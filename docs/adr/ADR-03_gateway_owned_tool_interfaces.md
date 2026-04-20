@@ -262,7 +262,7 @@ The main reason to discuss these categories is that tool design mixes two questi
 2. What backend mechanism fulfills that contract?
 
 For `code_interpreter`, the likely direction is a stable model-facing code execution tool, while the gateway chooses
-how to sandbox and execute code. 
+how to sandbox and execute code.
 
 For `web_search` or `file_search`, the distinction matters more. A provider may expose an MCP tool, an HTTP API, an
 SDK, a vector database, an object store, or a local adapter. This ADR frames built-in backend execution around managed
