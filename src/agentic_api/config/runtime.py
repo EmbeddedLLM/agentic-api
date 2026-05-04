@@ -32,9 +32,14 @@ class RuntimeConfig(BaseModel):
     @classmethod
     def validate_db_url(cls, v: str) -> str:
         url = make_url(v)
-        if not url.get_dialect().is_async:
+        dialect = url.get_dialect()
+        if not dialect.is_async:
             raise ValueError(
                 f"db_url must use an async driver (e.g. sqlite+aiosqlite://, postgresql+asyncpg://), got: {v!r}"
+            )
+        if dialect.name not in ("sqlite", "postgresql"):
+            raise ValueError(
+                f"db_url dialect must be sqlite or postgresql, got: {dialect.name!r}"
             )
         return v
 
