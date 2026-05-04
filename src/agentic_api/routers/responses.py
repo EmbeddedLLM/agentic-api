@@ -20,7 +20,8 @@ async def create_response(request: Request) -> Response:
     response_store: ResponseStore | None = request.app.state.response_store
     conversation_store: ConversationStore | None = request.app.state.conversation_store
 
-    # If the response store is disabled, fall back to a raw proxy passthrough.
+    # TODO: let the engine run in stateless mode (no response store); port proxy
+    # passthrough into a dedicated proxy router and remove this branch.
     if response_store is None:
         proxy_client_manager: ProxyClientManager = (
             request.app.state.proxy_client_manager
