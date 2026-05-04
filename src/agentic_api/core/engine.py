@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, AsyncGenerator
 
 from pydantic_ai import Agent, ModelHTTPError, UnexpectedModelBehavior
@@ -23,6 +24,8 @@ from agentic_api.types.responses import (
 )
 from agentic_api.utils.exceptions import BadInputError
 from agentic_api.utils.failures import FailureCounters
+
+logger = logging.getLogger(__name__)
 
 
 def _build_openai_provider(runtime_config: RuntimeConfig) -> OpenAIProvider:
@@ -109,11 +112,18 @@ class Engine:
         ) = await self._prepare_request()
         async for event in self._iter_events(run_settings, pipeline, stream=True):
             if event.type in {"response.completed", "response.incomplete"}:
-                await self._persist(
-                    hydrated_body=hydrated_body,
-                    response=pipeline.composer.response,
-                    conversation=conversation,
-                )
+                try:
+                    await self._persist(
+                        hydrated_body=hydrated_body,
+                        response=pipeline.composer.response,
+                        conversation=conversation,
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to persist response %s; response will not be rehydratable.",
+                        pipeline.composer.response.id,
+                        exc_info=True,
+                    )
                 pipeline.composer.response.conversation_id = (
                     conversation.conversation_id if conversation is not None else None
                 )
@@ -194,6 +204,7 @@ class Engine:
         stored = await self._response_store.get_or_raise(
             response_id=self._body.previous_response_id
         )
+        # TODO: when in-progress persistence lands, reject non-terminal stored.status here.
         history_items = await self._response_store.rehydrate(stored=stored)
 
         fields_set = self._body.model_fields_set
@@ -262,6 +273,7 @@ class Engine:
         """Resolve conversation, rehydrate history, and build a fresh Pipeline for this request."""
         response = ResponsesResponse.create_from_response_request(self._body)
         conversation = await self._resolve_conversation()
+        # TODO: when in-progress persistence lands, INSERT response as in_progress here before streaming begins.
         hydrated_body = await self._rehydrate(conversation)
         run_settings = self._build_run_settings(hydrated_body)
         pipeline = Pipeline.build(response=response)

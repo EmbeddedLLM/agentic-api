@@ -11,7 +11,7 @@ class _ResponsesChunk(Protocol):
 
 
 DONE_MARKER = "data: [DONE]\n\n"
-TERMINAL_EVENT_TYPES = {"response.completed", "response.failed"}
+TERMINAL_EVENT_TYPES = {"response.completed", "response.failed", "response.incomplete"}
 
 
 async def stream_responses_sse(

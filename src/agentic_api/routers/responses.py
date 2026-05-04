@@ -1,4 +1,7 @@
+import json
+
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import ValidationError
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from agentic_api.core.engine import Engine
@@ -31,7 +34,7 @@ async def create_response(request: Request) -> Response:
     try:
         body = await request.json()
         responses_request = ResponsesRequest.model_validate(body)
-    except Exception as exc:
+    except (ValueError, ValidationError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     engine = Engine(

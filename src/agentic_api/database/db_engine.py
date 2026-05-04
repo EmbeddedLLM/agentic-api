@@ -116,4 +116,8 @@ async def postgres_advisory_lock(
                     _cached_text_clause("SELECT pg_advisory_unlock(:k)"), {"k": key}
                 )
             except Exception:
-                return
+                logger.warning(
+                    "Failed to release PostgreSQL advisory lock (key=%d); lock may have leaked.",
+                    key,
+                    exc_info=True,
+                )

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -22,6 +23,8 @@ from agentic_api.types.responses import (
     ToolChoice,
 )
 from agentic_api.utils.common import utcnow, uuid7_str
+
+logger = logging.getLogger(__name__)
 
 _PERSISTABLE_RESPONSE_STATUSES = frozenset({"completed", "incomplete"})
 
@@ -172,6 +175,16 @@ class ResponseStore:
         items_by_id: dict[str, Item] = {
             item.id: item for item in await get_items(ids=stored.history_item_ids)
         }
+        missing = [
+            item_id for item_id in stored.history_item_ids if item_id not in items_by_id
+        ]
+        if missing:
+            logger.warning(
+                "rehydrate: %d item(s) missing for response %s: %s",
+                len(missing),
+                stored.id,
+                missing,
+            )
         return [
             ItemPayload.model_validate(items_by_id[item_id].data).item
             for item_id in stored.history_item_ids
