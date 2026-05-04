@@ -161,6 +161,7 @@ class ResponsesRequest(BaseModel):
     tool_choice: ToolChoice = Field(default_factory=AutoToolChoice)
     stream: bool = False
     response_store_enabled: bool = True
+    # TODO: remove when conversation handling gets its own router; control moves there
     conversation_store_enabled: bool = False
     include: list[str] | None = None
     # Pass-through fields forwarded verbatim to the upstream.
