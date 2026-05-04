@@ -29,7 +29,9 @@ def create_app(runtime_config: RuntimeConfig) -> FastAPI:
                 db_dialect=runtime_config.db_dialect,
             )
             app.state.response_store = ResponseStore(engine=engine)
-            app.state.conversation_store = ConversationStore(engine=engine)
+            app.state.conversation_store = ConversationStore(
+                engine=engine, db_dialect=runtime_config.db_dialect
+            )
         else:
             app.state.conversation_store = None
             app.state.response_store = None

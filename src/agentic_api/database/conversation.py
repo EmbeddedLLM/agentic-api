@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from collections.abc import Callable
+
 from sqlalchemy import DateTime, String, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,9 +25,8 @@ from agentic_api.database.session import (
 class Conversation(Base):
     """An ordered collection of Items representing a full conversation thread.
 
-    Used by the Conversation API path. `history_item_ids` grows as turns are appended;
-    it is the ordered list of all Item IDs in the conversation so far, and mirrors the
-    same field name on the Response table for consistency.
+    Used by the Conversation API path. History is stored on Item rows via
+    `conversation_id` + `seq` — no mutable ID list on this row.
 
     `metadata_` is an open JSON object for caller-supplied context (e.g. title,
     external IDs, tags). Not interpreted by the store.
@@ -34,12 +35,6 @@ class Conversation(Base):
     __tablename__ = "conversations"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    history_item_ids: Mapped[list[str]] = mapped_column(
-        "history_item_ids",
-        JSON().with_variant(JSONB, "postgresql"),
-        nullable=False,
-        default=list,
-    )
     metadata_: Mapped[dict[str, Any] | None] = mapped_column(
         "metadata",
         JSON().with_variant(JSONB, "postgresql"),
@@ -75,18 +70,49 @@ class Conversation(Base):
 async def create_conversation(
     *,
     id: str,
-    history_item_ids: list[str] | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> Conversation:
     """Insert a new Conversation row. Raises IntegrityError if the ID already exists."""
     now = utcnow()
     return Conversation(
         id=id,
-        history_item_ids=history_item_ids or [],
         metadata_=metadata,
         created_at=now,
         updated_at=now,
     )
+
+
+@run_in_session
+async def create_conversation_if_not_exists(
+    session: AsyncSession,
+    *,
+    id: str,
+    insert_fn: Callable,
+    metadata: dict[str, Any] | None = None,
+) -> Conversation:
+    """Insert a Conversation row if it doesn't exist, or return the existing one.
+
+    Uses INSERT ... ON CONFLICT DO NOTHING so the create-if-not-exists is atomic
+    at the DB level — safe under concurrent requests with the same conversation_id.
+
+    insert_fn must be a dialect-specific insert (pg_insert or sqlite_insert), chosen
+    once at startup from RuntimeConfig.db_dialect and passed in by ConversationStore.
+    """
+    now = utcnow()
+    stmt = (
+        insert_fn(Conversation)
+        .values(
+            id=id,
+            metadata_=metadata,
+            created_at=now,
+            updated_at=now,
+        )
+        .on_conflict_do_nothing(index_elements=["id"])
+    )
+    await session.execute(stmt)
+    await session.flush()
+    result = await session.execute(select(Conversation).where(Conversation.id == id))
+    return result.scalar_one()
 
 
 @session_get_one
@@ -99,27 +125,6 @@ async def get_conversation(*, id: str):
 async def get_conversations(*, ids: list[str]):
     """Bulk-fetch Conversations by ID. Returns a list in unspecified order."""
     return select(Conversation).where(Conversation.id.in_(ids))
-
-
-@run_in_session
-async def update_conversation_item_ids(
-    session: AsyncSession,
-    *,
-    id: str,
-    item_ids: list[str],
-) -> Conversation | None:
-    """Update history_item_ids on a Conversation row and update updated_at.
-
-    Returns the updated Conversation, or None if not found.
-    """
-    result = await session.execute(select(Conversation).where(Conversation.id == id))
-    conversation = result.scalar_one_or_none()
-    if conversation is None:
-        return None
-    conversation.history_item_ids = item_ids
-    conversation.updated_at = utcnow()
-    await session.flush()
-    return conversation
 
 
 @session_delete
