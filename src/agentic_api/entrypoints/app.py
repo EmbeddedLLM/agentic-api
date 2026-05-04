@@ -7,6 +7,7 @@ from agentic_api.config.runtime import RuntimeConfig
 from agentic_api.core.proxy import ProxyClientManager
 from agentic_api.database.schema import SchemaManager
 from agentic_api.database.db_engine import create_db_engine_async
+from agentic_api.database.session import reset_session_factory
 from agentic_api.routers import responses
 from agentic_api.store.conversation import ConversationStore
 from agentic_api.store.response import ResponseStore
@@ -41,6 +42,7 @@ def create_app(runtime_config: RuntimeConfig) -> FastAPI:
         await app.state.proxy_client_manager.aclose()
         if runtime_config.response_store_enabled:
             await engine.dispose()
+            reset_session_factory()
 
     app = FastAPI(
         title="Agentic API",

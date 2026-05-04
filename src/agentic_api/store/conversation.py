@@ -7,12 +7,13 @@ from typing import Any
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
 from agentic_api.database.conversation import (
     create_conversation,
     create_conversation_if_not_exists,
     get_conversation,
-    pg_insert,
-    sqlite_insert,
 )
 from agentic_api.database.item import Item, get_items_by_conversation
 from agentic_api.database.response import Response

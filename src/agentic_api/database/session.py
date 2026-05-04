@@ -14,6 +14,7 @@ __all__ = [
     "Session",
     "InvalidSessionUsage",
     "configure_session_factory",
+    "reset_session_factory",
     "run_in_session",
     "session_add_one",
     "session_add_all",
@@ -32,17 +33,34 @@ _active_session: ContextVar[AsyncSession | None] = ContextVar(
 )
 
 _session_factory: async_sessionmaker[AsyncSession] | None = None
+_session_factory_engine: AsyncEngine | None = None
+
+
+def reset_session_factory() -> None:
+    """Clear the module-level session factory. Intended for use in tests only."""
+    global _session_factory, _session_factory_engine
+    _session_factory = None
+    _session_factory_engine = None
 
 
 def configure_session_factory(engine: AsyncEngine) -> None:
-    """Bind the module-level session factory to the given engine.
+    """Bind the module-level session factory to the given engine. Idempotent for the same engine.
 
-    Must be called once at startup before any session is used.
+    Raises RuntimeError if called again with a different engine — this indicates a
+    programming error (two stores configured against different engines).
     """
-    global _session_factory
+    global _session_factory, _session_factory_engine
+    if _session_factory is not None:
+        if _session_factory_engine is not engine:
+            raise RuntimeError(
+                "configure_session_factory called with a different engine. "
+                "Only one engine is supported per process."
+            )
+        return
     _session_factory = async_sessionmaker(
         engine, class_=AsyncSession, expire_on_commit=False
     )
+    _session_factory_engine = engine
 
 
 def _get_factory() -> async_sessionmaker[AsyncSession]:

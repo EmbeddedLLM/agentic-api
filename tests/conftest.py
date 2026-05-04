@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from agentic_api.config.runtime import RuntimeConfig
 from agentic_api.core.proxy import ProxyClientManager
+from agentic_api.database.session import reset_session_factory
 from agentic_api.entrypoints.app import create_app
 from tests.utils.replay import (
     CassetteReplayer,
@@ -144,6 +145,7 @@ async def db_engine():
     await schema.ensure_ready(gateway_workers=1, db_dialect="sqlite")
     yield engine
     await engine.dispose()
+    reset_session_factory()
 
 
 @pytest.fixture
