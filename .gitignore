@@ -19,3 +19,11 @@ target/
 .vscode/
 *.swp
 *.swo
+
+# Logs
+*.log
+
+# SQLite database files
+*.db
+*.db-shm
+*.db-wal

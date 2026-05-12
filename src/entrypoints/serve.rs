@@ -3,9 +3,9 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use tracing::info;
 
-use crate::app::build_router;
 use crate::config::RuntimeConfig;
-use crate::proxy::ProxyState;
+use crate::entrypoints::app::build_router;
+use crate::entrypoints::proxy::ProxyState;
 
 /// Poll upstream `/health` until it responds 200 or the timeout is reached.
 ///
