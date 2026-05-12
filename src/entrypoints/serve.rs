@@ -4,14 +4,8 @@ use tokio::net::TcpListener;
 use tracing::info;
 
 use crate::config::RuntimeConfig;
-use crate::entrypoints::app::build_router;
-use crate::entrypoints::proxy::ProxyState;
+use crate::entrypoints::app::build_app;
 
-/// Poll upstream `/health` until it responds 200 or the timeout is reached.
-///
-/// # Errors
-///
-/// Returns an error if the upstream does not become ready within the configured timeout.
 pub async fn wait_upstream_ready(config: &RuntimeConfig) -> Result<(), Box<dyn std::error::Error>> {
     let base = config.llm_api_base.trim_end_matches('/');
     let url = format!("{base}/health");
@@ -61,29 +55,18 @@ pub async fn wait_upstream_ready(config: &RuntimeConfig) -> Result<(), Box<dyn s
     }
 }
 
-/// Start the gateway after the upstream becomes ready.
-///
-/// # Errors
-///
-/// Returns an error if upstream readiness polling fails or the server cannot bind.
 pub async fn run(config: RuntimeConfig) -> Result<(), Box<dyn std::error::Error>> {
     wait_upstream_ready(&config).await?;
     info!("upstream ready: {}", config.llm_api_base);
 
     let addr = format!("{}:{}", config.gateway_host, config.gateway_port);
-    let state = ProxyState::new(config);
-    let router = build_router(state);
+    let router = build_app(config).await?;
     let listener = TcpListener::bind(&addr).await?;
     info!("gateway listening on {addr}");
     axum::serve(listener, router).await?;
     Ok(())
 }
 
-/// Spawn vLLM as a subprocess and run the gateway in the foreground.
-///
-/// # Errors
-///
-/// Returns an error if vLLM fails to start or the gateway errors.
 pub async fn run_with_vllm(config: RuntimeConfig, vllm_args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut cmd = tokio::process::Command::new("python");
     cmd.arg("-m").arg("vllm.entrypoints.openai.api_server");

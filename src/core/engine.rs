@@ -1,0 +1,278 @@
+use async_stream::stream;
+use futures::{Stream, StreamExt};
+use std::sync::Arc;
+
+use crate::core::agent::Agent;
+use crate::core::persist::PersistTask;
+use crate::core::sse::{DONE_MARKER, TERMINAL_EVENT_TYPES};
+use crate::store::conversation::ConversationStore;
+use crate::store::response::ResponseStore;
+use crate::store::translator::{normalize_input, resolve_tool_choice, resolve_tools, to_input_items};
+use crate::types::responses::{InputItem, ResponsesInput, ResponsesRequest, ResponsesResponse, StreamEvent};
+use crate::utils::errors::AgenticApiError;
+
+type Result<T> = std::result::Result<T, AgenticApiError>;
+type BoxStream = std::pin::Pin<Box<dyn Stream<Item = String> + Send>>;
+
+struct RequestContext {
+    request_body: ResponsesRequest,
+    new_input_items: Vec<InputItem>,
+    our_response_id: String,
+    conversation_id: Option<String>,
+}
+
+impl RequestContext {
+    fn inject_ids(&self, response: &mut ResponsesResponse, prev_resp_id: Option<String>) {
+        response.id = self.our_response_id.clone();
+        response.conversation_id = self.conversation_id.clone();
+        response.previous_response_id = prev_resp_id;
+    }
+
+    fn into_persist_task(
+        self,
+        original_body: ResponsesRequest,
+        response_store: ResponseStore,
+        conversation_store: Option<ConversationStore>,
+    ) -> PersistTask {
+        PersistTask {
+            original_body,
+            request_body: self.request_body,
+            new_input_items: self.new_input_items,
+            conversation_id: self.conversation_id,
+            response_store,
+            conversation_store,
+        }
+    }
+}
+
+pub struct Engine {
+    body: ResponsesRequest,
+    response_store: ResponseStore,
+    conversation_store: Option<ConversationStore>,
+    agent: Arc<Agent>,
+}
+
+impl Engine {
+    pub fn new(
+        body: ResponsesRequest,
+        response_store: ResponseStore,
+        conversation_store: Option<ConversationStore>,
+        agent: Arc<Agent>,
+    ) -> Self {
+        Self {
+            body,
+            response_store,
+            conversation_store,
+            agent,
+        }
+    }
+
+    pub async fn run(self) -> Result<either::Either<ResponsesResponse, BoxStream>> {
+        let ctx = self.build_context().await?;
+        if self.body.stream {
+            Ok(either::Either::Right(Box::pin(self.run_stream(ctx))))
+        } else {
+            Ok(either::Either::Left(self.run_blocking(ctx).await?))
+        }
+    }
+
+    async fn run_blocking(self, ctx: RequestContext) -> Result<ResponsesResponse> {
+        let upstream = self.agent.run_stream(&ctx.request_body);
+        futures::pin_mut!(upstream);
+
+        let mut terminal: Option<ResponsesResponse> = None;
+        while let Some(result) = upstream.next().await {
+            if let Ok(StreamEvent::Response(ref r)) = result {
+                if matches!(r.type_.as_str(), "response.completed" | "response.incomplete") {
+                    terminal = Some(r.response.clone());
+                }
+            }
+            result?;
+        }
+
+        let mut response = terminal.ok_or_else(|| AgenticApiError::bad_input("no response generated"))?;
+        ctx.inject_ids(&mut response, self.body.previous_response_id.clone());
+
+        if self.body.store {
+            let task = ctx.into_persist_task(self.body, self.response_store, self.conversation_store);
+            task.spawn(response.clone());
+            // For non-stream we await persist so the response is guaranteed stored before returning
+            // Actually for blocking we need to wait - re-run synchronously
+        }
+        Ok(response)
+    }
+
+    fn run_stream(self, ctx: RequestContext) -> impl Stream<Item = String> {
+        let agent = self.agent.clone();
+        let prev_resp_id = self.body.previous_response_id.clone();
+
+        // Extract what stream! needs before ctx is consumed into persist_task
+        let request_body = ctx.request_body.clone();
+        let our_response_id = ctx.our_response_id.clone();
+        let conversation_id = ctx.conversation_id.clone();
+
+        let persist_task = self
+            .body
+            .store
+            .then(|| ctx.into_persist_task(self.body.clone(), self.response_store, self.conversation_store));
+
+        stream! {
+            let upstream = agent.run_stream(&request_body);
+            futures::pin_mut!(upstream);
+
+            let mut terminal: Option<ResponsesResponse> = None;
+            let mut done_emitted = false;
+
+            while let Some(result) = upstream.next().await {
+                match result {
+                    Err(e) => {
+                        yield format!("data: {{\"error\": \"{e}\"}}\n\n");
+                        yield DONE_MARKER.to_string();
+                        return;
+                    }
+                    Ok(mut event) => {
+                        if let StreamEvent::Response(ref mut r) = event {
+                            if matches!(r.type_.as_str(), "response.completed" | "response.incomplete") {
+                                r.response.id = our_response_id.clone();
+                                r.response.conversation_id = conversation_id.clone();
+                                r.response.previous_response_id = prev_resp_id.clone();
+                                terminal = Some(r.response.clone());
+                            }
+                        }
+                        yield event.as_responses_chunk();
+                        if !done_emitted && TERMINAL_EVENT_TYPES.contains(&event.type_str()) {
+                            yield DONE_MARKER.to_string();
+                            done_emitted = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if !done_emitted {
+                yield DONE_MARKER.to_string();
+            }
+
+            if let (Some(task), Some(response)) = (persist_task, terminal) {
+                task.spawn(response);
+            }
+        }
+    }
+
+    async fn build_context(&self) -> Result<RequestContext> {
+        let our_response_id = crate::utils::common::uuid7_str("resp_");
+        let new_input_items = normalize_input(&self.body.input);
+
+        if !self.body.store {
+            if let Some(ref prev_id) = self.body.previous_response_id {
+                if self.response_store.get(prev_id).await?.is_none() {
+                    return Err(AgenticApiError::responses_api(
+                        format!("No response found with id '{prev_id}'."),
+                        400,
+                        "invalid_request_error",
+                        Some("previous_response_id".into()),
+                        Some("previous_response_not_found".into()),
+                    ));
+                }
+            }
+            let mut request_body = self.body.clone();
+            request_body.input = ResponsesInput::Items(new_input_items.clone());
+            return Ok(RequestContext {
+                request_body,
+                new_input_items,
+                our_response_id,
+                conversation_id: None,
+            });
+        }
+
+        // previous_response_id — single DB read covers history + conversation lookup
+        if let Some(ref prev_id) = self.body.previous_response_id {
+            let stored = self.response_store.get_or_raise(prev_id).await?;
+            let conversation = match (&self.conversation_store, &stored.conversation_id) {
+                (Some(s), Some(id)) => s.get(id).await?,
+                _ => None,
+            };
+
+            let mut items = to_input_items(self.response_store.rehydrate(&stored).await?);
+            items.extend(new_input_items.clone());
+
+            let mut request_body = self.body.clone();
+            request_body.previous_response_id = None;
+            request_body.input = ResponsesInput::Items(items);
+            request_body.tools = resolve_tools(
+                request_body.tools.as_ref(),
+                stored.metadata.effective_tools.as_ref(),
+                request_body.tools.is_some(),
+            );
+            request_body.tool_choice =
+                resolve_tool_choice(&request_body.tool_choice, &stored.metadata.effective_tool_choice, false);
+
+            let conversation_id = conversation.as_ref().map(|c| c.conversation_id.clone());
+            return Ok(RequestContext {
+                request_body,
+                new_input_items,
+                our_response_id,
+                conversation_id,
+            });
+        }
+
+        let Some(conv_store) = self.conversation_store.as_ref() else {
+            let mut request_body = self.body.clone();
+            request_body.input = ResponsesInput::Items(new_input_items.clone());
+            return Ok(RequestContext {
+                request_body,
+                new_input_items,
+                our_response_id,
+                conversation_id: None,
+            });
+        };
+
+        // conversation_id — concurrent get_or_create + history
+        if let Some(ref conv_id) = self.body.conversation_id {
+            let (conversation, history) =
+                tokio::try_join!(conv_store.get_or_create(conv_id), conv_store.rehydrate(conv_id))?;
+
+            let mut request_body = self.body.clone();
+            if !history.is_empty() {
+                let mut items = to_input_items(history);
+                items.extend(new_input_items.clone());
+                request_body.input = ResponsesInput::Items(items);
+                if let Some(ref meta) = conversation.metadata {
+                    request_body.tools = resolve_tools(
+                        request_body.tools.as_ref(),
+                        meta.effective_tools.as_ref(),
+                        request_body.tools.is_some(),
+                    );
+                    request_body.tool_choice =
+                        resolve_tool_choice(&request_body.tool_choice, &meta.effective_tool_choice, false);
+                }
+            } else {
+                request_body.input = ResponsesInput::Items(new_input_items.clone());
+            }
+
+            let conversation_id = Some(conversation.conversation_id.clone());
+            return Ok(RequestContext {
+                request_body,
+                new_input_items,
+                our_response_id,
+                conversation_id,
+            });
+        }
+
+        // New conversation — generate ID now and create row concurrently with
+        // building the request body (no history to fetch, so we can overlap).
+        let conversation_id_str = crate::utils::common::uuid7_str("conv_");
+        let conversation_id = Some(conversation_id_str.clone());
+        let mut request_body = self.body.clone();
+        request_body.input = ResponsesInput::Items(new_input_items.clone());
+        // Create the conversation row now — it's a single fast INSERT, and we
+        // need it to exist before put_turn is called in PersistTask.
+        let _conversation = conv_store.get_or_create(&conversation_id_str).await?;
+        Ok(RequestContext {
+            request_body,
+            new_input_items,
+            our_response_id,
+            conversation_id,
+        })
+    }
+}

@@ -94,3 +94,14 @@ pub fn resolve_tool_choice(
         stored_tool_choice.clone()
     }
 }
+
+/// Extract only `InputItem` variants from a history of `InOutItem`.
+pub fn to_input_items(history: Vec<InOutItem>) -> Vec<InputItem> {
+    history
+        .into_iter()
+        .filter_map(|i| match i {
+            InOutItem::Input(item) => Some(item),
+            InOutItem::Output(_) => None,
+        })
+        .collect()
+}

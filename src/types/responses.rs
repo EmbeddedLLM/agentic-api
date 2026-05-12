@@ -198,9 +198,7 @@ pub struct ResponsesRequest {
     #[serde(default)]
     pub stream: bool,
     #[serde(default = "default_true")]
-    pub response_store_enabled: bool,
-    #[serde(default)]
-    pub conversation_store_enabled: bool,
+    pub store: bool,
     pub include: Option<Vec<String>>,
     pub temperature: Option<f64>,
     pub top_p: Option<f64>,
@@ -211,6 +209,42 @@ pub struct ResponsesRequest {
 
 fn default_true() -> bool {
     true
+}
+
+impl ResponsesRequest {
+    /// Produce a JSON value with gateway-only fields stripped, safe to forward to vLLM.
+    pub fn to_upstream_body(&self, stream: bool) -> serde_json::Value {
+        let mut body = serde_json::json!({
+            "model": self.model,
+            "input": self.input,
+            "stream": stream,
+        });
+        if let Some(v) = &self.instructions {
+            body["instructions"] = serde_json::json!(v);
+        }
+        if let Some(v) = &self.tools {
+            body["tools"] = serde_json::json!(v);
+        }
+        if let Some(v) = &self.include {
+            body["include"] = serde_json::json!(v);
+        }
+        if let Some(v) = self.temperature {
+            body["temperature"] = serde_json::json!(v);
+        }
+        if let Some(v) = self.top_p {
+            body["top_p"] = serde_json::json!(v);
+        }
+        if let Some(v) = self.max_output_tokens {
+            body["max_output_tokens"] = serde_json::json!(v);
+        }
+        if let Some(v) = &self.truncation {
+            body["truncation"] = serde_json::json!(v);
+        }
+        if let Some(v) = &self.metadata {
+            body["metadata"] = serde_json::json!(v);
+        }
+        body
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -262,7 +296,7 @@ impl ResponsesResponse {
 // Stream events
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResponseEvent {
     #[serde(rename = "type")]
     pub type_: String,
@@ -270,7 +304,7 @@ pub struct ResponseEvent {
     pub response: ResponsesResponse,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutputItemEvent {
     #[serde(rename = "type")]
     pub type_: String,
@@ -279,7 +313,7 @@ pub struct OutputItemEvent {
     pub item: OutputItem,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContentPartEvent {
     #[serde(rename = "type")]
     pub type_: String,
@@ -290,7 +324,7 @@ pub struct ContentPartEvent {
     pub part: Option<OutputTextContent>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TextDeltaEvent {
     #[serde(rename = "type")]
     pub type_: String,
@@ -306,7 +340,7 @@ pub struct TextDeltaEvent {
     pub logprobs: Vec<Value>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ErrorEvent {
     #[serde(rename = "type")]
     pub type_: String,
@@ -324,6 +358,40 @@ pub enum StreamEvent {
     ContentPart(ContentPartEvent),
     TextDelta(TextDeltaEvent),
     Error(ErrorEvent),
+}
+
+impl<'de> serde::Deserialize<'de> for StreamEvent {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        let type_str = v.get("type").and_then(Value::as_str).unwrap_or("");
+        match type_str {
+            "response.created"
+            | "response.in_progress"
+            | "response.completed"
+            | "response.incomplete"
+            | "response.failed" => serde_json::from_value(v)
+                .map(Self::Response)
+                .map_err(serde::de::Error::custom),
+            "response.output_item.added" | "response.output_item.done" => serde_json::from_value(v)
+                .map(Self::OutputItem)
+                .map_err(serde::de::Error::custom),
+            "response.content_part.added" | "response.content_part.done" => serde_json::from_value(v)
+                .map(Self::ContentPart)
+                .map_err(serde::de::Error::custom),
+            "response.output_text.delta"
+            | "response.output_text.done"
+            | "response.function_call_arguments.delta"
+            | "response.function_call_arguments.done" => serde_json::from_value(v)
+                .map(Self::TextDelta)
+                .map_err(serde::de::Error::custom),
+            "response.error" => serde_json::from_value(v)
+                .map(Self::Error)
+                .map_err(serde::de::Error::custom),
+            _ => Err(serde::de::Error::custom(format!(
+                "unknown StreamEvent type: {type_str}"
+            ))),
+        }
+    }
 }
 
 impl StreamEvent {

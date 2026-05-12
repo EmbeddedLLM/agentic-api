@@ -1,3 +1,6 @@
+use axum::Json;
+use axum::response::{IntoResponse, Response};
+use http::StatusCode;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -46,5 +49,38 @@ impl AgenticApiError {
             Self::BadInput(_) => 400,
             Self::Database(_) => 500,
         }
+    }
+}
+
+pub fn error_response(e: AgenticApiError) -> Response {
+    let status = StatusCode::from_u16(e.status_code()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    match &e {
+        AgenticApiError::ResponsesApi {
+            message,
+            error_type,
+            param,
+            code,
+            ..
+        } => (
+            status,
+            Json(serde_json::json!({
+                "error": {"message": message, "type": error_type, "param": param, "code": code}
+            })),
+        )
+            .into_response(),
+        AgenticApiError::BadInput(message) => (
+            status,
+            Json(serde_json::json!({
+                "error": {"message": message, "type": "invalid_request_error"}
+            })),
+        )
+            .into_response(),
+        _ => (
+            status,
+            Json(serde_json::json!({
+                "error": {"message": e.to_string(), "type": "api_error"}
+            })),
+        )
+            .into_response(),
     }
 }

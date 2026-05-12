@@ -31,6 +31,7 @@ pub struct StoredResponse {
     pub metadata: ResponseMetadata,
 }
 
+#[derive(Clone)]
 pub struct ResponseStore {
     pool: &'static DbPool,
 }
@@ -81,10 +82,7 @@ impl ResponseStore {
         hydrated_request: &ResponsesRequest,
         response: &ResponsesResponse,
     ) -> Result<()> {
-        if !matches!(response.status.as_str(), "completed" | "incomplete")
-            || response.id.is_empty()
-            || !request.response_store_enabled
-        {
+        if !matches!(response.status.as_str(), "completed" | "incomplete") || response.id.is_empty() || !request.store {
             return Ok(());
         }
 
@@ -129,19 +127,19 @@ impl ResponseStore {
     }
 
     pub async fn rehydrate(&self, stored: &StoredResponse) -> Result<Vec<InOutItem>> {
-        let by_id: HashMap<_, _> = item::get_items(self.pool, &stored.history_item_ids)
-            .await?
-            .into_iter()
-            .map(|r| (r.id.clone(), r))
-            .collect();
+        if stored.history_item_ids.is_empty() {
+            return Ok(vec![]);
+        }
 
-        let missing: Vec<_> = stored
-            .history_item_ids
-            .iter()
-            .filter(|id| !by_id.contains_key(*id))
-            .collect();
+        let rows = item::get_items(self.pool, &stored.history_item_ids).await?;
+        let by_id: HashMap<_, _> = rows.into_iter().map(|r| (r.id.clone(), r)).collect();
 
-        if !missing.is_empty() {
+        if by_id.len() < stored.history_item_ids.len() {
+            let missing: Vec<_> = stored
+                .history_item_ids
+                .iter()
+                .filter(|id| !by_id.contains_key(*id))
+                .collect();
             warn!(
                 "rehydrate: {} item(s) missing for response {}: {:?}",
                 missing.len(),

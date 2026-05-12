@@ -14,6 +14,7 @@ pub struct StoredConversation {
     pub metadata: Option<ResponseMetadata>,
 }
 
+#[derive(Clone)]
 pub struct ConversationStore {
     pool: &'static crate::database::db::DbPool,
 }
