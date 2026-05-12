@@ -5,4 +5,4 @@ pub mod models;
 pub mod response;
 pub mod schema;
 
-pub use db::{DbPool, DbResult, DbTransaction, create_pool};
+pub use db::{DbPool, DbResult, DbTransaction, configure_pool, create_pool, get_pool};

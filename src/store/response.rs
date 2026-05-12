@@ -1,0 +1,160 @@
+use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
+use tracing::warn;
+
+use crate::database::db::{DbPool, get_pool};
+use crate::database::{item, response};
+use crate::store::translator::{InOutItem, ItemPayload, normalize_input};
+use crate::types::responses::{ResponsesRequest, ResponsesResponse, ResponsesTool, ToolChoice};
+use crate::utils::common::uuid7_str;
+use crate::utils::errors::AgenticApiError;
+
+type Result<T> = std::result::Result<T, AgenticApiError>;
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ResponseMetadata {
+    pub model: String,
+    pub previous_response_id: Option<String>,
+    pub effective_tools: Option<Vec<ResponsesTool>>,
+    pub effective_tool_choice: ToolChoice,
+    pub effective_instructions: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoredResponse {
+    pub response_id: String,
+    pub conversation_id: Option<String>,
+    pub previous_response_id: Option<String>,
+    pub created_at: String,
+    pub history_item_ids: Vec<String>,
+    pub metadata: ResponseMetadata,
+}
+
+pub struct ResponseStore {
+    pool: &'static DbPool,
+}
+
+impl ResponseStore {
+    pub fn new(pool: Option<&'static DbPool>) -> Self {
+        Self {
+            pool: pool.unwrap_or_else(get_pool),
+        }
+    }
+
+    pub async fn get(&self, response_id: &str) -> Result<Option<StoredResponse>> {
+        let Some(row) = response::get_response(self.pool, response_id).await? else {
+            return Ok(None);
+        };
+
+        let metadata: ResponseMetadata = row
+            .metadata_json()
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap_or_default();
+
+        let history_item_ids = row.history_item_ids_vec();
+        Ok(Some(StoredResponse {
+            response_id: row.id,
+            conversation_id: row.conversation_id,
+            previous_response_id: row.previous_response_id,
+            created_at: row.created_at,
+            history_item_ids,
+            metadata,
+        }))
+    }
+
+    pub async fn get_or_raise(&self, response_id: &str) -> Result<StoredResponse> {
+        self.get(response_id).await?.ok_or_else(|| {
+            AgenticApiError::responses_api(
+                format!("No response found with id '{response_id}'."),
+                400,
+                "invalid_request_error",
+                Some("previous_response_id".into()),
+                Some("previous_response_not_found".into()),
+            )
+        })
+    }
+
+    pub async fn put_completed(
+        &self,
+        request: &ResponsesRequest,
+        hydrated_request: &ResponsesRequest,
+        response: &ResponsesResponse,
+    ) -> Result<()> {
+        if !matches!(response.status.as_str(), "completed" | "incomplete")
+            || response.id.is_empty()
+            || !request.response_store_enabled
+        {
+            return Ok(());
+        }
+
+        let input_payloads = normalize_input(&hydrated_request.input)
+            .into_iter()
+            .map(ItemPayload::from_input);
+        let output_payloads = response.output.iter().map(|o| ItemPayload::from_output(o.clone()));
+        let all_payloads: Vec<_> = input_payloads.chain(output_payloads).collect();
+
+        let mut item_ids = Vec::with_capacity(all_payloads.len());
+        let mut item_tuples = Vec::with_capacity(all_payloads.len());
+        for payload in all_payloads {
+            let id = uuid7_str("item_");
+            item_ids.push(id.clone());
+            item_tuples.push((id, payload.to_json_value()));
+        }
+
+        let metadata = ResponseMetadata {
+            model: response.model.clone(),
+            previous_response_id: response.previous_response_id.clone(),
+            effective_tools: hydrated_request.tools.clone(),
+            effective_tool_choice: hydrated_request.tool_choice.clone(),
+            effective_instructions: hydrated_request.instructions.clone(),
+        };
+
+        let history_value = serde_json::to_value(&item_ids).ok();
+        let metadata_value = serde_json::to_value(&metadata).ok();
+        let mut tx = self.pool.begin().await?;
+        item::create_items_in_tx(&mut tx, &item_tuples).await?;
+        response::create_response_in_tx(
+            &mut tx,
+            &response.id,
+            response.conversation_id.as_deref(),
+            response.previous_response_id.as_deref(),
+            history_value.as_ref(),
+            metadata_value.as_ref(),
+        )
+        .await?;
+        tx.commit().await?;
+
+        Ok(())
+    }
+
+    pub async fn rehydrate(&self, stored: &StoredResponse) -> Result<Vec<InOutItem>> {
+        let by_id: HashMap<_, _> = item::get_items(self.pool, &stored.history_item_ids)
+            .await?
+            .into_iter()
+            .map(|r| (r.id.clone(), r))
+            .collect();
+
+        let missing: Vec<_> = stored
+            .history_item_ids
+            .iter()
+            .filter(|id| !by_id.contains_key(*id))
+            .collect();
+
+        if !missing.is_empty() {
+            warn!(
+                "rehydrate: {} item(s) missing for response {}: {:?}",
+                missing.len(),
+                stored.response_id,
+                missing
+            );
+        }
+
+        Ok(stored
+            .history_item_ids
+            .iter()
+            .filter_map(|id| by_id.get(id).cloned())
+            .filter_map(ItemPayload::from_item_row)
+            .collect())
+    }
+}

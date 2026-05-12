@@ -1,3 +1,5 @@
+pub mod fixtures;
+
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -13,7 +15,10 @@ use http::StatusCode;
 use tokio::net::TcpListener;
 
 use agentic_api::config::RuntimeConfig;
-use agentic_api::proxy::ProxyState;
+use agentic_api::entrypoints::proxy::ProxyState;
+
+use agentic_api::database::db::DbPool;
+use agentic_api::database::schema::SchemaManager;
 
 pub fn test_config(upstream_url: &str) -> RuntimeConfig {
     RuntimeConfig {
@@ -23,6 +28,11 @@ pub fn test_config(upstream_url: &str) -> RuntimeConfig {
         gateway_port: 0,
         upstream_ready_timeout_s: 5.0,
         upstream_ready_interval_s: 0.1,
+        db_url: "sqlite::memory:".to_owned(),
+        db_dialect: agentic_api::config::DbDialect::Sqlite,
+        gateway_workers: 1,
+        response_store_enabled: true,
+        log_model_messages: false,
     }
 }
 
@@ -31,6 +41,20 @@ pub fn test_config_no_key(upstream_url: &str) -> RuntimeConfig {
         openai_api_key: None,
         ..test_config(upstream_url)
     }
+}
+
+pub async fn create_test_pool() -> &'static DbPool {
+    sqlx::any::install_default_drivers();
+    let pool = sqlx::any::AnyPoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .expect("failed to create test pool");
+    SchemaManager::new(&pool)
+        .ensure_ready()
+        .await
+        .expect("failed to run test schema");
+    Box::leak(Box::new(pool))
 }
 
 async fn health_handler() -> impl IntoResponse {
@@ -117,7 +141,7 @@ pub async fn spawn_upstream() -> (String, tokio::task::JoinHandle<()>) {
 
 pub async fn spawn_gateway(config: RuntimeConfig) -> (String, SocketAddr, tokio::task::JoinHandle<()>) {
     let state = ProxyState::new(config);
-    let router = agentic_api::app::build_router(state);
+    let router = agentic_api::entrypoints::app::build_router(state);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
