@@ -81,7 +81,10 @@ impl ResponseStore {
         hydrated_request: &ResponsesRequest,
         response: &ResponsesResponse,
     ) -> Result<()> {
-        if !matches!(response.status.as_str(), "completed" | "incomplete") || response.id.is_empty() || !request.store {
+        if !matches!(response.status.as_str(), "completed" | "incomplete")
+            || response.id.is_empty()
+            || !request.response_store_enabled
+        {
             return Ok(());
         }
 
