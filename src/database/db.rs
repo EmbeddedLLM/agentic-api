@@ -1,4 +1,4 @@
-use std::sync::OnceLock;
+use std::sync::Arc;
 
 use sqlx::any::AnyPoolOptions;
 
@@ -19,10 +19,11 @@ fn prepare_db_url(url: &str) -> String {
 /// # Errors
 ///
 /// Returns a [`sqlx::Error`] if the connection pool cannot be created.
-pub async fn create_pool(db_url: &str) -> DbResult<DbPool> {
+pub async fn create_pool(db_url: &str) -> DbResult<Arc<DbPool>> {
     sqlx::any::install_default_drivers();
     let url = prepare_db_url(db_url);
-    AnyPoolOptions::new().max_connections(10).connect(&url).await
+    let pool = AnyPoolOptions::new().max_connections(10).connect(&url).await?;
+    Ok(Arc::new(pool))
 }
 
 /// # Panics
