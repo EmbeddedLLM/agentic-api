@@ -42,6 +42,9 @@ impl ResponseStore {
         }
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the database query fails.
     pub async fn get(&self, response_id: &str) -> Result<Option<StoredResponse>> {
         let Some(row) = response::get_response(self.pool, response_id).await? else {
             return Ok(None);
@@ -63,6 +66,9 @@ impl ResponseStore {
         }))
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the response is not found or the database query fails.
     pub async fn get_or_raise(&self, response_id: &str) -> Result<StoredResponse> {
         self.get(response_id).await?.ok_or_else(|| {
             AgenticApiError::responses_api(
@@ -75,6 +81,9 @@ impl ResponseStore {
         })
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if a database operation fails.
     pub async fn put_completed(
         &self,
         request: &ResponsesRequest,
@@ -88,10 +97,9 @@ impl ResponseStore {
             return Ok(());
         }
 
-        let input_payloads = normalize_input(&hydrated_request.input)
-            .into_iter()
-            .map(ItemPayload::from_input);
-        let output_payloads = response.output.iter().map(|o| ItemPayload::from_output(o.clone()));
+        let normalized_input = normalize_input(&hydrated_request.input);
+        let input_payloads = normalized_input.iter().map(ItemPayload::from_input);
+        let output_payloads = response.output.iter().map(ItemPayload::from_output);
         let all_payloads: Vec<_> = input_payloads.chain(output_payloads).collect();
 
         let mut item_ids = Vec::with_capacity(all_payloads.len());
@@ -128,6 +136,9 @@ impl ResponseStore {
         Ok(())
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the database query fails.
     pub async fn rehydrate(&self, stored: &StoredResponse) -> Result<Vec<InOutItem>> {
         if stored.history_item_ids.is_empty() {
             return Ok(vec![]);
@@ -153,8 +164,7 @@ impl ResponseStore {
         Ok(stored
             .history_item_ids
             .iter()
-            .filter_map(|id| by_id.get(id).cloned())
-            .filter_map(ItemPayload::from_item_row)
+            .filter_map(|id| by_id.get(id).and_then(ItemPayload::from_item_row))
             .collect())
     }
 }

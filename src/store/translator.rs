@@ -25,27 +25,31 @@ pub struct ItemPayload {
 }
 
 impl ItemPayload {
-    pub fn from_input(item: InputItem) -> Self {
+    #[must_use]
+    pub fn from_input(item: &InputItem) -> Self {
         Self {
             v: ITEM_DATA_VERSION,
             kind: "input".to_string(),
-            item: serde_json::to_value(&item).unwrap_or_default(),
+            item: serde_json::to_value(item).unwrap_or_default(),
         }
     }
 
-    pub fn from_output(item: OutputItem) -> Self {
+    #[must_use]
+    pub fn from_output(item: &OutputItem) -> Self {
         Self {
             v: ITEM_DATA_VERSION,
             kind: "output".to_string(),
-            item: serde_json::to_value(&item).unwrap_or_default(),
+            item: serde_json::to_value(item).unwrap_or_default(),
         }
     }
 
+    #[must_use]
     pub fn to_json_value(&self) -> serde_json::Value {
         serde_json::to_value(self).unwrap_or(serde_json::Value::Null)
     }
 
-    pub fn from_item_row(row: crate::database::models::Item) -> Option<InOutItem> {
+    #[must_use]
+    pub fn from_item_row(row: &crate::database::models::Item) -> Option<InOutItem> {
         let data = row.data_json()?;
         let payload: Self = serde_json::from_value(data).ok()?;
         match payload.kind.as_str() {
@@ -56,6 +60,7 @@ impl ItemPayload {
     }
 }
 
+#[must_use]
 pub fn normalize_input(input: &ResponsesInput) -> Vec<InputItem> {
     match input {
         ResponsesInput::Text(text) => vec![InputItem::Message(InputMessage {
@@ -66,10 +71,12 @@ pub fn normalize_input(input: &ResponsesInput) -> Vec<InputItem> {
     }
 }
 
+#[must_use]
 pub fn wrap_tool_result(item: FunctionToolResultMessage) -> InputItem {
     InputItem::FunctionCallOutput(item)
 }
 
+#[must_use]
 pub fn resolve_tools(
     request_tools: Option<&Vec<ResponsesTool>>,
     stored_tools: Option<&Vec<ResponsesTool>>,
@@ -83,6 +90,7 @@ pub fn resolve_tools(
     .cloned()
 }
 
+#[must_use]
 pub fn resolve_tool_choice(
     request_tool_choice: &ToolChoice,
     stored_tool_choice: &ToolChoice,

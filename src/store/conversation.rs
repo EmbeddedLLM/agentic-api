@@ -25,6 +25,9 @@ impl ConversationStore {
         }
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the database query fails.
     pub async fn create(&self) -> Result<StoredConversation> {
         let row = conversation::create_conversation(self.pool, &uuid7_str("conv_"), None).await?;
         Ok(StoredConversation {
@@ -34,6 +37,9 @@ impl ConversationStore {
         })
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the database query fails.
     pub async fn get_or_create(&self, conversation_id: &str) -> Result<StoredConversation> {
         let row = conversation::get_or_create_conversation(self.pool, conversation_id, None).await?;
         let metadata = row.metadata_json().and_then(|v| serde_json::from_value(v).ok());
@@ -44,6 +50,9 @@ impl ConversationStore {
         })
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the database query fails.
     pub async fn get(&self, conversation_id: &str) -> Result<Option<StoredConversation>> {
         let Some(row) = conversation::get_conversation(self.pool, conversation_id).await? else {
             return Ok(None);
@@ -56,6 +65,9 @@ impl ConversationStore {
         }))
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the conversation is not found or a database operation fails.
     pub async fn put_turn(
         &self,
         conversation_id: &str,
@@ -70,14 +82,15 @@ impl ConversationStore {
             .ok_or_else(|| AgenticApiError::bad_input(format!("Conversation not found: {conversation_id}")))?;
 
         let existing = item::get_items_by_conversation(self.pool, &stored.conversation_id).await?;
+        #[allow(clippy::cast_possible_wrap)]
         let seq_start = existing.len() as i64;
 
         let item_tuples: Vec<(String, serde_json::Value)> = new_items
             .iter()
             .map(|any_item| {
                 let payload = match any_item {
-                    InOutItem::Input(i) => ItemPayload::from_input(i.clone()),
-                    InOutItem::Output(o) => ItemPayload::from_output(o.clone()),
+                    InOutItem::Input(i) => ItemPayload::from_input(i),
+                    InOutItem::Output(o) => ItemPayload::from_output(o),
                 };
                 (uuid7_str("item_"), payload.to_json_value())
             })
@@ -103,6 +116,9 @@ impl ConversationStore {
         Ok(())
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if the conversation is not found or a database query fails.
     pub async fn rehydrate(&self, conversation_id: &str) -> Result<Vec<InOutItem>> {
         self.get(conversation_id).await?.ok_or_else(|| {
             AgenticApiError::responses_api(
@@ -117,7 +133,7 @@ impl ConversationStore {
         Ok(item::get_items_by_conversation(self.pool, conversation_id)
             .await?
             .into_iter()
-            .filter_map(ItemPayload::from_item_row)
+            .filter_map(|row| ItemPayload::from_item_row(&row))
             .collect())
     }
 }
