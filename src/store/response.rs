@@ -1,9 +1,10 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-use crate::database::db::{DbPool, get_pool};
+use crate::database::db::DbPool;
 use crate::database::{item, response};
 use crate::store::translator::{InOutItem, ItemPayload, normalize_input};
 use crate::types::responses::{ResponsesRequest, ResponsesResponse, ResponsesTool, ToolChoice};
@@ -33,21 +34,32 @@ pub struct StoredResponse {
 
 #[derive(Clone)]
 pub struct ResponseStore {
-    pool: &'static DbPool,
+    pool: Option<Arc<DbPool>>,
 }
 
 impl ResponseStore {
-    pub fn new(pool: Option<&'static DbPool>) -> Self {
-        Self {
-            pool: pool.unwrap_or_else(get_pool),
-        }
+    #[must_use]
+    pub fn disabled() -> Self {
+        Self { pool: None }
+    }
+
+    #[must_use]
+    pub fn new(pool: Arc<DbPool>) -> Self {
+        Self { pool: Some(pool) }
+    }
+
+    fn pool(&self) -> Result<&DbPool> {
+        self.pool
+            .as_deref()
+            .ok_or_else(|| AgenticApiError::bad_input("response store not enabled"))
     }
 
     /// # Errors
     ///
     /// Returns an error if the database query fails.
     pub async fn get(&self, response_id: &str) -> Result<Option<StoredResponse>> {
-        let Some(row) = response::get_response(self.pool, response_id).await? else {
+        let pool = self.pool()?;
+        let Some(row) = response::get_response(pool, response_id).await? else {
             return Ok(None);
         };
 
@@ -92,6 +104,7 @@ impl ResponseStore {
             return Ok(());
         }
 
+        let pool = self.pool()?;
         let normalized_input = normalize_input(&hydrated_request.input);
         let input_payloads = normalized_input.iter().map(ItemPayload::from_input);
         let output_payloads = response.output.iter().map(ItemPayload::from_output);
@@ -112,7 +125,7 @@ impl ResponseStore {
         let item_ids: Vec<&str> = item_tuples.iter().map(|(id, _)| id.as_str()).collect();
         let history_str = serde_json::to_string(&item_ids).unwrap_or_default();
         let metadata_str = serde_json::to_string(&metadata).unwrap_or_default();
-        let mut tx = self.pool.begin().await?;
+        let mut tx = pool.begin().await?;
         item::create_items_in_tx(&mut tx, &item_tuples).await?;
         response::create_response_in_tx(
             &mut tx,
@@ -136,7 +149,8 @@ impl ResponseStore {
             return Ok(vec![]);
         }
 
-        let rows = item::get_items(self.pool, &stored.history_item_ids).await?;
+        let pool = self.pool()?;
+        let rows = item::get_items(pool, &stored.history_item_ids).await?;
         let by_id: HashMap<_, _> = rows.into_iter().map(|r| (r.id.clone(), r)).collect();
 
         if by_id.len() < stored.history_item_ids.len() {

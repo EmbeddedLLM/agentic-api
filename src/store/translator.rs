@@ -1,8 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::types::responses::{
-    FunctionToolResultMessage, InputItem, InputMessage, InputMessageContent, OutputItem, ResponsesInput, ResponsesTool,
-    ToolChoice,
+    InputItem, InputMessage, InputMessageContent, OutputItem, ResponsesInput, ResponsesTool, ToolChoice,
 };
 
 pub const ITEM_DATA_VERSION: u32 = 1;
@@ -77,11 +76,6 @@ pub fn normalize_input(input: &ResponsesInput) -> Vec<InputItem> {
 }
 
 #[must_use]
-pub fn wrap_tool_result(item: FunctionToolResultMessage) -> InputItem {
-    InputItem::FunctionCallOutput(item)
-}
-
-#[must_use]
 pub fn resolve_tools(
     request_tools: Option<&Vec<ResponsesTool>>,
     stored_tools: Option<&Vec<ResponsesTool>>,
@@ -109,6 +103,7 @@ pub fn resolve_tool_choice(
 }
 
 /// Extract only `InputItem` variants from a history of `InOutItem`.
+#[must_use]
 pub fn to_input_items(history: Vec<InOutItem>) -> Vec<InputItem> {
     history
         .into_iter()
