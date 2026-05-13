@@ -21,10 +21,9 @@ pub async fn create_item(pool: &DbPool, id: &str, data: &Value) -> DbResult<Item
 /// # Errors
 ///
 /// Returns a [`sqlx::Error`] if any query fails.
-pub async fn create_items_in_tx(tx: &mut DbTransaction<'_>, items: &[(String, Value)]) -> DbResult<()> {
+pub async fn create_items_in_tx(tx: &mut DbTransaction<'_>, items: &[(String, String)]) -> DbResult<()> {
     let now = utcnow_str();
-    for (id, data) in items {
-        let data_str = serde_json::to_string(data).unwrap_or_default();
+    for (id, data_str) in items {
         sqlx::query("INSERT INTO items (id, data, created_at) VALUES (?, ?, ?)")
             .bind(id)
             .bind(data_str)
@@ -40,15 +39,14 @@ pub async fn create_items_in_tx(tx: &mut DbTransaction<'_>, items: &[(String, Va
 /// Returns a [`sqlx::Error`] if any query fails.
 pub async fn create_conversation_items_in_tx(
     tx: &mut DbTransaction<'_>,
-    items: &[(String, Value)],
+    items: &[(String, String)],
     conversation_id: &str,
     seq_start: i64,
 ) -> DbResult<()> {
     let now = utcnow_str();
-    for (i, (id, data)) in items.iter().enumerate() {
+    for (i, (id, data_str)) in items.iter().enumerate() {
         #[allow(clippy::cast_possible_wrap)]
         let seq = seq_start + i as i64;
-        let data_str = serde_json::to_string(data).unwrap_or_default();
         sqlx::query("INSERT INTO items (id, data, created_at, conversation_id, seq) VALUES (?, ?, ?, ?, ?)")
             .bind(id)
             .bind(data_str)
@@ -59,6 +57,24 @@ pub async fn create_conversation_items_in_tx(
             .await?;
     }
     Ok(())
+}
+
+/// Returns the item count for a conversation if it exists, or `None` if not found.
+///
+/// # Errors
+///
+/// Returns a [`sqlx::Error`] if the query fails.
+pub async fn conversation_item_count(pool: &DbPool, conversation_id: &str) -> DbResult<Option<i64>> {
+    let row: Option<(i64,)> = sqlx::query_as(
+        "SELECT COUNT(i.id) FROM conversations c \
+         LEFT JOIN items i ON i.conversation_id = c.id \
+         WHERE c.id = ? \
+         GROUP BY c.id",
+    )
+    .bind(conversation_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|(n,)| n))
 }
 
 /// # Errors
