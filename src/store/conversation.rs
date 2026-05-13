@@ -1,4 +1,6 @@
-use crate::database::db::get_pool;
+use std::sync::Arc;
+
+use crate::database::db::DbPool;
 use crate::database::{conversation, item, response};
 use crate::store::response::ResponseMetadata;
 use crate::store::translator::{InOutItem, ItemPayload};
@@ -15,21 +17,32 @@ pub struct StoredConversation {
 }
 
 pub struct ConversationStore {
-    pool: &'static crate::database::db::DbPool,
+    pool: Option<Arc<DbPool>>,
 }
 
 impl ConversationStore {
-    pub fn new(pool: Option<&'static crate::database::db::DbPool>) -> Self {
-        Self {
-            pool: pool.unwrap_or_else(get_pool),
-        }
+    #[must_use]
+    pub fn disabled() -> Self {
+        Self { pool: None }
+    }
+
+    #[must_use]
+    pub fn new(pool: Arc<DbPool>) -> Self {
+        Self { pool: Some(pool) }
+    }
+
+    fn pool(&self) -> Result<&DbPool> {
+        self.pool
+            .as_deref()
+            .ok_or_else(|| AgenticApiError::bad_input("conversation store not enabled"))
     }
 
     /// # Errors
     ///
     /// Returns an error if the database query fails.
     pub async fn create(&self) -> Result<StoredConversation> {
-        let row = conversation::create_conversation(self.pool, &uuid7_str("conv_"), None).await?;
+        let pool = self.pool()?;
+        let row = conversation::create_conversation(pool, &uuid7_str("conv_"), None).await?;
         Ok(StoredConversation {
             conversation_id: row.id,
             created_at: row.created_at,
@@ -41,7 +54,8 @@ impl ConversationStore {
     ///
     /// Returns an error if the database query fails.
     pub async fn get_or_create(&self, conversation_id: &str) -> Result<StoredConversation> {
-        let row = conversation::get_or_create_conversation(self.pool, conversation_id, None).await?;
+        let pool = self.pool()?;
+        let row = conversation::get_or_create_conversation(pool, conversation_id, None).await?;
         let metadata = row.metadata_as();
         Ok(StoredConversation {
             conversation_id: row.id,
@@ -54,7 +68,8 @@ impl ConversationStore {
     ///
     /// Returns an error if the database query fails.
     pub async fn get(&self, conversation_id: &str) -> Result<Option<StoredConversation>> {
-        let Some(row) = conversation::get_conversation(self.pool, conversation_id).await? else {
+        let pool = self.pool()?;
+        let Some(row) = conversation::get_conversation(pool, conversation_id).await? else {
             return Ok(None);
         };
         let metadata = row.metadata_as();
@@ -76,7 +91,8 @@ impl ConversationStore {
         new_items: &[InOutItem],
         metadata: &ResponseMetadata,
     ) -> Result<()> {
-        let seq_start = item::conversation_item_count(self.pool, conversation_id)
+        let pool = self.pool()?;
+        let seq_start = item::conversation_item_count(pool, conversation_id)
             .await?
             .ok_or_else(|| AgenticApiError::bad_input(format!("Conversation not found: {conversation_id}")))?;
 
@@ -95,7 +111,7 @@ impl ConversationStore {
         let history_str = serde_json::to_string(&item_ids).unwrap_or_default();
         let metadata_str = serde_json::to_string(metadata).unwrap_or_default();
 
-        let mut tx = self.pool.begin().await?;
+        let mut tx = pool.begin().await?;
         item::create_conversation_items_in_tx(&mut tx, &item_tuples, conversation_id, seq_start).await?;
         response::create_response_in_tx(
             &mut tx,
@@ -115,17 +131,19 @@ impl ConversationStore {
     ///
     /// Returns an error if the conversation is not found or a database query fails.
     pub async fn rehydrate(&self, conversation_id: &str) -> Result<Vec<InOutItem>> {
-        self.get(conversation_id).await?.ok_or_else(|| {
-            AgenticApiError::responses_api(
+        let pool = self.pool()?;
+        let count = item::conversation_item_count(pool, conversation_id).await?;
+        if count.is_none() {
+            return Err(AgenticApiError::responses_api(
                 format!("Conversation '{conversation_id}' not found."),
                 400,
                 "invalid_request_error",
                 Some("conversation_id".into()),
                 Some("conversation_not_found".into()),
-            )
-        })?;
+            ));
+        }
 
-        Ok(item::get_items_by_conversation(self.pool, conversation_id)
+        Ok(item::get_items_by_conversation(pool, conversation_id)
             .await?
             .into_iter()
             .filter_map(|row| ItemPayload::from_item_row(&row))
