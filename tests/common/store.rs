@@ -11,7 +11,7 @@ pub async fn create_test_pool() -> &'static DbPool {
         .connect("sqlite::memory:")
         .await
         .expect("failed to create test pool");
-    SchemaManager::new(&pool)
+    SchemaManager::new_for_test(&pool)
         .ensure_ready()
         .await
         .expect("failed to run test schema");
