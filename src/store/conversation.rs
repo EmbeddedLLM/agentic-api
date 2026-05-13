@@ -42,7 +42,7 @@ impl ConversationStore {
     /// Returns an error if the database query fails.
     pub async fn get_or_create(&self, conversation_id: &str) -> Result<StoredConversation> {
         let row = conversation::get_or_create_conversation(self.pool, conversation_id, None).await?;
-        let metadata = row.metadata_json().and_then(|v| serde_json::from_value(v).ok());
+        let metadata = row.metadata_as();
         Ok(StoredConversation {
             conversation_id: row.id,
             created_at: row.created_at,
@@ -57,7 +57,7 @@ impl ConversationStore {
         let Some(row) = conversation::get_conversation(self.pool, conversation_id).await? else {
             return Ok(None);
         };
-        let metadata = row.metadata_json().and_then(|v| serde_json::from_value(v).ok());
+        let metadata = row.metadata_as();
         Ok(Some(StoredConversation {
             conversation_id: row.id,
             created_at: row.created_at,
@@ -76,29 +76,24 @@ impl ConversationStore {
         new_items: &[InOutItem],
         metadata: &ResponseMetadata,
     ) -> Result<()> {
-        let stored = self
-            .get(conversation_id)
+        let seq_start = item::conversation_item_count(self.pool, conversation_id)
             .await?
             .ok_or_else(|| AgenticApiError::bad_input(format!("Conversation not found: {conversation_id}")))?;
 
-        let existing = item::get_items_by_conversation(self.pool, &stored.conversation_id).await?;
-        #[allow(clippy::cast_possible_wrap)]
-        let seq_start = existing.len() as i64;
-
-        let item_tuples: Vec<(String, serde_json::Value)> = new_items
+        let item_tuples: Vec<(String, String)> = new_items
             .iter()
             .map(|any_item| {
                 let payload = match any_item {
                     InOutItem::Input(i) => ItemPayload::from_input(i),
                     InOutItem::Output(o) => ItemPayload::from_output(o),
                 };
-                (uuid7_str("item_"), payload.to_json_value())
+                (uuid7_str("item_"), payload.to_json_string())
             })
             .collect();
 
-        let item_ids: Vec<String> = item_tuples.iter().map(|(id, _)| id.clone()).collect();
-        let history_value = serde_json::to_value(&item_ids).ok();
-        let metadata_value = serde_json::to_value(metadata).ok();
+        let item_ids: Vec<&str> = item_tuples.iter().map(|(id, _)| id.as_str()).collect();
+        let history_str = serde_json::to_string(&item_ids).unwrap_or_default();
+        let metadata_str = serde_json::to_string(metadata).unwrap_or_default();
 
         let mut tx = self.pool.begin().await?;
         item::create_conversation_items_in_tx(&mut tx, &item_tuples, conversation_id, seq_start).await?;
@@ -107,8 +102,8 @@ impl ConversationStore {
             response_id,
             Some(conversation_id),
             previous_response_id,
-            history_value.as_ref(),
-            metadata_value.as_ref(),
+            Some(&history_str),
+            Some(&metadata_str),
         )
         .await?;
         tx.commit().await?;

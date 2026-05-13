@@ -50,10 +50,7 @@ impl ResponseStore {
             return Ok(None);
         };
 
-        let metadata: ResponseMetadata = row
-            .metadata_json()
-            .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_default();
+        let metadata: ResponseMetadata = row.metadata_as().unwrap_or_default();
 
         let history_item_ids = row.history_item_ids_vec();
         Ok(Some(StoredResponse {
@@ -100,15 +97,11 @@ impl ResponseStore {
         let normalized_input = normalize_input(&hydrated_request.input);
         let input_payloads = normalized_input.iter().map(ItemPayload::from_input);
         let output_payloads = response.output.iter().map(ItemPayload::from_output);
-        let all_payloads: Vec<_> = input_payloads.chain(output_payloads).collect();
 
-        let mut item_ids = Vec::with_capacity(all_payloads.len());
-        let mut item_tuples = Vec::with_capacity(all_payloads.len());
-        for payload in all_payloads {
-            let id = uuid7_str("item_");
-            item_ids.push(id.clone());
-            item_tuples.push((id, payload.to_json_value()));
-        }
+        let item_tuples: Vec<(String, String)> = input_payloads
+            .chain(output_payloads)
+            .map(|payload| (uuid7_str("item_"), payload.to_json_string()))
+            .collect();
 
         let metadata = ResponseMetadata {
             model: response.model.clone(),
@@ -118,8 +111,9 @@ impl ResponseStore {
             effective_instructions: hydrated_request.instructions.clone(),
         };
 
-        let history_value = serde_json::to_value(&item_ids).ok();
-        let metadata_value = serde_json::to_value(&metadata).ok();
+        let item_ids: Vec<&str> = item_tuples.iter().map(|(id, _)| id.as_str()).collect();
+        let history_str = serde_json::to_string(&item_ids).unwrap_or_default();
+        let metadata_str = serde_json::to_string(&metadata).unwrap_or_default();
         let mut tx = self.pool.begin().await?;
         item::create_items_in_tx(&mut tx, &item_tuples).await?;
         response::create_response_in_tx(
@@ -127,8 +121,8 @@ impl ResponseStore {
             &response.id,
             response.conversation_id.as_deref(),
             response.previous_response_id.as_deref(),
-            history_value.as_ref(),
-            metadata_value.as_ref(),
+            Some(&history_str),
+            Some(&metadata_str),
         )
         .await?;
         tx.commit().await?;
