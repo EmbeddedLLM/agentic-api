@@ -40,24 +40,3 @@ pub async fn get_response(pool: &DbPool, id: &str) -> DbResult<Option<Response>>
         .fetch_optional(pool)
         .await
 }
-
-/// # Errors
-///
-/// Returns a [`sqlx::Error`] if the query fails.
-pub async fn get_responses_by_conversation(pool: &DbPool, conversation_id: &str) -> DbResult<Vec<Response>> {
-    sqlx::query_as::<_, Response>("SELECT * FROM responses WHERE conversation_id = ? ORDER BY created_at ASC")
-        .bind(conversation_id)
-        .fetch_all(pool)
-        .await
-}
-
-/// # Errors
-///
-/// Returns a [`sqlx::Error`] if the query fails.
-pub async fn delete_response(pool: &DbPool, id: &str) -> DbResult<()> {
-    sqlx::query("DELETE FROM responses WHERE id = ?")
-        .bind(id)
-        .execute(pool)
-        .await?;
-    Ok(())
-}
