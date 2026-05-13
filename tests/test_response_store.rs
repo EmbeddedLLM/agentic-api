@@ -9,22 +9,22 @@ use agentic_api::store::translator::InOutItem;
 
 #[tokio::test]
 async fn test_get_returns_none_for_missing() {
-    let pool = store::create_test_pool().await;
-    let store = ResponseStore::new(Some(pool));
+    let pool = common::create_test_pool().await;
+    let store = ResponseStore::new(pool);
     assert!(store.get("nonexistent_id").await.unwrap().is_none());
 }
 
 #[tokio::test]
 async fn test_get_or_raise_errors_for_missing() {
-    let pool = store::create_test_pool().await;
-    let store = ResponseStore::new(Some(pool));
+    let pool = common::create_test_pool().await;
+    let store = ResponseStore::new(pool);
     assert!(store.get_or_raise("nonexistent_id").await.is_err());
 }
 
 #[tokio::test]
 async fn test_put_and_get_round_trip() {
-    let pool = store::create_test_pool().await;
-    let store = ResponseStore::new(Some(pool));
+    let pool = common::create_test_pool().await;
+    let store = ResponseStore::new(pool);
     let request = make_request("gpt-4o");
     let response = make_response("resp_abc", "gpt-4o", "completed");
 
@@ -38,10 +38,10 @@ async fn test_put_and_get_round_trip() {
 
 #[tokio::test]
 async fn test_put_skipped_when_store_disabled() {
-    let pool = store::create_test_pool().await;
-    let store = ResponseStore::new(Some(pool));
+    let pool = common::create_test_pool().await;
+    let store = ResponseStore::new(pool);
     let mut request = make_request("gpt-4o");
-    request.response_store_enabled = false;
+    request.store = false;
     let response = make_response("resp_skip", "gpt-4o", "completed");
 
     store.put_completed(&request, &request, &response).await.unwrap();
@@ -50,8 +50,8 @@ async fn test_put_skipped_when_store_disabled() {
 
 #[tokio::test]
 async fn test_put_skipped_when_status_not_persistable() {
-    let pool = store::create_test_pool().await;
-    let store = ResponseStore::new(Some(pool));
+    let pool = common::create_test_pool().await;
+    let store = ResponseStore::new(pool);
     let request = make_request("gpt-4o");
     let response = make_response("resp_failed", "gpt-4o", "failed");
 
@@ -61,8 +61,8 @@ async fn test_put_skipped_when_status_not_persistable() {
 
 #[tokio::test]
 async fn test_rehydrate_restores_items_in_order() {
-    let pool = store::create_test_pool().await;
-    let store = ResponseStore::new(Some(pool));
+    let pool = common::create_test_pool().await;
+    let store = ResponseStore::new(pool);
     let request = make_request("gpt-4o");
     let response = make_response("resp_rehydrate", "gpt-4o", "completed");
 
@@ -77,8 +77,8 @@ async fn test_rehydrate_restores_items_in_order() {
 
 #[tokio::test]
 async fn test_previous_response_id_stored() {
-    let pool = store::create_test_pool().await;
-    let store = ResponseStore::new(Some(pool));
+    let pool = common::create_test_pool().await;
+    let store = ResponseStore::new(pool);
 
     let request1 = make_request("gpt-4o");
     let response1 = make_response("resp_turn1", "gpt-4o", "completed");
