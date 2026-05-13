@@ -74,7 +74,7 @@ pub struct RuntimeConfig {
     #[validate(custom(function = "validate_db_url"))]
     pub db_url: String,
 
-    /// Derived from db_url at construction time, never set via CLI.
+    /// Derived from `db_url` at construction time, never set via CLI.
     #[arg(skip)]
     #[validate(skip)]
     pub db_dialect: DbDialect,

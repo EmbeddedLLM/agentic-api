@@ -10,6 +10,7 @@ pub struct Item {
 }
 
 impl Item {
+    #[must_use]
     pub fn data_json(&self) -> Option<Value> {
         serde_json::from_str(&self.data).ok()
     }
@@ -27,6 +28,7 @@ pub struct Response {
 }
 
 impl Response {
+    #[must_use]
     pub fn history_item_ids_vec(&self) -> Vec<String> {
         self.history_item_ids
             .as_deref()
@@ -34,6 +36,7 @@ impl Response {
             .unwrap_or_default()
     }
 
+    #[must_use]
     pub fn metadata_json(&self) -> Option<Value> {
         self.metadata.as_deref().and_then(|s| serde_json::from_str(s).ok())
     }
@@ -48,6 +51,7 @@ pub struct Conversation {
 }
 
 impl Conversation {
+    #[must_use]
     pub fn metadata_json(&self) -> Option<Value> {
         self.metadata.as_deref().and_then(|s| serde_json::from_str(s).ok())
     }
