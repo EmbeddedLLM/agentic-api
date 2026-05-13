@@ -6,6 +6,9 @@ use tracing::info;
 use crate::config::RuntimeConfig;
 use crate::entrypoints::app::build_app;
 
+/// # Errors
+///
+/// Returns an error if upstream is not ready within the configured timeout.
 pub async fn wait_upstream_ready(config: &RuntimeConfig) -> Result<(), Box<dyn std::error::Error>> {
     let base = config.llm_api_base.trim_end_matches('/');
     let url = format!("{base}/health");
@@ -55,6 +58,9 @@ pub async fn wait_upstream_ready(config: &RuntimeConfig) -> Result<(), Box<dyn s
     }
 }
 
+/// # Errors
+///
+/// Returns an error if upstream is not ready, app initialization fails, or server startup fails.
 pub async fn run(config: RuntimeConfig) -> Result<(), Box<dyn std::error::Error>> {
     wait_upstream_ready(&config).await?;
     info!("upstream ready: {}", config.llm_api_base);
@@ -67,6 +73,9 @@ pub async fn run(config: RuntimeConfig) -> Result<(), Box<dyn std::error::Error>
     Ok(())
 }
 
+/// # Errors
+///
+/// Returns an error if vLLM startup fails, upstream is not ready, or server initialization fails.
 pub async fn run_with_vllm(config: RuntimeConfig, vllm_args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
     let mut cmd = tokio::process::Command::new("python");
     cmd.arg("-m").arg("vllm.entrypoints.openai.api_server");

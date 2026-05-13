@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::body::Body;
@@ -36,7 +37,7 @@ fn is_request_drop(name: &str) -> bool {
 
 #[derive(Clone)]
 pub struct ProxyState {
-    pub config: RuntimeConfig,
+    pub config: Arc<RuntimeConfig>,
     pub stream_client: Client,
     pub non_stream_client: Client,
 }
@@ -46,7 +47,7 @@ impl ProxyState {
     ///
     /// Panics if the HTTP clients cannot be built (invalid TLS backend).
     #[must_use]
-    pub fn new(config: RuntimeConfig) -> Self {
+    pub fn new(config: Arc<RuntimeConfig>) -> Self {
         let stream_client = Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .pool_max_idle_per_host(0)
@@ -69,27 +70,32 @@ impl ProxyState {
     }
 }
 
-fn filter_request_headers(headers: &HeaderMap, config: &RuntimeConfig) -> reqwest::header::HeaderMap {
-    let mut out = reqwest::header::HeaderMap::new();
+fn filter_request_headers(headers: &HeaderMap, config: &Arc<RuntimeConfig>) -> reqwest::header::HeaderMap {
+    let mut out = reqwest::header::HeaderMap::with_capacity(headers.len());
     for (name, value) in headers {
         if is_request_drop(name.as_str()) {
             continue;
         }
-        if let Ok(n) = reqwest::header::HeaderName::from_bytes(name.as_str().as_bytes()) {
-            if let Ok(v) = reqwest::header::HeaderValue::from_bytes(value.as_bytes()) {
-                out.insert(n, v);
-            }
+        if let (Ok(n), Ok(v)) = (
+            reqwest::header::HeaderName::from_bytes(name.as_str().as_bytes()),
+            reqwest::header::HeaderValue::from_bytes(value.as_bytes()),
+        ) {
+            out.insert(n, v);
         }
     }
 
-    let has_auth = out.contains_key(reqwest::header::AUTHORIZATION);
-    if !has_auth {
-        if let Some(key) = config.openai_api_key.as_deref() {
-            let trimmed = key.trim();
-            if !trimmed.is_empty() {
-                if let Ok(v) = reqwest::header::HeaderValue::from_str(&format!("Bearer {trimmed}")) {
-                    out.insert(reqwest::header::AUTHORIZATION, v);
-                }
+    if !out.contains_key(reqwest::header::AUTHORIZATION) {
+        if let Some(key) = config
+            .openai_api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            let mut auth = String::with_capacity(7 + key.len());
+            auth.push_str("Bearer ");
+            auth.push_str(key);
+            if let Ok(v) = reqwest::header::HeaderValue::from_str(&auth) {
+                out.insert(reqwest::header::AUTHORIZATION, v);
             }
         }
     }
@@ -98,15 +104,16 @@ fn filter_request_headers(headers: &HeaderMap, config: &RuntimeConfig) -> reqwes
 }
 
 fn filter_response_headers(headers: &reqwest::header::HeaderMap) -> HeaderMap {
-    let mut out = HeaderMap::new();
+    let mut out = HeaderMap::with_capacity(headers.len().saturating_sub(HOP_BY_HOP.len()));
     for (name, value) in headers {
         if is_hop_by_hop(name.as_str()) {
             continue;
         }
-        if let Ok(n) = HeaderName::from_bytes(name.as_str().as_bytes()) {
-            if let Ok(v) = http::HeaderValue::from_bytes(value.as_bytes()) {
-                out.insert(n, v);
-            }
+        if let (Ok(n), Ok(v)) = (
+            HeaderName::from_bytes(name.as_str().as_bytes()),
+            http::HeaderValue::from_bytes(value.as_bytes()),
+        ) {
+            out.insert(n, v);
         }
     }
     out
@@ -145,7 +152,9 @@ pub async fn proxy_responses(State(state): State<ProxyState>, req: axum::extract
     let upstream_headers = filter_request_headers(&parts.headers, &state.config);
 
     let base = state.config.llm_api_base.trim_end_matches('/');
-    let mut url = format!("{base}/v1/responses");
+    let mut url = String::with_capacity(base.len() + 18);
+    url.push_str(base);
+    url.push_str("/v1/responses");
     if let Some(q) = parts.uri.query() {
         url.push('?');
         url.push_str(q);

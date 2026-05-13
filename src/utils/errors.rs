@@ -53,9 +53,10 @@ impl AgenticApiError {
     }
 }
 
-pub fn error_response(e: AgenticApiError) -> Response {
+#[must_use]
+pub fn error_response(e: &AgenticApiError) -> Response {
     let status = StatusCode::from_u16(e.status_code()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-    match &e {
+    match e {
         AgenticApiError::ResponsesApi {
             message,
             error_type,
@@ -76,7 +77,7 @@ pub fn error_response(e: AgenticApiError) -> Response {
             })),
         )
             .into_response(),
-        _ => (
+        AgenticApiError::Database(_) => (
             status,
             Json(serde_json::json!({
                 "error": {"message": e.to_string(), "type": "api_error"}

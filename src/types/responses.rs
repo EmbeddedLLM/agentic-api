@@ -160,12 +160,13 @@ pub struct FunctionTool {
 pub type ResponsesTool = FunctionTool;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum ToolChoice {
     #[default]
     Auto,
     None,
     Required,
+    #[serde(rename = "function")]
     Function {
         name: String,
     },
@@ -208,39 +209,53 @@ fn default_true() -> bool {
     true
 }
 
+#[derive(Debug, Serialize)]
+pub struct UpstreamRequest<'a> {
+    pub model: &'a str,
+    pub input: &'a ResponsesInput,
+    pub stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<&'a Vec<ResponsesTool>>,
+    #[serde(skip_serializing_if = "is_default_tool_choice")]
+    pub tool_choice: &'a ToolChoice,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include: Option<&'a Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub truncation: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<&'a Value>,
+}
+
+fn is_default_tool_choice(choice: &ToolChoice) -> bool {
+    matches!(choice, ToolChoice::Auto)
+}
+
 impl ResponsesRequest {
-    /// Produce a JSON value with gateway-only fields stripped, safe to forward to vLLM.
-    pub fn to_upstream_body(&self, stream: bool) -> serde_json::Value {
-        let mut body = serde_json::json!({
-            "model": self.model,
-            "input": self.input,
-            "stream": stream,
-        });
-        if let Some(v) = &self.instructions {
-            body["instructions"] = serde_json::json!(v);
+    /// Construct an `UpstreamRequest` borrowing from this request, suitable for forwarding to vLLM.
+    #[must_use]
+    pub fn to_upstream_request(&self, stream: bool) -> UpstreamRequest<'_> {
+        UpstreamRequest {
+            model: &self.model,
+            input: &self.input,
+            stream,
+            instructions: self.instructions.as_deref(),
+            tools: self.tools.as_ref(),
+            tool_choice: &self.tool_choice,
+            include: self.include.as_ref(),
+            temperature: self.temperature,
+            top_p: self.top_p,
+            max_output_tokens: self.max_output_tokens,
+            truncation: self.truncation.as_deref(),
+            metadata: self.metadata.as_ref(),
         }
-        if let Some(v) = &self.tools {
-            body["tools"] = serde_json::json!(v);
-        }
-        if let Some(v) = &self.include {
-            body["include"] = serde_json::json!(v);
-        }
-        if let Some(v) = self.temperature {
-            body["temperature"] = serde_json::json!(v);
-        }
-        if let Some(v) = self.top_p {
-            body["top_p"] = serde_json::json!(v);
-        }
-        if let Some(v) = self.max_output_tokens {
-            body["max_output_tokens"] = serde_json::json!(v);
-        }
-        if let Some(v) = &self.truncation {
-            body["truncation"] = serde_json::json!(v);
-        }
-        if let Some(v) = &self.metadata {
-            body["metadata"] = serde_json::json!(v);
-        }
-        body
     }
 }
 
@@ -267,24 +282,6 @@ pub struct ResponsesResponse {
 }
 
 impl ResponsesResponse {
-    #[must_use]
-    pub fn create_from_request(request: &ResponsesRequest) -> Self {
-        Self {
-            id: crate::utils::common::uuid7_str("resp_"),
-            object: "response".into(),
-            created_at: 0,
-            model: request.model.clone(),
-            status: "in_progress".into(),
-            output: vec![],
-            usage: None,
-            incomplete_details: None,
-            error: None,
-            previous_response_id: request.previous_response_id.clone(),
-            conversation_id: None,
-            instructions: request.instructions.clone(),
-        }
-    }
-
     #[must_use]
     pub fn as_responses_chunk(&self) -> String {
         format!("data: {}\n\n", serde_json::to_string(self).unwrap_or_default())

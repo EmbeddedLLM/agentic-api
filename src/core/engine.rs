@@ -4,12 +4,14 @@ use std::sync::Arc;
 
 use crate::core::agent::Agent;
 use crate::core::persist::PersistTask;
-use crate::core::sse::{DONE_MARKER, TERMINAL_EVENT_TYPES};
 use crate::store::conversation::ConversationStore;
 use crate::store::response::ResponseStore;
 use crate::store::translator::{normalize_input, resolve_tool_choice, resolve_tools, to_input_items};
 use crate::types::responses::{InputItem, ResponsesInput, ResponsesRequest, ResponsesResponse, StreamEvent};
 use crate::utils::errors::AgenticApiError;
+
+const DONE_MARKER: &str = "data: [DONE]\n\n";
+const TERMINAL_EVENT_TYPES: &[&str] = &["response.completed", "response.failed", "response.incomplete"];
 
 type Result<T> = std::result::Result<T, AgenticApiError>;
 type BoxStream = std::pin::Pin<Box<dyn Stream<Item = String> + Send>>;
@@ -23,8 +25,8 @@ struct RequestContext {
 
 impl RequestContext {
     fn inject_ids(&self, response: &mut ResponsesResponse, prev_resp_id: Option<String>) {
-        response.id = self.our_response_id.clone();
-        response.conversation_id = self.conversation_id.clone();
+        response.id.clone_from(&self.our_response_id);
+        response.conversation_id.clone_from(&self.conversation_id);
         response.previous_response_id = prev_resp_id;
     }
 
@@ -34,14 +36,14 @@ impl RequestContext {
         response_store: ResponseStore,
         conversation_store: Option<ConversationStore>,
     ) -> PersistTask {
-        PersistTask {
+        PersistTask::new(
             original_body,
-            request_body: self.request_body,
-            new_input_items: self.new_input_items,
-            conversation_id: self.conversation_id,
+            self.request_body,
+            self.new_input_items,
+            self.conversation_id,
             response_store,
             conversation_store,
-        }
+        )
     }
 }
 
@@ -50,23 +52,30 @@ pub struct Engine {
     response_store: ResponseStore,
     conversation_store: Option<ConversationStore>,
     agent: Arc<Agent>,
+    client_auth: Option<String>,
 }
 
 impl Engine {
+    #[must_use]
     pub fn new(
         body: ResponsesRequest,
         response_store: ResponseStore,
         conversation_store: Option<ConversationStore>,
         agent: Arc<Agent>,
+        client_auth: Option<String>,
     ) -> Self {
         Self {
             body,
             response_store,
             conversation_store,
             agent,
+            client_auth,
         }
     }
 
+    /// # Errors
+    ///
+    /// Returns an error if context building, upstream API call, or stream processing fails.
     pub async fn run(self) -> Result<either::Either<ResponsesResponse, BoxStream>> {
         let ctx = self.build_context().await?;
         if self.body.stream {
@@ -77,17 +86,20 @@ impl Engine {
     }
 
     async fn run_blocking(self, ctx: RequestContext) -> Result<ResponsesResponse> {
-        let upstream = self.agent.run_stream(&ctx.request_body);
+        let upstream = self.agent.run_stream(&ctx.request_body, self.client_auth.as_deref());
         futures::pin_mut!(upstream);
 
         let mut terminal: Option<ResponsesResponse> = None;
         while let Some(result) = upstream.next().await {
-            if let Ok(StreamEvent::Response(ref r)) = result {
-                if matches!(r.type_.as_str(), "response.completed" | "response.incomplete") {
-                    terminal = Some(r.response.clone());
+            match result {
+                Err(e) => return Err(e),
+                Ok(StreamEvent::Response(r))
+                    if matches!(r.type_.as_str(), "response.completed" | "response.incomplete") =>
+                {
+                    terminal = Some(r.response);
                 }
+                _ => {}
             }
-            result?;
         }
 
         let mut response = terminal.ok_or_else(|| AgenticApiError::bad_input("no response generated"))?;
@@ -96,8 +108,6 @@ impl Engine {
         if self.body.store {
             let task = ctx.into_persist_task(self.body, self.response_store, self.conversation_store);
             task.spawn(response.clone());
-            // For non-stream we await persist so the response is guaranteed stored before returning
-            // Actually for blocking we need to wait - re-run synchronously
         }
         Ok(response)
     }
@@ -105,8 +115,8 @@ impl Engine {
     fn run_stream(self, ctx: RequestContext) -> impl Stream<Item = String> {
         let agent = self.agent.clone();
         let prev_resp_id = self.body.previous_response_id.clone();
+        let client_auth = self.client_auth.clone();
 
-        // Extract what stream! needs before ctx is consumed into persist_task
         let request_body = ctx.request_body.clone();
         let our_response_id = ctx.our_response_id.clone();
         let conversation_id = ctx.conversation_id.clone();
@@ -117,7 +127,7 @@ impl Engine {
             .then(|| ctx.into_persist_task(self.body.clone(), self.response_store, self.conversation_store));
 
         stream! {
-            let upstream = agent.run_stream(&request_body);
+            let upstream = agent.run_stream(&request_body, client_auth.as_deref());
             futures::pin_mut!(upstream);
 
             let mut terminal: Option<ResponsesResponse> = None;
@@ -133,9 +143,9 @@ impl Engine {
                     Ok(mut event) => {
                         if let StreamEvent::Response(ref mut r) = event {
                             if matches!(r.type_.as_str(), "response.completed" | "response.incomplete") {
-                                r.response.id = our_response_id.clone();
-                                r.response.conversation_id = conversation_id.clone();
-                                r.response.previous_response_id = prev_resp_id.clone();
+                                r.response.id.clone_from(&our_response_id);
+                                r.response.conversation_id.clone_from(&conversation_id);
+                                r.response.previous_response_id.clone_from(&prev_resp_id);
                                 terminal = Some(r.response.clone());
                             }
                         }
@@ -159,6 +169,22 @@ impl Engine {
         }
     }
 
+    fn build_request_context(
+        &self,
+        new_input_items: Vec<InputItem>,
+        our_response_id: String,
+        conversation_id: Option<String>,
+    ) -> RequestContext {
+        let mut request_body = self.body.clone();
+        request_body.input = ResponsesInput::Items(new_input_items.clone());
+        RequestContext {
+            request_body,
+            new_input_items,
+            our_response_id,
+            conversation_id,
+        }
+    }
+
     async fn build_context(&self) -> Result<RequestContext> {
         let our_response_id = crate::utils::common::uuid7_str("resp_");
         let new_input_items = normalize_input(&self.body.input);
@@ -175,14 +201,7 @@ impl Engine {
                     ));
                 }
             }
-            let mut request_body = self.body.clone();
-            request_body.input = ResponsesInput::Items(new_input_items.clone());
-            return Ok(RequestContext {
-                request_body,
-                new_input_items,
-                our_response_id,
-                conversation_id: None,
-            });
+            return Ok(self.build_request_context(new_input_items, our_response_id, None));
         }
 
         // previous_response_id — single DB read covers history + conversation lookup
@@ -217,23 +236,17 @@ impl Engine {
         }
 
         let Some(conv_store) = self.conversation_store.as_ref() else {
-            let mut request_body = self.body.clone();
-            request_body.input = ResponsesInput::Items(new_input_items.clone());
-            return Ok(RequestContext {
-                request_body,
-                new_input_items,
-                our_response_id,
-                conversation_id: None,
-            });
+            return Ok(self.build_request_context(new_input_items, our_response_id, None));
         };
 
-        // conversation_id — concurrent get_or_create + history
         if let Some(ref conv_id) = self.body.conversation_id {
             let (conversation, history) =
                 tokio::try_join!(conv_store.get_or_create(conv_id), conv_store.rehydrate(conv_id))?;
 
             let mut request_body = self.body.clone();
-            if !history.is_empty() {
+            if history.is_empty() {
+                request_body.input = ResponsesInput::Items(new_input_items.clone());
+            } else {
                 let mut items = to_input_items(history);
                 items.extend(new_input_items.clone());
                 request_body.input = ResponsesInput::Items(items);
@@ -246,33 +259,18 @@ impl Engine {
                     request_body.tool_choice =
                         resolve_tool_choice(&request_body.tool_choice, &meta.effective_tool_choice, false);
                 }
-            } else {
-                request_body.input = ResponsesInput::Items(new_input_items.clone());
             }
 
-            let conversation_id = Some(conversation.conversation_id.clone());
             return Ok(RequestContext {
                 request_body,
                 new_input_items,
                 our_response_id,
-                conversation_id,
+                conversation_id: Some(conversation.conversation_id),
             });
         }
 
-        // New conversation — generate ID now and create row concurrently with
-        // building the request body (no history to fetch, so we can overlap).
         let conversation_id_str = crate::utils::common::uuid7_str("conv_");
-        let conversation_id = Some(conversation_id_str.clone());
-        let mut request_body = self.body.clone();
-        request_body.input = ResponsesInput::Items(new_input_items.clone());
-        // Create the conversation row now — it's a single fast INSERT, and we
-        // need it to exist before put_turn is called in PersistTask.
-        let _conversation = conv_store.get_or_create(&conversation_id_str).await?;
-        Ok(RequestContext {
-            request_body,
-            new_input_items,
-            our_response_id,
-            conversation_id,
-        })
+        conv_store.get_or_create(&conversation_id_str).await?;
+        Ok(self.build_request_context(new_input_items, our_response_id, Some(conversation_id_str)))
     }
 }
