@@ -9,7 +9,7 @@ pub fn test_config(upstream_url: &str) -> RuntimeConfig {
         gateway_workers: 1,
         upstream_ready_timeout_s: 5.0,
         upstream_ready_interval_s: 0.1,
-        db_url: "sqlite://:memory:".to_owned(),
+        db_url: "sqlite://:memory:?mode=memory".to_owned(),
         db_dialect: DbDialect::Sqlite,
         response_store_enabled: false,
         log_model_messages: false,

@@ -1,5 +1,6 @@
 use std::convert::Infallible;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
@@ -13,7 +14,12 @@ use http::StatusCode;
 use tokio::net::TcpListener;
 
 use agentic_api::config::RuntimeConfig;
+use agentic_api::core::agent::Agent;
+use agentic_api::database::db::DbPool;
+use agentic_api::entrypoints::app::AppState;
 use agentic_api::entrypoints::proxy::ProxyState;
+use agentic_api::store::conversation::ConversationStore;
+use agentic_api::store::response::ResponseStore;
 
 async fn health_handler() -> impl IntoResponse {
     StatusCode::OK
@@ -27,21 +33,6 @@ async fn responses_handler(req: Request) -> Response {
 
     let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap_or_default();
 
-    if body
-        .get("echo_auth")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false)
-    {
-        let auth = headers.get("authorization").and_then(|v| v.to_str().ok()).unwrap_or("");
-        let resp_body = serde_json::json!({"authorization": auth});
-        return (
-            StatusCode::OK,
-            [("content-type", "application/json"), ("x-upstream", "responses")],
-            serde_json::to_string(&resp_body).unwrap(),
-        )
-            .into_response();
-    }
-
     if body.get("force_error").and_then(serde_json::Value::as_u64) == Some(429) {
         return (
             StatusCode::TOO_MANY_REQUESTS,
@@ -51,36 +42,65 @@ async fn responses_handler(req: Request) -> Response {
             .into_response();
     }
 
-    if body.get("stream").and_then(serde_json::Value::as_bool).unwrap_or(false) {
-        let chunks: Vec<Result<Bytes, Infallible>> = vec![
-            Ok(Bytes::from(
-                "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hello\"}\n\n",
-            )),
-            Ok(Bytes::from("data: [DONE]\n\n")),
-        ];
-        let body = Body::from_stream(stream::iter(chunks));
-        return (
-            StatusCode::OK,
-            [
-                ("content-type", "text/event-stream; charset=utf-8"),
-                ("x-upstream", "responses-stream"),
-            ],
-            body,
-        )
-            .into_response();
-    }
+    let is_stream = body.get("stream").and_then(serde_json::Value::as_bool).unwrap_or(false);
+    let x_upstream = if is_stream { "responses-stream" } else { "responses" };
 
-    let out = r#"{"id":"resp_test","object":"response","status":"completed"}"#;
+    let auth_header = headers.get("authorization").and_then(|v| v.to_str().ok()).unwrap_or("");
+    let completed_event = serde_json::json!({
+        "type": "response.completed",
+        "sequence_number": 1,
+        "response": {
+            "id": "resp_test",
+            "object": "response",
+            "created_at": 0,
+            "model": body.get("model").and_then(|m| m.as_str()).unwrap_or("model-a"),
+            "status": "completed",
+            "output": [],
+            "previous_response_id": null,
+            "conversation_id": null,
+            "instructions": auth_header  // reuse instructions field to echo auth
+        }
+    });
+    let chunks: Vec<Result<Bytes, Infallible>> = vec![
+        Ok(Bytes::from(format!(
+            "data: {}\n\n",
+            serde_json::to_string(&completed_event).unwrap()
+        ))),
+        Ok(Bytes::from("data: [DONE]\n\n")),
+    ];
+    let body = Body::from_stream(stream::iter(chunks));
     (
         StatusCode::OK,
         [
-            ("content-type", "application/json"),
-            ("x-upstream", "responses"),
-            ("connection", "keep-alive"),
+            ("content-type", "text/event-stream; charset=utf-8"),
+            ("x-upstream", x_upstream),
         ],
-        out,
+        body,
     )
         .into_response()
+}
+
+pub async fn spawn_error_upstream(status: u16) -> (String, tokio::task::JoinHandle<()>) {
+    let handler = move |_req: Request| async move {
+        (
+            StatusCode::from_u16(status).unwrap(),
+            [("content-type", "application/json")],
+            r#"{"error":{"message":"upstream error","code":"rate_limit"}}"#,
+        )
+            .into_response()
+    };
+
+    let app = Router::new()
+        .route("/health", get(health_handler))
+        .route("/v1/responses", post(handler));
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    (format!("http://{addr}"), handle)
 }
 
 pub async fn spawn_upstream() -> (String, tokio::task::JoinHandle<()>) {
@@ -97,8 +117,16 @@ pub async fn spawn_upstream() -> (String, tokio::task::JoinHandle<()>) {
     (format!("http://{addr}"), handle)
 }
 
-pub async fn spawn_gateway(config: RuntimeConfig) -> (String, SocketAddr, tokio::task::JoinHandle<()>) {
-    let state = ProxyState::new(config);
+pub async fn spawn_gateway(
+    config: RuntimeConfig,
+    pool: Arc<DbPool>,
+) -> (String, SocketAddr, tokio::task::JoinHandle<()>) {
+    let state = AppState {
+        config: Arc::new(config.clone()),
+        agent: Arc::new(Agent::new(&config)),
+        response_store: ResponseStore::new(Arc::clone(&pool)),
+        conversation_store: Some(ConversationStore::new(Arc::clone(&pool))),
+    };
     let router = agentic_api::entrypoints::app::build_router(state);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -182,7 +210,7 @@ pub fn proxy_state_with_short_timeout(config: RuntimeConfig) -> ProxyState {
         .unwrap();
 
     ProxyState {
-        config,
+        config: Arc::new(config),
         stream_client,
         non_stream_client,
     }

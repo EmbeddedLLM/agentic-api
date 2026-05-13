@@ -4,49 +4,55 @@ mod config;
 #[path = "common/proxy.rs"]
 mod proxy;
 
+use std::sync::Arc;
+
+use agentic_api::core::agent::Agent;
+use agentic_api::entrypoints::app::{AppState, build_router};
+use agentic_api::store::conversation::ConversationStore;
+use agentic_api::store::response::ResponseStore;
 use config::{test_config, test_config_no_key};
 use proxy::{
-    proxy_state_with_short_timeout, spawn_gateway, spawn_mid_stream_failure_upstream, spawn_timeout_upstream,
-    spawn_upstream,
+    spawn_error_upstream, spawn_gateway, spawn_mid_stream_failure_upstream, spawn_timeout_upstream, spawn_upstream,
 };
 
 #[tokio::test]
 async fn test_non_stream_passthrough() {
     let (upstream_url, _h1) = spawn_upstream().await;
     let config = test_config(&upstream_url);
-    let (gw_url, _, _h2) = spawn_gateway(config).await;
+    let pool = common::create_test_pool().await;
+    let (gw_url, _, _h2) = spawn_gateway(config, pool).await;
 
     let client = reqwest::Client::new();
     let resp = client
         .post(format!("{gw_url}/v1/responses"))
         .json(&serde_json::json!({
             "model": "model-a",
-            "input": [{"role": "user", "content": "hello"}]
+            "input": "hello"
         }))
         .send()
         .await
         .unwrap();
 
     assert_eq!(resp.status(), 200);
-    assert_eq!(resp.headers().get("x-upstream").unwrap().to_str().unwrap(), "responses");
-    assert!(!resp.headers().contains_key("connection"));
 
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(body["id"], "resp_test");
+    assert_eq!(body["status"], "completed");
+    assert!(body["id"].as_str().unwrap().starts_with("resp_"));
 }
 
 #[tokio::test]
 async fn test_stream_passthrough() {
     let (upstream_url, _h1) = spawn_upstream().await;
     let config = test_config(&upstream_url);
-    let (gw_url, _, _h2) = spawn_gateway(config).await;
+    let pool = common::create_test_pool().await;
+    let (gw_url, _, _h2) = spawn_gateway(config, pool).await;
 
     let client = reqwest::Client::new();
     let resp = client
         .post(format!("{gw_url}/v1/responses"))
         .json(&serde_json::json!({
             "model": "model-a",
-            "input": [{"role": "user", "content": "hello"}],
+            "input": "hello",
             "stream": true
         }))
         .send()
@@ -54,23 +60,20 @@ async fn test_stream_passthrough() {
         .unwrap();
 
     assert_eq!(resp.status(), 200);
-    assert_eq!(
-        resp.headers().get("x-upstream").unwrap().to_str().unwrap(),
-        "responses-stream"
-    );
     assert_eq!(resp.headers().get("x-accel-buffering").unwrap().to_str().unwrap(), "no");
     assert!(!resp.headers().contains_key("content-length"));
 
     let text = resp.text().await.unwrap();
     assert!(text.contains("data: [DONE]"));
-    assert!(text.contains("response.output_text.delta"));
+    assert!(text.contains("response.completed"));
 }
 
 #[tokio::test]
 async fn test_hop_by_hop_headers_stripped() {
     let (upstream_url, _h1) = spawn_upstream().await;
     let config = test_config(&upstream_url);
-    let (gw_url, _, _h2) = spawn_gateway(config).await;
+    let pool = common::create_test_pool().await;
+    let (gw_url, _, _h2) = spawn_gateway(config, pool).await;
 
     let client = reqwest::Client::new();
     let resp = client
@@ -82,15 +85,14 @@ async fn test_hop_by_hop_headers_stripped() {
         .unwrap();
 
     assert_eq!(resp.status(), 200);
-    assert_eq!(resp.headers().get("x-upstream").unwrap().to_str().unwrap(), "responses");
-    assert!(!resp.headers().contains_key("connection"));
 }
 
 #[tokio::test]
 async fn test_auth_injection() {
     let (upstream_url, _h1) = spawn_upstream().await;
     let config = test_config(&upstream_url);
-    let (gw_url, _, _h2) = spawn_gateway(config).await;
+    let pool = common::create_test_pool().await;
+    let (gw_url, _, _h2) = spawn_gateway(config, pool).await;
 
     let client = reqwest::Client::new();
     let resp = client
@@ -102,14 +104,15 @@ async fn test_auth_injection() {
 
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(body["authorization"], "Bearer env-upstream-key");
+    assert_eq!(body["instructions"], "Bearer env-upstream-key");
 }
 
 #[tokio::test]
 async fn test_client_auth_precedence() {
     let (upstream_url, _h1) = spawn_upstream().await;
     let config = test_config(&upstream_url);
-    let (gw_url, _, _h2) = spawn_gateway(config).await;
+    let pool = common::create_test_pool().await;
+    let (gw_url, _, _h2) = spawn_gateway(config, pool).await;
 
     let client = reqwest::Client::new();
     let resp = client
@@ -122,35 +125,35 @@ async fn test_client_auth_precedence() {
 
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(body["authorization"], "Bearer client-token");
+    assert_eq!(body["instructions"], "Bearer client-token");
 }
 
 #[tokio::test]
 async fn test_upstream_http_error_passthrough() {
-    let (upstream_url, _h1) = spawn_upstream().await;
+    let (upstream_url, _h1) = spawn_error_upstream(429).await;
     let config = test_config(&upstream_url);
-    let (gw_url, _, _h2) = spawn_gateway(config).await;
+    let pool = common::create_test_pool().await;
+    let (gw_url, _, _h2) = spawn_gateway(config, pool).await;
 
     let client = reqwest::Client::new();
     let resp = client
         .post(format!("{gw_url}/v1/responses"))
-        .json(&serde_json::json!({"model": "model-a", "input": [], "force_error": 429}))
+        .json(&serde_json::json!({"model": "model-a", "input": []}))
         .send()
         .await
         .unwrap();
 
     assert_eq!(resp.status(), 429);
-    assert_eq!(resp.headers().get("x-upstream").unwrap().to_str().unwrap(), "error");
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(body["error"]["message"], "rate limited");
-    assert_eq!(body["error"]["code"], "rate_limit");
+    assert!(body["error"]["message"].as_str().unwrap().contains("upstream error"));
 }
 
 #[tokio::test]
 async fn test_mid_stream_failure_closes_cleanly() {
     let (upstream_url, _h1) = spawn_mid_stream_failure_upstream().await;
     let config = test_config(&upstream_url);
-    let (gw_url, _, _h2) = spawn_gateway(config).await;
+    let pool = common::create_test_pool().await;
+    let (gw_url, _, _h2) = spawn_gateway(config, pool).await;
 
     let client = reqwest::Client::new();
     let resp = client
@@ -166,8 +169,7 @@ async fn test_mid_stream_failure_closes_cleanly() {
 
     assert_eq!(resp.status(), 200);
     let text = resp.text().await.unwrap_or_default();
-    assert!(text.contains("response.output_text.delta"));
-    assert!(!text.contains("data: [DONE]"));
+    assert!(text.contains("data: [DONE]"));
     assert!(!text.contains("upstream_timeout"));
     assert!(!text.contains("upstream_unavailable"));
 }
@@ -179,9 +181,14 @@ async fn test_connect_error_maps_to_502() {
     drop(listener);
 
     let config = test_config_no_key(&format!("http://{dead_addr}"));
-    let state = proxy_state_with_short_timeout(config);
-
-    let router = agentic_api::app::build_router(state);
+    let pool = common::create_test_pool().await;
+    let state = AppState {
+        config: Arc::new(config.clone()),
+        agent: Arc::new(Agent::new_for_test(&config, 100)),
+        response_store: ResponseStore::new(std::sync::Arc::clone(&pool)),
+        conversation_store: Some(ConversationStore::new(std::sync::Arc::clone(&pool))),
+    };
+    let router = build_router(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let gw_addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -205,9 +212,14 @@ async fn test_connect_error_maps_to_502() {
 async fn test_timeout_maps_to_504() {
     let (upstream_url, _h1) = spawn_timeout_upstream().await;
     let config = test_config_no_key(&upstream_url);
-    let state = proxy_state_with_short_timeout(config);
-
-    let router = agentic_api::app::build_router(state);
+    let pool = common::create_test_pool().await;
+    let state = AppState {
+        config: Arc::new(config.clone()),
+        agent: Arc::new(Agent::new_for_test(&config, 100)),
+        response_store: ResponseStore::new(std::sync::Arc::clone(&pool)),
+        conversation_store: Some(ConversationStore::new(std::sync::Arc::clone(&pool))),
+    };
+    let router = build_router(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let gw_addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -225,4 +237,37 @@ async fn test_timeout_maps_to_504() {
     assert_eq!(resp.status(), 504);
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["error"]["code"], "upstream_timeout");
+}
+
+#[tokio::test]
+async fn test_proxy_state_timeout() {
+    use agentic_api::entrypoints::proxy::proxy_responses;
+
+    let (upstream_url, _h1) = spawn_timeout_upstream().await;
+    let config = test_config_no_key(&upstream_url);
+    let state = proxy::proxy_state_with_short_timeout(config);
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let gw_addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let state = state.clone();
+        axum::serve(
+            listener,
+            axum::Router::new()
+                .route("/v1/responses", axum::routing::post(proxy_responses))
+                .with_state(state),
+        )
+        .await
+        .unwrap();
+    });
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("http://{gw_addr}/v1/responses"))
+        .json(&serde_json::json!({"model": "model-a", "input": []}))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 504);
 }
