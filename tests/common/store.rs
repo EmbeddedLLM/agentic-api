@@ -4,7 +4,7 @@ use agentic_api::types::responses::{
     OutputItem, OutputMessage, OutputTextContent, ResponsesInput, ResponsesRequest, ResponsesResponse, ToolChoice,
 };
 
-pub async fn create_test_pool() -> &'static DbPool {
+pub async fn create_test_pool() -> std::sync::Arc<DbPool> {
     sqlx::any::install_default_drivers();
     let pool = sqlx::any::AnyPoolOptions::new()
         .max_connections(1)
@@ -15,7 +15,7 @@ pub async fn create_test_pool() -> &'static DbPool {
         .ensure_ready()
         .await
         .expect("failed to run test schema");
-    Box::leak(Box::new(pool))
+    std::sync::Arc::new(pool)
 }
 
 pub fn make_request(model: &str) -> ResponsesRequest {
