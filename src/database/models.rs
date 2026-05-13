@@ -1,19 +1,10 @@
-use serde_json::Value;
-
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct Item {
     pub id: String,
-    pub data: String,       // JSON stored as TEXT, deserialize with serde_json
+    pub data: String,       // JSON stored as TEXT
     pub created_at: String, // ISO 8601 timestamp stored as TEXT
     pub conversation_id: Option<String>,
     pub seq: Option<i64>,
-}
-
-impl Item {
-    #[must_use]
-    pub fn data_json(&self) -> Option<Value> {
-        serde_json::from_str(&self.data).ok()
-    }
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -37,7 +28,7 @@ impl Response {
     }
 
     #[must_use]
-    pub fn metadata_json(&self) -> Option<Value> {
+    pub fn metadata_as<T: serde::de::DeserializeOwned>(&self) -> Option<T> {
         self.metadata.as_deref().and_then(|s| serde_json::from_str(s).ok())
     }
 }
@@ -52,7 +43,7 @@ pub struct Conversation {
 
 impl Conversation {
     #[must_use]
-    pub fn metadata_json(&self) -> Option<Value> {
+    pub fn metadata_as<T: serde::de::DeserializeOwned>(&self) -> Option<T> {
         self.metadata.as_deref().and_then(|s| serde_json::from_str(s).ok())
     }
 }

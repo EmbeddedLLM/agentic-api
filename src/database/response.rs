@@ -1,5 +1,3 @@
-use serde_json::Value;
-
 use super::db::{DbPool, DbResult, DbTransaction};
 use super::models::Response;
 use crate::utils::common::utcnow_str;
@@ -12,12 +10,10 @@ pub async fn create_response_in_tx(
     id: &str,
     conversation_id: Option<&str>,
     previous_response_id: Option<&str>,
-    history_item_ids: Option<&Value>,
-    metadata: Option<&Value>,
+    history_item_ids: Option<&str>,
+    metadata: Option<&str>,
 ) -> DbResult<()> {
     let now = utcnow_str();
-    let history_str = history_item_ids.map(|v| serde_json::to_string(v).unwrap_or_default());
-    let metadata_str = metadata.map(|v| serde_json::to_string(v).unwrap_or_default());
     sqlx::query(
         "INSERT INTO responses \
          (id, conversation_id, previous_response_id, history_item_ids, metadata, created_at, updated_at) \
@@ -26,8 +22,8 @@ pub async fn create_response_in_tx(
     .bind(id)
     .bind(conversation_id)
     .bind(previous_response_id)
-    .bind(history_str)
-    .bind(metadata_str)
+    .bind(history_item_ids)
+    .bind(metadata)
     .bind(&now)
     .bind(&now)
     .execute(&mut **tx)
