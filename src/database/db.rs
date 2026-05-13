@@ -16,6 +16,9 @@ fn prepare_db_url(url: &str) -> String {
     }
 }
 
+/// # Errors
+///
+/// Returns a [`sqlx::Error`] if the connection pool cannot be created.
 pub async fn create_pool(db_url: &str) -> DbResult<DbPool> {
     sqlx::any::install_default_drivers();
     let url = prepare_db_url(db_url);

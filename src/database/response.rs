@@ -4,6 +4,9 @@ use super::db::{DbPool, DbResult, DbTransaction};
 use super::models::Response;
 use crate::utils::common::utcnow_str;
 
+/// # Errors
+///
+/// Returns a [`sqlx::Error`] if the query fails.
 pub async fn create_response_in_tx(
     tx: &mut DbTransaction<'_>,
     id: &str,
@@ -32,6 +35,9 @@ pub async fn create_response_in_tx(
     Ok(())
 }
 
+/// # Errors
+///
+/// Returns a [`sqlx::Error`] if the query fails.
 pub async fn get_response(pool: &DbPool, id: &str) -> DbResult<Option<Response>> {
     sqlx::query_as::<_, Response>("SELECT * FROM responses WHERE id = ?")
         .bind(id)
@@ -39,6 +45,9 @@ pub async fn get_response(pool: &DbPool, id: &str) -> DbResult<Option<Response>>
         .await
 }
 
+/// # Errors
+///
+/// Returns a [`sqlx::Error`] if the query fails.
 pub async fn get_responses_by_conversation(pool: &DbPool, conversation_id: &str) -> DbResult<Vec<Response>> {
     sqlx::query_as::<_, Response>("SELECT * FROM responses WHERE conversation_id = ? ORDER BY created_at ASC")
         .bind(conversation_id)
@@ -46,6 +55,9 @@ pub async fn get_responses_by_conversation(pool: &DbPool, conversation_id: &str)
         .await
 }
 
+/// # Errors
+///
+/// Returns a [`sqlx::Error`] if the query fails.
 pub async fn delete_response(pool: &DbPool, id: &str) -> DbResult<()> {
     sqlx::query("DELETE FROM responses WHERE id = ?")
         .bind(id)

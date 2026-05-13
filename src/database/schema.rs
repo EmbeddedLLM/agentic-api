@@ -19,10 +19,14 @@ pub struct SchemaManager<'a> {
 }
 
 impl<'a> SchemaManager<'a> {
+    #[must_use]
     pub fn new(pool: &'a DbPool) -> Self {
         Self { pool }
     }
 
+    /// # Errors
+    ///
+    /// Returns a [`sqlx::Error`] if migrations fail.
     pub async fn ensure_ready(&self) -> DbResult<()> {
         if SCHEMA_READY.get().is_some() {
             return Ok(());

@@ -4,6 +4,9 @@ use super::db::{DbPool, DbResult, DbTransaction};
 use super::models::Item;
 use crate::utils::common::utcnow_str;
 
+/// # Errors
+///
+/// Returns a [`sqlx::Error`] if the query fails.
 pub async fn create_item(pool: &DbPool, id: &str, data: &Value) -> DbResult<Item> {
     let now = utcnow_str();
     let data_str = serde_json::to_string(data).unwrap_or_default();
@@ -15,6 +18,9 @@ pub async fn create_item(pool: &DbPool, id: &str, data: &Value) -> DbResult<Item
         .await
 }
 
+/// # Errors
+///
+/// Returns a [`sqlx::Error`] if any query fails.
 pub async fn create_items_in_tx(tx: &mut DbTransaction<'_>, items: &[(String, Value)]) -> DbResult<()> {
     let now = utcnow_str();
     for (id, data) in items {
@@ -29,6 +35,9 @@ pub async fn create_items_in_tx(tx: &mut DbTransaction<'_>, items: &[(String, Va
     Ok(())
 }
 
+/// # Errors
+///
+/// Returns a [`sqlx::Error`] if any query fails.
 pub async fn create_conversation_items_in_tx(
     tx: &mut DbTransaction<'_>,
     items: &[(String, Value)],
@@ -37,6 +46,7 @@ pub async fn create_conversation_items_in_tx(
 ) -> DbResult<()> {
     let now = utcnow_str();
     for (i, (id, data)) in items.iter().enumerate() {
+        #[allow(clippy::cast_possible_wrap)]
         let seq = seq_start + i as i64;
         let data_str = serde_json::to_string(data).unwrap_or_default();
         sqlx::query("INSERT INTO items (id, data, created_at, conversation_id, seq) VALUES (?, ?, ?, ?, ?)")
@@ -51,6 +61,9 @@ pub async fn create_conversation_items_in_tx(
     Ok(())
 }
 
+/// # Errors
+///
+/// Returns a [`sqlx::Error`] if the query fails.
 pub async fn get_item(pool: &DbPool, id: &str) -> DbResult<Option<Item>> {
     sqlx::query_as::<_, Item>("SELECT * FROM items WHERE id = ?")
         .bind(id)
@@ -58,6 +71,9 @@ pub async fn get_item(pool: &DbPool, id: &str) -> DbResult<Option<Item>> {
         .await
 }
 
+/// # Errors
+///
+/// Returns a [`sqlx::Error`] if the query fails.
 pub async fn get_items(pool: &DbPool, ids: &[String]) -> DbResult<Vec<Item>> {
     if ids.is_empty() {
         return Ok(vec![]);
@@ -71,6 +87,9 @@ pub async fn get_items(pool: &DbPool, ids: &[String]) -> DbResult<Vec<Item>> {
     q.fetch_all(pool).await
 }
 
+/// # Errors
+///
+/// Returns a [`sqlx::Error`] if the query fails.
 pub async fn get_items_by_conversation(pool: &DbPool, conversation_id: &str) -> DbResult<Vec<Item>> {
     sqlx::query_as::<_, Item>("SELECT * FROM items WHERE conversation_id = ? ORDER BY seq ASC")
         .bind(conversation_id)
@@ -78,6 +97,9 @@ pub async fn get_items_by_conversation(pool: &DbPool, conversation_id: &str) -> 
         .await
 }
 
+/// # Errors
+///
+/// Returns a [`sqlx::Error`] if the query fails.
 pub async fn delete_item(pool: &DbPool, id: &str) -> DbResult<()> {
     sqlx::query("DELETE FROM items WHERE id = ?")
         .bind(id)
