@@ -1,20 +1,19 @@
-use serde_json::Value;
-
 use super::db::{DbPool, DbResult, DbTransaction};
 use super::models::Response;
 use crate::utils::common::utcnow_str;
 
+/// # Errors
+///
+/// Returns a [`sqlx::Error`] if the query fails.
 pub async fn create_response_in_tx(
     tx: &mut DbTransaction<'_>,
     id: &str,
     conversation_id: Option<&str>,
     previous_response_id: Option<&str>,
-    history_item_ids: Option<&Value>,
-    metadata: Option<&Value>,
+    history_item_ids: Option<&str>,
+    metadata: Option<&str>,
 ) -> DbResult<()> {
     let now = utcnow_str();
-    let history_str = history_item_ids.map(|v| serde_json::to_string(v).unwrap_or_default());
-    let metadata_str = metadata.map(|v| serde_json::to_string(v).unwrap_or_default());
     sqlx::query(
         "INSERT INTO responses \
          (id, conversation_id, previous_response_id, history_item_ids, metadata, created_at, updated_at) \
@@ -23,8 +22,8 @@ pub async fn create_response_in_tx(
     .bind(id)
     .bind(conversation_id)
     .bind(previous_response_id)
-    .bind(history_str)
-    .bind(metadata_str)
+    .bind(history_item_ids)
+    .bind(metadata)
     .bind(&now)
     .bind(&now)
     .execute(&mut **tx)
@@ -32,6 +31,9 @@ pub async fn create_response_in_tx(
     Ok(())
 }
 
+/// # Errors
+///
+/// Returns a [`sqlx::Error`] if the query fails.
 pub async fn get_response(pool: &DbPool, id: &str) -> DbResult<Option<Response>> {
     sqlx::query_as::<_, Response>("SELECT * FROM responses WHERE id = ?")
         .bind(id)
@@ -39,6 +41,9 @@ pub async fn get_response(pool: &DbPool, id: &str) -> DbResult<Option<Response>>
         .await
 }
 
+/// # Errors
+///
+/// Returns a [`sqlx::Error`] if the query fails.
 pub async fn get_responses_by_conversation(pool: &DbPool, conversation_id: &str) -> DbResult<Vec<Response>> {
     sqlx::query_as::<_, Response>("SELECT * FROM responses WHERE conversation_id = ? ORDER BY created_at ASC")
         .bind(conversation_id)
@@ -46,6 +51,9 @@ pub async fn get_responses_by_conversation(pool: &DbPool, conversation_id: &str)
         .await
 }
 
+/// # Errors
+///
+/// Returns a [`sqlx::Error`] if the query fails.
 pub async fn delete_response(pool: &DbPool, id: &str) -> DbResult<()> {
     sqlx::query("DELETE FROM responses WHERE id = ?")
         .bind(id)

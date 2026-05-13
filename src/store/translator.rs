@@ -7,6 +7,13 @@ use crate::types::responses::{
 
 pub const ITEM_DATA_VERSION: u32 = 1;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ItemKind {
+    Input,
+    Output,
+}
+
 // ---------------------------------------------------------------------------
 // InOutItem — holds either an InputItem or OutputItem for DB storage
 // ---------------------------------------------------------------------------
@@ -20,42 +27,45 @@ pub enum InOutItem {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ItemPayload {
     pub v: u32,
-    pub kind: String,
-    pub item: serde_json::Value,
+    pub kind: ItemKind,
+    pub item: String, // pre-serialized JSON
 }
 
 impl ItemPayload {
-    pub fn from_input(item: InputItem) -> Self {
+    #[must_use]
+    pub fn from_input(item: &InputItem) -> Self {
         Self {
             v: ITEM_DATA_VERSION,
-            kind: "input".to_string(),
-            item: serde_json::to_value(&item).unwrap_or_default(),
+            kind: ItemKind::Input,
+            item: serde_json::to_string(item).unwrap_or_default(),
         }
     }
 
-    pub fn from_output(item: OutputItem) -> Self {
+    #[must_use]
+    pub fn from_output(item: &OutputItem) -> Self {
         Self {
             v: ITEM_DATA_VERSION,
-            kind: "output".to_string(),
-            item: serde_json::to_value(&item).unwrap_or_default(),
+            kind: ItemKind::Output,
+            item: serde_json::to_string(item).unwrap_or_default(),
         }
     }
 
-    pub fn to_json_value(&self) -> serde_json::Value {
-        serde_json::to_value(self).unwrap_or(serde_json::Value::Null)
+    #[must_use]
+    pub fn to_json_string(&self) -> String {
+        serde_json::to_string(self).unwrap_or_default()
     }
 
-    pub fn from_item_row(row: crate::database::models::Item) -> Option<InOutItem> {
-        let data = row.data_json()?;
-        let payload: Self = serde_json::from_value(data).ok()?;
-        match payload.kind.as_str() {
-            "input" => serde_json::from_value(payload.item).ok().map(InOutItem::Input),
-            "output" => serde_json::from_value(payload.item).ok().map(InOutItem::Output),
-            _ => None,
+    #[must_use]
+    pub fn from_item_row(row: &crate::database::models::Item) -> Option<InOutItem> {
+        let payload: Self = serde_json::from_str(&row.data).ok()?;
+        match payload.kind {
+            ItemKind::Input => serde_json::from_str(&payload.item).ok().map(InOutItem::Input),
+            ItemKind::Output => serde_json::from_str(&payload.item).ok().map(InOutItem::Output),
         }
     }
 }
 
+#[must_use]
 pub fn normalize_input(input: &ResponsesInput) -> Vec<InputItem> {
     match input {
         ResponsesInput::Text(text) => vec![InputItem::Message(InputMessage {
@@ -66,10 +76,12 @@ pub fn normalize_input(input: &ResponsesInput) -> Vec<InputItem> {
     }
 }
 
+#[must_use]
 pub fn wrap_tool_result(item: FunctionToolResultMessage) -> InputItem {
     InputItem::FunctionCallOutput(item)
 }
 
+#[must_use]
 pub fn resolve_tools(
     request_tools: Option<&Vec<ResponsesTool>>,
     stored_tools: Option<&Vec<ResponsesTool>>,
@@ -83,6 +95,7 @@ pub fn resolve_tools(
     .cloned()
 }
 
+#[must_use]
 pub fn resolve_tool_choice(
     request_tool_choice: &ToolChoice,
     stored_tool_choice: &ToolChoice,

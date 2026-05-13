@@ -4,6 +4,9 @@ use super::db::{DbPool, DbResult};
 use super::models::Conversation;
 use crate::utils::common::utcnow_str;
 
+/// # Errors
+///
+/// Returns a [`sqlx::Error`] if the query fails.
 pub async fn create_conversation(pool: &DbPool, id: &str, metadata: Option<&Value>) -> DbResult<Conversation> {
     let now = utcnow_str();
     let metadata_str = metadata.map(|v| serde_json::to_string(v).unwrap_or_default());
@@ -19,6 +22,9 @@ pub async fn create_conversation(pool: &DbPool, id: &str, metadata: Option<&Valu
     .await
 }
 
+/// # Errors
+///
+/// Returns a [`sqlx::Error`] if the query fails.
 pub async fn get_or_create_conversation(pool: &DbPool, id: &str, metadata: Option<&Value>) -> DbResult<Conversation> {
     let now = utcnow_str();
     let metadata_str = metadata.map(|v| serde_json::to_string(v).unwrap_or_default());
@@ -39,6 +45,9 @@ pub async fn get_or_create_conversation(pool: &DbPool, id: &str, metadata: Optio
         .await
 }
 
+/// # Errors
+///
+/// Returns a [`sqlx::Error`] if the query fails.
 pub async fn get_conversation(pool: &DbPool, id: &str) -> DbResult<Option<Conversation>> {
     sqlx::query_as::<_, Conversation>("SELECT * FROM conversations WHERE id = ?")
         .bind(id)
@@ -46,6 +55,9 @@ pub async fn get_conversation(pool: &DbPool, id: &str) -> DbResult<Option<Conver
         .await
 }
 
+/// # Errors
+///
+/// Returns a [`sqlx::Error`] if the query fails.
 pub async fn delete_conversation(pool: &DbPool, id: &str) -> DbResult<()> {
     sqlx::query("DELETE FROM conversations WHERE id = ?")
         .bind(id)

@@ -159,19 +159,16 @@ pub struct FunctionTool {
 
 pub type ResponsesTool = FunctionTool;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolChoice {
+    #[default]
     Auto,
     None,
     Required,
-    Function { name: String },
-}
-
-impl Default for ToolChoice {
-    fn default() -> Self {
-        Self::Auto
-    }
+    Function {
+        name: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -270,6 +267,7 @@ pub struct ResponsesResponse {
 }
 
 impl ResponsesResponse {
+    #[must_use]
     pub fn create_from_request(request: &ResponsesRequest) -> Self {
         Self {
             id: crate::utils::common::uuid7_str("resp_"),
@@ -287,6 +285,7 @@ impl ResponsesResponse {
         }
     }
 
+    #[must_use]
     pub fn as_responses_chunk(&self) -> String {
         format!("data: {}\n\n", serde_json::to_string(self).unwrap_or_default())
     }
@@ -395,6 +394,7 @@ impl<'de> serde::Deserialize<'de> for StreamEvent {
 }
 
 impl StreamEvent {
+    #[must_use]
     pub fn type_str(&self) -> &str {
         match self {
             Self::Response(e) => &e.type_,
@@ -405,6 +405,7 @@ impl StreamEvent {
         }
     }
 
+    #[must_use]
     pub fn as_responses_chunk(&self) -> String {
         format!(
             "event: {}\ndata: {}\n\n",

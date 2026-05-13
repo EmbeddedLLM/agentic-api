@@ -43,6 +43,7 @@ impl AgenticApiError {
         }
     }
 
+    #[must_use]
     pub fn status_code(&self) -> u16 {
         match self {
             Self::ResponsesApi { status_code, .. } => *status_code,

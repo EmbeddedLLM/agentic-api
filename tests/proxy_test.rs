@@ -1,8 +1,13 @@
 mod common;
+#[path = "common/config.rs"]
+mod config;
+#[path = "common/proxy.rs"]
+mod proxy;
 
-use common::{
+use config::{test_config, test_config_no_key};
+use proxy::{
     proxy_state_with_short_timeout, spawn_gateway, spawn_mid_stream_failure_upstream, spawn_timeout_upstream,
-    spawn_upstream, test_config, test_config_no_key,
+    spawn_upstream,
 };
 
 #[tokio::test]

@@ -16,16 +16,25 @@ fn prepare_db_url(url: &str) -> String {
     }
 }
 
+/// # Errors
+///
+/// Returns a [`sqlx::Error`] if the connection pool cannot be created.
 pub async fn create_pool(db_url: &str) -> DbResult<DbPool> {
     sqlx::any::install_default_drivers();
     let url = prepare_db_url(db_url);
     AnyPoolOptions::new().max_connections(10).connect(&url).await
 }
 
+/// # Panics
+///
+/// Panics if the pool has already been configured.
 pub fn configure_pool(pool: DbPool) {
     POOL.set(pool).expect("pool already configured");
 }
 
+/// # Panics
+///
+/// Panics if `configure_pool` has not been called at startup.
 pub fn get_pool() -> &'static DbPool {
     POOL.get()
         .expect("pool not configured — call configure_pool() at startup")
