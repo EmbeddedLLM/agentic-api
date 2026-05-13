@@ -1,6 +1,22 @@
+use agentic_api::database::db::DbPool;
+use agentic_api::database::schema::SchemaManager;
 use agentic_api::types::responses::{
     OutputItem, OutputMessage, OutputTextContent, ResponsesInput, ResponsesRequest, ResponsesResponse, ToolChoice,
 };
+
+pub async fn create_test_pool() -> &'static DbPool {
+    sqlx::any::install_default_drivers();
+    let pool = sqlx::any::AnyPoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .expect("failed to create test pool");
+    SchemaManager::new(&pool)
+        .ensure_ready()
+        .await
+        .expect("failed to run test schema");
+    Box::leak(Box::new(pool))
+}
 
 pub fn make_request(model: &str) -> ResponsesRequest {
     ResponsesRequest {
