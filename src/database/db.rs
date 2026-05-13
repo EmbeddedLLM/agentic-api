@@ -6,8 +6,6 @@ pub type DbPool = sqlx::Pool<sqlx::Any>;
 pub type DbTransaction<'a> = sqlx::Transaction<'a, sqlx::Any>;
 pub type DbResult<T> = Result<T, sqlx::Error>;
 
-static POOL: OnceLock<DbPool> = OnceLock::new();
-
 fn prepare_db_url(url: &str) -> String {
     if url.starts_with("sqlite") && !url.contains('?') {
         format!("{url}?mode=rwc")
@@ -24,19 +22,4 @@ pub async fn create_pool(db_url: &str) -> DbResult<Arc<DbPool>> {
     let url = prepare_db_url(db_url);
     let pool = AnyPoolOptions::new().max_connections(10).connect(&url).await?;
     Ok(Arc::new(pool))
-}
-
-/// # Panics
-///
-/// Panics if the pool has already been configured.
-pub fn configure_pool(pool: DbPool) {
-    POOL.set(pool).expect("pool already configured");
-}
-
-/// # Panics
-///
-/// Panics if `configure_pool` has not been called at startup.
-pub fn get_pool() -> &'static DbPool {
-    POOL.get()
-        .expect("pool not configured — call configure_pool() at startup")
 }
