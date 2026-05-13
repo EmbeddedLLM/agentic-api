@@ -12,7 +12,7 @@ use futures::stream;
 use http::StatusCode;
 use tokio::net::TcpListener;
 
-use agentic_api::config::RuntimeConfig;
+use agentic_api::config::{DbDialect, RuntimeConfig};
 use agentic_api::proxy::ProxyState;
 
 pub fn test_config(upstream_url: &str) -> RuntimeConfig {
@@ -21,8 +21,13 @@ pub fn test_config(upstream_url: &str) -> RuntimeConfig {
         openai_api_key: Some("env-upstream-key".to_owned()),
         gateway_host: "127.0.0.1".to_owned(),
         gateway_port: 0,
+        gateway_workers: 1,
         upstream_ready_timeout_s: 5.0,
         upstream_ready_interval_s: 0.1,
+        db_url: "sqlite://:memory:".to_owned(),
+        db_dialect: DbDialect::Sqlite,
+        response_store_enabled: false,
+        log_model_messages: false,
     }
 }
 
