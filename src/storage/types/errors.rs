@@ -1,0 +1,139 @@
+//! Storage layer error types.
+
+use thiserror::Error;
+
+/// Result type for storage operations.
+///
+/// All storage functions return `Result<T, StorageError>` for explicit error handling.
+pub type Result<T> = std::result::Result<T, StorageError>;
+
+/// Storage layer errors with detailed context.
+#[derive(Error, Debug)]
+pub enum StorageError {
+    /// Resource not found in database.
+    #[error("not found: {resource_type} with id '{id}'")]
+    NotFound { resource_type: String, id: String },
+
+    /// Database operation failed.
+    ///
+    /// Wraps `sqlx::Error` and automatically converts from it via `#[from]`.
+    /// This allows using `?` operator with sqlx results.
+    #[error("database error: {0}")]
+    Database(#[from] sqlx::Error),
+
+    /// Storage is not configured or disabled.
+    #[error("storage not configured or disabled")]
+    NotConfigured,
+
+    /// Invalid operation on resource.
+    #[error("invalid {resource_type}: {reason}")]
+    Invalid { resource_type: String, reason: String },
+
+    /// Serialization/deserialization error.
+    #[error("serialization error: {0}")]
+    Serialization(#[from] serde_json::Error),
+
+    /// Internal storage error (unexpected condition).
+    #[error("internal storage error: {0}")]
+    Internal(String),
+}
+
+impl StorageError {
+    /// Creates a "not found" error for a resource.
+    #[must_use]
+    pub fn not_found(resource_type: impl Into<String>, id: impl Into<String>) -> Self {
+        Self::NotFound {
+            resource_type: resource_type.into(),
+            id: id.into(),
+        }
+    }
+
+    /// Creates an invalid operation error.
+    #[must_use]
+    pub fn invalid(resource_type: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self::Invalid {
+            resource_type: resource_type.into(),
+            reason: reason.into(),
+        }
+    }
+
+    /// Creates an internal error for unexpected conditions.
+    #[must_use]
+    pub fn internal(msg: impl Into<String>) -> Self {
+        Self::Internal(msg.into())
+    }
+
+    /// Returns `true` if this error is "not found".
+    #[must_use]
+    pub fn is_not_found(&self) -> bool {
+        matches!(self, Self::NotFound { .. })
+    }
+
+    /// Returns `true` if this error is "not configured".
+    #[must_use]
+    pub fn is_not_configured(&self) -> bool {
+        matches!(self, Self::NotConfigured)
+    }
+
+    /// Extracts the resource type and ID if this is a "not found" error.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let err = StorageError::not_found("Response", "123");
+    /// if let Some((resource, id)) = err.not_found_details() {
+    ///     println!("Not found: {} {}", resource, id);
+    /// }
+    /// ```
+    #[must_use]
+    pub fn not_found_details(&self) -> Option<(String, String)> {
+        match self {
+            Self::NotFound { resource_type, id } => Some((resource_type.clone(), id.clone())),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_not_found_error_creation() {
+        let err = StorageError::not_found("Response", "resp_123");
+        assert!(err.is_not_found());
+        assert!(!err.is_not_configured());
+    }
+
+    #[test]
+    fn test_not_found_details_extraction() {
+        let err = StorageError::not_found("Agent", "agent_456");
+        let details = err.not_found_details();
+        assert!(details.is_some());
+        let (resource, id) = details.unwrap();
+        assert_eq!(resource, "Agent");
+        assert_eq!(id, "agent_456");
+    }
+
+    #[test]
+    fn test_not_configured_error() {
+        let err = StorageError::NotConfigured;
+        assert!(!err.is_not_found());
+        assert!(err.is_not_configured());
+    }
+
+    #[test]
+    fn test_invalid_error_creation() {
+        let err = StorageError::invalid("Conversation", "empty conversation ID");
+        let msg = err.to_string();
+        assert!(msg.contains("invalid"));
+        assert!(msg.contains("Conversation"));
+    }
+
+    #[test]
+    fn test_error_display_formatting() {
+        let err = StorageError::not_found("Response", "123");
+        let msg = err.to_string();
+        assert_eq!(msg, "not found: Response with id '123'");
+    }
+}
