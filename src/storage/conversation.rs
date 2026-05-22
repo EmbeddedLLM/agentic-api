@@ -5,7 +5,7 @@ use std::sync::Arc;
 use super::models::{conversation, item, response};
 use super::pool::DbPool;
 use super::types::{ConversationData, InOutItem, ResponseMetadata, Result, StorageError};
-use crate::utils::common::{any_json_to_string, uuid7_str};
+use crate::utils::common::{serialize_to_string, uuid7_str};
 
 /// Conversation storage operations.
 #[derive(Clone)]
@@ -120,7 +120,7 @@ impl ConversationStore {
 
         item::create_in_tx(&mut tx, items_, Some(conversation_id), Some(seq_start)).await?;
 
-        let history_item_ids_json = any_json_to_string(&item_ids);
+        let history_item_ids_json = serialize_to_string(&item_ids);
         let metadata_json: String = metadata.into();
 
         response::create_in_tx(

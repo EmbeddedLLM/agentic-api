@@ -1,55 +1,13 @@
-// Storage CRUD operations benchmark
-// Run with: cargo bench --bench storage_crud
-// Or with custom iterations: cargo bench --bench storage_crud -- --iterations 100
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 
-use std::env;
-use std::sync::Arc;
-use std::time::Instant;
-
-use agentic_api::storage::{ConversationStore, InOutItem, ResponseMetadata, ResponseStore, SchemaManager};
+use agentic_api::storage::{ConversationStore, InOutItem, ResponseMetadata, ResponseStore, create_pool_with_schema};
 use agentic_api::types::io::{InputItem, InputMessage, InputMessageContent, OutputItem, OutputMessage};
 
-const DEFAULT_ITERATIONS: usize = 50;
+static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-#[derive(Debug)]
-struct BenchmarkResult {
-    operation: String,
-    iterations: usize,
-    total_duration_ms: f64,
-    average_duration_ms: f64,
-    min_duration_ms: f64,
-    max_duration_ms: f64,
-    throughput_ops_per_sec: f64,
-}
-
-impl BenchmarkResult {
-    fn new(operation: &str, iterations: usize, durations: Vec<f64>) -> Self {
-        let total = durations.iter().sum::<f64>();
-        let avg = total / iterations as f64;
-        let min = durations.iter().cloned().fold(f64::INFINITY, f64::min);
-        let max = durations.iter().cloned().fold(0.0, f64::max);
-        let throughput = 1000.0 / avg;
-
-        Self {
-            operation: operation.to_string(),
-            iterations,
-            total_duration_ms: total,
-            average_duration_ms: avg,
-            min_duration_ms: min,
-            max_duration_ms: max,
-            throughput_ops_per_sec: throughput,
-        }
-    }
-
-    fn print(&self) {
-        println!("\n=== Benchmark: {} ===", self.operation);
-        println!("Iterations: {}", self.iterations);
-        println!("Total Duration: {:.2}ms", self.total_duration_ms);
-        println!("Average: {:.4}ms/op", self.average_duration_ms);
-        println!("Min: {:.4}ms", self.min_duration_ms);
-        println!("Max: {:.4}ms", self.max_duration_ms);
-        println!("Throughput: {:.2} ops/sec", self.throughput_ops_per_sec);
-    }
+fn next_id() -> String {
+    let count = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    format!("id_{}", count)
 }
 
 fn create_test_items() -> Vec<InOutItem> {
@@ -71,273 +29,181 @@ fn create_test_metadata() -> ResponseMetadata {
     ResponseMetadata::default()
 }
 
-fn parse_iterations() -> usize {
-    let args: Vec<String> = env::args().collect();
+fn bench_conversation_persist(c: &mut Criterion, store: &ConversationStore) {
+    use std::sync::{Arc, Mutex};
+    let previous_response_id = Arc::new(Mutex::new(None::<String>));
 
-    for (i, arg) in args.iter().enumerate() {
-        if arg == "--iterations" || arg == "-i" {
-            if let Some(next_arg) = args.get(i + 1) {
-                if let Ok(iterations) = next_arg.parse::<usize>() {
-                    if iterations > 0 {
-                        return iterations;
-                    } else {
-                        eprintln!("Warning: iterations must be > 0, using default: {}", DEFAULT_ITERATIONS);
-                        return DEFAULT_ITERATIONS;
-                    }
-                } else {
-                    eprintln!(
-                        "Warning: could not parse iterations value '{}', using default: {}",
-                        next_arg, DEFAULT_ITERATIONS
-                    );
-                    return DEFAULT_ITERATIONS;
+    c.bench_function("conversation_persist", |b| {
+        b.to_async(tokio::runtime::Runtime::new().unwrap()).iter_batched(
+            || async {
+                let conversation = store.create().await.expect("failed to create conversation");
+                let new_items = create_test_items();
+                let test_metadata = create_test_metadata();
+                let response_id = next_id();
+                let prev_id = previous_response_id.lock().unwrap().as_deref().map(|s| s.to_string());
+                (
+                    conversation.conversation_id.clone(),
+                    new_items,
+                    test_metadata,
+                    response_id,
+                    prev_id,
+                )
+            },
+            |setup| {
+                let previous_response_id = previous_response_id.clone();
+                async move {
+                    let (conversation_id, new_items, test_metadata, response_id, prev_id) = setup.await;
+                    store
+                        .persist(
+                            &conversation_id,
+                            &response_id,
+                            prev_id.as_deref(),
+                            black_box(new_items),
+                            &black_box(test_metadata),
+                        )
+                        .await
+                        .expect("persist failed");
+
+                    *previous_response_id.lock().unwrap() = Some(response_id);
                 }
-            }
-        }
-    }
-
-    DEFAULT_ITERATIONS
+            },
+            criterion::BatchSize::SmallInput,
+        )
+    });
 }
 
-fn print_usage() {
-    println!("\n=== Benchmark Usage ===");
-    println!("Default (50 iterations):");
-    println!("  cargo bench --bench storage_crud\n");
-    println!("Custom iterations:");
-    println!("  cargo bench --bench storage_crud -- --iterations 100");
-    println!("  cargo bench --bench storage_crud -- -i 200\n");
+fn bench_response_persist(c: &mut Criterion, store: &ResponseStore) {
+    use std::sync::{Arc, Mutex};
+    let previous_id = Arc::new(Mutex::new(None::<String>));
+
+    c.bench_function("response_persist", |b| {
+        b.to_async(tokio::runtime::Runtime::new().unwrap()).iter_batched(
+            || {
+                let new_items = create_test_items();
+                let test_metadata = create_test_metadata();
+                let current_id = next_id();
+                let prev_id = previous_id.lock().unwrap().as_deref().map(|s| s.to_string());
+                (new_items, test_metadata, current_id, prev_id)
+            },
+            |(new_items, test_metadata, current_id, prev_id)| {
+                let previous_id = previous_id.clone();
+                async move {
+                    store
+                        .persist(
+                            &current_id,
+                            prev_id.as_deref(),
+                            black_box(new_items),
+                            &black_box(test_metadata),
+                        )
+                        .await
+                        .expect("persist failed");
+
+                    *previous_id.lock().unwrap() = Some(current_id);
+                }
+            },
+            criterion::BatchSize::SmallInput,
+        )
+    });
 }
 
-async fn create_test_pool() -> Arc<sqlx::Pool<sqlx::Any>> {
-    sqlx::any::install_default_drivers();
-    let pool = sqlx::any::AnyPoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite::memory:")
-        .await
-        .expect("failed to create test pool");
-    let pool = Arc::new(pool);
+fn bench_conversation_rehydrate(c: &mut Criterion, store: &ConversationStore) {
+    use std::sync::Mutex;
+    let previous_response_id = Mutex::new(None::<String>);
 
-    let schema_manager = SchemaManager::new_for_test(pool.as_ref());
-    schema_manager
-        .ensure_ready()
-        .await
-        .expect("failed to initialize schema");
+    c.bench_function("conversation_rehydrate", |b| {
+        b.to_async(tokio::runtime::Runtime::new().unwrap()).iter_batched(
+            || async {
+                let conversation = store.create().await.expect("failed to create conversation");
+                let new_items = create_test_items();
+                let test_metadata = create_test_metadata();
+                let response_id = next_id();
+                let prev_id = previous_response_id.lock().unwrap().as_deref().map(|s| s.to_string());
 
-    pool
+                store
+                    .persist(
+                        &conversation.conversation_id,
+                        &response_id,
+                        prev_id.as_deref(),
+                        new_items,
+                        &test_metadata,
+                    )
+                    .await
+                    .expect("setup persist failed");
+
+                *previous_response_id.lock().unwrap() = Some(response_id);
+                conversation.conversation_id.clone()
+            },
+            |setup| async move {
+                let conversation_id = setup.await;
+                store
+                    .rehydrate(&black_box(conversation_id))
+                    .await
+                    .expect("rehydrate failed")
+            },
+            criterion::BatchSize::SmallInput,
+        )
+    });
 }
 
-#[tokio::main]
-async fn main() {
-    let iterations = parse_iterations();
+fn bench_response_rehydrate(c: &mut Criterion, store: &ResponseStore) {
+    use std::sync::Mutex;
+    let previous_response_id = Mutex::new(None::<String>);
 
-    println!("Starting Storage CRUD Benchmarks...");
-    println!("Iterations: {}\n", iterations);
+    c.bench_function("response_rehydrate", |b| {
+        b.to_async(tokio::runtime::Runtime::new().unwrap()).iter_batched(
+            || async {
+                let new_items = create_test_items();
+                let test_metadata = create_test_metadata();
+                let response_id = next_id();
+                let prev_id = previous_response_id.lock().unwrap().as_deref().map(|s| s.to_string());
 
-    bench_conversation_persist(iterations).await;
-    bench_conversation_rehydrate(iterations).await;
-    bench_response_persist(iterations).await;
-    bench_response_rehydrate(iterations).await;
+                store
+                    .persist(&response_id, prev_id.as_deref(), new_items, &test_metadata)
+                    .await
+                    .expect("setup persist failed");
 
-    print_usage();
-    println!("\n✅ All benchmarks completed");
+                *previous_response_id.lock().unwrap() = Some(response_id.clone());
+                response_id
+            },
+            |setup| async move {
+                let response_id = setup.await;
+                store
+                    .rehydrate(&black_box(response_id))
+                    .await
+                    .expect("rehydrate failed")
+            },
+            criterion::BatchSize::SmallInput,
+        )
+    });
 }
 
-async fn bench_conversation_persist(iterations: usize) {
-    let pool = create_test_pool().await;
+fn init_benches(c: &mut Criterion) {
+    COUNTER.store(0, std::sync::atomic::Ordering::SeqCst);
 
-    let store = ConversationStore::new(Arc::clone(&pool));
-
-    let conversation = match store.create().await {
-        Ok(conv) => conv,
-        Err(e) => {
-            eprintln!("Failed to create conversation: {}", e);
-            return;
-        }
-    };
-    let conversation_id = &conversation.conversation_id;
-
-    let test_items_list: Vec<Vec<InOutItem>> = (0..100).map(|_| create_test_items()).collect();
-    let test_metadata = create_test_metadata();
-    let mut durations = Vec::new();
-    let mut previous_response_id: Option<String> = None;
-
-    for i in 0..iterations {
-        let new_items = test_items_list[i % 100].clone();
-        let response_id = format!("resp_{}", i);
-
-        let start = Instant::now();
-        let result = store
-            .persist(
-                conversation_id,
-                &response_id,
-                previous_response_id.as_deref(),
-                new_items,
-                &test_metadata,
-            )
-            .await;
-        let duration = start.elapsed().as_secs_f64() * 1000.0;
-
-        match result {
-            Ok(_) => {
-                previous_response_id = Some(response_id.clone());
-                durations.push(duration);
-            }
-            Err(e) => {
-                eprintln!("Persist operation failed: {}", e);
-                return;
-            }
-        }
-    }
-
-    let result = BenchmarkResult::new("ConversationStore::persist", iterations, durations);
-    result.print();
-}
-
-async fn bench_response_persist(iterations: usize) {
-    let pool = create_test_pool().await;
-
-    let store = ResponseStore::new(Arc::clone(&pool));
-
-    let test_items_list: Vec<Vec<InOutItem>> = (0..100).map(|_| create_test_items()).collect();
-    let test_metadata = create_test_metadata();
-    let mut durations = Vec::new();
-    let mut previous_response_id: Option<String> = None;
-
-    for i in 0..iterations {
-        let new_items = test_items_list[i % 100].clone();
-        let response_id = format!("resp_{}", i);
-
-        let start = Instant::now();
-        let result = store
-            .persist(&response_id, previous_response_id.as_deref(), new_items, &test_metadata)
-            .await;
-        let duration = start.elapsed().as_secs_f64() * 1000.0;
-
-        match result {
-            Ok(_) => {
-                previous_response_id = Some(response_id);
-                durations.push(duration);
-            }
-            Err(e) => {
-                eprintln!("Persist operation failed: {}", e);
-                return;
-            }
-        }
-    }
-
-    let result = BenchmarkResult::new("ResponseStore::persist", iterations, durations);
-    result.print();
-}
-
-async fn bench_conversation_rehydrate(iterations: usize) {
-    let pool = create_test_pool().await;
-
-    let store = ConversationStore::new(Arc::clone(&pool));
-
-    let conversation = match store.create().await {
-        Ok(conv) => conv,
-        Err(e) => {
-            eprintln!("Failed to create conversation: {}", e);
-            return;
-        }
-    };
-    let conversation_id = &conversation.conversation_id;
-
-    let test_items_list: Vec<Vec<InOutItem>> = (0..100).map(|_| create_test_items()).collect();
-    let test_metadata = create_test_metadata();
-
-    let mut previous_response_id: Option<String> = None;
-    for i in 0..iterations {
-        let new_items = test_items_list[i % 100].clone();
-        let response_id = format!("resp_{}", i);
-
-        let _ = store
-            .persist(
-                conversation_id,
-                &response_id,
-                previous_response_id.as_deref(),
-                new_items,
-                &test_metadata,
-            )
-            .await;
-
-        previous_response_id = Some(response_id);
-    }
-
-    // Now benchmark rehydrate
-    let mut durations = Vec::new();
-
-    for _ in 0..iterations {
-        let start = Instant::now();
-        let result = store.rehydrate(conversation_id).await;
-        let duration = start.elapsed().as_secs_f64() * 1000.0;
-
-        match result {
-            Ok(_) => {
-                durations.push(duration);
-            }
-            Err(e) => {
-                eprintln!("Rehydrate operation failed: {}", e);
-                return;
-            }
-        }
-    }
-
-    let result = BenchmarkResult::new("ConversationStore::rehydrate", iterations, durations);
-    result.print();
-}
-
-async fn bench_response_rehydrate(iterations: usize) {
-    let pool = create_test_pool().await;
-
-    let store = ResponseStore::new(Arc::clone(&pool));
-
-    let test_items_list: Vec<Vec<InOutItem>> = (0..100).map(|_| create_test_items()).collect();
-    let test_metadata = create_test_metadata();
-
-    // Populate with data first, chaining responses
-    let mut response_ids = Vec::new();
-    let mut previous_response_id: Option<String> = None;
-
-    for i in 0..iterations {
-        let new_items = test_items_list[i % 100].clone();
-        let response_id = format!("resp_{}", i);
-
-        if let Ok(_) = store
-            .persist(&response_id, previous_response_id.as_deref(), new_items, &test_metadata)
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let pool = rt.block_on(async {
+        create_pool_with_schema(None)
             .await
-        {
-            response_ids.push(response_id.clone());
-            previous_response_id = Some(response_id);
-        }
-    }
+            .expect("failed to create pool with schema")
+    });
 
-    // Fetch the response data for rehydration
-    let mut response_data_list = Vec::new();
-    for response_id in &response_ids {
-        if let Ok(Some(resp_data)) = store.get(response_id).await {
-            response_data_list.push(resp_data);
-        }
-    }
+    let conversation_store = ConversationStore::new(pool.clone());
+    let response_store = ResponseStore::new(pool.clone());
 
-    // Now benchmark rehydrate
-    let mut durations = Vec::new();
+    bench_conversation_persist(c, &conversation_store);
+    bench_response_persist(c, &response_store);
+    bench_conversation_rehydrate(c, &conversation_store);
+    bench_response_rehydrate(c, &response_store);
 
-    for response_data in &response_data_list {
-        let start = Instant::now();
-        let result = store.rehydrate(response_data).await;
-        let duration = start.elapsed().as_secs_f64() * 1000.0;
-
-        match result {
-            Ok(_) => {
-                durations.push(duration);
-            }
-            Err(e) => {
-                eprintln!("Rehydrate operation failed: {}", e);
-                return;
-            }
-        }
-    }
-
-    let result = BenchmarkResult::new("ResponseStore::rehydrate", iterations, durations);
-    result.print();
+    rt.block_on(async {
+        sqlx::query("DELETE FROM items").execute(pool.as_ref()).await.ok();
+        sqlx::query("DELETE FROM responses").execute(pool.as_ref()).await.ok();
+        sqlx::query("DELETE FROM conversations")
+            .execute(pool.as_ref())
+            .await
+            .ok();
+    });
 }
+
+criterion_group!(benches, init_benches);
+criterion_main!(benches);

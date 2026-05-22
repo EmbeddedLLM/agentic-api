@@ -3,7 +3,7 @@
 use super::super::pool::{DbPool, DbResult, DbTransaction};
 use super::super::types::item::InOutItem;
 use crate::types::io::{InputItem, OutputItem};
-use crate::utils::common::{from_json_str_opt, utcnow_str};
+use crate::utils::common::{deserialize_from_str_opt, utcnow_str};
 
 /// Conversation history item stored in the database.
 ///
@@ -32,13 +32,13 @@ impl Item {
     /// Deserialize data column as `InputItem`.
     #[must_use]
     pub fn as_input(&self) -> Option<InputItem> {
-        from_json_str_opt(&self.data)
+        deserialize_from_str_opt(&self.data)
     }
 
     /// Deserialize data column as `OutputItem`.
     #[must_use]
     pub fn as_output(&self) -> Option<OutputItem> {
-        from_json_str_opt(&self.data)
+        deserialize_from_str_opt(&self.data)
     }
 
     /// Deserialize data column as either `InputItem` or `OutputItem`.

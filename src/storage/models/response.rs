@@ -1,7 +1,7 @@
 //! LLM API response stored in the database.
 
 use super::super::pool::{DbPool, DbResult, DbTransaction};
-use crate::utils::common::{from_json_string_opt, from_json_string_opt_or_default, utcnow_str};
+use crate::utils::common::{deserialize_from_string_opt, deserialize_from_string_opt_or_default, utcnow_str};
 
 /// LLM API response stored in the database.
 ///
@@ -71,13 +71,13 @@ impl Response {
     /// Deserialize `history_item_ids` from JSON string to Vec<String>.
     #[must_use]
     pub fn history_item_ids_vec(&self) -> Vec<String> {
-        from_json_string_opt_or_default(&self.history_item_ids)
+        deserialize_from_string_opt_or_default(&self.history_item_ids)
     }
 
     /// Deserialize metadata from JSON string to the given type.
     #[must_use]
     pub fn metadata_as<T: serde::de::DeserializeOwned>(&self) -> Option<T> {
-        from_json_string_opt(&self.metadata)
+        deserialize_from_string_opt(&self.metadata)
     }
 }
 

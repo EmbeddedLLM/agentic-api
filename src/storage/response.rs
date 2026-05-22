@@ -5,7 +5,7 @@ use std::sync::Arc;
 use super::models::{item, response};
 use super::pool::DbPool;
 use super::types::{InOutItem, ResponseData, ResponseMetadata, Result, StorageError};
-use crate::utils::common::{any_json_to_string, uuid7_str};
+use crate::utils::common::{serialize_to_string, uuid7_str};
 
 /// Response storage operations.
 #[derive(Clone)]
@@ -116,7 +116,7 @@ impl ResponseStore {
 
         item::create_in_tx(&mut tx, items_, None, None).await?;
 
-        let history_item_ids_json = any_json_to_string(&item_ids);
+        let history_item_ids_json = serialize_to_string(&item_ids);
         let metadata_json: String = metadata.into();
 
         response::create_in_tx(
