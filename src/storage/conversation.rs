@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use super::models::{conversation, item, response};
 use super::pool::DbPool;
-use super::types::{ConversationData, InOutItem, ResponseMetadata, Result, StorageError};
+use super::types::{ConversationData, InOutItem, ResponseMetadata, StorageError, StoreResult};
 use crate::utils::common::{serialize_to_string, uuid7_str};
 
 /// Conversation storage operations.
@@ -31,7 +31,7 @@ impl ConversationStore {
     /// # Errors
     ///
     /// Returns error if store is disabled (no pool configured).
-    fn pool(&self) -> Result<&DbPool> {
+    fn pool(&self) -> StoreResult<&DbPool> {
         self.pool.as_deref().ok_or(StorageError::NotConfigured)
     }
 
@@ -40,7 +40,7 @@ impl ConversationStore {
     /// # Errors
     ///
     /// Returns error if database query fails.
-    pub async fn create(&self) -> Result<ConversationData> {
+    pub async fn create(&self) -> StoreResult<ConversationData> {
         let pool = self.pool()?;
         let row = conversation::create(pool, &uuid7_str("conv_")).await?;
         Ok(row.into())
@@ -51,7 +51,7 @@ impl ConversationStore {
     /// # Errors
     ///
     /// Returns error if database query fails.
-    pub async fn get_or_create(&self, conversation_id: &str) -> Result<ConversationData> {
+    pub async fn get_or_create(&self, conversation_id: &str) -> StoreResult<ConversationData> {
         let pool = self.pool()?;
         let row = conversation::get_or_create(pool, conversation_id).await?;
         Ok(row.into())
@@ -61,13 +61,13 @@ impl ConversationStore {
     ///
     /// # Errors
     ///
-    /// Returns error if database query fails.
-    pub async fn get(&self, conversation_id: &str) -> Result<Option<ConversationData>> {
+    /// Returns error if conversation not found or database query fails.
+    pub async fn get(&self, conversation_id: &str) -> StoreResult<ConversationData> {
         let pool = self.pool()?;
-        let Some(row) = conversation::get(pool, conversation_id).await? else {
-            return Ok(None);
-        };
-        Ok(Some(row.into()))
+        let row = conversation::get(pool, conversation_id)
+            .await?
+            .ok_or_else(|| StorageError::not_found("Conversation", conversation_id))?;
+        Ok(row.into())
     }
 
     /// Rehydrates a conversation with all its items.
@@ -75,12 +75,9 @@ impl ConversationStore {
     /// # Errors
     ///
     /// Returns error if conversation not found or database query fails.
-    pub async fn rehydrate(&self, conversation_id: &str) -> Result<Vec<InOutItem>> {
+    pub async fn rehydrate(&self, conversation_id: &str) -> StoreResult<Vec<InOutItem>> {
         let pool = self.pool()?;
-        let rows = item::get_items_by_conversation(pool, conversation_id)
-            .await
-            .ok()
-            .ok_or_else(|| StorageError::not_found("Conversation", conversation_id))?;
+        let rows = item::get_items_by_conversation(pool, conversation_id).await?;
 
         Ok(rows.into_iter().filter_map(|row| row.as_inout()).collect())
     }
@@ -99,7 +96,7 @@ impl ConversationStore {
         previous_response_id: Option<&str>,
         new_items: Vec<InOutItem>,
         metadata: &ResponseMetadata,
-    ) -> Result<()> {
+    ) -> StoreResult<()> {
         let pool = self.pool()?;
         let seq_start = item::conversation_item_count(pool, conversation_id)
             .await?

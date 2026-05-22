@@ -6,6 +6,6 @@ pub mod item;
 pub mod response;
 
 pub use conversation::ConversationData;
-pub use errors::{Result, StorageError};
+pub use errors::{StorageError, StoreResult};
 pub use item::{InOutItem, ItemKind};
 pub use response::{ResponseData, ResponseMetadata};

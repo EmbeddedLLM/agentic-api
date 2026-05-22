@@ -5,7 +5,7 @@ use thiserror::Error;
 /// Result type for storage operations.
 ///
 /// All storage functions return `Result<T, StorageError>` for explicit error handling.
-pub type Result<T> = std::result::Result<T, StorageError>;
+pub type StoreResult<T> = std::result::Result<T, StorageError>;
 
 /// Storage layer errors with detailed context.
 #[derive(Error, Debug)]
@@ -24,18 +24,6 @@ pub enum StorageError {
     /// Storage is not configured or disabled.
     #[error("storage not configured or disabled")]
     NotConfigured,
-
-    /// Invalid operation on resource.
-    #[error("invalid {resource_type}: {reason}")]
-    Invalid { resource_type: String, reason: String },
-
-    /// Serialization/deserialization error.
-    #[error("serialization error: {0}")]
-    Serialization(#[from] serde_json::Error),
-
-    /// Internal storage error (unexpected condition).
-    #[error("internal storage error: {0}")]
-    Internal(String),
 }
 
 impl StorageError {
@@ -46,21 +34,6 @@ impl StorageError {
             resource_type: resource_type.into(),
             id: id.into(),
         }
-    }
-
-    /// Creates an invalid operation error.
-    #[must_use]
-    pub fn invalid(resource_type: impl Into<String>, reason: impl Into<String>) -> Self {
-        Self::Invalid {
-            resource_type: resource_type.into(),
-            reason: reason.into(),
-        }
-    }
-
-    /// Creates an internal error for unexpected conditions.
-    #[must_use]
-    pub fn internal(msg: impl Into<String>) -> Self {
-        Self::Internal(msg.into())
     }
 
     /// Returns `true` if this error is "not found".
@@ -76,15 +49,6 @@ impl StorageError {
     }
 
     /// Extracts the resource type and ID if this is a "not found" error.
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// let err = StorageError::not_found("Response", "123");
-    /// if let Some((resource, id)) = err.not_found_details() {
-    ///     println!("Not found: {} {}", resource, id);
-    /// }
-    /// ```
     #[must_use]
     pub fn not_found_details(&self) -> Option<(String, String)> {
         match self {
@@ -120,14 +84,6 @@ mod tests {
         let err = StorageError::NotConfigured;
         assert!(!err.is_not_found());
         assert!(err.is_not_configured());
-    }
-
-    #[test]
-    fn test_invalid_error_creation() {
-        let err = StorageError::invalid("Conversation", "empty conversation ID");
-        let msg = err.to_string();
-        assert!(msg.contains("invalid"));
-        assert!(msg.contains("Conversation"));
     }
 
     #[test]

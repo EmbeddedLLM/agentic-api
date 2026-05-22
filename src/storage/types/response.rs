@@ -98,4 +98,47 @@ mod tests {
         assert!(response.history_item_ids.is_empty());
         assert_eq!(response.metadata.model, "");
     }
+
+    #[test]
+    fn test_response_metadata_serialization() {
+        let metadata = ResponseMetadata {
+            model: "gpt-4".to_string(),
+            previous_response_id: Some("resp_1".to_string()),
+            effective_tools: None,
+            effective_tool_choice: ToolChoice::Auto,
+            effective_instructions: Some("be helpful".to_string()),
+        };
+
+        let json_str = String::from(&metadata);
+        assert!(json_str.contains("gpt-4"));
+        assert!(json_str.contains("resp_1"));
+        assert!(json_str.contains("be helpful"));
+    }
+
+    #[test]
+    fn test_response_metadata_default() {
+        let metadata = ResponseMetadata::default();
+        assert_eq!(metadata.model, "");
+        assert!(metadata.previous_response_id.is_none());
+        assert!(metadata.effective_tools.is_none());
+        assert!(metadata.effective_instructions.is_none());
+    }
+
+    #[test]
+    fn test_response_data_multiple_history_items() {
+        let db_row = StorageDbResponse {
+            id: "resp_multi".to_string(),
+            conversation_id: Some("conv_1".to_string()),
+            previous_response_id: Some("resp_prev".to_string()),
+            history_item_ids: Some(r#"["item_1","item_2","item_3"]"#.to_string()),
+            metadata: Some(r#"{"model":"gpt-3.5"}"#.to_string()),
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+        };
+
+        let response: ResponseData = db_row.into();
+        assert_eq!(response.history_item_ids.len(), 3);
+        assert_eq!(response.history_item_ids[0], "item_1");
+        assert_eq!(response.history_item_ids[2], "item_3");
+        assert_eq!(response.previous_response_id, Some("resp_prev".to_string()));
+    }
 }

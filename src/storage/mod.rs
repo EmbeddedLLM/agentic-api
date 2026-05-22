@@ -26,4 +26,4 @@ pub use models::Response as DbResponse;
 pub use pool::{DbPool, DbResult, DbTransaction, create_pool, create_pool_with_schema};
 pub use response::ResponseStore;
 pub use schema::SchemaManager;
-pub use types::{ConversationData, InOutItem, ItemKind, ResponseData, ResponseMetadata, Result, StorageError};
+pub use types::{ConversationData, InOutItem, ItemKind, ResponseData, ResponseMetadata, StorageError, StoreResult};

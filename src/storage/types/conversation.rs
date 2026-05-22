@@ -58,4 +58,42 @@ mod tests {
         assert_eq!(db_row.id, "conv_456");
         assert_eq!(db_row.created_at, "2024-01-01T00:00:00Z");
     }
+
+    #[test]
+    fn test_conversation_data_clone() {
+        let data = ConversationData {
+            conversation_id: "conv_clone".to_string(),
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+        };
+
+        let cloned = data.clone();
+        assert_eq!(cloned.conversation_id, data.conversation_id);
+        assert_eq!(cloned.created_at, data.created_at);
+    }
+
+    #[test]
+    fn test_conversation_data_debug_format() {
+        let data = ConversationData {
+            conversation_id: "conv_debug".to_string(),
+            created_at: "2024-01-01T00:00:00Z".to_string(),
+        };
+
+        let debug_str = format!("{:?}", data);
+        assert!(debug_str.contains("conv_debug"));
+        assert!(debug_str.contains("ConversationData"));
+    }
+
+    #[test]
+    fn test_conversation_bidirectional_conversion() {
+        let original = ConversationData {
+            conversation_id: "conv_bidir".to_string(),
+            created_at: "2024-02-01T12:30:00Z".to_string(),
+        };
+
+        let db_row: StorageDbConversation = original.clone().into();
+        let recovered: ConversationData = db_row.into();
+
+        assert_eq!(original.conversation_id, recovered.conversation_id);
+        assert_eq!(original.created_at, recovered.created_at);
+    }
 }

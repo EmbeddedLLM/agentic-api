@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use super::models::{item, response};
 use super::pool::DbPool;
-use super::types::{InOutItem, ResponseData, ResponseMetadata, Result, StorageError};
+use super::types::{InOutItem, ResponseData, ResponseMetadata, StorageError, StoreResult};
 use crate::utils::common::{serialize_to_string, uuid7_str};
 
 /// Response storage operations.
@@ -43,7 +43,7 @@ impl ResponseStore {
     /// # Errors
     ///
     /// Returns [`StorageError::NotConfigured`] if store is disabled (no pool configured).
-    fn pool(&self) -> Result<&DbPool> {
+    fn pool(&self) -> StoreResult<&DbPool> {
         self.pool.as_deref().ok_or(StorageError::NotConfigured)
     }
 
@@ -51,25 +51,13 @@ impl ResponseStore {
     ///
     /// # Errors
     ///
-    /// Returns error if database query fails or store is disabled.
-    pub async fn get(&self, response_id: &str) -> Result<Option<ResponseData>> {
+    /// Returns error if response not found, database query fails, or store is disabled.
+    pub async fn get(&self, response_id: &str) -> StoreResult<ResponseData> {
         let pool = self.pool()?;
-        let Some(row) = response::get(pool, response_id).await? else {
-            return Ok(None);
-        };
-
-        Ok(Some(row.into()))
-    }
-
-    /// Retrieves a response or returns error if not found.
-    ///
-    /// # Errors
-    ///
-    /// Returns error if response not found, store is disabled, or database query fails.
-    pub async fn get_or_raise(&self, response_id: &str) -> Result<ResponseData> {
-        self.get(response_id)
+        let row = response::get(pool, response_id)
             .await?
-            .ok_or_else(|| StorageError::not_found("Response", response_id))
+            .ok_or_else(|| StorageError::not_found("Response", response_id))?;
+        Ok(row.into())
     }
 
     /// Rehydrates a response with full history.
@@ -79,9 +67,9 @@ impl ResponseStore {
     /// # Errors
     ///
     /// Returns error if database query fails or store is disabled.
-    pub async fn rehydrate(&self, response_id: &str) -> Result<Vec<InOutItem>> {
+    pub async fn rehydrate(&self, response_id: &str) -> StoreResult<Vec<InOutItem>> {
         let pool = self.pool()?;
-        let response = self.get_or_raise(response_id).await?;
+        let response = self.get(response_id).await?;
         let rows = item::get_items(pool, &response.history_item_ids).await?;
         Ok(rows.into_iter().filter_map(|row| row.as_inout()).collect())
     }
@@ -99,7 +87,7 @@ impl ResponseStore {
         previous_response_id: Option<&str>,
         new_items: Vec<InOutItem>,
         metadata: &ResponseMetadata,
-    ) -> Result<()> {
+    ) -> StoreResult<()> {
         let pool = self.pool()?;
 
         let mut item_ids: Vec<String> = Vec::new();
