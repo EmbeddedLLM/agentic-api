@@ -79,8 +79,9 @@ impl ResponseStore {
     /// # Errors
     ///
     /// Returns error if database query fails or store is disabled.
-    pub async fn rehydrate(&self, response: &ResponseData) -> Result<Vec<InOutItem>> {
+    pub async fn rehydrate(&self, response_id: &str) -> Result<Vec<InOutItem>> {
         let pool = self.pool()?;
+        let response = self.get_or_raise(response_id).await?;
         let rows = item::get_items(pool, &response.history_item_ids).await?;
         Ok(rows.into_iter().filter_map(|row| row.as_inout()).collect())
     }

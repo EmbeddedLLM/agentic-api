@@ -13,7 +13,7 @@ static SCHEMA_READY: AtomicBool = AtomicBool::new(false);
 
 fn is_marked_ready() -> bool {
     matches!(
-        env::var("AA_DB_SCHEMA_READY").as_deref(),
+        env::var("AGENTIC_API_SCHEMA_READY").as_deref(),
         Ok("1" | "true" | "t" | "yes" | "y" | "on")
     )
 }
@@ -32,9 +32,12 @@ impl<'a> SchemaManager<'a> {
 
     /// Ensures database schema is ready by running pending migrations.
     ///
-    /// Checks if migrations have already been applied (via in-memory flag or
-    /// `AA_DB_SCHEMA_READY` environment variable). If not, runs all pending
-    /// migrations from the `migrations/` directory.
+    /// Checks if migrations have already been applied via one of:
+    /// 1. In-memory flag (`SCHEMA_READY`)
+    /// 2. `AGENTIC_API_SCHEMA_READY` environment variable
+    /// 3. For file-based `SQLite`: checks if database file exists (assumes migrations ran before)
+    ///
+    /// If none of the above, runs all pending migrations from the `migrations/` directory.
     ///
     /// # Errors
     ///
@@ -59,18 +62,6 @@ impl<'a> SchemaManager<'a> {
         SCHEMA_READY.store(true, Ordering::SeqCst);
         info!("[schema] DB schema ready.");
         Ok(())
-    }
-}
-
-impl<'a> SchemaManager<'a> {
-    /// Creates a schema manager that resets the ready flag for testing.
-    ///
-    /// Useful for tests that create a new in-memory pool per test case,
-    /// ensuring migrations run fresh for each test.
-    #[must_use]
-    pub fn new_for_test(pool: &'a DbPool) -> Self {
-        SCHEMA_READY.store(false, Ordering::SeqCst);
-        Self { pool }
     }
 }
 
@@ -116,7 +107,7 @@ mod tests {
 
     #[test]
     fn test_env_var_pattern() {
-        // Test the pattern matching logic for AA_DB_SCHEMA_READY
+        // Test the pattern matching logic for AGENTIC_API_SCHEMA_READY
         let test_values = vec![
             ("1", true),
             ("true", true),
@@ -138,7 +129,57 @@ mod tests {
                 Ok::<&str, String>(val).as_deref(),
                 Ok("1" | "true" | "t" | "yes" | "y" | "on")
             );
-            assert_eq!(matches, expected, "Mismatch for value '{}'", val);
+            assert_eq!(matches, expected, "Mismatch for value '{val}'");
         }
+    }
+
+    #[tokio::test]
+    async fn test_ensure_ready_with_flag_set() {
+        // Reset flag before test
+        SCHEMA_READY.store(false, Ordering::SeqCst);
+
+        // Create an in-memory SQLite pool
+        let pool = crate::storage::pool::create_pool(Some("sqlite://?mode=memory"))
+            .await
+            .expect("failed to create pool");
+
+        let schema = SchemaManager::new(pool.as_ref());
+
+        // First call should run migrations (or succeed with empty DB)
+        let result = schema.ensure_ready().await;
+        assert!(result.is_ok(), "ensure_ready failed: {result:?}");
+
+        // Flag should now be set
+        assert!(SCHEMA_READY.load(Ordering::SeqCst));
+
+        // Second call should return immediately without doing work
+        let result = schema.ensure_ready().await;
+        assert!(result.is_ok());
+
+        // Reset flag after test
+        SCHEMA_READY.store(false, Ordering::SeqCst);
+    }
+
+    #[tokio::test]
+    async fn test_ensure_ready_multiple_calls() {
+        // Reset flag before test
+        SCHEMA_READY.store(false, Ordering::SeqCst);
+
+        let pool = crate::storage::pool::create_pool(Some("sqlite://?mode=memory"))
+            .await
+            .expect("failed to create pool");
+
+        let schema = SchemaManager::new(pool.as_ref());
+
+        // Multiple calls should all succeed
+        for _ in 0..3 {
+            let result = schema.ensure_ready().await;
+            assert!(result.is_ok());
+        }
+
+        assert!(SCHEMA_READY.load(Ordering::SeqCst));
+
+        // Reset flag after test
+        SCHEMA_READY.store(false, Ordering::SeqCst);
     }
 }

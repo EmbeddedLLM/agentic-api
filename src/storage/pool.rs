@@ -21,7 +21,9 @@ pub type DbResult<T> = Result<T, sqlx::Error>;
 /// This enables write mode (`rwc` = read-write-create) for file-based databases.
 ///
 /// For other database types (`PostgreSQL`, `MySQL`), returns URL as-is.
-fn prepare_db_url(url: &str) -> String {
+/// Defaults to `sqlite://./agentic_api.db` if no URL is provided.
+fn prepare_db_url(url: Option<&str>) -> String {
+    let url = url.unwrap_or("sqlite://./agentic_api.db");
     if url.starts_with("sqlite") && !url.contains('?') {
         format!("{url}?mode=rwc")
     } else {
@@ -37,12 +39,11 @@ fn prepare_db_url(url: &str) -> String {
 /// - `SQLite` file mode: read-write-create for file-based databases
 ///
 /// The pool is wrapped in `Arc` for thread-safe sharing across async tasks.
-/// See [Rust Cookbook § Database](https://rust-lang-nursery.github.io/rust-cookbook/database.html)
-/// for pooling best practices.
 ///
 /// # Arguments
 ///
-/// * `db_url` - Database connection URL (e.g., `sqlite://data.db`, `postgresql://user:pass@host/db`)
+/// * `db_url` - Optional database connection URL. Defaults to `sqlite://./agentic_api.db` if `None`.
+///   Examples: `sqlite://data.db`, `postgresql://user:pass@host/db`
 ///
 /// # Errors
 ///
@@ -52,30 +53,7 @@ fn prepare_db_url(url: &str) -> String {
 /// - Connection limit is exceeded
 /// - Authentication fails
 ///
-/// # Examples
-///
-/// ```ignore
-/// use agentic_api::storage::pool;
-///
-/// // SQLite (file-based)
-/// let pool = pool::create_pool("sqlite://data.db").await?;
-///
-/// // PostgreSQL
-/// let pool = pool::create_pool("postgresql://user:pass@localhost/mydb").await?;
-///
-/// // Use the pool (shared via Arc)
-/// let result = sqlx::query("SELECT * FROM responses")
-///     .fetch_one(pool.as_ref())
-///     .await?;
-/// ```
-///
-/// # Performance Considerations (From Rust Cookbook)
-///
-/// - Connection pooling reduces overhead of establishing new connections
-/// - Connections are reused from the pool for subsequent queries
-/// - Maximum connections should be tuned to database and application capacity
-/// - No blocking I/O on connection retrieval - uses async/await
-pub async fn create_pool(db_url: &str) -> DbResult<Arc<DbPool>> {
+pub async fn create_pool(db_url: Option<&str>) -> DbResult<Arc<DbPool>> {
     // Install default drivers for auto-detection
     sqlx::any::install_default_drivers();
 
@@ -90,6 +68,29 @@ pub async fn create_pool(db_url: &str) -> DbResult<Arc<DbPool>> {
     Ok(Arc::new(pool))
 }
 
+/// Creates a connection pool and initializes the database schema.
+///
+/// Combines [`create_pool`] with schema initialization using [`SchemaManager`].
+/// Useful for applications and benchmarks that need a fully initialized database.
+///
+/// # Arguments
+///
+/// * `db_url` - Database connection URL
+///
+/// # Errors
+///
+/// Returns error if pool creation or schema initialization fails.
+pub async fn create_pool_with_schema(db_url: Option<&str>) -> DbResult<Arc<DbPool>> {
+    use crate::storage::SchemaManager;
+
+    let pool = create_pool(db_url).await?;
+
+    let schema_manager = SchemaManager::new(pool.as_ref());
+    schema_manager.ensure_ready().await?;
+
+    Ok(pool)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -97,28 +98,34 @@ mod tests {
     #[test]
     fn test_prepare_sqlite_url_without_params() {
         let url = "sqlite://test.db";
-        let prepared = prepare_db_url(url);
+        let prepared = prepare_db_url(Some(url));
         assert_eq!(prepared, "sqlite://test.db?mode=rwc");
     }
 
     #[test]
     fn test_prepare_sqlite_url_with_params() {
         let url = "sqlite://test.db?cache=shared";
-        let prepared = prepare_db_url(url);
+        let prepared = prepare_db_url(Some(url));
         assert_eq!(prepared, "sqlite://test.db?cache=shared");
     }
 
     #[test]
     fn test_prepare_postgres_url() {
         let url = "postgresql://user:pass@localhost/db";
-        let prepared = prepare_db_url(url);
+        let prepared = prepare_db_url(Some(url));
         assert_eq!(prepared, "postgresql://user:pass@localhost/db");
     }
 
     #[test]
     fn test_prepare_mysql_url() {
         let url = "mysql://user:pass@localhost/db";
-        let prepared = prepare_db_url(url);
+        let prepared = prepare_db_url(Some(url));
         assert_eq!(prepared, "mysql://user:pass@localhost/db");
+    }
+
+    #[test]
+    fn test_prepare_default_sqlite_url() {
+        let prepared = prepare_db_url(None);
+        assert_eq!(prepared, "sqlite://./agentic_api.db?mode=rwc");
     }
 }

@@ -77,11 +77,11 @@ impl ConversationStore {
     /// Returns error if conversation not found or database query fails.
     pub async fn rehydrate(&self, conversation_id: &str) -> Result<Vec<InOutItem>> {
         let pool = self.pool()?;
-        item::conversation_item_count(pool, conversation_id)
-            .await?
+        let rows = item::get_items_by_conversation(pool, conversation_id)
+            .await
+            .ok()
             .ok_or_else(|| StorageError::not_found("Conversation", conversation_id))?;
 
-        let rows = item::get_items_by_conversation(pool, conversation_id).await?;
         Ok(rows.into_iter().filter_map(|row| row.as_inout()).collect())
     }
 
