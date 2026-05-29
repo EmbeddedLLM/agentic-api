@@ -30,6 +30,17 @@ impl<'a> SchemaManager<'a> {
         Self { pool }
     }
 
+    /// Runs migrations without checking the global flag.
+    async fn run_migrations(&self) -> DbResult<()> {
+        debug!("[schema] Running migrations...");
+        sqlx::migrate!("./migrations")
+            .run(self.pool)
+            .await
+            .map_err(|e| sqlx::Error::Configuration(e.to_string().into()))?;
+        info!("[schema] DB schema ready.");
+        Ok(())
+    }
+
     /// Ensures database schema is ready by running pending migrations.
     ///
     /// Checks if migrations have already been applied via one of:
@@ -53,15 +64,20 @@ impl<'a> SchemaManager<'a> {
             return Ok(());
         }
 
-        debug!("[schema] Running migrations...");
-        sqlx::migrate!("./migrations")
-            .run(self.pool)
-            .await
-            .map_err(|e| sqlx::Error::Configuration(e.to_string().into()))?;
-
+        self.run_migrations().await?;
         SCHEMA_READY.store(true, Ordering::SeqCst);
-        info!("[schema] DB schema ready.");
         Ok(())
+    }
+
+    /// Ensures database schema is ready without using the global flag.
+    ///
+    /// Intended for in-memory test databases that need independent schema initialization.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`sqlx::Error`] if migrations fail.
+    pub async fn ensure_ready_for_test(&self) -> DbResult<()> {
+        self.run_migrations().await
     }
 }
 

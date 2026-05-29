@@ -1,6 +1,6 @@
 use agentic_core::storage::InOutItem;
 use agentic_core::storage::ResponseMetadata;
-use agentic_core::storage::{ConversationStore, DbPool, ResponseStore, create_pool_with_schema};
+use agentic_core::storage::{ConversationStore, DbPool, ResponseStore, create_pool_with_schema_test};
 use agentic_core::types::io::{InputItem, InputMessage, InputMessageContent, OutputItem, OutputMessage};
 use std::sync::Arc;
 
@@ -12,7 +12,7 @@ async fn setup_pool() -> Arc<DbPool> {
             .display()
     );
 
-    create_pool_with_schema(Some(&db_url))
+    create_pool_with_schema_test(Some(&db_url))
         .await
         .expect("failed to create pool with schema")
 }
