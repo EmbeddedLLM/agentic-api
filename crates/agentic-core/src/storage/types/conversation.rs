@@ -26,7 +26,7 @@ impl From<ConversationData> for StorageDbConversation {
     fn from(data: ConversationData) -> Self {
         Self {
             id: data.conversation_id,
-            created_at: data.created_at.clone(),
+            created_at: data.created_at,
         }
     }
 }

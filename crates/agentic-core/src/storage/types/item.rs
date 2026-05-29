@@ -65,14 +65,14 @@ mod tests {
             role: "user".to_string(),
             content: InputMessageContent::Text("hello".to_string()),
         });
-        let item: InOutItem = input.clone().into();
+        let item: InOutItem = input.into();
         assert!(matches!(item, InOutItem::Input(_)));
     }
 
     #[test]
     fn test_inout_item_from_output() {
         let output = OutputItem::Message(OutputMessage::new("msg_1", "completed"));
-        let item: InOutItem = output.clone().into();
+        let item: InOutItem = output.into();
         assert!(matches!(item, InOutItem::Output(_)));
     }
 
