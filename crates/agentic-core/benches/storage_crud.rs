@@ -1,4 +1,4 @@
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{BatchSize, Criterion, black_box, criterion_group, criterion_main};
 
 use agentic_core::storage::{ConversationStore, InOutItem, ResponseMetadata, ResponseStore, create_pool_with_schema};
 use agentic_core::types::io::{InputItem, InputMessage, InputMessageContent, OutputItem, OutputMessage};
@@ -67,8 +67,8 @@ fn bench_conversation_persist(c: &mut Criterion, store: &ConversationStore) {
                     *previous_response_id.lock().unwrap() = Some(response_id);
                 }
             },
-            criterion::BatchSize::SmallInput,
-        )
+            BatchSize::SmallInput,
+        );
     });
 }
 
@@ -101,8 +101,8 @@ fn bench_response_persist(c: &mut Criterion, store: &ResponseStore) {
                     *previous_id.lock().unwrap() = Some(current_id);
                 }
             },
-            criterion::BatchSize::SmallInput,
-        )
+            BatchSize::SmallInput,
+        );
     });
 }
 
@@ -140,8 +140,8 @@ fn bench_conversation_rehydrate(c: &mut Criterion, store: &ConversationStore) {
                     .await
                     .expect("rehydrate failed")
             },
-            criterion::BatchSize::SmallInput,
-        )
+            BatchSize::SmallInput,
+        );
     });
 }
 
@@ -172,8 +172,8 @@ fn bench_response_rehydrate(c: &mut Criterion, store: &ResponseStore) {
                     .await
                     .expect("rehydrate failed")
             },
-            criterion::BatchSize::SmallInput,
-        )
+            BatchSize::SmallInput,
+        );
     });
 }
 
