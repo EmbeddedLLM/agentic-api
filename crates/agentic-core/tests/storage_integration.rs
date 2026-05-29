@@ -1,7 +1,7 @@
-use agentic_api::storage::InOutItem;
-use agentic_api::storage::ResponseMetadata;
-use agentic_api::storage::{ConversationStore, DbPool, ResponseStore, create_pool_with_schema};
-use agentic_api::types::io::{InputItem, InputMessage, InputMessageContent, OutputItem, OutputMessage};
+use agentic_core::storage::InOutItem;
+use agentic_core::storage::ResponseMetadata;
+use agentic_core::storage::{ConversationStore, DbPool, ResponseStore, create_pool_with_schema};
+use agentic_core::types::io::{InputItem, InputMessage, InputMessageContent, OutputItem, OutputMessage};
 use std::sync::Arc;
 
 async fn setup_pool() -> Arc<DbPool> {
