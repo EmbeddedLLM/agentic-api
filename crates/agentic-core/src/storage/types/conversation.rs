@@ -78,7 +78,7 @@ mod tests {
             created_at: "2024-01-01T00:00:00Z".to_string(),
         };
 
-        let debug_str = format!("{:?}", data);
+        let debug_str = format!("{data:?}");
         assert!(debug_str.contains("conv_debug"));
         assert!(debug_str.contains("ConversationData"));
     }

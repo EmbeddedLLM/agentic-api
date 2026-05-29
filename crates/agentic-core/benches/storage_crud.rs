@@ -7,7 +7,7 @@ static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new
 
 fn next_id() -> String {
     let count = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    format!("id_{}", count)
+    format!("id_{count}")
 }
 
 fn create_test_items() -> Vec<InOutItem> {
@@ -40,7 +40,7 @@ fn bench_conversation_persist(c: &mut Criterion, store: &ConversationStore) {
                 let new_items = create_test_items();
                 let test_metadata = create_test_metadata();
                 let response_id = next_id();
-                let prev_id = previous_response_id.lock().unwrap().as_deref().map(|s| s.to_string());
+                let prev_id = previous_response_id.lock().unwrap().as_deref().map(ToString::to_string);
                 (
                     conversation.conversation_id.clone(),
                     new_items,
@@ -82,7 +82,7 @@ fn bench_response_persist(c: &mut Criterion, store: &ResponseStore) {
                 let new_items = create_test_items();
                 let test_metadata = create_test_metadata();
                 let current_id = next_id();
-                let prev_id = previous_id.lock().unwrap().as_deref().map(|s| s.to_string());
+                let prev_id = previous_id.lock().unwrap().as_deref().map(ToString::to_string);
                 (new_items, test_metadata, current_id, prev_id)
             },
             |(new_items, test_metadata, current_id, prev_id)| {
@@ -117,7 +117,7 @@ fn bench_conversation_rehydrate(c: &mut Criterion, store: &ConversationStore) {
                 let new_items = create_test_items();
                 let test_metadata = create_test_metadata();
                 let response_id = next_id();
-                let prev_id = previous_response_id.lock().unwrap().as_deref().map(|s| s.to_string());
+                let prev_id = previous_response_id.lock().unwrap().as_deref().map(ToString::to_string);
 
                 store
                     .persist(
@@ -155,7 +155,7 @@ fn bench_response_rehydrate(c: &mut Criterion, store: &ResponseStore) {
                 let new_items = create_test_items();
                 let test_metadata = create_test_metadata();
                 let response_id = next_id();
-                let prev_id = previous_response_id.lock().unwrap().as_deref().map(|s| s.to_string());
+                let prev_id = previous_response_id.lock().unwrap().as_deref().map(ToString::to_string);
 
                 store
                     .persist(&response_id, prev_id.as_deref(), new_items, &test_metadata)
