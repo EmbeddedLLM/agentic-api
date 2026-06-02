@@ -5,6 +5,7 @@ use serde_json;
 
 use super::super::models::Response as StorageDbResponse;
 use crate::types::io::{ResponsesTool, ToolChoice};
+use crate::utils::common::serialize_to_string;
 
 /// Response metadata with effective configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -51,7 +52,7 @@ impl From<StorageDbResponse> for ResponseData {
 
 impl From<&ResponseMetadata> for String {
     fn from(metadata: &ResponseMetadata) -> Self {
-        serde_json::to_string(metadata).unwrap_or_default()
+        serialize_to_string(metadata)
     }
 }
 

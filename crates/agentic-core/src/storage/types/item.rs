@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::types::io::{InputItem, OutputItem};
+use crate::utils::common::serialize_to_string;
 
 /// Item kind (input vs output) for storage and retrieval.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,8 +35,8 @@ impl From<OutputItem> for InOutItem {
 impl From<&InOutItem> for String {
     fn from(item: &InOutItem) -> Self {
         match item {
-            InOutItem::Input(input) => serde_json::to_string(input).unwrap_or_default(),
-            InOutItem::Output(output) => serde_json::to_string(output).unwrap_or_default(),
+            InOutItem::Input(input) => serialize_to_string(input),
+            InOutItem::Output(output) => serialize_to_string(output),
         }
     }
 }

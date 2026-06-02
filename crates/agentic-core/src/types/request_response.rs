@@ -4,6 +4,7 @@ use serde_json::Value;
 use super::io::{
     InputItem, InputMessage, InputMessageContent, OutputItem, ResponseUsage, ResponsesInput, ResponsesTool, ToolChoice,
 };
+use crate::utils::common::serialize_to_string;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RequestPayload {
@@ -106,7 +107,7 @@ pub struct ResponsePayload {
 impl ResponsePayload {
     #[must_use]
     pub fn as_responses_chunk(&self) -> String {
-        format!("data: {}\n\n", serde_json::to_string(self).unwrap_or_default())
+        format!("data: {}\n\n", serialize_to_string(self))
     }
 }
 
