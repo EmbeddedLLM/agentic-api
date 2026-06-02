@@ -1,8 +1,8 @@
 //! Database schema management and migrations.
 
 use std::env;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tracing::{debug, info};
 
@@ -91,6 +91,10 @@ impl<'a> SchemaManager<'a> {
     }
 
     /// Runs migrations without checking any flag.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`sqlx::Error`] if migrations fail.
     pub async fn run_migrations(&self) -> DbResult<()> {
         debug!("[schema] Running migrations...");
         sqlx::migrate!("./migrations")
