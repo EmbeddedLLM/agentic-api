@@ -1,6 +1,6 @@
 use chrono::Utc;
-use uuid::Uuid;
 use tracing::warn;
+use uuid::Uuid;
 
 #[must_use]
 pub fn uuid7_str(prefix: &str) -> String {
