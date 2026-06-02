@@ -14,7 +14,7 @@ pub use storage::{
 pub use types::{
     FunctionTool, FunctionToolCall, FunctionToolResultMessage, IncompleteDetails, InputContent, InputImageContent,
     InputItem, InputMessage, InputMessageContent, InputTextContent, InputTokenDetails, OutputItem, OutputMessage,
-    OutputTextContent, OutputTokenDetails, ResponseUsage, ResponsesInput, ResponsesRequest, ResponsesResponse,
+    OutputTextContent, OutputTokenDetails, ResponseUsage, ResponsesInput, RequestPayload, ResponsePayload,
     ResponsesTool, ToolChoice, UpstreamRequest,
 };
 pub use utils::{utcnow_str, uuid7_str};

@@ -6,7 +6,7 @@ use super::io::{
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResponsesRequest {
+pub struct RequestPayload {
     pub model: String,
     pub input: ResponsesInput,
     pub instructions: Option<String>,
@@ -60,7 +60,7 @@ fn is_default_tool_choice(choice: &ToolChoice) -> bool {
     matches!(choice, ToolChoice::Auto)
 }
 
-impl ResponsesRequest {
+impl RequestPayload {
     /// Construct an `UpstreamRequest` borrowing from this request, suitable for forwarding to vLLM.
     #[must_use]
     pub fn to_upstream_request(&self, stream: bool) -> UpstreamRequest<'_> {
@@ -87,7 +87,7 @@ pub struct IncompleteDetails {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResponsesResponse {
+pub struct ResponsePayload {
     pub id: String,
     pub object: String,
     pub created_at: i64,
@@ -103,7 +103,7 @@ pub struct ResponsesResponse {
     pub instructions: Option<String>,
 }
 
-impl ResponsesResponse {
+impl ResponsePayload {
     #[must_use]
     pub fn as_responses_chunk(&self) -> String {
         format!("data: {}\n\n", serde_json::to_string(self).unwrap_or_default())

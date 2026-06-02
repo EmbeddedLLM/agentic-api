@@ -6,4 +6,4 @@ pub use io::{
     InputMessage, InputMessageContent, InputTextContent, InputTokenDetails, OutputItem, OutputMessage,
     OutputTextContent, OutputTokenDetails, ResponseUsage, ResponsesInput, ResponsesTool, ToolChoice,
 };
-pub use request_response::{IncompleteDetails, ResponsesRequest, ResponsesResponse, UpstreamRequest};
+pub use request_response::{IncompleteDetails, RequestPayload, ResponsePayload, UpstreamRequest};
