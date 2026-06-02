@@ -1,6 +1,10 @@
 pub mod storage;
 pub mod types;
 pub mod utils;
+pub mod config;
+pub mod error;
+pub mod proxy;
+pub mod readiness;
 
 pub use storage::{
     ConversationData, ConversationStore, DbPool, InOutItem, ItemKind, ResponseData, ResponseMetadata, ResponseStore,
@@ -14,3 +18,4 @@ pub use types::{
     ResponsesTool, ToolChoice, UpstreamRequest,
 };
 pub use utils::{utcnow_str, uuid7_str};
+

@@ -10,16 +10,9 @@ use agentic_core::proxy::ProxyState;
 fn test_config(llm_url: &str) -> Config {
     Config {
         llm_api_base: llm_url.to_owned(),
-        openai_api_key: Some("env-llm-key".to_owned()),
+        openai_api_key: None,
         llm_ready_timeout_s: 5.0,
         llm_ready_interval_s: 0.1,
-    }
-}
-
-fn test_config_no_key(llm_url: &str) -> Config {
-    Config {
-        openai_api_key: None,
-        ..test_config(llm_url)
     }
 }
 
@@ -46,47 +39,42 @@ async fn spawn_gateway(config: Config) -> (String, tokio::task::JoinHandle<()>) 
 }
 
 #[tokio::test]
-async fn test_health_returns_200() {
+async fn test_cors_preflight_returns_200() {
     let (llm_url, _h1) = spawn_mock_llm().await;
     let config = test_config(&llm_url);
     let (gw_url, _h2) = spawn_gateway(config).await;
 
-    let resp = reqwest::get(format!("{gw_url}/health")).await.unwrap();
+    let client = reqwest::Client::new();
+    let resp = client
+        .request(reqwest::Method::OPTIONS, format!("{gw_url}/v1/responses"))
+        .header("Origin", "http://example.com")
+        .header("Access-Control-Request-Method", "POST")
+        .header("Access-Control-Request-Headers", "Content-Type,Authorization")
+        .send()
+        .await
+        .unwrap();
+
     assert_eq!(resp.status(), 200);
+    assert!(resp.headers().contains_key("access-control-allow-origin"));
+    assert!(resp.headers().contains_key("access-control-allow-methods"));
+    assert!(resp.headers().contains_key("access-control-allow-headers"));
 }
 
 #[tokio::test]
-async fn test_health_returns_200_even_when_llm_down() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let dead_addr = listener.local_addr().unwrap();
-    drop(listener);
-
-    let config = test_config_no_key(&format!("http://{dead_addr}"));
-    let (gw_url, _h2) = spawn_gateway(config).await;
-
-    let resp = reqwest::get(format!("{gw_url}/health")).await.unwrap();
-    assert_eq!(resp.status(), 200);
-}
-
-#[tokio::test]
-async fn test_ready_returns_200_when_llm_healthy() {
+async fn test_cors_headers_on_regular_request() {
     let (llm_url, _h1) = spawn_mock_llm().await;
     let config = test_config(&llm_url);
     let (gw_url, _h2) = spawn_gateway(config).await;
 
-    let resp = reqwest::get(format!("{gw_url}/ready")).await.unwrap();
-    assert_eq!(resp.status(), 200);
-}
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{gw_url}/v1/responses"))
+        .header("Origin", "http://example.com")
+        .header("Content-Type", "application/json")
+        .body(r#"{"model":"test","input":"hi"}"#)
+        .send()
+        .await
+        .unwrap();
 
-#[tokio::test]
-async fn test_ready_returns_503_when_llm_unreachable() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let dead_addr = listener.local_addr().unwrap();
-    drop(listener);
-
-    let config = test_config_no_key(&format!("http://{dead_addr}"));
-    let (gw_url, _h2) = spawn_gateway(config).await;
-
-    let resp = reqwest::get(format!("{gw_url}/ready")).await.unwrap();
-    assert_eq!(resp.status(), 503);
+    assert!(resp.headers().contains_key("access-control-allow-origin"));
 }

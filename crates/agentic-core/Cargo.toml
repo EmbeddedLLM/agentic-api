@@ -7,11 +7,16 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-serde = { workspace = true }
-serde_json = { workspace = true }
-thiserror = { workspace = true }
-tokio = { workspace = true }
-tracing = { workspace = true }
+bytes.workspace = true
+futures.workspace = true
+http.workspace = true
+reqwest = { workspace = true, features = ["default-tls", "stream"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["time"] }
+tracing.workspace = true
+
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "any", "migrate", "sqlite", "postgres"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v7", "serde"] }
@@ -22,6 +27,7 @@ criterion = { workspace = true }
 [[bench]]
 name = "storage_crud"
 harness = false
+
 
 [lints]
 workspace = true
