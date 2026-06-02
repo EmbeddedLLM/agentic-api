@@ -63,37 +63,24 @@ pub async fn create_in_tx(
     conversation_id: Option<&str>,
     seq_start: Option<i64>,
 ) -> DbResult<Vec<Item>> {
-    let now = utcnow_str();
-    let mut created_items = Vec::with_capacity(items.len());
-
-    for (idx, (id, data)) in items.into_iter().enumerate() {
-        let item = match (conversation_id, seq_start) {
-            (Some(conv_id), Some(start_seq)) => {
-                #[allow(clippy::cast_possible_wrap)]
-                let seq = start_seq + idx as i64;
-                sqlx::query_as::<_, Item>(
-                    "INSERT INTO items (id, data, created_at, conversation_id, seq) VALUES (?, ?, ?, ?, ?) RETURNING *",
-                )
-                .bind(&id)
-                .bind(&data)
-                .bind(now)
-                .bind(conv_id)
-                .bind(seq)
-                .fetch_one(&mut **tx)
-                .await?
-            }
-            _ => {
-                sqlx::query_as::<_, Item>("INSERT INTO items (id, data, created_at) VALUES (?, ?, ?) RETURNING *")
-                    .bind(&id)
-                    .bind(&data)
-                    .bind(now)
-                    .fetch_one(&mut **tx)
-                    .await?
-            }
-        };
-        created_items.push(item);
+    if items.is_empty() {
+        return Ok(Vec::new());
     }
-    Ok(created_items)
+
+    let now = utcnow_str();
+    let placeholders: Vec<&str> = vec!["(?, ?, ?, ?, ?)"; items.len()];
+    let values_clause = placeholders.join(", ");
+    let sql =
+        format!("INSERT INTO items (id, data, created_at, conversation_id, seq) VALUES {values_clause} RETURNING *");
+
+    let mut query = sqlx::query_as::<_, Item>(&sql);
+    #[allow(clippy::cast_possible_wrap)]
+    for (idx, (id, data)) in items.iter().enumerate() {
+        let seq = seq_start.map(|start| start + idx as i64);
+        query = query.bind(id).bind(data).bind(now).bind(conversation_id).bind(seq);
+    }
+
+    query.fetch_all(&mut **tx).await
 }
 
 /// Get items by IDs.

@@ -1,5 +1,6 @@
 //! Response storage operations and queries.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::models::{item, response};
@@ -71,7 +72,21 @@ impl ResponseStore {
         let pool = self.pool()?;
         let response = self.get(response_id).await?;
         let rows = item::get_items(pool, &response.history_item_ids).await?;
-        Ok(rows.into_iter().filter_map(|row| row.as_inout()).collect())
+        let mut items_by_id: HashMap<String, InOutItem> = rows
+            .into_iter()
+            .filter_map(|row| {
+                let id = row.id.clone();
+                row.as_inout().map(|item| (id, item))
+            })
+            .collect();
+
+        let ordered_items = response
+            .history_item_ids
+            .iter()
+            .filter_map(|id| items_by_id.remove(id))
+            .collect();
+
+        Ok(ordered_items)
     }
 
     /// Persists a response with its items and metadata.
