@@ -105,7 +105,7 @@ pub async fn get_items(pool: &DbPool, ids: &[String]) -> DbResult<Vec<Item>> {
         return Ok(vec![]);
     }
     let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
-    let sql = format!("SELECT * FROM items WHERE id IN ({placeholders})");
+    let sql = format!("SELECT * FROM items WHERE id IN ({placeholders}) ORDER BY seq ASC");
     let mut q = sqlx::query_as::<_, Item>(&sql);
     for id in ids {
         q = q.bind(id);
