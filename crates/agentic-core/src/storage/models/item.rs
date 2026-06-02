@@ -111,15 +111,18 @@ pub async fn get_items_by_conversation(pool: &DbPool, conversation_id: &str) -> 
         .await
 }
 
-/// Get count of items for a conversation.
+/// Get next sequence number for items in a conversation.
 ///
 /// # Errors
 /// Returns `DbResult::Err` if the database query fails.
 pub async fn conversation_item_count(pool: &DbPool, conversation_id: &str) -> DbResult<Option<i64>> {
-    sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM items WHERE conversation_id = ?")
+    let max_seq: Option<i64> = sqlx::query_scalar("SELECT MAX(seq) FROM items WHERE conversation_id = ?")
         .bind(conversation_id)
         .fetch_optional(pool)
-        .await
+        .await?
+        .flatten();
+
+    Ok(Some(max_seq.unwrap_or(-1) + 1))
 }
 
 #[cfg(test)]
