@@ -24,8 +24,8 @@ pub struct Response {
     /// Response metadata as JSON object string.
     pub metadata: Option<String>,
 
-    /// Creation timestamp in ISO 8601 format.
-    pub created_at: String,
+    /// Creation timestamp as Unix timestamp in seconds.
+    pub created_at: i64,
 }
 
 /// Create a response in a transaction and return it.
@@ -51,7 +51,7 @@ pub async fn create_in_tx(
     .bind(previous_response_id)
     .bind(history_item_ids)
     .bind(metadata)
-    .bind(&now)
+    .bind(now)
     .fetch_one(&mut **tx)
     .await
 }
@@ -93,7 +93,7 @@ mod tests {
             previous_response_id: None,
             history_item_ids: None,
             metadata: None,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
+            created_at: 1_704_067_200,
         };
 
         let ids: Vec<String> = response.history_item_ids_vec();
@@ -108,7 +108,7 @@ mod tests {
             previous_response_id: None,
             history_item_ids: Some(r#"["item_1", "item_2"]"#.to_string()),
             metadata: None,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
+            created_at: 1_704_067_200,
         };
 
         let ids = response.history_item_ids_vec();
@@ -129,7 +129,7 @@ mod tests {
             previous_response_id: None,
             history_item_ids: None,
             metadata: Some(r#"{"model":"gpt-4"}"#.to_string()),
-            created_at: "2024-01-01T00:00:00Z".to_string(),
+            created_at: 1_704_067_200,
         };
 
         let meta: Option<TestMeta> = response.metadata_as();

@@ -9,8 +9,8 @@ use super::super::models::Conversation as StorageDbConversation;
 pub struct ConversationData {
     /// Unique conversation identifier
     pub conversation_id: String,
-    /// Creation timestamp in ISO 8601 format
-    pub created_at: String,
+    /// Creation timestamp as Unix timestamp in seconds
+    pub created_at: i64,
 }
 
 impl From<StorageDbConversation> for ConversationData {
@@ -39,31 +39,31 @@ mod tests {
     fn test_conversation_from_db_conversation() {
         let db_row = StorageDbConversation {
             id: "conv_123".to_string(),
-            created_at: "2024-01-01T00:00:00Z".to_string(),
+            created_at: 1_704_067_200,
         };
 
         let conversation: ConversationData = db_row.into();
         assert_eq!(conversation.conversation_id, "conv_123");
-        assert_eq!(conversation.created_at, "2024-01-01T00:00:00Z");
+        assert_eq!(conversation.created_at, 1_704_067_200);
     }
 
     #[test]
     fn test_conversation_roundtrip() {
         let data = ConversationData {
             conversation_id: "conv_456".to_string(),
-            created_at: "2024-01-01T00:00:00Z".to_string(),
+            created_at: 1_704_067_200,
         };
 
         let db_row: StorageDbConversation = data.into();
         assert_eq!(db_row.id, "conv_456");
-        assert_eq!(db_row.created_at, "2024-01-01T00:00:00Z");
+        assert_eq!(db_row.created_at, 1_704_067_200);
     }
 
     #[test]
     fn test_conversation_data_clone() {
         let data = ConversationData {
             conversation_id: "conv_clone".to_string(),
-            created_at: "2024-01-01T00:00:00Z".to_string(),
+            created_at: 1_704_067_200,
         };
 
         let cloned = data.clone();
@@ -75,7 +75,7 @@ mod tests {
     fn test_conversation_data_debug_format() {
         let data = ConversationData {
             conversation_id: "conv_debug".to_string(),
-            created_at: "2024-01-01T00:00:00Z".to_string(),
+            created_at: 1_704_067_200,
         };
 
         let debug_str = format!("{data:?}");
@@ -87,7 +87,7 @@ mod tests {
     fn test_conversation_bidirectional_conversion() {
         let original = ConversationData {
             conversation_id: "conv_bidir".to_string(),
-            created_at: "2024-02-01T12:30:00Z".to_string(),
+            created_at: 1_706_790_600,
         };
 
         let db_row: StorageDbConversation = original.clone().into();

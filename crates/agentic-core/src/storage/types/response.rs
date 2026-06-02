@@ -1,7 +1,6 @@
 //! Domain type for response storage.
 
 use serde::{Deserialize, Serialize};
-use serde_json;
 
 use super::super::models::Response as StorageDbResponse;
 use crate::types::io::{ResponsesTool, ToolChoice};
@@ -26,8 +25,8 @@ pub struct ResponseData {
     pub conversation_id: Option<String>,
     /// Optional reference to previous response for chaining
     pub previous_response_id: Option<String>,
-    /// Creation timestamp in ISO 8601 format
-    pub created_at: String,
+    /// Creation timestamp as Unix timestamp in seconds
+    pub created_at: i64,
     /// Deserialized history item IDs (vec of item IDs)
     pub history_item_ids: Vec<String>,
     /// Response metadata with effective configuration (fully typed)
@@ -71,13 +70,13 @@ mod tests {
                 r#"{"model":"gpt-4","previous_response_id":null,"effective_tools":null,"effective_tool_choice":"auto","effective_instructions":null}"#
                     .to_string(),
             ),
-            created_at: "2024-01-01T00:00:00Z".to_string(),
+            created_at: 1_704_067_200,
         };
 
         let response: ResponseData = db_row.into();
         assert_eq!(response.response_id, "resp_123");
         assert_eq!(response.conversation_id, Some("conv_456".to_string()));
-        assert_eq!(response.created_at, "2024-01-01T00:00:00Z");
+        assert_eq!(response.created_at, 1_704_067_200);
         assert_eq!(response.history_item_ids, vec!["item_1".to_string()]);
         assert_eq!(response.metadata.model, "gpt-4");
     }
@@ -90,7 +89,7 @@ mod tests {
             previous_response_id: None,
             history_item_ids: None,
             metadata: None,
-            created_at: "2024-01-01T00:00:00Z".to_string(),
+            created_at: 1_704_067_200,
         };
 
         let response: ResponseData = db_row.into();
@@ -133,7 +132,7 @@ mod tests {
             previous_response_id: Some("resp_prev".to_string()),
             history_item_ids: Some(r#"["item_1","item_2","item_3"]"#.to_string()),
             metadata: Some(r#"{"model":"gpt-3.5"}"#.to_string()),
-            created_at: "2024-01-01T00:00:00Z".to_string(),
+            created_at: 1_704_067_200,
         };
 
         let response: ResponseData = db_row.into();

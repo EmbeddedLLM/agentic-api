@@ -1,13 +1,12 @@
 CREATE TABLE IF NOT EXISTS conversations (
     id          TEXT PRIMARY KEY,
-    metadata    TEXT,
-    created_at  TEXT NOT NULL
+    created_at  INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS items (
     id              TEXT PRIMARY KEY,
     data            TEXT NOT NULL,
-    created_at      TEXT NOT NULL,
+    created_at      INTEGER NOT NULL,
     conversation_id TEXT REFERENCES conversations(id) ON DELETE CASCADE,
     seq             INTEGER
 );
@@ -21,7 +20,7 @@ CREATE TABLE IF NOT EXISTS responses (
     previous_response_id TEXT REFERENCES responses(id) ON DELETE SET NULL,
     history_item_ids     TEXT,
     metadata             TEXT,
-    created_at           TEXT NOT NULL
+    created_at           INTEGER NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_responses_conversation_id ON responses (conversation_id);

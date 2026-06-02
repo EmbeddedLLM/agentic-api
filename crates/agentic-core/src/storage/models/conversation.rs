@@ -12,8 +12,8 @@ pub struct Conversation {
     /// Unique conversation identifier.
     pub id: String,
 
-    /// Creation timestamp in ISO 8601 format.
-    pub created_at: String,
+    /// Creation timestamp as Unix timestamp in seconds.
+    pub created_at: i64,
 }
 
 /// Create a new conversation.
@@ -27,7 +27,7 @@ pub async fn create(pool: &DbPool, id: &str) -> DbResult<Conversation> {
          VALUES (?, ?) RETURNING *",
     )
     .bind(id)
-    .bind(&now)
+    .bind(now)
     .fetch_one(pool)
     .await
 }
@@ -45,7 +45,7 @@ pub async fn get_or_create(pool: &DbPool, id: &str) -> DbResult<Conversation> {
          RETURNING *",
     )
     .bind(id)
-    .bind(&now)
+    .bind(now)
     .fetch_one(pool)
     .await
 }
@@ -69,10 +69,10 @@ mod tests {
     fn test_conversation_basic() {
         let conversation = Conversation {
             id: "conv_1".to_string(),
-            created_at: "2024-01-01T00:00:00Z".to_string(),
+            created_at: 1_704_067_200,
         };
 
         assert_eq!(conversation.id, "conv_1");
-        assert_eq!(conversation.created_at, "2024-01-01T00:00:00Z");
+        assert_eq!(conversation.created_at, 1_704_067_200);
     }
 }

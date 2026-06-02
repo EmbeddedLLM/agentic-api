@@ -8,8 +8,8 @@ pub fn uuid7_str(prefix: &str) -> String {
 }
 
 #[must_use]
-pub fn utcnow_str() -> String {
-    Utc::now().to_rfc3339()
+pub fn utcnow_str() -> i64 {
+    Utc::now().timestamp()
 }
 
 /// Serialize any type to JSON string, returning empty string on error.

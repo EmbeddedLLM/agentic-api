@@ -18,8 +18,8 @@ pub struct Item {
     /// Deserialized based on context (`message`, `tool_call`, etc.)
     pub data: String,
 
-    /// Creation timestamp in ISO 8601 format.
-    pub created_at: String,
+    /// Creation timestamp as Unix timestamp in seconds.
+    pub created_at: i64,
 
     /// Optional conversation ID for grouping items.
     pub conversation_id: Option<String>,
@@ -76,7 +76,7 @@ pub async fn create_in_tx(
                 )
                 .bind(&id)
                 .bind(&data)
-                .bind(&now)
+                .bind(now)
                 .bind(conv_id)
                 .bind(seq)
                 .fetch_one(&mut **tx)
@@ -86,7 +86,7 @@ pub async fn create_in_tx(
                 sqlx::query_as::<_, Item>("INSERT INTO items (id, data, created_at) VALUES (?, ?, ?) RETURNING *")
                     .bind(&id)
                     .bind(&data)
-                    .bind(&now)
+                    .bind(now)
                     .fetch_one(&mut **tx)
                     .await?
             }
@@ -105,7 +105,7 @@ pub async fn get_items(pool: &DbPool, ids: &[String]) -> DbResult<Vec<Item>> {
         return Ok(vec![]);
     }
     let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
-    let sql = format!("SELECT * FROM items WHERE id IN ({placeholders}) ORDER BY seq ASC");
+    let sql = format!("SELECT * FROM items WHERE id IN ({placeholders})");
     let mut q = sqlx::query_as::<_, Item>(&sql);
     for id in ids {
         q = q.bind(id);
@@ -144,7 +144,7 @@ mod tests {
         let item = Item {
             id: "item_123".to_string(),
             data: r#"{"role":"user","content":"hello"}"#.to_string(),
-            created_at: "2024-01-01T00:00:00Z".to_string(),
+            created_at: 1_704_067_200,
             conversation_id: Some("conv_456".to_string()),
             seq: Some(1),
         };
@@ -159,7 +159,7 @@ mod tests {
         let item = Item {
             id: "item_789".to_string(),
             data: r#"{"role":"assistant"}"#.to_string(),
-            created_at: "2024-01-01T00:00:00Z".to_string(),
+            created_at: 1_704_067_200,
             conversation_id: None,
             seq: None,
         };
