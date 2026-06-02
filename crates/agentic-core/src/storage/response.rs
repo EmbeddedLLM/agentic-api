@@ -34,12 +34,6 @@ impl ResponseStore {
         Self { pool: Some(pool) }
     }
 
-    /// Creates a response store for testing without a real database.
-    #[must_use]
-    pub fn new_test() -> Self {
-        Self { pool: None }
-    }
-
     /// Returns a reference to the database pool.
     ///
     /// # Errors
@@ -145,12 +139,6 @@ mod tests {
     #[test]
     fn test_response_store_disabled() {
         let store = ResponseStore::disabled();
-        assert!(store.pool().is_err());
-    }
-
-    #[test]
-    fn test_response_store_new_test() {
-        let store = ResponseStore::new_test();
         assert!(store.pool().is_err());
     }
 
