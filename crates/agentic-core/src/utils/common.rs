@@ -1,5 +1,4 @@
 use chrono::Utc;
-use tracing::warn;
 use uuid::Uuid;
 
 #[must_use]
@@ -12,29 +11,51 @@ pub fn utcnow_str() -> i64 {
     Utc::now().timestamp()
 }
 
-/// Serialize any type to JSON string, returning empty string on error.
+/// Serialize any type to JSON string.
 ///
-/// If serialization fails, logs a warning and returns an empty string.
-#[must_use]
-pub fn serialize_to_string<T: serde::Serialize>(value: &T) -> String {
+/// Strict serialization - returns error if serialization fails.
+/// Used in persistence operations where we control the data types.
+///
+/// # Errors
+///
+/// Returns `serde_json::Error` if serialization fails.
+pub fn serialize_to_string<T: serde::Serialize>(value: &T) -> Result<String, serde_json::Error> {
     serde_json::to_string(value)
-        .inspect_err(|e| warn!("failed to serialize value to JSON: {e}"))
-        .unwrap_or_default()
+}
+
+/// Deserialize JSON string to any type.
+///
+/// Strict deserialization - returns error if deserialization fails.
+/// Used when we need explicit error handling for data integrity.
+///
+/// # Errors
+///
+/// Returns `serde_json::Error` if deserialization fails.
+pub fn deserialize_from_str<T: serde::de::DeserializeOwned>(json_str: &str) -> Result<T, serde_json::Error> {
+    serde_json::from_str(json_str)
+}
+
+/// Deserialize JSON string to any type with Default fallback.
+///
+/// Graceful deserialization - returns default value on error or empty string.
+/// Used in read operations where we accept corrupted data gracefully.
+#[must_use]
+pub fn deserialize_from_str_or_default<T: serde::de::DeserializeOwned + Default>(json_str: &str) -> T {
+    serde_json::from_str(json_str).unwrap_or_default()
 }
 
 /// Deserialize JSON string to any type, returning None on error.
 ///
-/// If deserialization fails, logs a warning and returns None.
+/// Optional deserialization - returns None if JSON is invalid.
+/// Convenience function for cases where None represents missing data.
 #[must_use]
 pub fn deserialize_from_str_opt<T: serde::de::DeserializeOwned>(json_str: &str) -> Option<T> {
-    serde_json::from_str(json_str)
-        .inspect_err(|e| warn!("failed to deserialize JSON string: {e}"))
-        .ok()
+    serde_json::from_str(json_str).ok()
 }
 
 /// Deserialize optional JSON String to any type, returning default on error or if None.
 ///
-/// If deserialization fails, logs a warning and returns the default value for T.
+/// Graceful optional deserialization - returns default value for T if missing or invalid.
 #[must_use]
 pub fn deserialize_from_string_opt_or_default<T: serde::de::DeserializeOwned + Default>(
     json_str: &Option<String>,
@@ -47,7 +68,7 @@ pub fn deserialize_from_string_opt_or_default<T: serde::de::DeserializeOwned + D
 
 /// Deserialize optional JSON String to any type, returning None on error or if None.
 ///
-/// If deserialization fails, logs a warning and returns None.
+/// Optional deserialization - returns None if missing or invalid JSON.
 #[must_use]
 pub fn deserialize_from_string_opt<T: serde::de::DeserializeOwned>(json_str: &Option<String>) -> Option<T> {
     json_str.as_ref().and_then(|s| deserialize_from_str_opt::<T>(s))

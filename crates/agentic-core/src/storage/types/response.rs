@@ -1,8 +1,11 @@
 //! Domain type for response storage.
 
+use std::convert::TryFrom;
+
 use serde::{Deserialize, Serialize};
 
 use super::super::models::Response as StorageDbResponse;
+use super::errors::StorageError;
 use crate::types::io::{ResponsesTool, ToolChoice};
 use crate::utils::common::serialize_to_string;
 
@@ -49,9 +52,11 @@ impl From<StorageDbResponse> for ResponseData {
     }
 }
 
-impl From<&ResponseMetadata> for String {
-    fn from(metadata: &ResponseMetadata) -> Self {
-        serialize_to_string(metadata)
+impl TryFrom<&ResponseMetadata> for String {
+    type Error = StorageError;
+
+    fn try_from(metadata: &ResponseMetadata) -> Result<Self, Self::Error> {
+        serialize_to_string(metadata).map_err(StorageError::Serialization)
     }
 }
 
@@ -109,7 +114,7 @@ mod tests {
             effective_instructions: Some("be helpful".to_string()),
         };
 
-        let json_str = String::from(&metadata);
+        let json_str = String::try_from(&metadata).expect("serialization failed");
         assert!(json_str.contains("gpt-4"));
         assert!(json_str.contains("resp_1"));
         assert!(json_str.contains("be helpful"));

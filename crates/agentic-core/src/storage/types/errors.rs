@@ -1,5 +1,6 @@
 //! Storage layer error types.
 
+use serde_json;
 use thiserror::Error;
 
 /// Result type for storage operations.
@@ -24,6 +25,12 @@ pub enum StorageError {
     /// Storage is not configured or disabled.
     #[error("storage not configured or disabled")]
     NotConfigured,
+
+    /// Serialization or deserialization of data failed.
+    ///
+    /// Wraps `serde_json::Error` and automatically converts from it via `#[from]`.
+    #[error("serialization error: {0}")]
+    Serialization(#[from] serde_json::Error),
 }
 
 impl StorageError {
@@ -55,6 +62,12 @@ impl StorageError {
             Self::NotFound { resource_type, id } => Some((resource_type.clone(), id.clone())),
             _ => None,
         }
+    }
+
+    /// Returns `true` if this error is a serialization error.
+    #[must_use]
+    pub fn is_serialization(&self) -> bool {
+        matches!(self, Self::Serialization(_))
     }
 }
 

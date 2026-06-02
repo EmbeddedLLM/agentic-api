@@ -107,7 +107,8 @@ pub struct ResponsePayload {
 impl ResponsePayload {
     #[must_use]
     pub fn as_responses_chunk(&self) -> String {
-        format!("data: {}\n\n", serialize_to_string(self))
+        let json_str = serialize_to_string(self).unwrap_or_else(|_| String::new());
+        format!("data: {json_str}\n\n")
     }
 }
 

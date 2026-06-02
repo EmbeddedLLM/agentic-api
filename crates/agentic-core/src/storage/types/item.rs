@@ -1,7 +1,10 @@
 //! Domain types for conversation items.
 
+use std::convert::TryFrom;
+
 use serde::{Deserialize, Serialize};
 
+use crate::storage::StorageError;
 use crate::types::io::{InputItem, OutputItem};
 use crate::utils::common::serialize_to_string;
 
@@ -32,11 +35,13 @@ impl From<OutputItem> for InOutItem {
     }
 }
 
-impl From<&InOutItem> for String {
-    fn from(item: &InOutItem) -> Self {
+impl TryFrom<&InOutItem> for String {
+    type Error = StorageError;
+
+    fn try_from(item: &InOutItem) -> Result<Self, Self::Error> {
         match item {
-            InOutItem::Input(input) => serialize_to_string(input),
-            InOutItem::Output(output) => serialize_to_string(output),
+            InOutItem::Input(input) => serialize_to_string(input).map_err(StorageError::Serialization),
+            InOutItem::Output(output) => serialize_to_string(output).map_err(StorageError::Serialization),
         }
     }
 }
@@ -84,7 +89,7 @@ mod tests {
             content: InputMessageContent::Text("test".to_string()),
         });
         let item = InOutItem::Input(input);
-        let json = String::from(&item);
+        let json = String::try_from(&item).expect("serialization failed");
         assert!(json.contains("user"));
         assert!(json.contains("test"));
     }

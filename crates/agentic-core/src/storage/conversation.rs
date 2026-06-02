@@ -1,5 +1,6 @@
 //! Conversation storage operations.
 
+use std::convert::TryFrom;
 use std::sync::Arc;
 
 use super::models::{conversation, item, response};
@@ -103,22 +104,20 @@ impl ConversationStore {
             .ok_or_else(|| StorageError::not_found("Conversation", conversation_id))?;
 
         let mut item_ids: Vec<String> = Vec::new();
-        let items_: Vec<(String, String)> = new_items
-            .into_iter()
-            .map(|any_item| {
-                let item_id = uuid7_str("item_");
-                item_ids.push(item_id.clone());
-                let data_str: String = (&any_item).into();
-                (item_id, data_str)
-            })
-            .collect();
+        let mut items_: Vec<(String, String)> = Vec::new();
+        for any_item in new_items {
+            let item_id = uuid7_str("item_");
+            item_ids.push(item_id.clone());
+            let data_str = String::try_from(&any_item)?;
+            items_.push((item_id, data_str));
+        }
 
         let mut tx = pool.begin().await?;
 
         item::create_in_tx(&mut tx, items_, Some(conversation_id), Some(seq_start)).await?;
 
-        let history_item_ids_json = serialize_to_string(&item_ids);
-        let metadata_json: String = metadata.into();
+        let history_item_ids_json = serialize_to_string(&item_ids)?;
+        let metadata_json = String::try_from(metadata)?;
 
         response::create_in_tx(
             &mut tx,
