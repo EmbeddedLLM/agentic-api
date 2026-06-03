@@ -64,16 +64,21 @@ async fn fetch_response_json(
 
     if !resp.status().is_success() {
         let status = resp.status().as_u16();
-        let body = resp.text().await.unwrap_or_default();
+        // Log and discard any error reading the error body — the status code
+        // is the primary signal; an empty body is acceptable here.
+        let body = resp
+            .text()
+            .await
+            .inspect_err(|e| tracing::debug!("failed to read error response body: {e}"))
+            .unwrap_or_default();
         return Err(ExecutorError::LLMRequest {
             status: http::StatusCode::from_u16(status).unwrap_or(http::StatusCode::INTERNAL_SERVER_ERROR),
             body,
         });
     }
 
-    resp.text()
-        .await
-        .map_err(|e| ExecutorError::StreamError(format!("failed to read response body: {e}")))
+    // Preserve the reqwest::Error as the typed source (NetworkError).
+    resp.text().await.map_err(ExecutorError::NetworkError)
 }
 
 /// Step 1 — Build [`RequestContext`] by rehydrating conversation history.
@@ -183,7 +188,12 @@ async fn rehydrate_from_conversation(ctx: &mut RequestContext, exec_ctx: &Execut
 /// Step 2 — Call the LLM inference backend; yields raw SSE lines (`data: …`).
 ///
 /// Always requests `stream=true` upstream. Stops on `[DONE]`.
-/// Yields `Err` on connection failure (502), timeout (504), or non-2xx status.
+///
+/// # Errors
+/// Each stream item is `Result<String, ExecutorError>`. The stream yields `Err` on:
+/// - [`ExecutorError::LLMRequest`] — connect timeout (504), connection failure (502),
+///   or non-2xx HTTP status from the backend
+/// - [`ExecutorError::NetworkError`] — network failure while reading the response body
 pub fn call_inference(
     upstream_json: String,
     url: String,
@@ -219,7 +229,11 @@ pub fn call_inference(
 
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
-            let body = resp.text().await.unwrap_or_default();
+            let body = resp
+                .text()
+                .await
+                .inspect_err(|e| tracing::debug!("failed to read error response body: {e}"))
+                .unwrap_or_default();
             yield Err(ExecutorError::LLMRequest {
                 status: http::StatusCode::from_u16(status)
                     .unwrap_or(http::StatusCode::INTERNAL_SERVER_ERROR),
@@ -241,7 +255,7 @@ pub fn call_inference(
             let chunk = match chunk_result {
                 Ok(c) => c,
                 Err(e) => {
-                    yield Err(ExecutorError::StreamError(format!("stream read error: {e}")));
+                    yield Err(ExecutorError::NetworkError(e));
                     return;
                 }
             };
@@ -306,8 +320,8 @@ pub async fn persist_response(
 async fn run_blocking(ctx: RequestContext, exec_ctx: &ExecutionContext) -> ExecutorResult<ResponsePayload> {
     let url = exec_ctx.responses_url();
     // Non-streaming request: stream=false → full JSON body → from_json.
-    let upstream_json = serialize_to_string(&ctx.enriched_request.to_upstream_request(false))
-        .map_err(|e| ExecutorError::ParseError(e.to_string()))?;
+    let upstream_json =
+        serialize_to_string(&ctx.enriched_request.to_upstream_request(false)).map_err(ExecutorError::JsonError)?;
 
     let body = fetch_response_json(upstream_json, &url, &exec_ctx.client, exec_ctx.client_auth.as_deref()).await?;
 

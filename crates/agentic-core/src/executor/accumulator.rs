@@ -53,8 +53,7 @@ impl ResponseAccumulator {
     /// # Errors
     /// Returns `ExecutorError::ParseError` if JSON parsing fails or required fields are missing.
     pub fn from_json(body: &str, conversation_id: Option<&str>) -> ExecutorResult<Self> {
-        let json: serde_json::Value =
-            deserialize_from_str(body).map_err(|e| ExecutorError::ParseError(format!("invalid JSON: {e}")))?;
+        let json: serde_json::Value = deserialize_from_str(body).map_err(ExecutorError::JsonError)?;
 
         let response_id = json["id"]
             .as_str()
