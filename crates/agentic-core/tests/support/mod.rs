@@ -24,10 +24,6 @@ use agentic_core::storage::{ConversationStore, DbPool, ResponseStore, create_poo
 use agentic_core::types::io::{OutputItem, ResponsesInput, ToolChoice};
 use agentic_core::types::request_response::{RequestPayload, ResponsePayload};
 
-// ---------------------------------------------------------------------------
-// Cassette types
-// ---------------------------------------------------------------------------
-
 #[derive(Debug, Deserialize)]
 pub struct Cassette {
     pub turns: Vec<Turn>,
@@ -116,10 +112,6 @@ pub fn expected_text(turn: &Turn) -> String {
     String::new()
 }
 
-// ---------------------------------------------------------------------------
-// Mock HTTP server (RAII — Drop aborts the server task)
-// ---------------------------------------------------------------------------
-
 /// A per-test HTTP mock server.  The server task is aborted when this struct
 /// is dropped, ensuring clean teardown even if a test panics.
 pub struct MockServer {
@@ -183,13 +175,13 @@ impl MockResponse {
 // Use a VecDeque so pop_front is O(1).
 impl MockServer {
     pub async fn start_deque(responses: Vec<MockResponse>) -> Self {
+        use std::collections::VecDeque;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind mock server");
         let addr = listener.local_addr().expect("local addr");
         let url = format!("http://{addr}");
         // Store as VecDeque for O(1) pop_front.
-        use std::collections::VecDeque;
         let queue: Arc<Mutex<VecDeque<MockResponse>>> = Arc::new(Mutex::new(VecDeque::from(responses)));
 
         let handle = tokio::spawn(async move {
@@ -219,11 +211,7 @@ impl MockServer {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Shared database pool setup
-// ---------------------------------------------------------------------------
-
-/// Create a fresh SQLite pool with schema applied.
+/// Create a fresh `SQLite` pool with schema applied.
 ///
 /// Uses a unique temp-file per call so concurrent tests don't conflict.
 pub async fn setup_pool() -> Arc<DbPool> {
@@ -233,10 +221,6 @@ pub async fn setup_pool() -> Arc<DbPool> {
         .await
         .expect("failed to create test pool")
 }
-
-// ---------------------------------------------------------------------------
-// TestFixture — owns MockServer + ExecutionContext for one test
-// ---------------------------------------------------------------------------
 
 /// Bundles everything a test needs.  Dropped at end of test scope.
 pub struct TestFixture {
@@ -278,10 +262,6 @@ impl TestFixture {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Request builder
-// ---------------------------------------------------------------------------
-
 pub fn make_request(
     input: &str,
     store: bool,
@@ -307,10 +287,6 @@ pub fn make_request(
         metadata: None,
     }
 }
-
-// ---------------------------------------------------------------------------
-// Response helpers
-// ---------------------------------------------------------------------------
 
 pub fn unwrap_blocking(result: Either<ResponsePayload, BoxStream>) -> ResponsePayload {
     match result {
@@ -345,9 +321,8 @@ pub fn output_text(payload: &ResponsePayload) -> String {
         .output
         .iter()
         .filter_map(|item| match item {
-            OutputItem::Message(msg) => Some(msg.content.iter().map(|c| c.text.as_str()).collect::<Vec<_>>().join("")),
+            OutputItem::Message(msg) => Some(msg.content.iter().map(|c| c.text.as_str()).collect::<String>()),
             OutputItem::FunctionCall(_) => None,
         })
-        .collect::<Vec<_>>()
-        .join("")
+        .collect::<String>()
 }

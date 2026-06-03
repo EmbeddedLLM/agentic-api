@@ -188,17 +188,17 @@ async fn seed_chain(exec_ctx: &Arc<ExecutionContext>, depth: usize) -> Option<St
     prev_id
 }
 
-fn bench_execute_blocking(c: &mut Criterion, exec_ctx: Arc<ExecutionContext>) {
+fn bench_execute_blocking(c: &mut Criterion, exec_ctx: &Arc<ExecutionContext>) {
     let mut group = c.benchmark_group("execute/blocking");
     for depth in 1..=max_depth() {
         group.bench_with_input(BenchmarkId::new("turns", depth), &depth, |b, &depth| {
             b.to_async(tokio::runtime::Runtime::new().unwrap()).iter_batched(
                 || {
-                    let exec_ctx = Arc::clone(&exec_ctx);
+                    let exec_ctx = Arc::clone(exec_ctx);
                     async move { seed_chain(&exec_ctx, depth).await }
                 },
                 |setup| {
-                    let exec_ctx = Arc::clone(&exec_ctx);
+                    let exec_ctx = Arc::clone(exec_ctx);
                     async move {
                         let prev_id = setup.await;
                         let req = make_request("bench turn", false, black_box(prev_id));
@@ -212,17 +212,17 @@ fn bench_execute_blocking(c: &mut Criterion, exec_ctx: Arc<ExecutionContext>) {
     group.finish();
 }
 
-fn bench_execute_streaming(c: &mut Criterion, exec_ctx: Arc<ExecutionContext>) {
+fn bench_execute_streaming(c: &mut Criterion, exec_ctx: &Arc<ExecutionContext>) {
     let mut group = c.benchmark_group("execute/streaming");
     for depth in 1..=max_depth() {
         group.bench_with_input(BenchmarkId::new("turns", depth), &depth, |b, &depth| {
             b.to_async(tokio::runtime::Runtime::new().unwrap()).iter_batched(
                 || {
-                    let exec_ctx = Arc::clone(&exec_ctx);
+                    let exec_ctx = Arc::clone(exec_ctx);
                     async move { seed_chain(&exec_ctx, depth).await }
                 },
                 |setup| {
-                    let exec_ctx = Arc::clone(&exec_ctx);
+                    let exec_ctx = Arc::clone(exec_ctx);
                     async move {
                         let prev_id = setup.await;
                         let req = make_request("bench turn", true, black_box(prev_id));
@@ -241,7 +241,7 @@ fn bench_execute_streaming(c: &mut Criterion, exec_ctx: Arc<ExecutionContext>) {
     group.finish();
 }
 
-fn bench_rehydrate_only(c: &mut Criterion, exec_ctx: Arc<ExecutionContext>) {
+fn bench_rehydrate_only(c: &mut Criterion, exec_ctx: &Arc<ExecutionContext>) {
     let mut group = c.benchmark_group("rehydrate_only");
 
     // Grow the shared chain incrementally so deeper depths include all prior
@@ -256,7 +256,7 @@ fn bench_rehydrate_only(c: &mut Criterion, exec_ctx: Arc<ExecutionContext>) {
             if depth == 1 || !has_tip {
                 let prev_id = chain_tip.lock().unwrap().clone();
                 let req = make_request("seed", false, prev_id);
-                if let Either::Left(p) = execute(req, Arc::clone(&exec_ctx)).await.expect("seed") {
+                if let Either::Left(p) = execute(req, Arc::clone(exec_ctx)).await.expect("seed") {
                     *chain_tip.lock().unwrap() = Some(p.id);
                 }
             }
@@ -266,7 +266,7 @@ fn bench_rehydrate_only(c: &mut Criterion, exec_ctx: Arc<ExecutionContext>) {
             b.to_async(tokio::runtime::Runtime::new().unwrap()).iter_batched(
                 || chain_tip.lock().unwrap().clone(),
                 |prev_id| {
-                    let exec_ctx = Arc::clone(&exec_ctx);
+                    let exec_ctx = Arc::clone(exec_ctx);
                     async move {
                         let req = make_request("bench", false, black_box(prev_id));
                         rehydrate_conversation(req, &exec_ctx).await.expect("rehydrate")
@@ -285,13 +285,13 @@ fn init_benches(c: &mut Criterion) {
     let mock_url = start_mock_server(&rt);
     let (exec_ctx, pool) = build_exec_ctx(&rt, mock_url);
 
-    bench_execute_blocking(c, Arc::clone(&exec_ctx));
+    bench_execute_blocking(c, &exec_ctx);
     clear_db(&rt, &pool);
 
-    bench_execute_streaming(c, Arc::clone(&exec_ctx));
+    bench_execute_streaming(c, &exec_ctx);
     clear_db(&rt, &pool);
 
-    bench_rehydrate_only(c, Arc::clone(&exec_ctx));
+    bench_rehydrate_only(c, &exec_ctx);
     clear_db(&rt, &pool);
 }
 
