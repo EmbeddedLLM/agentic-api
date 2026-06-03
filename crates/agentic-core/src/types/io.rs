@@ -110,17 +110,17 @@ pub enum OutputItem {
     FunctionCall(FunctionToolCall),
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct InputTokenDetails {
     pub cached_tokens: i64,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct OutputTokenDetails {
     pub reasoning_tokens: i64,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct ResponseUsage {
     pub input_tokens: i64,
     pub output_tokens: i64,
@@ -154,6 +154,32 @@ pub enum ToolChoice {
     Function {
         name: String,
     },
+}
+
+/// Returns the effective tool list, preferring `request_tools` when explicitly
+/// set by the caller, otherwise falling back to the stored configuration.
+#[inline]
+pub(crate) fn resolve_tools(
+    request_tools: Option<&[ResponsesTool]>,
+    stored_tools: Option<&[ResponsesTool]>,
+    tools_explicitly_set: bool,
+) -> Option<Vec<ResponsesTool>> {
+    if tools_explicitly_set {
+        request_tools
+    } else {
+        stored_tools
+    }
+    .map(<[_]>::to_vec)
+}
+
+/// Returns the effective tool choice using the same precedence as [`resolve_tools`].
+#[inline]
+pub(crate) fn resolve_tool_choice(
+    request_choice: &ToolChoice,
+    stored_choice: &ToolChoice,
+    explicitly_set: bool,
+) -> ToolChoice {
+    if explicitly_set { request_choice } else { stored_choice }.clone()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

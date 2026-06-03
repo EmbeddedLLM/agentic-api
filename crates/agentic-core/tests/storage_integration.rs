@@ -1,21 +1,12 @@
+mod support;
+
 use agentic_core::storage::InOutItem;
 use agentic_core::storage::ResponseMetadata;
-use agentic_core::storage::{ConversationStore, DbPool, ResponseStore, create_pool_with_schema};
+use agentic_core::storage::{ConversationStore, ResponseStore};
 use agentic_core::types::io::{InputItem, InputMessage, InputMessageContent, OutputItem, OutputMessage};
 use std::sync::Arc;
 
-async fn setup_pool() -> Arc<DbPool> {
-    let db_url = format!(
-        "sqlite://{}",
-        std::env::temp_dir()
-            .join(format!("test_{}.db", uuid::Uuid::now_v7()))
-            .display()
-    );
-
-    create_pool_with_schema(Some(&db_url))
-        .await
-        .expect("failed to create pool with schema")
-}
+use support::setup_pool;
 
 fn create_input_item(text: &str) -> InOutItem {
     InOutItem::Input(InputItem::Message(InputMessage {

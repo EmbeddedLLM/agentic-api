@@ -17,7 +17,9 @@ pedantic = { level = "warn", priority = -1 }
 
 [workspace.dependencies]
 agentic-core = { path = "crates/agentic-core" }
+async-stream = "0.3"
 axum = "0.8"
+either = "1"
 bytes = "1"
 clap = { version = "4", features = ["derive", "env"] }
 criterion = { version = "0.5", features = ["async_tokio"] }

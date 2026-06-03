@@ -1,0 +1,327 @@
+//! Response accumulation and parsing utilities.
+//!
+//! Handles both streaming (SSE) and non-streaming JSON response formats,
+//! accumulating chunks into a unified `ResponsePayload` structure.
+//!
+//! Streaming path uses a channel + `spawn_blocking` so that SSE JSON parsing
+//! runs on a blocking thread while the async task continues reading from the
+//! network — keeping the tokio executor thread free between chunk arrivals.
+
+use std::pin::Pin;
+use std::sync::mpsc;
+
+use futures::{Stream, StreamExt};
+
+use crate::executor::error::{ExecutorError, ExecutorResult};
+use crate::types::event::{MessageStatus, ResponseStatus, SSEEventType};
+use crate::types::io::{OutputItem, OutputMessage, OutputTextContent, ResponseUsage};
+use crate::types::request_response::{IncompleteDetails, ResponsePayload};
+use crate::utils::common::{deserialize_from_str, deserialize_from_value, deserialize_from_value_opt};
+use crate::utils::uuid7_str;
+
+/// Accumulates LLM response chunks from streaming or non-streaming sources.
+pub struct ResponseAccumulator {
+    response_id: String,
+    conversation_id: Option<String>,
+    output: Vec<OutputItem>,
+    usage: Option<ResponseUsage>,
+    status: ResponseStatus,
+    incomplete_details: Option<IncompleteDetails>,
+    // In-flight message state — owned here so process_sse_line takes only &mut self.
+    current_message: Option<OutputMessage>,
+    accumulated_text: String,
+}
+
+impl ResponseAccumulator {
+    /// Creates a new response accumulator.
+    #[must_use]
+    pub fn new(response_id: String, conversation_id: Option<String>) -> Self {
+        Self {
+            response_id,
+            conversation_id,
+            output: Vec::new(),
+            usage: None,
+            status: ResponseStatus::InProgress,
+            incomplete_details: None,
+            current_message: None,
+            accumulated_text: String::new(),
+        }
+    }
+
+    /// Parses a non-streaming JSON response body.
+    ///
+    /// # Errors
+    /// Returns `ExecutorError::ParseError` if JSON parsing fails or required fields are missing.
+    pub fn from_json(body: &str, conversation_id: Option<&str>) -> ExecutorResult<Self> {
+        let json: serde_json::Value =
+            deserialize_from_str(body).map_err(|e| ExecutorError::ParseError(format!("invalid JSON: {e}")))?;
+
+        let response_id = json["id"]
+            .as_str()
+            .ok_or_else(|| ExecutorError::ParseError("missing 'id' field in response".into()))?
+            .to_string();
+
+        let output = json["output"]
+            .as_array()
+            .map(|items| {
+                let mut out = Vec::with_capacity(items.len());
+                out.extend(
+                    items
+                        .iter()
+                        .filter_map(|item| deserialize_from_value_opt::<OutputItem>(item.clone())),
+                );
+                out
+            })
+            .unwrap_or_default();
+
+        let status = json["status"]
+            .as_str()
+            .map_or(ResponseStatus::Completed, |s| s.parse().unwrap_or_default());
+
+        let usage = deserialize_from_value_opt::<ResponseUsage>(json["usage"].clone());
+
+        Ok(Self {
+            response_id,
+            conversation_id: conversation_id.map(str::to_string),
+            output,
+            usage,
+            status,
+            incomplete_details: None,
+            current_message: None,
+            accumulated_text: String::new(),
+        })
+    }
+
+    /// Accumulates an async stream of raw SSE lines with parallel processing.
+    ///
+    /// The async task feeds raw SSE lines through a channel while a `spawn_blocking`
+    /// worker handles JSON parsing on a blocking thread — keeping the tokio executor
+    /// free between chunk arrivals.
+    ///
+    /// # Errors
+    /// Returns `ExecutorError::ParseError` if chunk parsing fails, or
+    /// `ExecutorError::StreamError` if the stream or worker encounters an error.
+    pub async fn from_stream(
+        mut stream: Pin<Box<dyn Stream<Item = Result<String, ExecutorError>> + Send>>,
+        conversation_id: Option<&str>,
+    ) -> ExecutorResult<Self> {
+        let (tx, rx) = mpsc::channel::<String>();
+        // Convert to owned here — spawn_blocking closure must be 'static.
+        let conv_id_owned = conversation_id.map(str::to_string);
+
+        // Spawn blocking task: JSON parsing is CPU-bound, runs off the async executor.
+        let worker_handle = tokio::task::spawn_blocking(move || Self::process_stream_chunks(rx, conv_id_owned));
+
+        // Feed raw SSE lines from the async stream to the blocking worker.
+        while let Some(chunk_result) = stream.next().await {
+            match chunk_result {
+                Ok(chunk) => {
+                    if tx.send(chunk).is_err() {
+                        // Worker exited early (e.g. saw ResponseDone).
+                        break;
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
+        // Signal EOF to worker.
+        drop(tx);
+
+        // Properly async join — does not block the tokio executor thread.
+        worker_handle
+            .await
+            .map_err(|_| ExecutorError::StreamError("Worker thread panicked".into()))
+    }
+
+    /// Worker function that processes SSE lines from the channel (runs on blocking thread).
+    fn process_stream_chunks(rx: mpsc::Receiver<String>, conversation_id: Option<String>) -> Self {
+        let mut acc = Self::new(uuid7_str("resp_"), conversation_id);
+        for line in rx {
+            acc.process_sse_line(&line);
+        }
+        acc.finalize_current_message();
+        if acc.status == ResponseStatus::InProgress {
+            acc.status = ResponseStatus::Completed;
+        }
+        acc
+    }
+
+    /// Processes pre-collected raw SSE lines synchronously.
+    ///
+    /// Useful when lines have already been buffered (e.g. replaying a recorded stream).
+    /// Prefer [`from_stream`](Self::from_stream) for live async streams.
+    /// Line parse errors are silently skipped — this function is infallible.
+    #[must_use]
+    pub fn from_sse_lines(lines: impl IntoIterator<Item = String>, conversation_id: Option<&str>) -> Self {
+        let mut acc = Self::new(uuid7_str("resp_"), conversation_id.map(str::to_string));
+        for line in lines {
+            acc.process_sse_line(&line);
+        }
+        acc.finalize_current_message();
+        acc
+    }
+
+    /// Closes the in-flight message, pushing it to `output` with accumulated text.
+    fn finalize_current_message(&mut self) {
+        if let Some(mut msg) = self.current_message.take() {
+            if !self.accumulated_text.is_empty() {
+                msg.content.push(OutputTextContent::new(&self.accumulated_text));
+            }
+            msg.status = MessageStatus::Completed.as_str().to_string();
+            self.output.push(OutputItem::Message(msg));
+        }
+        self.accumulated_text.clear();
+    }
+
+    /// Processes a single raw SSE line, updating accumulator state.
+    ///
+    /// Non-`data:` lines, `[DONE]`, and malformed JSON are silently skipped.
+    fn process_sse_line(&mut self, line: &str) {
+        let Some(data_str) = line.strip_prefix("data: ") else {
+            return;
+        };
+        if data_str == "[DONE]" {
+            return;
+        }
+        let Ok(json) = deserialize_from_str::<serde_json::Value>(data_str) else {
+            return;
+        };
+
+        match json["type"]
+            .as_str()
+            .map_or(SSEEventType::Other, |s| s.parse().unwrap_or_default())
+        {
+            SSEEventType::ResponseCreated => {
+                if let Some(id) = json["response"]["id"].as_str() {
+                    self.response_id = id.to_string();
+                }
+            }
+            SSEEventType::ResponseOutputItemAdded => {
+                self.finalize_current_message();
+                let item_id = json["item"]["id"]
+                    .as_str()
+                    .map_or_else(|| uuid7_str("msg_"), str::to_string);
+                self.current_message = Some(OutputMessage::new(&item_id, MessageStatus::InProgress.as_str()));
+            }
+            SSEEventType::ResponseOutputTextDelta => {
+                if let Some(delta) = json["delta"].as_str() {
+                    self.accumulated_text.push_str(delta);
+                }
+            }
+            SSEEventType::ResponseDone => {
+                self.finalize_current_message();
+                self.status = ResponseStatus::Completed;
+                if let Ok(usage) = deserialize_from_value::<ResponseUsage>(json["response"]["usage"].clone()) {
+                    self.usage = Some(usage);
+                }
+            }
+            SSEEventType::Other => {}
+        }
+    }
+
+    /// Marks the response as incomplete due to an error or interruption.
+    pub fn mark_incomplete(&mut self, reason: String) {
+        self.status = ResponseStatus::Incomplete;
+        self.incomplete_details = Some(IncompleteDetails { reason: Some(reason) });
+    }
+
+    /// Finalizes the accumulator into a `ResponsePayload`.
+    ///
+    /// The caller supplies fields that come from the original request, not from
+    /// the LLM response stream.
+    #[must_use]
+    pub fn finalize(
+        self,
+        model: &str,
+        previous_response_id: Option<&str>,
+        instructions: Option<&str>,
+    ) -> ResponsePayload {
+        ResponsePayload {
+            id: self.response_id,
+            object: "response".to_string(),
+            created_at: chrono::Utc::now().timestamp(),
+            model: model.to_string(),
+            status: self.status.as_str().to_string(),
+            output: self.output,
+            usage: self.usage,
+            incomplete_details: self.incomplete_details,
+            error: None,
+            previous_response_id: previous_response_id.map(str::to_string),
+            conversation_id: self.conversation_id,
+            instructions: instructions.map(str::to_string),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_accumulator_new() {
+        let acc = ResponseAccumulator::new("resp_123".into(), Some("conv_456".into()));
+        assert_eq!(acc.response_id, "resp_123");
+        assert_eq!(acc.conversation_id, Some("conv_456".into()));
+        assert_eq!(acc.status, ResponseStatus::InProgress);
+    }
+
+    #[test]
+    fn test_accumulator_mark_incomplete() {
+        let mut acc = ResponseAccumulator::new("resp_123".into(), None);
+        acc.mark_incomplete("Stream interrupted".into());
+        assert_eq!(acc.status, ResponseStatus::Incomplete);
+        assert!(acc.incomplete_details.is_some());
+    }
+
+    #[test]
+    fn test_accumulator_finalize() {
+        let acc = ResponseAccumulator::new("resp_123".into(), Some("conv_456".into()));
+        let payload = acc.finalize("gpt-4o", Some("resp_prev"), Some("be helpful"));
+        assert_eq!(payload.id, "resp_123");
+        assert_eq!(payload.model, "gpt-4o");
+        assert_eq!(payload.conversation_id, Some("conv_456".into()));
+        assert_eq!(payload.previous_response_id, Some("resp_prev".into()));
+        assert_eq!(payload.instructions, Some("be helpful".into()));
+        assert_eq!(payload.status, ResponseStatus::InProgress.as_str());
+    }
+
+    #[test]
+    fn test_accumulator_from_sse_lines_empty() {
+        let acc = ResponseAccumulator::from_sse_lines(vec![], None);
+        assert_eq!(acc.status, ResponseStatus::InProgress);
+        assert!(acc.output.is_empty());
+    }
+
+    #[test]
+    fn test_accumulator_text_delta_assigned_to_message() {
+        let lines = vec![
+            r#"data: {"type":"response.created","response":{"id":"resp_abc"}}"#.to_string(),
+            r#"data: {"type":"response.output_item.added","item":{"id":"msg_1"}}"#.to_string(),
+            r#"data: {"type":"response.output_text.delta","delta":"Hello"}"#.to_string(),
+            r#"data: {"type":"response.output_text.delta","delta":" world"}"#.to_string(),
+            r#"data: {"type":"response.done","response":{"usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert_eq!(acc.status, ResponseStatus::Completed);
+        assert_eq!(acc.output.len(), 1);
+
+        if let OutputItem::Message(msg) = &acc.output[0] {
+            assert_eq!(msg.content.len(), 1);
+            assert_eq!(msg.content[0].text, "Hello world");
+        } else {
+            panic!("expected OutputItem::Message");
+        }
+
+        assert!(acc.usage.is_some());
+        let usage = acc.usage.unwrap();
+        assert_eq!(usage.total_tokens, 7);
+    }
+
+    #[test]
+    fn test_message_status_enum() {
+        assert_eq!(MessageStatus::Completed.as_str(), "completed");
+        assert_eq!(MessageStatus::InProgress.as_str(), "in_progress");
+    }
+}

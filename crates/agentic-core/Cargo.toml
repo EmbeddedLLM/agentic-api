@@ -7,7 +7,9 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+async-stream.workspace = true
 bytes.workspace = true
+either.workspace = true
 futures.workspace = true
 http.workspace = true
 reqwest = { workspace = true, features = ["default-tls", "stream"] }
@@ -22,10 +24,17 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v7", "serde"] }
 
 [dev-dependencies]
+axum.workspace = true
 criterion = { workspace = true }
+serde_yaml = "0.9"
+tokio = { workspace = true, features = ["full"] }
 
 [[bench]]
 name = "storage_crud"
+harness = false
+
+[[bench]]
+name = "executor_throughput"
 harness = false
 
 [lints]

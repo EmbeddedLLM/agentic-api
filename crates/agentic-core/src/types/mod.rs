@@ -1,3 +1,4 @@
+pub mod event;
 pub mod io;
 pub mod request_response;
 

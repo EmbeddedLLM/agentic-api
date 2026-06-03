@@ -73,3 +73,20 @@ pub fn deserialize_from_string_opt_or_default<T: serde::de::DeserializeOwned + D
 pub fn deserialize_from_string_opt<T: serde::de::DeserializeOwned>(json_str: &Option<String>) -> Option<T> {
     json_str.as_ref().and_then(|s| deserialize_from_str_opt::<T>(s))
 }
+
+/// Deserialize a `serde_json::Value` into `T`.
+///
+/// # Errors
+///
+/// Returns `serde_json::Error` if the value's shape does not match `T`.
+pub fn deserialize_from_value<T: serde::de::DeserializeOwned>(
+    value: serde_json::Value,
+) -> Result<T, serde_json::Error> {
+    serde_json::from_value(value)
+}
+
+/// Deserialize a `serde_json::Value` into `T`, returning `None` on type mismatch.
+#[must_use]
+pub fn deserialize_from_value_opt<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> Option<T> {
+    serde_json::from_value(value).ok()
+}
