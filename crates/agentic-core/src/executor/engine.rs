@@ -31,6 +31,24 @@ pub type BoxStream = Pin<Box<dyn Stream<Item = String> + Send>>;
 /// Wire-format marker signalling end-of-stream to the client.
 const DONE_MARKER: &str = "data: [DONE]\n\n";
 
+/// Fetch the next raw bytes chunk from a streaming response.
+///
+/// Returns `Ok(Some(bytes))` on data, `Ok(None)` when the stream ends cleanly,
+/// and `Err` on a network failure or chunk timeout.
+async fn next_chunk<S>(stream: &mut S, timeout: Duration) -> ExecutorResult<Option<bytes::Bytes>>
+where
+    S: futures::Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Unpin,
+{
+    let item = if timeout.is_zero() {
+        stream.next().await
+    } else {
+        tokio::time::timeout(timeout, stream.next()).await.map_err(|_| {
+            ExecutorError::StreamError("chunk timeout: no data received within the configured window".into())
+        })?
+    };
+    item.transpose().map_err(ExecutorError::NetworkError)
+}
+
 /// Makes a non-streaming HTTP POST to the LLM backend and returns the full JSON body.
 ///
 /// Used by [`run_blocking`] so it can pass the result to [`ResponseAccumulator::from_json`].
@@ -187,6 +205,50 @@ async fn rehydrate_from_conversation(ctx: &mut RequestContext, exec_ctx: &Execut
     Ok(())
 }
 
+/// Send a single inference POST and validate the HTTP response.
+///
+/// Handles connect/timeout errors and non-2xx status codes so that
+/// [`call_inference`] only deals with streaming the body.
+async fn send_inference_request(
+    client: &reqwest::Client,
+    url: &str,
+    body: String,
+    auth: Option<&str>,
+) -> ExecutorResult<reqwest::Response> {
+    let mut req = client.post(url).header("Content-Type", "application/json").body(body);
+    if let Some(key) = auth {
+        req = req.bearer_auth(key);
+    }
+
+    let resp = req.send().await.map_err(|e| ExecutorError::LLMRequest {
+        status: if e.is_timeout() {
+            http::StatusCode::GATEWAY_TIMEOUT
+        } else {
+            http::StatusCode::BAD_GATEWAY
+        },
+        body: if e.is_timeout() {
+            "upstream timeout".into()
+        } else {
+            "upstream unavailable".into()
+        },
+    })?;
+
+    if !resp.status().is_success() {
+        let status = resp.status().as_u16();
+        let body = resp
+            .text()
+            .await
+            .inspect_err(|e| tracing::debug!("failed to read error response body: {e}"))
+            .unwrap_or_default();
+        return Err(ExecutorError::LLMRequest {
+            status: http::StatusCode::from_u16(status).unwrap_or(http::StatusCode::INTERNAL_SERVER_ERROR),
+            body,
+        });
+    }
+
+    Ok(resp)
+}
+
 /// Step 2 — Call the LLM inference backend; yields raw SSE lines (`data: …`).
 ///
 /// Always requests `stream=true` upstream. Stops on `[DONE]`.
@@ -204,76 +266,19 @@ pub fn call_inference(
     chunk_timeout: Duration,
 ) -> impl Stream<Item = Result<String, ExecutorError>> + Send + 'static {
     stream! {
-        let mut req = client
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .body(upstream_json);
-        if let Some(ref key) = auth {
-            req = req.bearer_auth(key);
-        }
-
-        let resp = match req.send().await {
+        let resp = match send_inference_request(&client, &url, upstream_json, auth.as_deref()).await {
             Ok(r) => r,
-            Err(e) if e.is_timeout() => {
-                yield Err(ExecutorError::LLMRequest {
-                    status: http::StatusCode::GATEWAY_TIMEOUT,
-                    body: "upstream timeout".into(),
-                });
-                return;
-            }
-            Err(_) => {
-                yield Err(ExecutorError::LLMRequest {
-                    status: http::StatusCode::BAD_GATEWAY,
-                    body: "upstream unavailable".into(),
-                });
-                return;
-            }
+            Err(e) => { yield Err(e); return; }
         };
 
-        if !resp.status().is_success() {
-            let status = resp.status().as_u16();
-            let body = resp
-                .text()
-                .await
-                .inspect_err(|e| tracing::debug!("failed to read error response body: {e}"))
-                .unwrap_or_default();
-            yield Err(ExecutorError::LLMRequest {
-                status: http::StatusCode::from_u16(status)
-                    .unwrap_or(http::StatusCode::INTERNAL_SERVER_ERROR),
-                body,
-            });
-            return;
-        }
-
-        let buf_cap = resp
-            .content_length()
-            .and_then(|n| usize::try_from(n).ok())
-            .unwrap_or(8192)
-            .min(4 * 1024 * 1024);
-
-        let mut byte_stream = resp.bytes_stream();
-        let mut buf = String::with_capacity(buf_cap);
+        let mut bytes = resp.bytes_stream();
+        let mut buf = String::with_capacity(8192);
 
         loop {
-            // Apply a per-chunk timeout when configured; zero means no timeout.
-            let next = if chunk_timeout.is_zero() {
-                byte_stream.next().await
-            } else if let Ok(opt) = tokio::time::timeout(chunk_timeout, byte_stream.next()).await {
-                opt
-            } else {
-                yield Err(ExecutorError::StreamError(
-                    "chunk timeout: no data received within the configured window".into(),
-                ));
-                return;
-            };
-
-            let chunk = match next {
-                None => break,
-                Some(Ok(c)) => c,
-                Some(Err(e)) => {
-                    yield Err(ExecutorError::NetworkError(e));
-                    return;
-                }
+            let chunk = match next_chunk(&mut bytes, chunk_timeout).await {
+                Ok(Some(c)) => c,
+                Ok(None) => break,
+                Err(e) => { yield Err(e); return; }
             };
 
             match std::str::from_utf8(&chunk) {
@@ -282,17 +287,11 @@ pub fn call_inference(
             }
 
             while let Some(pos) = buf.find('\n') {
-                let line_end = if pos > 0 && buf.as_bytes()[pos - 1] == b'\r' {
-                    pos - 1
-                } else {
-                    pos
-                };
-                let line = &buf[..line_end];
-                if line.starts_with("data: ") {
-                    if line == "data: [DONE]" {
-                        return;
-                    }
-                    yield Ok(line.to_string());
+                let line = buf[..pos].trim_end_matches('\r');
+                match line {
+                    "data: [DONE]" => return,
+                    l if l.starts_with("data: ") => yield Ok(l.to_string()),
+                    _ => {}
                 }
                 buf.drain(..=pos);
             }
