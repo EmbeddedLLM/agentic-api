@@ -1,0 +1,234 @@
+turns:
+- filename: t1
+  request:
+    body: {}
+    headers:
+      accept: '*/*'
+      authorization: Bearer ***
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/conversations
+    query_params: {}
+  response:
+    body:
+      created_at: 1776764537
+      id: conv_69e746796f7481909635d37860d6cd1f0aeb5a0588bb8b2a
+      metadata: {}
+      object: conversation
+    headers:
+      content-type: application/json
+    status_code: 200
+- filename: t2
+  request:
+    body:
+      conversation: conv_69e746796f7481909635d37860d6cd1f0aeb5a0588bb8b2a
+      input: 'Remember the word MANGO. Just say: OK'
+      model: gpt-4o
+      store: true
+      stream: true
+    headers:
+      accept: '*/*'
+      authorization: Bearer ***
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    headers:
+      content-type: text/event-stream; charset=utf-8
+    sse:
+    - 'event: response.created
+
+      '
+    - 'data: {"type":"response.created","response":{"id":"resp_0aeb5a0588bb8b2a0069e7467c813c8190a46d9810f8dc0355","object":"response","created_at":1776764540,"status":"in_progress","background":false,"completed_at":null,"conversation":{"id":"conv_69e746796f7481909635d37860d6cd1f0aeb5a0588bb8b2a"},"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-4o-2024-08-06","output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"in_memory","reasoning":{"effort":null,"summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tools":[],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":0}
+
+      '
+    - '
+
+      '
+    - 'event: response.in_progress
+
+      '
+    - 'data: {"type":"response.in_progress","response":{"id":"resp_0aeb5a0588bb8b2a0069e7467c813c8190a46d9810f8dc0355","object":"response","created_at":1776764540,"status":"in_progress","background":false,"completed_at":null,"conversation":{"id":"conv_69e746796f7481909635d37860d6cd1f0aeb5a0588bb8b2a"},"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-4o-2024-08-06","output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"in_memory","reasoning":{"effort":null,"summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tools":[],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":1}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.added
+
+      '
+    - 'data: {"type":"response.output_item.added","item":{"id":"msg_0aeb5a0588bb8b2a0069e7467d19088190abae62ec47b1f0b1","type":"message","status":"in_progress","content":[],"role":"assistant"},"output_index":0,"sequence_number":2}
+
+      '
+    - '
+
+      '
+    - 'event: response.content_part.added
+
+      '
+    - 'data: {"type":"response.content_part.added","content_index":0,"item_id":"msg_0aeb5a0588bb8b2a0069e7467d19088190abae62ec47b1f0b1","output_index":0,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":""},"sequence_number":3}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"OK","item_id":"msg_0aeb5a0588bb8b2a0069e7467d19088190abae62ec47b1f0b1","logprobs":[],"obfuscation":"LAhO6jFUD08oa2","output_index":0,"sequence_number":4}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.done
+
+      '
+    - 'data: {"type":"response.output_text.done","content_index":0,"item_id":"msg_0aeb5a0588bb8b2a0069e7467d19088190abae62ec47b1f0b1","logprobs":[],"output_index":0,"sequence_number":5,"text":"OK"}
+
+      '
+    - '
+
+      '
+    - 'event: response.content_part.done
+
+      '
+    - 'data: {"type":"response.content_part.done","content_index":0,"item_id":"msg_0aeb5a0588bb8b2a0069e7467d19088190abae62ec47b1f0b1","output_index":0,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":"OK"},"sequence_number":6}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.done
+
+      '
+    - 'data: {"type":"response.output_item.done","item":{"id":"msg_0aeb5a0588bb8b2a0069e7467d19088190abae62ec47b1f0b1","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"OK"}],"role":"assistant"},"output_index":0,"sequence_number":7}
+
+      '
+    - '
+
+      '
+    - 'event: response.completed
+
+      '
+    - 'data: {"type":"response.completed","response":{"id":"resp_0aeb5a0588bb8b2a0069e7467c813c8190a46d9810f8dc0355","object":"response","created_at":1776764540,"status":"completed","background":false,"completed_at":1776764541,"conversation":{"id":"conv_69e746796f7481909635d37860d6cd1f0aeb5a0588bb8b2a"},"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-4o-2024-08-06","output":[{"id":"msg_0aeb5a0588bb8b2a0069e7467d19088190abae62ec47b1f0b1","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"OK"}],"role":"assistant"}],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"in_memory","reasoning":{"effort":null,"summary":null},"safety_identifier":null,"service_tier":"default","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tools":[],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":{"input_tokens":17,"input_tokens_details":{"cached_tokens":0},"output_tokens":2,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":19},"user":null,"metadata":{}},"sequence_number":8}
+
+      '
+    - '
+
+      '
+    status_code: 200
+- filename: t3
+  request:
+    body:
+      conversation: conv_69e746796f7481909635d37860d6cd1f0aeb5a0588bb8b2a
+      input: What word did I ask you to remember?
+      model: gpt-4o
+      store: true
+      stream: true
+    headers:
+      accept: '*/*'
+      authorization: Bearer ***
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    headers:
+      content-type: text/event-stream; charset=utf-8
+    sse:
+    - 'event: response.created
+
+      '
+    - 'data: {"type":"response.created","response":{"id":"resp_0aeb5a0588bb8b2a0069e74683f0388190b99690bad6b9b489","object":"response","created_at":1776764548,"status":"in_progress","background":false,"completed_at":null,"conversation":{"id":"conv_69e746796f7481909635d37860d6cd1f0aeb5a0588bb8b2a"},"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-4o-2024-08-06","output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"in_memory","reasoning":{"effort":null,"summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tools":[],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":0}
+
+      '
+    - '
+
+      '
+    - 'event: response.in_progress
+
+      '
+    - 'data: {"type":"response.in_progress","response":{"id":"resp_0aeb5a0588bb8b2a0069e74683f0388190b99690bad6b9b489","object":"response","created_at":1776764548,"status":"in_progress","background":false,"completed_at":null,"conversation":{"id":"conv_69e746796f7481909635d37860d6cd1f0aeb5a0588bb8b2a"},"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-4o-2024-08-06","output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"in_memory","reasoning":{"effort":null,"summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tools":[],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":1}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.added
+
+      '
+    - 'data: {"type":"response.output_item.added","item":{"id":"msg_0aeb5a0588bb8b2a0069e7468455c48190acd151ab62b504e1","type":"message","status":"in_progress","content":[],"role":"assistant"},"output_index":0,"sequence_number":2}
+
+      '
+    - '
+
+      '
+    - 'event: response.content_part.added
+
+      '
+    - 'data: {"type":"response.content_part.added","content_index":0,"item_id":"msg_0aeb5a0588bb8b2a0069e7468455c48190acd151ab62b504e1","output_index":0,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":""},"sequence_number":3}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"M","item_id":"msg_0aeb5a0588bb8b2a0069e7468455c48190acd151ab62b504e1","logprobs":[],"obfuscation":"uG6UWN3uEmZChjC","output_index":0,"sequence_number":4}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"ANGO","item_id":"msg_0aeb5a0588bb8b2a0069e7468455c48190acd151ab62b504e1","logprobs":[],"obfuscation":"v0kxXmx9ogqa","output_index":0,"sequence_number":5}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.done
+
+      '
+    - 'data: {"type":"response.output_text.done","content_index":0,"item_id":"msg_0aeb5a0588bb8b2a0069e7468455c48190acd151ab62b504e1","logprobs":[],"output_index":0,"sequence_number":6,"text":"MANGO"}
+
+      '
+    - '
+
+      '
+    - 'event: response.content_part.done
+
+      '
+    - 'data: {"type":"response.content_part.done","content_index":0,"item_id":"msg_0aeb5a0588bb8b2a0069e7468455c48190acd151ab62b504e1","output_index":0,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":"MANGO"},"sequence_number":7}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.done
+
+      '
+    - 'data: {"type":"response.output_item.done","item":{"id":"msg_0aeb5a0588bb8b2a0069e7468455c48190acd151ab62b504e1","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"MANGO"}],"role":"assistant"},"output_index":0,"sequence_number":8}
+
+      '
+    - '
+
+      '
+    - 'event: response.completed
+
+      '
+    - 'data: {"type":"response.completed","response":{"id":"resp_0aeb5a0588bb8b2a0069e74683f0388190b99690bad6b9b489","object":"response","created_at":1776764548,"status":"completed","background":false,"completed_at":1776764548,"conversation":{"id":"conv_69e746796f7481909635d37860d6cd1f0aeb5a0588bb8b2a"},"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-4o-2024-08-06","output":[{"id":"msg_0aeb5a0588bb8b2a0069e7468455c48190acd151ab62b504e1","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"MANGO"}],"role":"assistant"}],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"in_memory","reasoning":{"effort":null,"summary":null},"safety_identifier":null,"service_tier":"default","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tools":[],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":{"input_tokens":35,"input_tokens_details":{"cached_tokens":0},"output_tokens":3,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":38},"user":null,"metadata":{}},"sequence_number":9}
+
+      '
+    - '
+
+      '
+    status_code: 200

@@ -1,0 +1,77 @@
+turns:
+- filename: t1
+  request:
+    body:
+      input: 'Reply with exactly one word: HELLO'
+      model: gpt-4o
+      store: true
+      stream: false
+    headers:
+      accept: '*/*'
+      authorization: Bearer ***
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      background: false
+      billing:
+        payer: developer
+      completed_at: 1776764143
+      created_at: 1776764142
+      error: null
+      frequency_penalty: 0.0
+      id: resp_0508721937e20de90069e744ee9018819394c8e011dc6d7818
+      incomplete_details: null
+      instructions: null
+      max_output_tokens: null
+      max_tool_calls: null
+      metadata: {}
+      model: gpt-4o-2024-08-06
+      object: response
+      output:
+      - content:
+        - annotations: []
+          logprobs: []
+          text: HI
+          type: output_text
+        id: msg_0508721937e20de90069e744ef1b2881939596753c5951691e
+        role: assistant
+        status: completed
+        type: message
+      parallel_tool_calls: true
+      presence_penalty: 0.0
+      previous_response_id: null
+      prompt_cache_key: null
+      prompt_cache_retention: in_memory
+      reasoning:
+        effort: null
+        summary: null
+      safety_identifier: null
+      service_tier: default
+      status: completed
+      store: true
+      temperature: 1.0
+      text:
+        format:
+          type: text
+        verbosity: medium
+      tool_choice: auto
+      tools: []
+      top_logprobs: 0
+      top_p: 1.0
+      truncation: disabled
+      usage:
+        input_tokens: 15
+        input_tokens_details:
+          cached_tokens: 0
+        output_tokens: 2
+        output_tokens_details:
+          reasoning_tokens: 0
+        total_tokens: 17
+      user: null
+    headers:
+      content-type: application/json
+    status_code: 200

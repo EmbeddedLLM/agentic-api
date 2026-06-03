@@ -1,0 +1,154 @@
+turns:
+- filename: t1
+  request:
+    body:
+      input: 'Remember the word APPLE. Just say: OK'
+      model: gpt-4o
+      store: true
+      stream: false
+    headers:
+      accept: '*/*'
+      authorization: Bearer ***
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      background: false
+      billing:
+        payer: developer
+      completed_at: 1776764188
+      created_at: 1776764187
+      error: null
+      frequency_penalty: 0.0
+      id: resp_0db0cfecd1a4eaa10069e7451beccc8195a9e7e09d9343aad0
+      incomplete_details: null
+      instructions: null
+      max_output_tokens: null
+      max_tool_calls: null
+      metadata: {}
+      model: gpt-4o-2024-08-06
+      object: response
+      output:
+      - content:
+        - annotations: []
+          logprobs: []
+          text: OK
+          type: output_text
+        id: msg_0db0cfecd1a4eaa10069e7451c5dac8195a040d4c3725fe3e7
+        role: assistant
+        status: completed
+        type: message
+      parallel_tool_calls: true
+      presence_penalty: 0.0
+      previous_response_id: null
+      prompt_cache_key: null
+      prompt_cache_retention: in_memory
+      reasoning:
+        effort: null
+        summary: null
+      safety_identifier: null
+      service_tier: default
+      status: completed
+      store: true
+      temperature: 1.0
+      text:
+        format:
+          type: text
+        verbosity: medium
+      tool_choice: auto
+      tools: []
+      top_logprobs: 0
+      top_p: 1.0
+      truncation: disabled
+      usage:
+        input_tokens: 17
+        input_tokens_details:
+          cached_tokens: 0
+        output_tokens: 2
+        output_tokens_details:
+          reasoning_tokens: 0
+        total_tokens: 19
+      user: null
+    headers:
+      content-type: application/json
+    status_code: 200
+- filename: t2
+  request:
+    body:
+      input: What word did I ask you to remember?
+      model: gpt-4o
+      previous_response_id: resp_0db0cfecd1a4eaa10069e7451beccc8195a9e7e09d9343aad0
+      store: true
+      stream: false
+    headers:
+      accept: '*/*'
+      authorization: Bearer ***
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      background: false
+      billing:
+        payer: developer
+      completed_at: 1776764196
+      created_at: 1776764195
+      error: null
+      frequency_penalty: 0.0
+      id: resp_0db0cfecd1a4eaa10069e74523ef348195adc49fff1d49863a
+      incomplete_details: null
+      instructions: null
+      max_output_tokens: null
+      max_tool_calls: null
+      metadata: {}
+      model: gpt-4o-2024-08-06
+      object: response
+      output:
+      - content:
+        - annotations: []
+          logprobs: []
+          text: APPLE
+          type: output_text
+        id: msg_0db0cfecd1a4eaa10069e7452480608195b1c2d83f819edb60
+        role: assistant
+        status: completed
+        type: message
+      parallel_tool_calls: true
+      presence_penalty: 0.0
+      previous_response_id: resp_0db0cfecd1a4eaa10069e7451beccc8195a9e7e09d9343aad0
+      prompt_cache_key: null
+      prompt_cache_retention: in_memory
+      reasoning:
+        effort: null
+        summary: null
+      safety_identifier: null
+      service_tier: default
+      status: completed
+      store: true
+      temperature: 1.0
+      text:
+        format:
+          type: text
+        verbosity: medium
+      tool_choice: auto
+      tools: []
+      top_logprobs: 0
+      top_p: 1.0
+      truncation: disabled
+      usage:
+        input_tokens: 35
+        input_tokens_details:
+          cached_tokens: 0
+        output_tokens: 2
+        output_tokens_details:
+          reasoning_tokens: 0
+        total_tokens: 37
+      user: null
+    headers:
+      content-type: application/json
+    status_code: 200
