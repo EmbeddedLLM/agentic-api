@@ -18,8 +18,8 @@ pub struct Item {
     /// Deserialized based on context (`message`, `tool_call`, etc.)
     pub data: String,
 
-    /// Creation timestamp in ISO 8601 format.
-    pub created_at: String,
+    /// Creation timestamp as Unix timestamp in seconds.
+    pub created_at: i64,
 
     /// Optional conversation ID for grouping items.
     pub conversation_id: Option<String>,
@@ -63,37 +63,24 @@ pub async fn create_in_tx(
     conversation_id: Option<&str>,
     seq_start: Option<i64>,
 ) -> DbResult<Vec<Item>> {
-    let now = utcnow_str();
-    let mut created_items = Vec::with_capacity(items.len());
-
-    for (idx, (id, data)) in items.into_iter().enumerate() {
-        let item = match (conversation_id, seq_start) {
-            (Some(conv_id), Some(start_seq)) => {
-                #[allow(clippy::cast_possible_wrap)]
-                let seq = start_seq + idx as i64;
-                sqlx::query_as::<_, Item>(
-                    "INSERT INTO items (id, data, created_at, conversation_id, seq) VALUES (?, ?, ?, ?, ?) RETURNING *",
-                )
-                .bind(&id)
-                .bind(&data)
-                .bind(&now)
-                .bind(conv_id)
-                .bind(seq)
-                .fetch_one(&mut **tx)
-                .await?
-            }
-            _ => {
-                sqlx::query_as::<_, Item>("INSERT INTO items (id, data, created_at) VALUES (?, ?, ?) RETURNING *")
-                    .bind(&id)
-                    .bind(&data)
-                    .bind(&now)
-                    .fetch_one(&mut **tx)
-                    .await?
-            }
-        };
-        created_items.push(item);
+    if items.is_empty() {
+        return Ok(Vec::new());
     }
-    Ok(created_items)
+
+    let now = utcnow_str();
+    let placeholders: Vec<&str> = vec!["(?, ?, ?, ?, ?)"; items.len()];
+    let values_clause = placeholders.join(", ");
+    let sql =
+        format!("INSERT INTO items (id, data, created_at, conversation_id, seq) VALUES {values_clause} RETURNING *");
+
+    let mut query = sqlx::query_as::<_, Item>(&sql);
+    #[allow(clippy::cast_possible_wrap)]
+    for (idx, (id, data)) in items.iter().enumerate() {
+        let seq = seq_start.map(|start| start + idx as i64);
+        query = query.bind(id).bind(data).bind(now).bind(conversation_id).bind(seq);
+    }
+
+    query.fetch_all(&mut **tx).await
 }
 
 /// Get items by IDs.
@@ -124,15 +111,18 @@ pub async fn get_items_by_conversation(pool: &DbPool, conversation_id: &str) -> 
         .await
 }
 
-/// Get count of items for a conversation.
+/// Get next sequence number for items in a conversation.
 ///
 /// # Errors
 /// Returns `DbResult::Err` if the database query fails.
 pub async fn conversation_item_count(pool: &DbPool, conversation_id: &str) -> DbResult<Option<i64>> {
-    sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM items WHERE conversation_id = ?")
+    let max_seq: Option<i64> = sqlx::query_scalar("SELECT MAX(seq) FROM items WHERE conversation_id = ?")
         .bind(conversation_id)
         .fetch_optional(pool)
-        .await
+        .await?
+        .flatten();
+
+    Ok(Some(max_seq.unwrap_or(-1) + 1))
 }
 
 #[cfg(test)]
@@ -144,7 +134,7 @@ mod tests {
         let item = Item {
             id: "item_123".to_string(),
             data: r#"{"role":"user","content":"hello"}"#.to_string(),
-            created_at: "2024-01-01T00:00:00Z".to_string(),
+            created_at: 1_704_067_200,
             conversation_id: Some("conv_456".to_string()),
             seq: Some(1),
         };
@@ -159,7 +149,7 @@ mod tests {
         let item = Item {
             id: "item_789".to_string(),
             data: r#"{"role":"assistant"}"#.to_string(),
-            created_at: "2024-01-01T00:00:00Z".to_string(),
+            created_at: 1_704_067_200,
             conversation_id: None,
             seq: None,
         };

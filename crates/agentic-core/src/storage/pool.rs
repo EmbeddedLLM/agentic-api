@@ -70,9 +70,8 @@ pub async fn create_pool(db_url: Option<&str>) -> DbResult<Arc<DbPool>> {
 
 /// Creates a connection pool and initializes the database schema.
 ///
-/// Combines [`create_pool`] with schema initialization using [`SchemaManager`].
-/// Useful for applications and benchmarks that need a fully initialized database.
-///
+/// Combines [`create_pool`] with schema initialization using [`PoolWithSchema`].
+/// Each pool has its own per-pool schema readiness flag.
 /// # Arguments
 ///
 /// * `db_url` - Database connection URL
@@ -81,38 +80,13 @@ pub async fn create_pool(db_url: Option<&str>) -> DbResult<Arc<DbPool>> {
 ///
 /// Returns error if pool creation or schema initialization fails.
 pub async fn create_pool_with_schema(db_url: Option<&str>) -> DbResult<Arc<DbPool>> {
-    use crate::storage::SchemaManager;
+    use crate::storage::PoolWithSchema;
 
     let pool = create_pool(db_url).await?;
+    let pool_with_schema = PoolWithSchema::new(pool);
+    pool_with_schema.ensure_schema_ready().await?;
 
-    let schema_manager = SchemaManager::new(pool.as_ref());
-    schema_manager.ensure_ready().await?;
-
-    Ok(pool)
-}
-
-/// Creates a connection pool and initializes the database schema without global state.
-///
-/// Similar to [`create_pool_with_schema`], but uses `ensure_ready_for_test` which
-/// doesn't update the global `SCHEMA_READY` flag. Useful for in-memory test databases
-/// in multi-threaded scenarios.
-///
-/// # Arguments
-///
-/// * `db_url` - Database connection URL
-///
-/// # Errors
-///
-/// Returns error if pool creation or schema initialization fails.
-pub async fn create_pool_with_schema_test(db_url: Option<&str>) -> DbResult<Arc<DbPool>> {
-    use crate::storage::SchemaManager;
-
-    let pool = create_pool(db_url).await?;
-
-    let schema_manager = SchemaManager::new(pool.as_ref());
-    schema_manager.ensure_ready_for_test().await?;
-
-    Ok(pool)
+    Ok(pool_with_schema.pool().clone())
 }
 
 #[cfg(test)]

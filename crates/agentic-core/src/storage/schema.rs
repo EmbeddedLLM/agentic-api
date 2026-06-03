@@ -1,6 +1,7 @@
 //! Database schema management and migrations.
 
 use std::env;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use tracing::{debug, info};
@@ -9,8 +10,6 @@ use super::pool::DbPool;
 
 type DbResult<T> = Result<T, sqlx::Error>;
 
-static SCHEMA_READY: AtomicBool = AtomicBool::new(false);
-
 fn is_marked_ready() -> bool {
     matches!(
         env::var("AGENTIC_API_SCHEMA_READY").as_deref(),
@@ -18,20 +17,85 @@ fn is_marked_ready() -> bool {
     )
 }
 
-/// Manages database schema initialization and migrations.
+/// Database pool with per-pool schema readiness tracking.
+///
+/// Wraps `DbPool` and adds an `AtomicBool` flag to track schema initialization
+/// per pool instance. This eliminates the issue of global state interfering
+/// when multiple pools point to different databases.
+pub struct PoolWithSchema {
+    pool: Arc<DbPool>,
+    schema_ready: AtomicBool,
+}
+
+impl PoolWithSchema {
+    /// Creates a new pool with schema tracking.
+    #[must_use]
+    pub fn new(pool: Arc<DbPool>) -> Self {
+        Self {
+            pool,
+            schema_ready: AtomicBool::new(false),
+        }
+    }
+
+    /// Returns a reference to the underlying database pool.
+    pub fn pool(&self) -> &Arc<DbPool> {
+        &self.pool
+    }
+
+    /// Ensures database schema is ready by running pending migrations.
+    ///
+    /// Checks if migrations have already been applied via one of:
+    /// 1. Per-pool flag (`schema_ready`)
+    /// 2. `AGENTIC_API_SCHEMA_READY` environment variable
+    ///
+    /// If none of the above, runs all pending migrations from the `migrations/` directory.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`sqlx::Error`] if migrations fail.
+    pub async fn ensure_schema_ready(&self) -> DbResult<()> {
+        if self.schema_ready.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+
+        if is_marked_ready() {
+            debug!("[schema] DDL skipped — marked ready by supervisor.");
+            self.schema_ready.store(true, Ordering::SeqCst);
+            return Ok(());
+        }
+
+        debug!("[schema] Running migrations...");
+        sqlx::migrate!("./migrations")
+            .run(self.pool.as_ref())
+            .await
+            .map_err(|e| sqlx::Error::Configuration(e.to_string().into()))?;
+        info!("[schema] DB schema ready.");
+        self.schema_ready.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+/// Manages database schema initialization and migrations (deprecated).
+///
+/// This struct is kept for backward compatibility. New code should use
+/// [`PoolWithSchema::ensure_schema_ready`] instead.
 pub struct SchemaManager<'a> {
     pool: &'a DbPool,
 }
 
 impl<'a> SchemaManager<'a> {
-    /// Creates a new schema manager for the given database pool.
+    /// Creates a new schema manager for the given database pool (deprecated).
     #[must_use]
     pub fn new(pool: &'a DbPool) -> Self {
         Self { pool }
     }
 
-    /// Runs migrations without checking the global flag.
-    async fn run_migrations(&self) -> DbResult<()> {
+    /// Runs migrations without checking any flag.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`sqlx::Error`] if migrations fail.
+    pub async fn run_migrations(&self) -> DbResult<()> {
         debug!("[schema] Running migrations...");
         sqlx::migrate!("./migrations")
             .run(self.pool)
@@ -40,45 +104,6 @@ impl<'a> SchemaManager<'a> {
         info!("[schema] DB schema ready.");
         Ok(())
     }
-
-    /// Ensures database schema is ready by running pending migrations.
-    ///
-    /// Checks if migrations have already been applied via one of:
-    /// 1. In-memory flag (`SCHEMA_READY`)
-    /// 2. `AGENTIC_API_SCHEMA_READY` environment variable
-    /// 3. For file-based `SQLite`: checks if database file exists (assumes migrations ran before)
-    ///
-    /// If none of the above, runs all pending migrations from the `migrations/` directory.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`sqlx::Error`] if migrations fail.
-    pub async fn ensure_ready(&self) -> DbResult<()> {
-        if SCHEMA_READY.load(Ordering::SeqCst) {
-            return Ok(());
-        }
-
-        if is_marked_ready() {
-            debug!("[schema] DDL skipped — marked ready by supervisor.");
-            SCHEMA_READY.store(true, Ordering::SeqCst);
-            return Ok(());
-        }
-
-        self.run_migrations().await?;
-        SCHEMA_READY.store(true, Ordering::SeqCst);
-        Ok(())
-    }
-
-    /// Ensures database schema is ready without using the global flag.
-    ///
-    /// Intended for in-memory test databases that need independent schema initialization.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`sqlx::Error`] if migrations fail.
-    pub async fn ensure_ready_for_test(&self) -> DbResult<()> {
-        self.run_migrations().await
-    }
 }
 
 #[cfg(test)]
@@ -86,44 +111,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_schema_ready_flag_toggle() {
-        // Test basic atomic toggle behavior
-        SCHEMA_READY.store(false, Ordering::SeqCst);
-        assert!(!SCHEMA_READY.load(Ordering::SeqCst));
-
-        SCHEMA_READY.store(true, Ordering::SeqCst);
-        assert!(SCHEMA_READY.load(Ordering::SeqCst));
-
-        SCHEMA_READY.store(false, Ordering::SeqCst);
-        assert!(!SCHEMA_READY.load(Ordering::SeqCst));
-    }
-
-    #[test]
-    fn test_schema_ready_flag_sequential() {
-        // Test sequential consistency with multiple transitions
-        SCHEMA_READY.store(false, Ordering::SeqCst);
-
-        for i in 0..10 {
-            let value = i % 2 == 0;
-            SCHEMA_READY.store(value, Ordering::SeqCst);
-            assert_eq!(SCHEMA_READY.load(Ordering::SeqCst), value);
-        }
-    }
-
-    #[test]
-    fn test_new_for_test_resets_flag() {
-        // Set flag to true to simulate previous test state
-        SCHEMA_READY.store(true, Ordering::SeqCst);
-        assert!(SCHEMA_READY.load(Ordering::SeqCst));
-
-        // Reset behavior from new_for_test
-        SCHEMA_READY.store(false, Ordering::SeqCst);
-        assert!(!SCHEMA_READY.load(Ordering::SeqCst));
-    }
-
-    #[test]
     fn test_env_var_pattern() {
-        // Test the pattern matching logic for AGENTIC_API_SCHEMA_READY
         let test_values = vec![
             ("1", true),
             ("true", true),
@@ -150,52 +138,49 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_ensure_ready_with_flag_set() {
-        // Reset flag before test
-        SCHEMA_READY.store(false, Ordering::SeqCst);
-
-        // Create an in-memory SQLite pool
+    async fn test_pool_with_schema_ready() {
         let pool = crate::storage::pool::create_pool(Some("sqlite://?mode=memory"))
             .await
             .expect("failed to create pool");
 
-        let schema = SchemaManager::new(pool.as_ref());
+        let pool_with_schema = PoolWithSchema::new(pool);
 
-        // First call should run migrations (or succeed with empty DB)
-        let result = schema.ensure_ready().await;
-        assert!(result.is_ok(), "ensure_ready failed: {result:?}");
+        // First call should run migrations
+        let result = pool_with_schema.ensure_schema_ready().await;
+        assert!(result.is_ok(), "ensure_schema_ready failed: {result:?}");
 
         // Flag should now be set
-        assert!(SCHEMA_READY.load(Ordering::SeqCst));
+        assert!(pool_with_schema.schema_ready.load(Ordering::SeqCst));
 
         // Second call should return immediately without doing work
-        let result = schema.ensure_ready().await;
+        let result = pool_with_schema.ensure_schema_ready().await;
         assert!(result.is_ok());
-
-        // Reset flag after test
-        SCHEMA_READY.store(false, Ordering::SeqCst);
     }
 
     #[tokio::test]
-    async fn test_ensure_ready_multiple_calls() {
-        // Reset flag before test
-        SCHEMA_READY.store(false, Ordering::SeqCst);
-
-        let pool = crate::storage::pool::create_pool(Some("sqlite://?mode=memory"))
+    async fn test_multiple_pools_independent() {
+        // Create two in-memory pools
+        let pool1 = crate::storage::pool::create_pool(Some("sqlite://?mode=memory"))
             .await
-            .expect("failed to create pool");
+            .expect("failed to create pool1");
 
-        let schema = SchemaManager::new(pool.as_ref());
+        let pool2 = crate::storage::pool::create_pool(Some("sqlite://?mode=memory"))
+            .await
+            .expect("failed to create pool2");
 
-        // Multiple calls should all succeed
-        for _ in 0..3 {
-            let result = schema.ensure_ready().await;
-            assert!(result.is_ok());
-        }
+        let pwc1 = PoolWithSchema::new(pool1);
+        let pwc2 = PoolWithSchema::new(pool2);
 
-        assert!(SCHEMA_READY.load(Ordering::SeqCst));
+        // Initialize both
+        pwc1.ensure_schema_ready().await.expect("pool1 failed");
+        pwc2.ensure_schema_ready().await.expect("pool2 failed");
 
-        // Reset flag after test
-        SCHEMA_READY.store(false, Ordering::SeqCst);
+        // Both should be marked ready independently
+        assert!(pwc1.schema_ready.load(Ordering::SeqCst));
+        assert!(pwc2.schema_ready.load(Ordering::SeqCst));
+
+        // Subsequent calls should succeed without re-running migrations
+        pwc1.ensure_schema_ready().await.expect("pool1 repeat failed");
+        pwc2.ensure_schema_ready().await.expect("pool2 repeat failed");
     }
 }

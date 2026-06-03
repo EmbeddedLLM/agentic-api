@@ -1,5 +1,7 @@
 //! Response storage operations and queries.
 
+use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::sync::Arc;
 
 use super::models::{item, response};
@@ -30,12 +32,6 @@ impl ResponseStore {
     #[must_use]
     pub fn new(pool: Arc<DbPool>) -> Self {
         Self { pool: Some(pool) }
-    }
-
-    /// Creates a response store for testing without a real database.
-    #[must_use]
-    pub fn new_test() -> Self {
-        Self { pool: None }
     }
 
     /// Returns a reference to the database pool.
@@ -71,7 +67,21 @@ impl ResponseStore {
         let pool = self.pool()?;
         let response = self.get(response_id).await?;
         let rows = item::get_items(pool, &response.history_item_ids).await?;
-        Ok(rows.into_iter().filter_map(|row| row.as_inout()).collect())
+        let mut items_by_id: HashMap<String, InOutItem> = rows
+            .into_iter()
+            .filter_map(|row| {
+                let id = row.id.clone();
+                row.as_inout().map(|item| (id, item))
+            })
+            .collect();
+
+        let ordered_items = response
+            .history_item_ids
+            .iter()
+            .filter_map(|id| items_by_id.remove(id))
+            .collect();
+
+        Ok(ordered_items)
     }
 
     /// Persists a response with its items and metadata.
@@ -91,22 +101,20 @@ impl ResponseStore {
         let pool = self.pool()?;
 
         let mut item_ids: Vec<String> = Vec::new();
-        let items_: Vec<(String, String)> = new_items
-            .into_iter()
-            .map(|any_item| {
-                let item_id = uuid7_str("item_");
-                item_ids.push(item_id.clone());
-                let data_str: String = (&any_item).into();
-                (item_id, data_str)
-            })
-            .collect();
+        let mut items_: Vec<(String, String)> = Vec::new();
+        for any_item in new_items {
+            let item_id = uuid7_str("item_");
+            item_ids.push(item_id.clone());
+            let data_str = String::try_from(&any_item)?;
+            items_.push((item_id, data_str));
+        }
 
         let mut tx = pool.begin().await?;
 
         item::create_in_tx(&mut tx, items_, None, None).await?;
 
-        let history_item_ids_json = serialize_to_string(&item_ids);
-        let metadata_json: String = metadata.into();
+        let history_item_ids_json = serialize_to_string(&item_ids)?;
+        let metadata_json = String::try_from(metadata)?;
 
         response::create_in_tx(
             &mut tx,
@@ -131,12 +139,6 @@ mod tests {
     #[test]
     fn test_response_store_disabled() {
         let store = ResponseStore::disabled();
-        assert!(store.pool().is_err());
-    }
-
-    #[test]
-    fn test_response_store_new_test() {
-        let store = ResponseStore::new_test();
         assert!(store.pool().is_err());
     }
 
