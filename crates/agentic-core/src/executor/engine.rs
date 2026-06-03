@@ -23,6 +23,8 @@ use crate::types::request_response::{RequestPayload, ResponsePayload};
 use crate::utils::common::serialize_to_string;
 use crate::utils::uuid7_str;
 
+use std::time::Duration;
+
 /// SSE stream of raw lines sent to the client (`data: …\n\n` per event).
 pub type BoxStream = Pin<Box<dyn Stream<Item = String> + Send>>;
 
@@ -199,6 +201,7 @@ pub fn call_inference(
     url: String,
     client: Arc<reqwest::Client>,
     auth: Option<String>,
+    chunk_timeout: Duration,
 ) -> impl Stream<Item = Result<String, ExecutorError>> + Send + 'static {
     stream! {
         let mut req = client
@@ -251,10 +254,23 @@ pub fn call_inference(
         let mut byte_stream = resp.bytes_stream();
         let mut buf = String::with_capacity(buf_cap);
 
-        while let Some(chunk_result) = byte_stream.next().await {
-            let chunk = match chunk_result {
-                Ok(c) => c,
-                Err(e) => {
+        loop {
+            // Apply a per-chunk timeout when configured; zero means no timeout.
+            let next = if chunk_timeout.is_zero() {
+                byte_stream.next().await
+            } else if let Ok(opt) = tokio::time::timeout(chunk_timeout, byte_stream.next()).await {
+                opt
+            } else {
+                yield Err(ExecutorError::StreamError(
+                    "chunk timeout: no data received within the configured window".into(),
+                ));
+                return;
+            };
+
+            let chunk = match next {
+                None => break,
+                Some(Ok(c)) => c,
+                Some(Err(e)) => {
                     yield Err(ExecutorError::NetworkError(e));
                     return;
                 }
@@ -365,6 +381,7 @@ fn run_stream(ctx: RequestContext, exec_ctx: Arc<ExecutionContext>) -> BoxStream
             url,
             Arc::clone(&exec_ctx.client),
             exec_ctx.client_auth.clone(),
+            exec_ctx.streaming_timeout,
         ));
 
         // from_stream feeds SSE lines to a spawn_blocking worker via channel.

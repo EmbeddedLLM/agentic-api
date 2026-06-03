@@ -3,6 +3,7 @@ use thiserror::Error;
 
 use crate::StorageError;
 
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum ExecutorError {
     /// A storage layer operation failed.

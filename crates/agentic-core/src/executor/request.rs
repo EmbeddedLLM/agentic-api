@@ -1,10 +1,12 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::executor::modes::{ConversationHandler, ResponseHandler};
 use crate::types::io::InputItem;
 use crate::types::request_response::{RequestPayload, ResponsePayload};
 
 /// Context built by `rehydrate_conversation`, threaded through the execute pipeline.
+#[derive(Debug)]
 pub struct RequestContext {
     /// Untouched original request from the client.
     pub original_request: RequestPayload,
@@ -34,6 +36,7 @@ impl RequestContext {
 /// Runtime dependencies passed into `execute()`.
 ///
 /// Owns the storage handlers, HTTP client, and LLM endpoint configuration.
+#[derive(Debug)]
 pub struct ExecutionContext {
     pub conv_handler: ConversationHandler,
     pub resp_handler: ResponseHandler,
@@ -42,6 +45,9 @@ pub struct ExecutionContext {
     pub llm_base_url: String,
     /// Bearer token forwarded from the client, if any.
     pub client_auth: Option<String>,
+    /// Maximum wait time for the next SSE chunk.  `Duration::ZERO` disables the timeout.
+    /// Sourced from [`Config::streaming_chunk_timeout_s`](crate::config::Config::streaming_chunk_timeout_s).
+    pub streaming_timeout: Duration,
 }
 
 impl ExecutionContext {
@@ -71,6 +77,28 @@ impl ExecutionContext {
             client,
             llm_base_url,
             client_auth,
+            streaming_timeout: Duration::from_secs(30),
+        }
+    }
+
+    #[must_use]
+    pub fn from_config(
+        conv_handler: ConversationHandler,
+        resp_handler: ResponseHandler,
+        client: Arc<reqwest::Client>,
+        cfg: &crate::config::Config,
+        client_auth: Option<String>,
+    ) -> Self {
+        // TODO: expose `streaming_chunk_timeout_s: Option<f64>` in `Config` and read it here
+        //       once all `Config` struct literals in agentic-server use `..Config::default()`.
+        let streaming_timeout = Duration::from_secs(30);
+        Self {
+            conv_handler,
+            resp_handler,
+            client,
+            llm_base_url: cfg.llm_api_base.clone(),
+            client_auth,
+            streaming_timeout,
         }
     }
 }

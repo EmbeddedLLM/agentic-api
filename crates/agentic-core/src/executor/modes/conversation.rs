@@ -7,7 +7,7 @@ use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::executor::request::RequestContext;
 
 /// Handles all conversation store operations: creation, rehydration, and persistence.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ConversationHandler {
     store: ConversationStore,
 }

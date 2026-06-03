@@ -7,7 +7,7 @@ use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::executor::request::RequestContext;
 
 /// Handles all response store operations: lookup, rehydration, and persistence.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ResponseHandler {
     store: ResponseStore,
 }

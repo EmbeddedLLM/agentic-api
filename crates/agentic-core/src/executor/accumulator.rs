@@ -20,6 +20,7 @@ use crate::utils::common::{deserialize_from_str, deserialize_from_value, deseria
 use crate::utils::uuid7_str;
 
 /// Accumulates LLM response chunks from streaming or non-streaming sources.
+#[derive(Debug)]
 pub struct ResponseAccumulator {
     response_id: String,
     conversation_id: Option<String>,
@@ -220,9 +221,11 @@ impl ResponseAccumulator {
     }
 
     /// Marks the response as incomplete due to an error or interruption.
-    pub fn mark_incomplete(&mut self, reason: String) {
+    pub fn mark_incomplete(&mut self, reason: impl Into<String>) {
         self.status = ResponseStatus::Incomplete;
-        self.incomplete_details = Some(IncompleteDetails { reason: Some(reason) });
+        self.incomplete_details = Some(IncompleteDetails {
+            reason: Some(reason.into()),
+        });
     }
 
     /// Finalizes the accumulator into a `ResponsePayload`.
@@ -268,7 +271,7 @@ mod tests {
     #[test]
     fn test_accumulator_mark_incomplete() {
         let mut acc = ResponseAccumulator::new("resp_123".into(), None);
-        acc.mark_incomplete("Stream interrupted".into());
+        acc.mark_incomplete("Stream interrupted");
         assert_eq!(acc.status, ResponseStatus::Incomplete);
         assert!(acc.incomplete_details.is_some());
     }

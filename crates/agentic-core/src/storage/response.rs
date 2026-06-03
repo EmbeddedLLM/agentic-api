@@ -10,7 +10,7 @@ use super::types::{InOutItem, ResponseData, ResponseMetadata, StorageError, Stor
 use crate::utils::common::{serialize_to_string, uuid7_str};
 
 /// Response storage operations.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ResponseStore {
     pool: Option<Arc<DbPool>>,
 }

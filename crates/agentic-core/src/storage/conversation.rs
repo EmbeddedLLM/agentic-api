@@ -9,7 +9,7 @@ use super::types::{ConversationData, InOutItem, ResponseMetadata, StorageError, 
 use crate::utils::common::{serialize_to_string, uuid7_str};
 
 /// Conversation storage operations.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ConversationStore {
     pool: Option<Arc<DbPool>>,
 }
