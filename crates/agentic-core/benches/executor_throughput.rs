@@ -34,7 +34,7 @@ use axum::Router;
 use axum::http::header;
 use axum::response::IntoResponse;
 use axum::routing::post;
-use criterion::{BatchSize, BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use criterion::{BatchSize, BenchmarkId, Criterion, black_box, criterion_group};
 use either::Either;
 use futures::StreamExt;
 
@@ -188,19 +188,25 @@ async fn seed_chain(exec_ctx: &Arc<ExecutionContext>, depth: usize) -> Option<St
     prev_id
 }
 
+// Bench: blocking path, depths 1–max_depth
+//
+// The chain of N-1 prior turns is seeded with `rt.block_on()` BEFORE criterion
+// starts the measurement loop, so only turn N is timed.
 fn bench_execute_blocking(c: &mut Criterion, exec_ctx: &Arc<ExecutionContext>) {
     let mut group = c.benchmark_group("execute/blocking");
+    let rt = tokio::runtime::Runtime::new().unwrap();
+
     for depth in 1..=max_depth() {
-        group.bench_with_input(BenchmarkId::new("turns", depth), &depth, |b, &depth| {
+        // Pre-seed N-1 turns outside criterion — their cost is NOT measured.
+        let prev_id = rt.block_on(seed_chain(exec_ctx, depth));
+
+        group.bench_with_input(BenchmarkId::new("turns", depth), &depth, |b, _| {
             b.to_async(tokio::runtime::Runtime::new().unwrap()).iter_batched(
-                || {
-                    let exec_ctx = Arc::clone(exec_ctx);
-                    async move { seed_chain(&exec_ctx, depth).await }
-                },
-                |setup| {
+                // Synchronous setup: just hand the pre-seeded prev_id to each sample.
+                || prev_id.clone(),
+                |prev_id| {
                     let exec_ctx = Arc::clone(exec_ctx);
                     async move {
-                        let prev_id = setup.await;
                         let req = make_request("bench turn", false, black_box(prev_id));
                         execute(req, exec_ctx).await.expect("execute")
                     }
@@ -212,22 +218,22 @@ fn bench_execute_blocking(c: &mut Criterion, exec_ctx: &Arc<ExecutionContext>) {
     group.finish();
 }
 
+// Bench: streaming path, depths 1–max_depth (same pre-seed approach).
 fn bench_execute_streaming(c: &mut Criterion, exec_ctx: &Arc<ExecutionContext>) {
     let mut group = c.benchmark_group("execute/streaming");
+    let rt = tokio::runtime::Runtime::new().unwrap();
+
     for depth in 1..=max_depth() {
-        group.bench_with_input(BenchmarkId::new("turns", depth), &depth, |b, &depth| {
+        let prev_id = rt.block_on(seed_chain(exec_ctx, depth));
+
+        group.bench_with_input(BenchmarkId::new("turns", depth), &depth, |b, _| {
             b.to_async(tokio::runtime::Runtime::new().unwrap()).iter_batched(
-                || {
-                    let exec_ctx = Arc::clone(exec_ctx);
-                    async move { seed_chain(&exec_ctx, depth).await }
-                },
-                |setup| {
+                || prev_id.clone(),
+                |prev_id| {
                     let exec_ctx = Arc::clone(exec_ctx);
                     async move {
-                        let prev_id = setup.await;
                         let req = make_request("bench turn", true, black_box(prev_id));
                         let result = execute(req, exec_ctx).await.expect("execute");
-                        // Drain the stream so accumulate + persist are included.
                         if let Either::Right(stream) = result {
                             let mut stream = Box::pin(stream);
                             while stream.next().await.is_some() {}
@@ -295,5 +301,4 @@ fn init_benches(c: &mut Criterion) {
     clear_db(&rt, &pool);
 }
 
-criterion_group!(benches, init_benches);
-criterion_main!(benches);
+criterion_group!(executor_benches, init_benches);

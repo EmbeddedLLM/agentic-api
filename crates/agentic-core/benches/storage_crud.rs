@@ -1,4 +1,4 @@
-use criterion::{BatchSize, Criterion, black_box, criterion_group, criterion_main};
+use criterion::{BatchSize, Criterion, black_box, criterion_group};
 
 use agentic_core::storage::{ConversationStore, InOutItem, ResponseMetadata, ResponseStore, create_pool_with_schema};
 use agentic_core::types::io::{InputItem, InputMessage, InputMessageContent, OutputItem, OutputMessage};
@@ -205,5 +205,4 @@ fn init_benches(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, init_benches);
-criterion_main!(benches);
+criterion_group!(storage_benches, init_benches);

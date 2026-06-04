@@ -30,11 +30,7 @@ serde_yaml = "0.9"
 tokio = { workspace = true, features = ["full"] }
 
 [[bench]]
-name = "storage_crud"
-harness = false
-
-[[bench]]
-name = "executor_throughput"
+name = "benches"
 harness = false
 
 [lints]
