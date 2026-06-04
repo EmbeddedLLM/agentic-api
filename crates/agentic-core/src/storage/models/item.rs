@@ -1,5 +1,7 @@
 //! Conversation history item stored in the database.
 
+use tracing::warn;
+
 use super::super::pool::{DbPool, DbResult, DbTransaction};
 use super::super::types::item::InOutItem;
 use crate::types::io::{InputItem, OutputItem};
@@ -44,9 +46,14 @@ impl Item {
     /// Deserialize data column as either `InputItem` or `OutputItem`.
     #[must_use]
     pub fn as_inout(&self) -> Option<InOutItem> {
-        self.as_input()
-            .map(InOutItem::Input)
-            .or_else(|| self.as_output().map(InOutItem::Output))
+        match (self.as_input(), self.as_output()) {
+            (Some(input), _) if !matches!(input, InputItem::Unknown) => Some(InOutItem::Input(input)),
+            (_, Some(output)) if !matches!(output, OutputItem::Unknown) => Some(InOutItem::Output(output)),
+            _ => {
+                warn!(item_id = %self.id, "unrecognized item type in stored data");
+                None
+            }
+        }
     }
 }
 
