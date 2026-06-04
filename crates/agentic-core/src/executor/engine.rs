@@ -49,38 +49,34 @@ where
     item.transpose().map_err(ExecutorError::NetworkError)
 }
 
-/// Makes a non-streaming HTTP POST to the LLM backend and returns the full JSON body.
+/// Build, send, and validate an HTTP POST to the LLM backend.
 ///
-/// Used by [`run_blocking`] so it can pass the result to [`ResponseAccumulator::from_json`].
-async fn fetch_response_json(
-    upstream_json: String,
-    url: &str,
+/// Shared by both the blocking path (caller reads `.text()`) and the streaming
+/// path (caller reads `.bytes_stream()`). Maps connect/timeout failures and
+/// non-2xx status codes to [`ExecutorError::LLMRequest`].
+async fn send_request(
     client: &reqwest::Client,
+    url: &str,
+    body: String,
     auth: Option<&str>,
-) -> ExecutorResult<String> {
-    let mut req = client
-        .post(url)
-        .header("Content-Type", "application/json")
-        .body(upstream_json);
+) -> ExecutorResult<reqwest::Response> {
+    let mut req = client.post(url).header("Content-Type", "application/json").body(body);
     if let Some(key) = auth {
         req = req.bearer_auth(key);
     }
 
-    let resp = match req.send().await {
-        Ok(r) => r,
-        Err(e) if e.is_timeout() => {
-            return Err(ExecutorError::LLMRequest {
-                status: http::StatusCode::GATEWAY_TIMEOUT,
-                body: "upstream timeout".into(),
-            });
-        }
-        Err(_) => {
-            return Err(ExecutorError::LLMRequest {
-                status: http::StatusCode::BAD_GATEWAY,
-                body: "upstream unavailable".into(),
-            });
-        }
-    };
+    let resp = req.send().await.map_err(|e| ExecutorError::LLMRequest {
+        status: if e.is_timeout() {
+            http::StatusCode::GATEWAY_TIMEOUT
+        } else {
+            http::StatusCode::BAD_GATEWAY
+        },
+        body: if e.is_timeout() {
+            "upstream timeout".into()
+        } else {
+            "upstream unavailable".into()
+        },
+    })?;
 
     if !resp.status().is_success() {
         let status = resp.status().as_u16();
@@ -97,6 +93,19 @@ async fn fetch_response_json(
         });
     }
 
+    Ok(resp)
+}
+
+/// Makes a non-streaming HTTP POST to the LLM backend and returns the full JSON body.
+///
+/// Used by [`run_blocking`] so it can pass the result to [`ResponseAccumulator::from_json`].
+async fn fetch_response_json(
+    upstream_json: String,
+    url: &str,
+    client: &reqwest::Client,
+    auth: Option<&str>,
+) -> ExecutorResult<String> {
+    let resp = send_request(client, url, upstream_json, auth).await?;
     // Preserve the reqwest::Error as the typed source (NetworkError).
     resp.text().await.map_err(ExecutorError::NetworkError)
 }
@@ -205,50 +214,6 @@ async fn rehydrate_from_conversation(ctx: &mut RequestContext, exec_ctx: &Execut
     Ok(())
 }
 
-/// Send a single inference POST and validate the HTTP response.
-///
-/// Handles connect/timeout errors and non-2xx status codes so that
-/// [`call_inference`] only deals with streaming the body.
-async fn send_inference_request(
-    client: &reqwest::Client,
-    url: &str,
-    body: String,
-    auth: Option<&str>,
-) -> ExecutorResult<reqwest::Response> {
-    let mut req = client.post(url).header("Content-Type", "application/json").body(body);
-    if let Some(key) = auth {
-        req = req.bearer_auth(key);
-    }
-
-    let resp = req.send().await.map_err(|e| ExecutorError::LLMRequest {
-        status: if e.is_timeout() {
-            http::StatusCode::GATEWAY_TIMEOUT
-        } else {
-            http::StatusCode::BAD_GATEWAY
-        },
-        body: if e.is_timeout() {
-            "upstream timeout".into()
-        } else {
-            "upstream unavailable".into()
-        },
-    })?;
-
-    if !resp.status().is_success() {
-        let status = resp.status().as_u16();
-        let body = resp
-            .text()
-            .await
-            .inspect_err(|e| tracing::debug!("failed to read error response body: {e}"))
-            .unwrap_or_default();
-        return Err(ExecutorError::LLMRequest {
-            status: http::StatusCode::from_u16(status).unwrap_or(http::StatusCode::INTERNAL_SERVER_ERROR),
-            body,
-        });
-    }
-
-    Ok(resp)
-}
-
 /// Step 2 — Call the LLM inference backend; yields raw SSE lines (`data: …`).
 ///
 /// Always requests `stream=true` upstream. Stops on `[DONE]`.
@@ -266,7 +231,7 @@ pub fn call_inference(
     chunk_timeout: Duration,
 ) -> impl Stream<Item = Result<String, ExecutorError>> + Send + 'static {
     stream! {
-        let resp = match send_inference_request(&client, &url, upstream_json, auth.as_deref()).await {
+        let resp = match send_request(&client, &url, upstream_json, auth.as_deref()).await {
             Ok(r) => r,
             Err(e) => { yield Err(e); return; }
         };
