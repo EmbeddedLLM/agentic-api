@@ -6,15 +6,18 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Router, serve};
 use bytes::Bytes;
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group};
 use futures::stream;
 use http::StatusCode;
 use tokio::net::TcpListener;
 use tokio::runtime::Runtime;
 
 use agentic_core::config::Config;
+use agentic_core::executor::{ConversationHandler, ExecutionContext, ResponseHandler};
 use agentic_core::proxy::ProxyState;
-use agentic_server::app::{ServerConfig, build_router};
+use agentic_core::storage::{ConversationStore, ResponseStore};
+use agentic_server::app::{AppState, ServerConfig, build_router};
+use std::sync::Arc;
 
 fn bench_config(llm_url: &str) -> Config {
     Config {
@@ -22,6 +25,7 @@ fn bench_config(llm_url: &str) -> Config {
         openai_api_key: Some("bench-key".to_owned()),
         llm_ready_timeout_s: 5.0,
         llm_ready_interval_s: 0.1,
+        db_url: None,
     }
 }
 
@@ -71,7 +75,19 @@ async fn spawn_llm() -> String {
 }
 
 async fn spawn_gateway(config: Config) -> String {
-    let state = ProxyState::new(config).unwrap();
+    let proxy_state = ProxyState::new(config.clone()).unwrap();
+    let exec_ctx = Arc::new(ExecutionContext::new(
+        ConversationHandler::new(ConversationStore::disabled()),
+        ResponseHandler::new(ResponseStore::disabled()),
+        Arc::new(reqwest::Client::new()),
+        config.llm_api_base.clone(),
+        config.openai_api_key.clone(),
+    ));
+    let state = AppState {
+        proxy_state,
+        exec_ctx,
+        llm_api_base: config.llm_api_base,
+    };
     let server_config = ServerConfig::from_env();
     let router = build_router(state, &server_config);
 
@@ -171,5 +187,4 @@ fn proxy_benchmarks(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, proxy_benchmarks);
-criterion_main!(benches);
+criterion_group!(proxy_benches, proxy_benchmarks);

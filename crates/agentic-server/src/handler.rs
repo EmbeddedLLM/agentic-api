@@ -1,9 +1,22 @@
-use agentic_core::proxy::{ProxyBody, ProxyRequest, ProxyResponse, ProxyState, error_response};
+use std::sync::Arc;
+
 use axum::body::Body;
 use axum::extract::State;
+use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
+use bytes::Bytes;
+use either::Either;
+use futures::StreamExt;
 use http::StatusCode;
+use serde_json::json;
 use tracing::warn;
+
+use agentic_core::executor::{ExecutorError, create_conversation, execute};
+use agentic_core::proxy::{ProxyBody, ProxyRequest, ProxyResponse, error_response, proxy_request};
+use agentic_core::storage::StorageError;
+use agentic_core::types::request_response::RequestPayload;
+
+use crate::app::AppState;
 
 const MAX_BODY_SIZE: usize = 10 * 1024 * 1024;
 
@@ -11,23 +24,12 @@ pub async fn health() -> impl IntoResponse {
     StatusCode::OK
 }
 
-pub async fn ready(State(state): State<ProxyState>) -> impl IntoResponse {
-    let base = state.config.llm_api_base.trim_end_matches('/');
+pub async fn ready(State(state): State<AppState>) -> impl IntoResponse {
+    let base = state.llm_api_base.trim_end_matches('/');
     let url = format!("{base}/health");
-
-    let mut headers = reqwest::header::HeaderMap::new();
-    if let Some(key) = state.config.openai_api_key.as_deref() {
-        let trimmed = key.trim();
-        if !trimmed.is_empty() {
-            if let Ok(v) = reqwest::header::HeaderValue::from_str(&format!("Bearer {trimmed}")) {
-                headers.insert(reqwest::header::AUTHORIZATION, v);
-            }
-        }
-    }
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
-        .default_headers(headers)
         .build();
 
     let Ok(client) = client else {
@@ -37,7 +39,7 @@ pub async fn ready(State(state): State<ProxyState>) -> impl IntoResponse {
     match client.get(&url).send().await {
         Ok(resp) if resp.status().is_success() => StatusCode::OK,
         Ok(resp) => {
-            warn!("LLM backend not ready: status {}", resp.status());
+            warn!("LLM backend not ready: {}", resp.status());
             StatusCode::SERVICE_UNAVAILABLE
         }
         Err(e) => {
@@ -47,7 +49,30 @@ pub async fn ready(State(state): State<ProxyState>) -> impl IntoResponse {
     }
 }
 
-fn convert_response(resp: ProxyResponse) -> Response {
+/// Read the request body and extract the `store` boolean (defaults to `true`).
+///
+/// Returns `Ok((bytes, store))` or an error `Response` if the body exceeds
+/// `MAX_BODY_SIZE`.
+async fn read_body(body: axum::body::Body) -> Result<(Bytes, bool), Response> {
+    let Ok(bytes) = axum::body::to_bytes(body, MAX_BODY_SIZE).await else {
+        return Err(convert_response(error_response(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "body_too_large",
+            "request body too large",
+        )));
+    };
+
+    let store = serde_json::from_slice::<serde_json::Value>(&bytes)
+        .ok()
+        .and_then(|j| j.get("store").and_then(serde_json::Value::as_bool))
+        .unwrap_or(true);
+
+    Ok((bytes, store))
+}
+
+/// # Panics
+/// Panics if the response builder produces an invalid response (unreachable in practice).
+pub fn convert_response(resp: ProxyResponse) -> Response {
     let mut builder = Response::builder().status(resp.status);
     for (name, value) in &resp.headers {
         builder = builder.header(name, value);
@@ -58,22 +83,126 @@ fn convert_response(resp: ProxyResponse) -> Response {
     }
 }
 
-pub async fn proxy_responses(State(state): State<ProxyState>, req: axum::extract::Request) -> Response {
-    let (parts, body) = req.into_parts();
-
-    let Ok(body_bytes) = axum::body::to_bytes(body, MAX_BODY_SIZE).await else {
-        return convert_response(error_response(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "body_too_large",
-            "Request body too large",
-        ));
-    };
-
+async fn proxy_responses(state: &AppState, parts: Parts, body: Bytes) -> Response {
     let proxy_req = ProxyRequest {
         headers: parts.headers,
-        body: body_bytes,
-        query: parts.uri.query().map(String::from),
+        body,
+        query: parts.uri.query().map(str::to_string),
+    };
+    convert_response(proxy_request(proxy_req, &state.proxy_state).await)
+}
+
+async fn execute_responses(state: &AppState, parts: Parts, body: Bytes) -> Response {
+    let mut payload = match serde_json::from_slice::<RequestPayload>(&body) {
+        Ok(p) => p,
+        Err(e) => return executor_error_response(ExecutorError::from(e)),
     };
 
-    convert_response(agentic_core::proxy::proxy_request(proxy_req, &state).await)
+    let request_auth = parts
+        .headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(str::to_string);
+
+    let exec_ctx = if request_auth.is_some() && request_auth != state.exec_ctx.client_auth {
+        let mut ctx = (*state.exec_ctx).clone();
+        ctx.client_auth = request_auth;
+        Arc::new(ctx)
+    } else {
+        Arc::clone(&state.exec_ctx)
+    };
+
+    payload.conversation_id = payload.conversation_id.filter(|_| payload.store);
+
+    match execute(payload, exec_ctx).await {
+        Ok(Either::Left(response_payload)) => axum::Json(response_payload).into_response(),
+        Ok(Either::Right(stream)) => {
+            let byte_stream = stream.map(|line| Ok::<Bytes, std::convert::Infallible>(Bytes::from(line)));
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("Content-Type", "text/event-stream; charset=utf-8")
+                .header("Cache-Control", "no-cache")
+                .header("X-Accel-Buffering", "no")
+                .body(Body::from_stream(byte_stream))
+                .expect("valid SSE response")
+        }
+        Err(e) => executor_error_response(e),
+    }
+}
+
+/// # Panics
+/// Panics if the response builder produces an invalid response (unreachable in practice).
+pub fn executor_error_response(err: ExecutorError) -> Response {
+    let (status, code, message) = match err {
+        ExecutorError::Storage(StorageError::NotFound {
+            ref resource_type,
+            ref id,
+        }) => (
+            StatusCode::NOT_FOUND,
+            "not_found",
+            format!("{resource_type} not found: {id}"),
+        ),
+        ExecutorError::LLMRequest { status, body } => {
+            let http_status = StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+            return Response::builder()
+                .status(http_status)
+                .header("Content-Type", "application/json")
+                .body(Body::from(body))
+                .expect("valid error response");
+        }
+        ExecutorError::InvalidRequest(msg) => (StatusCode::BAD_REQUEST, "invalid_request_error", msg),
+        ExecutorError::ParseError(msg) => (StatusCode::UNPROCESSABLE_ENTITY, "invalid_request_error", msg),
+        ref other => (StatusCode::INTERNAL_SERVER_ERROR, "server_error", other.to_string()),
+    };
+
+    warn!("executor error ({status}): {message}");
+
+    let body = serde_json::to_vec(&json!({
+        "error": { "message": message, "type": "api_error", "code": code }
+    }))
+    .unwrap_or_default();
+
+    Response::builder()
+        .status(status)
+        .header("Content-Type", "application/json")
+        .body(Body::from(body))
+        .expect("valid error response")
+}
+
+pub async fn conversations(State(state): State<AppState>, req: axum::extract::Request) -> Response {
+    let (_, body) = req.into_parts();
+    let (_, store) = match read_body(body).await {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+
+    if !store {
+        return executor_error_response(ExecutorError::InvalidRequest("conversations require store=true".into()));
+    }
+
+    match create_conversation(&state.exec_ctx).await {
+        Ok(data) => axum::Json(json!({
+            "id": data.conversation_id,
+            "created_at": data.created_at,
+            "object": "conversation",
+            "metadata": {}
+        }))
+        .into_response(),
+        Err(e) => executor_error_response(e),
+    }
+}
+
+pub async fn responses(State(state): State<AppState>, req: axum::extract::Request) -> Response {
+    let (parts, body) = req.into_parts();
+    let (body_bytes, store) = match read_body(body).await {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+
+    if store {
+        execute_responses(&state, parts, body_bytes).await
+    } else {
+        proxy_responses(&state, parts, body_bytes).await
+    }
 }

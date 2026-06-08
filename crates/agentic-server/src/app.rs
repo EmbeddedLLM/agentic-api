@@ -1,10 +1,14 @@
-use agentic_core::proxy::ProxyState;
+use std::sync::Arc;
+
 use axum::Router;
 use axum::routing::{get, post};
 use http::HeaderValue;
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
-use crate::handler::{health, proxy_responses, ready};
+use agentic_core::executor::ExecutionContext;
+use agentic_core::proxy::ProxyState;
+
+use crate::handler::{conversations, health, ready, responses};
 
 /// Server-level configuration read from environment variables.
 pub struct ServerConfig {
@@ -12,7 +16,6 @@ pub struct ServerConfig {
 }
 
 impl ServerConfig {
-    /// Read `CORS_ALLOWED_ORIGINS` (comma-separated). Unset or empty = permissive.
     #[must_use]
     pub fn from_env() -> Self {
         let cors_allowed_origins = std::env::var("CORS_ALLOWED_ORIGINS")
@@ -47,11 +50,25 @@ impl ServerConfig {
     }
 }
 
-pub fn build_router(state: ProxyState, server_config: &ServerConfig) -> Router {
+/// Shared application state injected into every handler.
+///
+/// Both states are always present:
+/// - `proxy_state` handles `store=false` requests (direct passthrough to vLLM)
+/// - `exec_ctx` handles `store=true` requests (stateful executor with DB)
+#[derive(Clone)]
+pub struct AppState {
+    pub proxy_state: ProxyState,
+    pub exec_ctx: Arc<ExecutionContext>,
+    /// vLLM base URL — used by the `/ready` health probe.
+    pub llm_api_base: String,
+}
+
+pub fn build_router(state: AppState, server_config: &ServerConfig) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/ready", get(ready))
-        .route("/v1/responses", post(proxy_responses))
+        .route("/v1/conversations", post(conversations))
+        .route("/v1/responses", post(responses))
         .layer(server_config.cors_layer())
         .with_state(state)
 }

@@ -1,14 +1,48 @@
+use std::sync::Arc;
+
 use agentic_core::config::Config;
 use agentic_core::error::Error;
+use agentic_core::executor::{ConversationHandler, ExecutionContext, ResponseHandler};
 use agentic_core::proxy::ProxyState;
 use agentic_core::readiness::wait_llm_ready;
-use agentic_server::app::{ServerConfig, build_router};
+use agentic_core::storage::{ConversationStore, ResponseStore, create_pool_with_schema};
+use agentic_server::app::{AppState, ServerConfig, build_router};
 use tokio::net::TcpListener;
 use tracing::info;
 
-async fn serve_gateway(config: Config, host: &str, port: u16) -> Result<(), Error> {
+async fn build_state(config: &Config) -> Result<AppState, Error> {
+    // Proxy state — always built, used for store=false requests.
+    let proxy_state = ProxyState::new(config.clone())?;
+
+    // Executor — always built alongside the proxy.
+    // The db_url defaults to a local SQLite file when not explicitly set.
+    let db_url = config.db_url.as_deref().unwrap_or("sqlite://./agentic_api.db");
+
+    let pool = create_pool_with_schema(Some(db_url))
+        .await
+        .map_err(|e| Error::Config(format!("failed to open database '{db_url}': {e}")))?;
+
+    let conv_handler = ConversationHandler::new(ConversationStore::new(pool.clone()));
+    let resp_handler = ResponseHandler::new(ResponseStore::new(pool));
+    let client = Arc::new(reqwest::Client::new());
+
+    let exec_ctx = Arc::new(ExecutionContext::new(
+        conv_handler,
+        resp_handler,
+        client,
+        config.llm_api_base.clone(),
+        config.openai_api_key.clone(),
+    ));
+
+    Ok(AppState {
+        proxy_state,
+        exec_ctx,
+        llm_api_base: config.llm_api_base.clone(),
+    })
+}
+
+async fn serve_gateway(state: AppState, host: &str, port: u16) -> Result<(), Error> {
     let addr = format!("{host}:{port}");
-    let state = ProxyState::new(config)?;
     let server_config = ServerConfig::from_env();
     let router = build_router(state, &server_config);
     let listener = TcpListener::bind(&addr).await?;
@@ -21,18 +55,21 @@ async fn serve_gateway(config: Config, host: &str, port: u16) -> Result<(), Erro
 ///
 /// # Errors
 ///
-/// Returns an error if LLM readiness polling fails or the server cannot bind.
+/// Returns an error if DB initialisation, LLM readiness polling, or the
+/// server binding fails.
 pub async fn run(config: Config, host: &str, port: u16) -> Result<(), Error> {
     wait_llm_ready(&config).await?;
     info!("LLM ready: {}", config.llm_api_base);
-    serve_gateway(config, host, port).await
+    let state = build_state(&config).await?;
+    serve_gateway(state, host, port).await
 }
 
 /// Spawn vLLM as a subprocess and run the gateway in the foreground.
 ///
 /// # Errors
 ///
-/// Returns an error if vLLM fails to start or the gateway errors.
+/// Returns an error if vLLM fails to start, DB init fails, or the gateway
+/// errors.
 pub async fn run_with_llm(config: Config, host: &str, port: u16, llm_args: Vec<String>) -> Result<(), Error> {
     let mut cmd = tokio::process::Command::new("python");
     cmd.arg("-m").arg("vllm.entrypoints.openai.api_server");
@@ -45,9 +82,7 @@ pub async fn run_with_llm(config: Config, host: &str, port: u16, llm_args: Vec<S
         ready = wait_llm_ready(&config) => ready,
         status = child.wait() => {
             let status = status?;
-            Err(Error::LlmProcessExited {
-                status: status.to_string(),
-            })
+            Err(Error::LlmProcessExited { status: status.to_string() })
         }
     };
 
@@ -60,13 +95,13 @@ pub async fn run_with_llm(config: Config, host: &str, port: u16, llm_args: Vec<S
         }
     }
 
+    let state = build_state(&config).await?;
+
     let result = tokio::select! {
-        gateway = serve_gateway(config, host, port) => gateway,
+        gateway = serve_gateway(state, host, port) => gateway,
         status = child.wait() => {
             let status = status?;
-            Err(Error::LlmProcessExited {
-                status: status.to_string(),
-            })
+            Err(Error::LlmProcessExited { status: status.to_string() })
         }
     };
 

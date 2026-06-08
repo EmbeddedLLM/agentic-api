@@ -1,0 +1,134 @@
+mod common;
+
+use axum::Router;
+use axum::response::IntoResponse;
+use axum::routing::post;
+use http::StatusCode;
+use tokio::net::TcpListener;
+
+use common::{spawn_gateway, spawn_mock_llm, test_config, test_state};
+
+/// Spawn a mock vLLM that returns a minimal valid JSON response.
+async fn spawn_mock_vllm_json() -> (String, tokio::task::JoinHandle<()>) {
+    let app = Router::new().route(
+        "/v1/responses",
+        post(|| async {
+            axum::response::Response::builder()
+                .status(200)
+                .header("Content-Type", "application/json")
+                .body(axum::body::Body::from(
+                    r#"{"id":"resp_vllm","object":"response","status":"completed",
+                        "model":"test","output":[],"created_at":0}"#,
+                ))
+                .unwrap()
+                .into_response()
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (format!("http://{addr}"), handle)
+}
+
+/// Spawn a mock vLLM that returns an SSE stream.
+async fn spawn_mock_vllm_sse() -> (String, tokio::task::JoinHandle<()>) {
+    let app = Router::new().route(
+        "/v1/responses",
+        post(|| async {
+            axum::response::Response::builder()
+                .status(200)
+                .header("Content-Type", "text/event-stream; charset=utf-8")
+                .body(axum::body::Body::from(
+                    "data: {\"type\":\"response.done\"}\n\ndata: [DONE]\n\n",
+                ))
+                .unwrap()
+                .into_response()
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (format!("http://{addr}"), handle)
+}
+
+#[tokio::test]
+async fn test_store_false_proxies_json_to_vllm() {
+    // Arrange
+    let (llm_url, _h1) = spawn_mock_vllm_json().await;
+    let (gw_url, _h2) = spawn_gateway(test_state(&test_config(&llm_url))).await;
+
+    // Act
+    let resp = reqwest::Client::new()
+        .post(format!("{gw_url}/v1/responses"))
+        .json(&serde_json::json!({"model":"test","input":"hi","store":false,"stream":false}))
+        .send()
+        .await
+        .unwrap();
+
+    // Assert — vLLM mock response forwarded
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["id"], "resp_vllm");
+}
+
+#[tokio::test]
+async fn test_store_false_proxies_sse_to_vllm() {
+    // Arrange
+    let (llm_url, _h1) = spawn_mock_vllm_sse().await;
+    let (gw_url, _h2) = spawn_gateway(test_state(&test_config(&llm_url))).await;
+
+    // Act
+    let resp = reqwest::Client::new()
+        .post(format!("{gw_url}/v1/responses"))
+        .json(&serde_json::json!({"model":"test","input":"hi","store":false,"stream":true}))
+        .send()
+        .await
+        .unwrap();
+
+    // Assert — SSE content-type forwarded from mock vLLM
+    assert_eq!(resp.status(), 200);
+    assert!(
+        resp.headers()["content-type"]
+            .to_str()
+            .unwrap()
+            .contains("event-stream")
+    );
+}
+
+#[tokio::test]
+async fn test_store_true_reaches_executor_not_proxy() {
+    // Arrange — mock vLLM returns 200, but executor path will fail at storage layer
+    let (llm_url, _h1) = spawn_mock_vllm_json().await;
+    let (gw_url, _h2) = spawn_gateway(test_state(&test_config(&llm_url))).await;
+
+    // Act
+    let resp = reqwest::Client::new()
+        .post(format!("{gw_url}/v1/responses"))
+        .json(&serde_json::json!({"model":"test","input":"hi","store":true,"stream":false}))
+        .send()
+        .await
+        .unwrap();
+
+    // Assert — executor path reached; disabled store returns 5xx (not the proxy's 200)
+    assert_ne!(resp.status(), 200, "expected executor path, not proxy");
+    assert!(resp.status().is_server_error());
+}
+
+#[tokio::test]
+async fn test_oversized_body_returns_413() {
+    // Arrange — LLM is never reached (gateway rejects the body first)
+    let (llm_url, _h1) = spawn_mock_llm().await;
+    let (gw_url, _h2) = spawn_gateway(test_state(&test_config(&llm_url))).await;
+
+    // Act — 11 MB body
+    let resp = reqwest::Client::new()
+        .post(format!("{gw_url}/v1/responses"))
+        .header("Content-Type", "application/json")
+        .body("x".repeat(11 * 1024 * 1024))
+        .send()
+        .await
+        .unwrap();
+
+    // Assert
+    assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}

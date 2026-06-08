@@ -36,7 +36,7 @@ impl RequestContext {
 /// Runtime dependencies passed into `execute()`.
 ///
 /// Owns the storage handlers, HTTP client, and LLM endpoint configuration.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ExecutionContext {
     pub conv_handler: ConversationHandler,
     pub resp_handler: ResponseHandler,

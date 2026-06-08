@@ -4,6 +4,9 @@ pub struct Config {
     pub openai_api_key: Option<String>,
     pub llm_ready_timeout_s: f64,
     pub llm_ready_interval_s: f64,
+    /// Database URL for conversation and response storage.
+    /// `None` means stateful features are disabled; all requests are proxied.
+    pub db_url: Option<String>,
 }
 
 #[must_use]
