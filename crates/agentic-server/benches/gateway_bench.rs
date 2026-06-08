@@ -182,8 +182,18 @@ async fn spawn_gateway(llm_url: &str) -> (Arc<reqwest::Client>, String) {
 }
 
 /// Create a conversation and run `prior_turns` non-streaming turns.
-/// Returns the `conversation_id` for use in the benchmarked turn.
-async fn seed_conversation(client: &reqwest::Client, gw: &str, model: &str, prior_turns: usize) -> String {
+///
+/// Each turn passes both `conversation_id` and, from the second turn on,
+/// `previous_response_id` from the immediately preceding turn — matching
+/// real client usage.
+///
+/// Returns `(conversation_id, last_response_id)` for use in the benchmarked turn.
+async fn seed_conversation(
+    client: &reqwest::Client,
+    gw: &str,
+    model: &str,
+    prior_turns: usize,
+) -> (String, Option<String>) {
     let conv: serde_json::Value = client
         .post(format!("{gw}/v1/conversations"))
         .header("Content-Type", "application/json")
@@ -196,24 +206,30 @@ async fn seed_conversation(client: &reqwest::Client, gw: &str, model: &str, prio
         .expect("conv json");
 
     let conv_id = conv["id"].as_str().expect("conv id").to_string();
+    let mut prev_id: Option<String> = None;
 
     for _ in 0..prior_turns {
-        client
+        let mut body = serde_json::json!({
+            "model": model, "input": "bench",
+            "store": true, "stream": false,
+            "conversation_id": conv_id
+        });
+        if let Some(ref id) = prev_id {
+            body["previous_response_id"] = serde_json::Value::String(id.clone());
+        }
+        let resp: serde_json::Value = client
             .post(format!("{gw}/v1/responses"))
-            .json(&serde_json::json!({
-                "model": model, "input": "bench",
-                "store": true, "stream": false,
-                "conversation_id": conv_id
-            }))
+            .json(&body)
             .send()
             .await
             .expect("seed turn")
-            .bytes()
+            .json()
             .await
-            .expect("seed bytes");
+            .expect("seed turn json");
+        prev_id = resp["id"].as_str().map(str::to_string);
     }
 
-    conv_id
+    (conv_id, prev_id)
 }
 
 /// Seed N-1 turns via `previous_response_id` chaining (no `conversation_id`).
@@ -259,18 +275,26 @@ pub fn gateway_benchmarks(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("conversation_rehydration/non_streaming");
     for turns in 1..=max_turns {
-        let conv_id = rt.block_on(seed_conversation(&client, &gw_url, &model, turns - 1));
+        eprintln!(
+            "  [seed] conversation_rehydration/non_streaming  turns={turns}  prior={}",
+            turns - 1
+        );
+        let (conv_id, prev_id) = rt.block_on(seed_conversation(&client, &gw_url, &model, turns - 1));
         group.bench_with_input(BenchmarkId::new("turns", turns), &turns, |b, _| {
             b.to_async(Runtime::new().unwrap()).iter_batched(
-                || (conv_id.clone(), model.clone()),
-                |(cid, mdl)| {
+                || (conv_id.clone(), prev_id.clone(), model.clone()),
+                |(cid, pid, mdl)| {
                     let client = Arc::clone(&client);
                     let url = format!("{gw_url}/v1/responses");
                     async move {
+                        let mut body = serde_json::json!({"model": mdl, "input": "bench",
+                            "store": true, "stream": false, "conversation_id": cid});
+                        if let Some(id) = pid {
+                            body["previous_response_id"] = serde_json::Value::String(id);
+                        }
                         client
                             .post(&url)
-                            .json(&serde_json::json!({"model": mdl, "input": "bench",
-                                "store": true, "stream": false, "conversation_id": cid}))
+                            .json(&body)
                             .send()
                             .await
                             .unwrap()
@@ -287,18 +311,26 @@ pub fn gateway_benchmarks(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("conversation_rehydration/streaming");
     for turns in 1..=max_turns {
-        let conv_id = rt.block_on(seed_conversation(&client, &gw_url, &model, turns - 1));
+        eprintln!(
+            "  [seed] conversation_rehydration/streaming  turns={turns}  prior={}",
+            turns - 1
+        );
+        let (conv_id, prev_id) = rt.block_on(seed_conversation(&client, &gw_url, &model, turns - 1));
         group.bench_with_input(BenchmarkId::new("turns", turns), &turns, |b, _| {
             b.to_async(Runtime::new().unwrap()).iter_batched(
-                || (conv_id.clone(), model.clone()),
-                |(cid, mdl)| {
+                || (conv_id.clone(), prev_id.clone(), model.clone()),
+                |(cid, pid, mdl)| {
                     let client = Arc::clone(&client);
                     let url = format!("{gw_url}/v1/responses");
                     async move {
+                        let mut body = serde_json::json!({"model": mdl, "input": "bench",
+                            "store": true, "stream": true, "conversation_id": cid});
+                        if let Some(id) = pid {
+                            body["previous_response_id"] = serde_json::Value::String(id);
+                        }
                         client
                             .post(&url)
-                            .json(&serde_json::json!({"model": mdl, "input": "bench",
-                                "store": true, "stream": true, "conversation_id": cid}))
+                            .json(&body)
                             .send()
                             .await
                             .unwrap()
@@ -317,6 +349,10 @@ pub fn gateway_benchmarks(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("response_rehydration/non_streaming");
     for turns in 1..=max_turns {
+        eprintln!(
+            "  [seed] response_rehydration/non_streaming  turns={turns}  prior={}",
+            turns - 1
+        );
         let prev_id = rt.block_on(seed_response_chain(&client, &gw_url, &model, turns - 1));
         group.bench_with_input(BenchmarkId::new("turns", turns), &turns, |b, _| {
             b.to_async(Runtime::new().unwrap()).iter_batched(
@@ -349,6 +385,10 @@ pub fn gateway_benchmarks(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("response_rehydration/streaming");
     for turns in 1..=max_turns {
+        eprintln!(
+            "  [seed] response_rehydration/streaming  turns={turns}  prior={}",
+            turns - 1
+        );
         let prev_id = rt.block_on(seed_response_chain(&client, &gw_url, &model, turns - 1));
         group.bench_with_input(BenchmarkId::new("turns", turns), &turns, |b, _| {
             b.to_async(Runtime::new().unwrap()).iter_batched(
