@@ -149,13 +149,13 @@ pub async fn rehydrate_conversation(
         return Ok(ctx);
     }
 
-    if ctx.original_request.previous_response_id.is_some() {
-        rehydrate_from_response(&mut ctx, exec_ctx).await?;
+    if ctx.original_request.conversation_id.is_some() {
+        rehydrate_from_conversation(&mut ctx, exec_ctx).await?;
         return Ok(ctx);
     }
 
-    if ctx.original_request.conversation_id.is_some() {
-        rehydrate_from_conversation(&mut ctx, exec_ctx).await?;
+    if ctx.original_request.previous_response_id.is_some() {
+        rehydrate_from_response(&mut ctx, exec_ctx).await?;
         return Ok(ctx);
     }
 
