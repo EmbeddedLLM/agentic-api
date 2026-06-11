@@ -52,7 +52,7 @@ pub async fn ready(State(state): State<AppState>) -> impl IntoResponse {
 ///
 /// Returns `Ok((bytes, store))` or an error `Response` if the body exceeds
 /// `MAX_BODY_SIZE`.
-async fn read_body(body: axum::body::Body) -> Result<(Bytes, bool), Response> {
+async fn read_body(body: Body) -> Result<(Bytes, bool), Response> {
     let Ok(bytes) = axum::body::to_bytes(body, MAX_BODY_SIZE).await else {
         return Err(convert_response(error_response(
             StatusCode::PAYLOAD_TOO_LARGE,
