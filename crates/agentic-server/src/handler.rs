@@ -103,6 +103,7 @@ async fn execute_responses(state: &AppState, parts: Parts, body: Bytes) -> Respo
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
+        .filter(|s| !s.is_empty())
         .map(str::to_string);
 
     let exec_ctx = if request_auth.is_some() && request_auth != state.exec_ctx.client_auth {
@@ -159,7 +160,7 @@ pub fn executor_error_response(err: ExecutorError) -> Response {
     warn!("executor error ({status}): {message}");
 
     let body = serde_json::to_vec(&json!({
-        "error": { "message": message, "type": "api_error", "code": code }
+        "error": { "message": message, "type": code, "code": code }
     }))
     .unwrap_or_default();
 
