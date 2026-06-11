@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::body::Body;
-use axum::extract::State;
+use axum::extract::{Request, State};
 use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
@@ -149,7 +149,7 @@ pub fn executor_error_response(err: ExecutorError) -> Response {
         .expect("valid error response")
 }
 
-pub async fn conversations(State(state): State<AppState>, req: axum::extract::Request) -> Response {
+pub async fn conversations(State(state): State<AppState>, req: Request) -> Response {
     let (_, body) = req.into_parts();
     let (_, store) = match read_body(body).await {
         Ok(v) => v,
@@ -172,7 +172,7 @@ pub async fn conversations(State(state): State<AppState>, req: axum::extract::Re
     }
 }
 
-pub async fn responses(State(state): State<AppState>, req: axum::extract::Request) -> Response {
+pub async fn responses(State(state): State<AppState>, req: Request) -> Response {
     let (parts, body) = req.into_parts();
     let (body_bytes, store) = match read_body(body).await {
         Ok(v) => v,
