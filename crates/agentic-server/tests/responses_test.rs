@@ -17,7 +17,7 @@ async fn spawn_mock_vllm_json() -> (String, tokio::task::JoinHandle<()>) {
                 .status(200)
                 .header("Content-Type", "application/json")
                 .body(axum::body::Body::from(
-                    r#"{"id":"resp_vllm","object":"response","status":"completed",
+                    r#"{"id":"mock_id","object":"response","status":"completed",
                         "model":"test","output":[],"created_at":0}"#,
                 ))
                 .unwrap()
@@ -60,15 +60,15 @@ async fn test_store_false_proxies_json_to_vllm() {
     // Act
     let resp = reqwest::Client::new()
         .post(format!("{gw_url}/v1/responses"))
-        .json(&serde_json::json!({"model":"test","input":"hi","store":false,"stream":false}))
+        .json(&serde_json::json!({"model":"test","input":[{"type":"message","role":"user","content":"hi"}],"store":false,"stream":false}))
         .send()
         .await
         .unwrap();
 
-    // Assert — vLLM mock response forwarded
+    // Assert — proxy forwards vLLM response verbatim; mock_id is not resp_-prefixed
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(body["id"], "resp_vllm");
+    assert_eq!(body["id"], "mock_id");
 }
 
 #[tokio::test]
@@ -80,7 +80,7 @@ async fn test_store_false_proxies_sse_to_vllm() {
     // Act
     let resp = reqwest::Client::new()
         .post(format!("{gw_url}/v1/responses"))
-        .json(&serde_json::json!({"model":"test","input":"hi","store":false,"stream":true}))
+        .json(&serde_json::json!({"model":"test","input":[{"type":"message","role":"user","content":"hi"}],"store":false,"stream":true}))
         .send()
         .await
         .unwrap();
@@ -104,14 +104,19 @@ async fn test_store_true_reaches_executor_not_proxy() {
     // Act
     let resp = reqwest::Client::new()
         .post(format!("{gw_url}/v1/responses"))
-        .json(&serde_json::json!({"model":"test","input":"hi","store":true,"stream":false}))
+        .json(&serde_json::json!({"model":"test","input":[{"type":"message","role":"user","content":"hi"}],"store":true,"stream":false}))
         .send()
         .await
         .unwrap();
 
-    // Assert — executor path reached; disabled store returns 5xx (not the proxy's 200)
-    assert_ne!(resp.status(), 200, "expected executor path, not proxy");
-    assert!(resp.status().is_server_error());
+    // Assert — executor path reached: executor assigns a resp_-prefixed id
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.unwrap();
+    let id = body["id"].as_str().unwrap_or("");
+    assert!(
+        id.starts_with("resp_"),
+        "expected executor-assigned id starting with resp_, got: {id}"
+    );
 }
 
 #[tokio::test]

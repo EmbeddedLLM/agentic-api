@@ -88,8 +88,6 @@ async fn post_streaming(
     drain_sse(stream).await
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-
 async fn responses_flow(
     client: &reqwest::Client,
     gateway: &str,
@@ -104,7 +102,7 @@ async fn responses_flow(
         gateway,
         serde_json::json!({
             "model": model,
-            "input": "Please remember the keyword MANGO. Acknowledge with exactly: OK",
+            "input": [{"type": "message", "role": "user", "content": "Please remember the keyword MANGO. Acknowledge with exactly: OK"}],
             "store": true,
             "stream": false
         }),
@@ -122,7 +120,7 @@ async fn responses_flow(
         gateway,
         serde_json::json!({
             "model": model,
-            "input": "What keyword did I ask you to remember?",
+            "input": [{"type": "message", "role": "user", "content": "What keyword did I ask you to remember?"}],
             "store": true,
             "stream": true,
             "previous_response_id": t1_id
@@ -164,7 +162,7 @@ async fn conversation_flow(
         gateway,
         serde_json::json!({
             "model": model,
-            "input": "Please remember the keyword PAPAYA. Acknowledge with exactly: OK",
+            "input": [{"type": "message", "role": "user", "content": "Please remember the keyword PAPAYA. Acknowledge with exactly: OK"}],
             "store": true,
             "stream": false,
             "conversation_id": conv_id
@@ -183,7 +181,7 @@ async fn conversation_flow(
         gateway,
         serde_json::json!({
             "model": model,
-            "input": "What keyword did I ask you to remember?",
+            "input": [{"type": "message", "role": "user", "content": "What keyword did I ask you to remember?"}],
             "store": true,
             "stream": true,
             "conversation_id": conv_id

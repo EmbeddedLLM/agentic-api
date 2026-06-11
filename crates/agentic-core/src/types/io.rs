@@ -94,6 +94,25 @@ impl OutputMessage {
     }
 }
 
+impl From<OutputMessage> for InputMessage {
+    fn from(msg: OutputMessage) -> Self {
+        let parts = msg
+            .content
+            .into_iter()
+            .map(|c| {
+                InputContent::Text(InputTextContent {
+                    type_: c.type_,
+                    text: c.text,
+                })
+            })
+            .collect();
+        Self {
+            role: msg.role,
+            content: InputMessageContent::Parts(parts),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionToolCall {
     pub id: String,
