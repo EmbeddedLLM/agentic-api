@@ -8,6 +8,12 @@
 //!   Create a conversation, then two turns (non-streaming + streaming)
 //!   sharing the same `conversation_id`.
 //!
+//! # Step 1 — start the gateway (pointing at your vLLM host):
+//! ```bash
+//! cargo run -p agentic-server -- --llm-api-base http://localhost:8000
+//! ```
+//!
+//! # Step 2 — run the example against the running gateway:
 //! ```bash
 //! GATEWAY_URL=http://localhost:9000 \
 //! MODEL=Qwen/Qwen3-30B-A3B-FP8 \
