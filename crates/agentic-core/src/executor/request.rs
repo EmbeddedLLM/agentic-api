@@ -1,7 +1,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::config::Config;
+use crate::error::Error;
 use crate::executor::modes::{ConversationHandler, ResponseHandler};
+use crate::storage::{ConversationStore, ResponseStore, create_pool_with_schema};
 use crate::types::io::InputItem;
 use crate::types::request_response::{RequestPayload, ResponsePayload};
 
@@ -81,24 +84,32 @@ impl ExecutionContext {
         }
     }
 
-    #[must_use]
-    pub fn from_config(
-        conv_handler: ConversationHandler,
-        resp_handler: ResponseHandler,
-        client: Arc<reqwest::Client>,
-        cfg: &crate::config::Config,
-        client_auth: Option<String>,
-    ) -> Self {
-        // TODO: expose `streaming_chunk_timeout_s: Option<f64>` in `Config` and read it here
-        //       once all `Config` struct literals in agentic-server use `..Config::default()`.
-        let streaming_timeout = Duration::from_secs(30);
-        Self {
+    /// Build an `ExecutionContext` directly from [`Config`](crate::config::Config).
+    ///
+    /// Creates the database pool, both storage handlers, and an HTTP client
+    /// internally so callers don't need to depend on the storage layer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database pool cannot be opened or the schema
+    /// migration fails.
+    pub async fn from_config(cfg: &Config) -> Result<Self, Error> {
+        let db_url = cfg.db_url.as_deref().unwrap_or("sqlite://./agentic_api.db");
+        let pool = create_pool_with_schema(Some(db_url))
+            .await
+            .map_err(|e| Error::Config(format!("failed to open database '{db_url}': {e}")))?;
+
+        let conv_handler = ConversationHandler::new(ConversationStore::new(pool.clone()));
+        let resp_handler = ResponseHandler::new(ResponseStore::new(pool));
+        let client = Arc::new(reqwest::Client::new());
+
+        Ok(Self {
             conv_handler,
             resp_handler,
             client,
             llm_base_url: cfg.llm_api_base.clone(),
-            client_auth,
-            streaming_timeout,
-        }
+            client_auth: cfg.openai_api_key.clone(),
+            streaming_timeout: Duration::from_secs(30),
+        })
     }
 }

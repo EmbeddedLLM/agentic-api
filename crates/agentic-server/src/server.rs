@@ -2,37 +2,16 @@ use std::sync::Arc;
 
 use agentic_core::config::Config;
 use agentic_core::error::Error;
-use agentic_core::executor::{ConversationHandler, ExecutionContext, ResponseHandler};
+use agentic_core::executor::ExecutionContext;
 use agentic_core::proxy::ProxyState;
 use agentic_core::readiness::wait_llm_ready;
-use agentic_core::storage::{ConversationStore, ResponseStore, create_pool_with_schema};
 use agentic_server::app::{AppState, ServerConfig, build_router};
 use tokio::net::TcpListener;
 use tracing::info;
 
 async fn build_state(config: &Config) -> Result<AppState, Error> {
-    // Proxy state — always built, used for store=false requests.
     let proxy_state = ProxyState::new(config.clone())?;
-
-    // Executor — always built alongside the proxy.
-    // The db_url defaults to a local SQLite file when not explicitly set.
-    let db_url = config.db_url.as_deref().unwrap_or("sqlite://./agentic_api.db");
-
-    let pool = create_pool_with_schema(Some(db_url))
-        .await
-        .map_err(|e| Error::Config(format!("failed to open database '{db_url}': {e}")))?;
-
-    let conv_handler = ConversationHandler::new(ConversationStore::new(pool.clone()));
-    let resp_handler = ResponseHandler::new(ResponseStore::new(pool));
-    let client = Arc::new(reqwest::Client::new());
-
-    let exec_ctx = Arc::new(ExecutionContext::new(
-        conv_handler,
-        resp_handler,
-        client,
-        config.llm_api_base.clone(),
-        config.openai_api_key.clone(),
-    ));
+    let exec_ctx = Arc::new(ExecutionContext::from_config(config).await?);
 
     Ok(AppState {
         proxy_state,
