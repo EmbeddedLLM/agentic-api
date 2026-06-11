@@ -2,6 +2,7 @@ use http::StatusCode;
 use thiserror::Error;
 
 use crate::StorageError;
+use crate::utils::common::serialize_to_vec_or_default;
 
 #[non_exhaustive]
 #[derive(Debug, Error)]
@@ -53,6 +54,48 @@ pub enum ExecutorError {
 
     #[error("invalid request: {0}")]
     InvalidRequest(String),
+}
+
+impl ExecutorError {
+    /// HTTP status code that best represents this error to an API caller.
+    #[must_use]
+    pub fn http_status(&self) -> StatusCode {
+        match self {
+            Self::Storage(e) if e.is_not_found() => StatusCode::NOT_FOUND,
+            Self::LLMRequest { status, .. } => *status,
+            Self::InvalidRequest(_) => StatusCode::BAD_REQUEST,
+            Self::ParseError(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+
+    /// Short machine-readable error code for the API error envelope.
+    #[must_use]
+    pub fn error_code(&self) -> &'static str {
+        match self {
+            Self::Storage(e) if e.is_not_found() => "not_found",
+            Self::LLMRequest { .. } => "upstream_error",
+            Self::InvalidRequest(_) | Self::ParseError(_) => "invalid_request_error",
+            _ => "server_error",
+        }
+    }
+
+    /// Serialise the error into the HTTP response body bytes.
+    ///
+    /// `LLMRequest` bodies are forwarded verbatim; all other variants are
+    /// wrapped in the standard `{"error": {"message", "type", "code"}}` envelope.
+    #[must_use]
+    pub fn into_response_body(self) -> Vec<u8> {
+        match self {
+            Self::LLMRequest { body, .. } => body.into_bytes(),
+            other => {
+                let code = other.error_code();
+                serialize_to_vec_or_default(&serde_json::json!({
+                    "error": { "message": other.to_string(), "type": code, "code": code }
+                }))
+            }
+        }
+    }
 }
 
 pub type ExecutorResult<T> = Result<T, ExecutorError>;

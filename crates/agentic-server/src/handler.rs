@@ -11,9 +11,8 @@ use http::StatusCode;
 use serde_json::json;
 use tracing::warn;
 
-use agentic_core::executor::{ExecutorError, create_conversation, execute};
+use agentic_core::executor::{BoxStream, ExecutionContext, ExecutorError, create_conversation, execute};
 use agentic_core::proxy::{ProxyBody, ProxyRequest, ProxyResponse, error_response, proxy_request};
-use agentic_core::storage::StorageError;
 use agentic_core::types::request_response::RequestPayload;
 
 use crate::app::AppState;
@@ -92,12 +91,7 @@ async fn proxy_responses(state: &AppState, parts: Parts, body: Bytes) -> Respons
     convert_response(proxy_request(proxy_req, &state.proxy_state).await)
 }
 
-async fn execute_responses(state: &AppState, parts: Parts, body: Bytes) -> Response {
-    let mut payload = match serde_json::from_slice::<RequestPayload>(&body) {
-        Ok(p) => p,
-        Err(e) => return executor_error_response(ExecutorError::from(e)),
-    };
-
+fn resolve_exec_ctx(state: &AppState, parts: &Parts) -> Arc<ExecutionContext> {
     let request_auth = parts
         .headers
         .get("authorization")
@@ -106,28 +100,37 @@ async fn execute_responses(state: &AppState, parts: Parts, body: Bytes) -> Respo
         .filter(|s| !s.is_empty())
         .map(str::to_string);
 
-    let exec_ctx = if request_auth.is_some() && request_auth != state.exec_ctx.client_auth {
+    if request_auth.is_some() && request_auth != state.exec_ctx.client_auth {
         let mut ctx = (*state.exec_ctx).clone();
         ctx.client_auth = request_auth;
         Arc::new(ctx)
     } else {
         Arc::clone(&state.exec_ctx)
+    }
+}
+
+fn sse_response(stream: BoxStream) -> Response {
+    let byte_stream = stream.map(|line| Ok::<Bytes, std::convert::Infallible>(Bytes::from(line)));
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "text/event-stream; charset=utf-8")
+        .header("Cache-Control", "no-cache")
+        .header("X-Accel-Buffering", "no")
+        .body(Body::from_stream(byte_stream))
+        .expect("valid SSE response")
+}
+
+async fn execute_responses(state: &AppState, parts: Parts, body: Bytes) -> Response {
+    let mut payload = match serde_json::from_slice::<RequestPayload>(&body) {
+        Ok(p) => p,
+        Err(e) => return executor_error_response(ExecutorError::from(e)),
     };
 
     payload.conversation_id = payload.conversation_id.filter(|_| payload.store);
 
-    match execute(payload, exec_ctx).await {
+    match execute(payload, resolve_exec_ctx(state, &parts)).await {
         Ok(Either::Left(response_payload)) => axum::Json(response_payload).into_response(),
-        Ok(Either::Right(stream)) => {
-            let byte_stream = stream.map(|line| Ok::<Bytes, std::convert::Infallible>(Bytes::from(line)));
-            Response::builder()
-                .status(StatusCode::OK)
-                .header("Content-Type", "text/event-stream; charset=utf-8")
-                .header("Cache-Control", "no-cache")
-                .header("X-Accel-Buffering", "no")
-                .body(Body::from_stream(byte_stream))
-                .expect("valid SSE response")
-        }
+        Ok(Either::Right(stream)) => sse_response(stream),
         Err(e) => executor_error_response(e),
     }
 }
@@ -135,39 +138,14 @@ async fn execute_responses(state: &AppState, parts: Parts, body: Bytes) -> Respo
 /// # Panics
 /// Panics if the response builder produces an invalid response (unreachable in practice).
 pub fn executor_error_response(err: ExecutorError) -> Response {
-    let (status, code, message) = match err {
-        ExecutorError::Storage(StorageError::NotFound {
-            ref resource_type,
-            ref id,
-        }) => (
-            StatusCode::NOT_FOUND,
-            "not_found",
-            format!("{resource_type} not found: {id}"),
-        ),
-        ExecutorError::LLMRequest { status, body } => {
-            let http_status = StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
-            return Response::builder()
-                .status(http_status)
-                .header("Content-Type", "application/json")
-                .body(Body::from(body))
-                .expect("valid error response");
-        }
-        ExecutorError::InvalidRequest(msg) => (StatusCode::BAD_REQUEST, "invalid_request_error", msg),
-        ExecutorError::ParseError(msg) => (StatusCode::UNPROCESSABLE_ENTITY, "invalid_request_error", msg),
-        ref other => (StatusCode::INTERNAL_SERVER_ERROR, "server_error", other.to_string()),
-    };
-
-    warn!("executor error ({status}): {message}");
-
-    let body = serde_json::to_vec(&json!({
-        "error": { "message": message, "type": code, "code": code }
-    }))
-    .unwrap_or_default();
-
+    let status = err.http_status();
+    if !matches!(err, ExecutorError::LLMRequest { .. }) {
+        warn!("executor error ({status}): {err}");
+    }
     Response::builder()
         .status(status)
         .header("Content-Type", "application/json")
-        .body(Body::from(body))
+        .body(Body::from(err.into_response_body()))
         .expect("valid error response")
 }
 

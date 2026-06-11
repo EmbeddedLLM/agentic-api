@@ -90,3 +90,9 @@ pub fn deserialize_from_value<T: serde::de::DeserializeOwned>(
 pub fn deserialize_from_value_opt<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> Option<T> {
     serde_json::from_value(value).ok()
 }
+
+/// Serialize any type to JSON bytes, returning an empty `Vec` on error.
+#[must_use]
+pub fn serialize_to_vec_or_default<T: serde::Serialize>(value: &T) -> Vec<u8> {
+    serde_json::to_vec(value).unwrap_or_default()
+}
