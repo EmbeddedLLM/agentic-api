@@ -48,25 +48,28 @@ pub async fn ready(State(state): State<AppState>) -> impl IntoResponse {
     }
 }
 
-/// Read the request body and extract the `store` boolean (defaults to `true`).
-///
-/// Returns `Ok((bytes, store))` or an error `Response` if the body exceeds
-/// `MAX_BODY_SIZE`.
-async fn read_body(body: Body) -> Result<(Bytes, bool), Response> {
-    let Ok(bytes) = axum::body::to_bytes(body, MAX_BODY_SIZE).await else {
-        return Err(convert_response(error_response(
+async fn read_bytes(body: Body) -> Result<Bytes, Response> {
+    axum::body::to_bytes(body, MAX_BODY_SIZE).await.map_err(|_| {
+        convert_response(error_response(
             StatusCode::PAYLOAD_TOO_LARGE,
             "body_too_large",
             "request body too large",
-        )));
-    };
+        ))
+    })
+}
 
-    let store = serde_json::from_slice::<serde_json::Value>(&bytes)
+async fn read_and_parse(body: Body) -> Result<(Bytes, RequestPayload), Response> {
+    let bytes = read_bytes(body).await?;
+    let payload = serde_json::from_slice::<RequestPayload>(&bytes)
+        .map_err(|e| executor_error_response(ExecutorError::from(e)))?;
+    Ok((bytes, payload))
+}
+
+fn extract_store(bytes: &[u8]) -> bool {
+    serde_json::from_slice::<serde_json::Value>(bytes)
         .ok()
         .and_then(|j| j.get("store").and_then(serde_json::Value::as_bool))
-        .unwrap_or(true);
-
-    Ok((bytes, store))
+        .unwrap_or(true)
 }
 
 /// # Panics
@@ -120,12 +123,7 @@ fn sse_response(stream: BoxStream) -> Response {
         .expect("valid SSE response")
 }
 
-async fn execute_responses(state: &AppState, parts: Parts, body: Bytes) -> Response {
-    let mut payload = match serde_json::from_slice::<RequestPayload>(&body) {
-        Ok(p) => p,
-        Err(e) => return executor_error_response(ExecutorError::from(e)),
-    };
-
+async fn execute_responses(state: &AppState, parts: Parts, mut payload: RequestPayload) -> Response {
     payload.conversation_id = payload.conversation_id.filter(|_| payload.store);
 
     match execute(payload, resolve_exec_ctx(state, &parts)).await {
@@ -151,12 +149,12 @@ pub fn executor_error_response(err: ExecutorError) -> Response {
 
 pub async fn conversations(State(state): State<AppState>, req: Request) -> Response {
     let (_, body) = req.into_parts();
-    let (_, store) = match read_body(body).await {
-        Ok(v) => v,
+    let bytes = match read_bytes(body).await {
+        Ok(b) => b,
         Err(e) => return e,
     };
 
-    if !store {
+    if !extract_store(&bytes) {
         return executor_error_response(ExecutorError::InvalidRequest("conversations require store=true".into()));
     }
 
@@ -174,14 +172,14 @@ pub async fn conversations(State(state): State<AppState>, req: Request) -> Respo
 
 pub async fn responses(State(state): State<AppState>, req: Request) -> Response {
     let (parts, body) = req.into_parts();
-    let (body_bytes, store) = match read_body(body).await {
+    let (bytes, payload) = match read_and_parse(body).await {
         Ok(v) => v,
         Err(e) => return e,
     };
 
-    if store {
-        execute_responses(&state, parts, body_bytes).await
+    if payload.store {
+        execute_responses(&state, parts, payload).await
     } else {
-        proxy_responses(&state, parts, body_bytes).await
+        proxy_responses(&state, parts, bytes).await
     }
 }
