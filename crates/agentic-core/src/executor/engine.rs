@@ -392,6 +392,7 @@ pub async fn create_conversation(exec_ctx: &ExecutionContext) -> ExecutorResult<
 /// Run the full agentic loop.
 ///
 /// Returns `Either::Left(ResponsePayload)` for non-streaming requests, or
+// TODO: replace with a builder — ExecuteRequest::new(payload, ctx).auth(token).run().await
 /// `Either::Right(BoxStream)` for streaming, each yielded `String` is an SSE
 /// line ready to forward to the client.
 ///
