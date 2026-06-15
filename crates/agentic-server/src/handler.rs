@@ -177,6 +177,12 @@ pub async fn responses(State(state): State<AppState>, req: Request) -> Response 
         Err(e) => return e,
     };
 
+    if !payload.store && (payload.previous_response_id.is_some() || payload.conversation_id.is_some()) {
+        return executor_error_response(ExecutorError::InvalidRequest(
+            "previous_response_id and conversation_id require store=true".into(),
+        ));
+    }
+
     if payload.store {
         execute_responses(&state, parts, payload).await
     } else {
