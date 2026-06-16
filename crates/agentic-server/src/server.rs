@@ -74,7 +74,14 @@ pub async fn run_with_llm(config: Config, host: &str, port: u16, llm_args: Vec<S
         }
     }
 
-    let state = build_state(&config).await?;
+    let state = match build_state(&config).await {
+        Ok(s) => s,
+        Err(err) => {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            return Err(err);
+        }
+    };
 
     let result = tokio::select! {
         gateway = serve_gateway(state, host, port) => gateway,
