@@ -63,7 +63,7 @@ impl ExecutorError {
         match self {
             Self::Storage(e) if e.is_not_found() => StatusCode::NOT_FOUND,
             Self::LLMRequest { status, .. } => *status,
-            Self::InvalidRequest(_) => StatusCode::BAD_REQUEST,
+            Self::InvalidRequest(_) | Self::JsonError(_) => StatusCode::BAD_REQUEST,
             Self::ParseError(_) => StatusCode::UNPROCESSABLE_ENTITY,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         }
@@ -75,7 +75,7 @@ impl ExecutorError {
         match self {
             Self::Storage(e) if e.is_not_found() => "not_found",
             Self::LLMRequest { .. } => "upstream_error",
-            Self::InvalidRequest(_) | Self::ParseError(_) => "invalid_request_error",
+            Self::InvalidRequest(_) | Self::ParseError(_) | Self::JsonError(_) => "invalid_request_error",
             _ => "server_error",
         }
     }
