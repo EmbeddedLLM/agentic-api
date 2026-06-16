@@ -60,9 +60,14 @@ pub async fn create_pool(db_url: Option<&str>) -> DbResult<Arc<DbPool>> {
     // Prepare URL with database-specific parameters
     let url = prepare_db_url(db_url);
 
-    // Create connection pool with 10 max connections
-    // This is a conservative default - tune based on your workload
-    let pool = AnyPoolOptions::new().max_connections(10).connect(&url).await?;
+    // SQLite only allows one writer at a time; a single connection in the pool
+    // serializes writes at the pool level (queue).
+    // For other databases, 10 connections is a conservative default.
+    let max_connections = if url.starts_with("sqlite") { 1 } else { 10 };
+    let pool = AnyPoolOptions::new()
+        .max_connections(max_connections)
+        .connect(&url)
+        .await?;
 
     // Wrap in Arc for thread-safe sharing across async tasks
     Ok(Arc::new(pool))
