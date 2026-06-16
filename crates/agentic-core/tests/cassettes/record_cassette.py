@@ -419,6 +419,28 @@ def run_isolation(
             _send(client, body, stream, proxy_url)
 
 
+def run_store_true_then_store_false(
+    client: httpx.Client,
+    turns: int,
+    model: str,
+    stream: bool,
+    proxy_url: str,
+) -> None:
+    """Turn 1: store=true with conversation_id. Remaining turns: store=false, still pass conversation_id."""
+    conv_id = _create_conversation(client, proxy_url)
+    for turn in range(1, turns + 1):
+        store_turn = turn == 1
+        prompt = _prompt(f"Turn {turn}/{turns} — enter prompt: ")
+        body: dict = {
+            "model": model,
+            "input": prompt,
+            "stream": stream,
+            "store": store_turn,
+            "conversation": conv_id,
+        }
+        _send(client, body, stream, proxy_url)
+
+
 def run_mixed(
     client: httpx.Client,
     turns: int,
@@ -519,7 +541,7 @@ def run_responses(
 )
 @click.option(
     "--mode",
-    type=click.Choice(["conv", "isolation", "mixed", "responses"]),
+    type=click.Choice(["conv", "isolation", "mixed", "responses", "store_true_then_store_false"]),
     default="conv",
     show_default=True,
     help="Recording mode.",
@@ -639,6 +661,8 @@ def main(
                 run_mixed(client, turns, model, stream, store, proxy_url)
             elif mode == "responses":
                 run_responses(client, turns, model, stream, store, branches, proxy_url)
+            elif mode == "store_true_then_store_false":
+                run_store_true_then_store_false(client, turns, model, stream, proxy_url)
     finally:
         _stop_proxy(server)
 

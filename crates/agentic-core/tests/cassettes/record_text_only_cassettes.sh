@@ -242,7 +242,28 @@ python "$SCRIPTS_DIR/record_cassette.py" \
     --output "$CONV_DIR/conv-multi-branch-multi-turn-${MODEL_SLUG}-nonstreaming.yaml"
 green "✓ Test 10 done."
 
+next_test
+
+# ── Test 11: store=false follow-up with conversation_id still rehydrates + persists ──
+
+bold "═══════════════════════════════════════════════════════════════"
+bold "Test 11 of 11 — conv-store-false-followup-nonstreaming"
+bold "  Turn 1: store=true + conversation_id (stored)"
+bold "  Turn 2: store=false + same conversation_id (rehydrates, persists)"
+bold "═══════════════════════════════════════════════════════════════"
+bold "Prompts to enter:"
+echo "  Turn 1: Remember the word LEMON. Just say: OK"
+echo "  Turn 2: What word did I ask you to remember?"
+echo
+python "$SCRIPTS_DIR/record_cassette.py" \
+    --mode store_true_then_store_false \
+    --turns 2 \
+    --no-stream \
+    --model "$MODEL" \
+    --output "$CONV_DIR/conv-store-false-followup-${MODEL_SLUG}-nonstreaming.yaml"
+green "✓ Test 11 done."
+
 echo
 green "════════════════════════════════════════════════════════════════"
-green "All 10 cassettes recorded."
+green "All 11 cassettes recorded."
 green "════════════════════════════════════════════════════════════════"

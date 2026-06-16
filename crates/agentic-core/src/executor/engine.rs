@@ -313,7 +313,10 @@ async fn run_blocking(ctx: RequestContext, exec_ctx: &ExecutionContext) -> Execu
     );
     ctx.inject_ids(&mut payload);
 
-    if ctx.original_request.store {
+    let should_persist = ctx.original_request.store
+        || ctx.original_request.previous_response_id.is_some()
+        || ctx.original_request.conversation_id.is_some();
+    if should_persist {
         let ch = exec_ctx.conv_handler.clone();
         let rh = exec_ctx.resp_handler.clone();
         if let Err(e) = persist_response(payload.clone(), ctx, ch, rh).await {
@@ -337,7 +340,11 @@ fn run_stream(ctx: RequestContext, exec_ctx: Arc<ExecutionContext>) -> BoxStream
         }
     };
 
-    let store = ctx.original_request.store;
+    // Persist when store=true, or when an ID is passed — context continuity must
+    // be preserved even if the caller sets store=false.
+    let should_persist = ctx.original_request.store
+        || ctx.original_request.previous_response_id.is_some()
+        || ctx.original_request.conversation_id.is_some();
 
     Box::pin(stream! {
         let line_stream = Box::pin(call_inference(
@@ -365,7 +372,7 @@ fn run_stream(ctx: RequestContext, exec_ctx: Arc<ExecutionContext>) -> BoxStream
                 yield payload.as_responses_chunk();
                 yield DONE_MARKER.to_string();
 
-                if store {
+                if should_persist {
                     let ch = exec_ctx.conv_handler.clone();
                     let rh = exec_ctx.resp_handler.clone();
                     if let Err(e) = persist_response(payload, ctx, ch, rh).await {

@@ -1,0 +1,183 @@
+turns:
+- filename: t1
+  request:
+    body: {}
+    headers:
+      accept: '*/*'
+      authorization: Bearer ***
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/conversations
+    query_params: {}
+  response:
+    body:
+      created_at: 1781607526
+      id: conv_6a312c66ce248194a0927676869060d3000b70c4ed0bf09a
+      metadata: {}
+      object: conversation
+    headers:
+      content-type: application/json
+    status_code: 200
+- filename: t2
+  request:
+    body:
+      conversation: conv_6a312c66ce248194a0927676869060d3000b70c4ed0bf09a
+      input: 'Remember the word LEMON. Just say: OK'
+      model: gpt-4o
+      store: true
+      stream: false
+    headers:
+      accept: '*/*'
+      authorization: Bearer ***
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      background: false
+      billing:
+        payer: developer
+      completed_at: 1781607537
+      conversation:
+        id: conv_6a312c66ce248194a0927676869060d3000b70c4ed0bf09a
+      created_at: 1781607536
+      error: null
+      frequency_penalty: 0.0
+      id: resp_000b70c4ed0bf09a006a312c6ff2e08194aedb818631dd9f01
+      incomplete_details: null
+      instructions: null
+      max_output_tokens: null
+      max_tool_calls: null
+      metadata: {}
+      model: gpt-4o-2024-08-06
+      moderation: null
+      object: response
+      output:
+      - content:
+        - annotations: []
+          logprobs: []
+          text: OK
+          type: output_text
+        id: msg_000b70c4ed0bf09a006a312c7100a48194820a8d44f6445a3c
+        role: assistant
+        status: completed
+        type: message
+      parallel_tool_calls: true
+      presence_penalty: 0.0
+      previous_response_id: null
+      prompt_cache_key: null
+      prompt_cache_retention: in_memory
+      reasoning:
+        context: null
+        effort: null
+        summary: null
+      safety_identifier: null
+      service_tier: default
+      status: completed
+      store: true
+      temperature: 1.0
+      text:
+        format:
+          type: text
+        verbosity: medium
+      tool_choice: auto
+      tools: []
+      top_logprobs: 0
+      top_p: 1.0
+      truncation: disabled
+      usage:
+        input_tokens: 17
+        input_tokens_details:
+          cached_tokens: 0
+        output_tokens: 2
+        output_tokens_details:
+          reasoning_tokens: 0
+        total_tokens: 19
+      user: null
+    headers:
+      content-type: application/json
+    status_code: 200
+- filename: t3
+  request:
+    body:
+      conversation: conv_6a312c66ce248194a0927676869060d3000b70c4ed0bf09a
+      input: What word did I ask you to remember?
+      model: gpt-4o
+      store: false
+      stream: false
+    headers:
+      accept: '*/*'
+      authorization: Bearer ***
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      background: false
+      billing:
+        payer: developer
+      completed_at: 1781607545
+      conversation:
+        id: conv_6a312c66ce248194a0927676869060d3000b70c4ed0bf09a
+      created_at: 1781607544
+      error: null
+      frequency_penalty: 0.0
+      id: resp_000b70c4ed0bf09a016a312c789a7c81949fbafc7a68db8ea5
+      incomplete_details: null
+      instructions: null
+      max_output_tokens: null
+      max_tool_calls: null
+      metadata: {}
+      model: gpt-4o-2024-08-06
+      moderation: null
+      object: response
+      output:
+      - content:
+        - annotations: []
+          logprobs: []
+          text: LEMON
+          type: output_text
+        id: msg_000b70c4ed0bf09a016a312c799ba881948f272164ed6f6732
+        role: assistant
+        status: completed
+        type: message
+      parallel_tool_calls: true
+      presence_penalty: 0.0
+      previous_response_id: null
+      prompt_cache_key: null
+      prompt_cache_retention: in_memory
+      reasoning:
+        context: null
+        effort: null
+        summary: null
+      safety_identifier: null
+      service_tier: default
+      status: completed
+      store: false
+      temperature: 1.0
+      text:
+        format:
+          type: text
+        verbosity: medium
+      tool_choice: auto
+      tools: []
+      top_logprobs: 0
+      top_p: 1.0
+      truncation: disabled
+      usage:
+        input_tokens: 35
+        input_tokens_details:
+          cached_tokens: 0
+        output_tokens: 3
+        output_tokens_details:
+          reasoning_tokens: 0
+        total_tokens: 38
+      user: null
+    headers:
+      content-type: application/json
+    status_code: 200

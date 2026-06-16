@@ -10,7 +10,7 @@ use agentic_core::executor::{create_conversation, execute};
 use std::sync::Arc;
 use support::{
     TestFixture, collect_stream, expected_text, load_cassette, make_request, output_text, request_input_texts,
-    responses_turns, text_response, unwrap_blocking,
+    responses_turns, unwrap_blocking,
 };
 
 const DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/text_only/conversation");
@@ -305,51 +305,61 @@ async fn test_multi_branch() {
 }
 
 #[tokio::test]
-async fn test_store_false_with_conversation_id_hydrates_but_does_not_persist() {
-    let fixture = TestFixture::new_with_responses(vec![
-        text_response("stored answer"),
-        text_response("stateless answer"),
-        text_response("final answer"),
-    ])
-    .await;
+async fn test_store_false_with_conversation_id_hydrates_and_persists() {
+    let cassette = load_cassette(&format!("{DIR}/conv-store-false-followup-gpt-4o-nonstreaming.yaml"));
+    let all: Vec<_> = cassette.turns.iter().collect();
+    let fixture = TestFixture::new(&all).await;
     let ctx = &fixture.exec_ctx;
+    let resp = responses_turns(&cassette);
+    let (t1, t2) = (resp[0], resp[1]);
+
     let conv_id = create_conversation(ctx).await.expect("create conv").conversation_id;
 
+    // Turn 1: store=true
     let p1 = unwrap_blocking(
         execute(
-            make_request("seed", true, false, None, Some(conv_id.clone())),
+            make_request(
+                &t1.request.body.input,
+                t1.request.body.store,
+                false,
+                None,
+                Some(conv_id.clone()),
+            ),
             Arc::clone(ctx),
         )
         .await
-        .expect("stored turn"),
+        .expect("t1"),
     );
-    assert_eq!(output_text(&p1), "stored answer");
+    assert_eq!(p1.status, "completed");
+    assert_eq!(output_text(&p1), expected_text(t1));
 
+    // Turn 2: store=false but conversation_id passed — must rehydrate and persist locally
     let p2 = unwrap_blocking(
         execute(
-            make_request("follow up", false, false, None, Some(conv_id.clone())),
+            make_request(
+                &t2.request.body.input,
+                t2.request.body.store,
+                false,
+                None,
+                Some(conv_id.clone()),
+            ),
             Arc::clone(ctx),
         )
         .await
-        .expect("store=false follow-up"),
+        .expect("t2"),
     );
-    assert_eq!(output_text(&p2), "stateless answer");
+    assert_eq!(p2.status, "completed");
+    assert_eq!(output_text(&p2), expected_text(t2));
 
-    let p3 = unwrap_blocking(
-        execute(make_request("third", true, false, None, Some(conv_id)), Arc::clone(ctx))
-            .await
-            .expect("stored third turn"),
-    );
-    assert_eq!(output_text(&p3), "final answer");
-
+    // Turn 2 was sent the full history from turn 1 (rehydrated correctly)
     let requests = fixture.request_bodies().await;
-    assert_eq!(requests.len(), 3);
+    assert_eq!(requests.len(), 2);
     assert_eq!(
         request_input_texts(&requests[1]),
-        vec!["seed", "stored answer", "follow up"]
-    );
-    assert_eq!(
-        request_input_texts(&requests[2]),
-        vec!["seed", "stored answer", "third"]
+        vec![
+            t1.request.body.input.as_str(),
+            expected_text(t1).as_str(),
+            t2.request.body.input.as_str()
+        ]
     );
 }
