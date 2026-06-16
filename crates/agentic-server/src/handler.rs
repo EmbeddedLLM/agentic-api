@@ -123,9 +123,7 @@ fn sse_response(stream: BoxStream) -> Response {
         .expect("valid SSE response")
 }
 
-async fn execute_responses(state: &AppState, parts: Parts, mut payload: RequestPayload) -> Response {
-    payload.conversation_id = payload.conversation_id.filter(|_| payload.store);
-
+async fn execute_responses(state: &AppState, parts: Parts, payload: RequestPayload) -> Response {
     match execute(payload, resolve_exec_ctx(state, &parts)).await {
         Ok(Either::Left(response_payload)) => axum::Json(response_payload).into_response(),
         Ok(Either::Right(stream)) => sse_response(stream),
@@ -177,13 +175,9 @@ pub async fn responses(State(state): State<AppState>, req: Request) -> Response 
         Err(e) => return e,
     };
 
-    if !payload.store && (payload.previous_response_id.is_some() || payload.conversation_id.is_some()) {
-        return executor_error_response(ExecutorError::InvalidRequest(
-            "previous_response_id and conversation_id require store=true".into(),
-        ));
-    }
+    let should_persist = payload.store || payload.previous_response_id.is_some() || payload.conversation_id.is_some();
 
-    if payload.store {
+    if should_persist {
         execute_responses(&state, parts, payload).await
     } else {
         proxy_responses(&state, parts, bytes).await
