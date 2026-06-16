@@ -118,14 +118,17 @@ pub async fn get_items_by_conversation(pool: &DbPool, conversation_id: &str) -> 
         .await
 }
 
-/// Get next sequence number for items in a conversation.
+/// Get next sequence number for items in a conversation, within a transaction.
+///
+/// Reading inside the transaction ensures concurrent writers serialize on the same
+/// connection and cannot both claim the same sequence range.
 ///
 /// # Errors
 /// Returns `DbResult::Err` if the database query fails.
-pub async fn conversation_item_count(pool: &DbPool, conversation_id: &str) -> DbResult<Option<i64>> {
+pub async fn conversation_item_count(tx: &mut DbTransaction<'_>, conversation_id: &str) -> DbResult<Option<i64>> {
     let max_seq: Option<i64> = sqlx::query_scalar("SELECT MAX(seq) FROM items WHERE conversation_id = ?")
         .bind(conversation_id)
-        .fetch_optional(pool)
+        .fetch_optional(&mut **tx)
         .await?
         .flatten();
 

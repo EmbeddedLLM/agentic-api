@@ -258,7 +258,7 @@ async fn test_response_store_chaining_respects_foreign_key() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_conversation_concurrent_turns() {
     let pool = setup_pool().await;
     let store = ConversationStore::new(pool.clone());
