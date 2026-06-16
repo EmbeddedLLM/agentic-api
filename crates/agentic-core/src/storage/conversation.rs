@@ -99,9 +99,6 @@ impl ConversationStore {
         metadata: &ResponseMetadata,
     ) -> StoreResult<()> {
         let pool = self.pool()?;
-        let seq_start = item::conversation_item_count(pool, conversation_id)
-            .await?
-            .ok_or_else(|| StorageError::not_found("Conversation", conversation_id))?;
 
         let mut item_ids: Vec<String> = Vec::new();
         let mut items_: Vec<(String, String)> = Vec::new();
@@ -113,6 +110,10 @@ impl ConversationStore {
         }
 
         let mut tx = pool.begin().await?;
+
+        let seq_start = item::conversation_item_count(&mut tx, conversation_id)
+            .await?
+            .ok_or_else(|| StorageError::not_found("Conversation", conversation_id))?;
 
         item::create_in_tx(&mut tx, items_, Some(conversation_id), Some(seq_start)).await?;
 
