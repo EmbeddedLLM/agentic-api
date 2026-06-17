@@ -1,0 +1,361 @@
+turns:
+- filename: t1
+  request:
+    body:
+      input: 'Reply with exactly one word: HELLO'
+      model: openai/gpt-oss-20b
+      store: true
+      stream: true
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    headers:
+      content-type: text/event-stream; charset=utf-8
+    sse:
+    - 'event: response.created
+
+      '
+    - 'data: {"response":{"id":"resp_b23d2c649fe8c967","created_at":1781669958,"incomplete_details":null,"instructions":null,"metadata":null,"model":"openai/gpt-oss-20b","object":"response","output":[],"parallel_tool_calls":true,"temperature":1.0,"tool_choice":"none","tools":[],"top_p":1.0,"background":false,"max_output_tokens":130997,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","text":null,"top_logprobs":null,"truncation":"disabled","usage":null,"user":null,"presence_penalty":0.0,"frequency_penalty":0.0,"kv_transfer_params":null,"input_messages":null,"output_messages":null},"sequence_number":0,"type":"response.created"}
+
+      '
+    - '
+
+      '
+    - 'event: response.in_progress
+
+      '
+    - 'data: {"response":{"id":"resp_b23d2c649fe8c967","created_at":1781669958,"incomplete_details":null,"instructions":null,"metadata":null,"model":"openai/gpt-oss-20b","object":"response","output":[],"parallel_tool_calls":true,"temperature":1.0,"tool_choice":"none","tools":[],"top_p":1.0,"background":false,"max_output_tokens":130997,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","text":null,"top_logprobs":null,"truncation":"disabled","usage":null,"user":null,"presence_penalty":0.0,"frequency_penalty":0.0,"kv_transfer_params":null,"input_messages":null,"output_messages":null},"sequence_number":1,"type":"response.in_progress"}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.added
+
+      '
+    - 'data: {"item":{"id":"msg_8b9153183e425160","summary":[],"type":"reasoning","content":null,"encrypted_content":null,"status":"in_progress"},"output_index":0,"sequence_number":2,"type":"response.output_item.added"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_part.added
+
+      '
+    - 'data: {"content_index":0,"item_id":"msg_8b9153183e425160","output_index":0,"part":{"text":"","type":"reasoning_text"},"sequence_number":3,"type":"response.reasoning_part.added"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"User","item_id":"msg_8b9153183e425160","output_index":0,"sequence_number":4,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" says: \"Reply with exactly one word","item_id":"msg_8b9153183e425160","output_index":0,"sequence_number":5,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":":","item_id":"msg_8b9153183e425160","output_index":0,"sequence_number":6,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" HEL","item_id":"msg_8b9153183e425160","output_index":0,"sequence_number":7,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"LO","item_id":"msg_8b9153183e425160","output_index":0,"sequence_number":8,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"\".","item_id":"msg_8b9153183e425160","output_index":0,"sequence_number":9,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" So","item_id":"msg_8b9153183e425160","output_index":0,"sequence_number":10,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" they","item_id":"msg_8b9153183e425160","output_index":0,"sequence_number":11,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" want","item_id":"msg_8b9153183e425160","output_index":0,"sequence_number":12,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" me","item_id":"msg_8b9153183e425160","output_index":0,"sequence_number":13,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" to","item_id":"msg_8b9153183e425160","output_index":0,"sequence_number":14,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" reply","item_id":"msg_8b9153183e425160","output_index":0,"sequence_number":15,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" with","item_id":"msg_8b9153183e425160","output_index":0,"sequence_number":16,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" exactly","item_id":"msg_8b9153183e425160","output_index":0,"sequence_number":17,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" one","item_id":"msg_8b9153183e425160","output_index":0,"sequence_number":18,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" word","item_id":"msg_8b9153183e425160","output_index":0,"sequence_number":19,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":":","item_id":"msg_8b9153183e425160","output_index":0,"sequence_number":20,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" \"","item_id":"msg_8b9153183e425160","output_index":0,"sequence_number":21,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"HEL","item_id":"msg_8b9153183e425160","output_index":0,"sequence_number":22,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"LO","item_id":"msg_8b9153183e425160","output_index":0,"sequence_number":23,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"\".","item_id":"msg_8b9153183e425160","output_index":0,"sequence_number":24,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" Just","item_id":"msg_8b9153183e425160","output_index":0,"sequence_number":25,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" output","item_id":"msg_8b9153183e425160","output_index":0,"sequence_number":26,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" HEL","item_id":"msg_8b9153183e425160","output_index":0,"sequence_number":27,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"LO","item_id":"msg_8b9153183e425160","output_index":0,"sequence_number":28,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":".","item_id":"msg_8b9153183e425160","output_index":0,"sequence_number":29,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.done
+
+      '
+    - 'data: {"content_index":0,"item_id":"msg_8b9153183e425160","output_index":0,"sequence_number":30,"text":"User
+      says: \"Reply with exactly one word: HELLO\". So they want me to reply with
+      exactly one word: \"HELLO\". Just output HELLO.","type":"response.reasoning_text.done"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_part.done
+
+      '
+    - 'data: {"content_index":0,"item_id":"msg_8b9153183e425160","output_index":0,"part":{"text":"User
+      says: \"Reply with exactly one word: HELLO\". So they want me to reply with
+      exactly one word: \"HELLO\". Just output HELLO.","type":"reasoning_text"},"sequence_number":31,"type":"response.reasoning_part.done"}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.done
+
+      '
+    - 'data: {"item":{"id":"msg_8b9153183e425160","summary":[],"type":"reasoning","content":[{"text":"User
+      says: \"Reply with exactly one word: HELLO\". So they want me to reply with
+      exactly one word: \"HELLO\". Just output HELLO.","type":"reasoning_text"}],"encrypted_content":null,"status":"completed"},"output_index":0,"sequence_number":32,"type":"response.output_item.done"}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.done
+
+      '
+    - 'data: {"content_index":0,"item_id":"msg_8b9153183e425160","logprobs":[],"output_index":1,"sequence_number":33,"text":"HELLO","type":"response.output_text.done"}
+
+      '
+    - '
+
+      '
+    - 'event: response.content_part.done
+
+      '
+    - 'data: {"content_index":0,"item_id":"msg_8b9153183e425160","output_index":1,"part":{"annotations":[],"text":"HELLO","type":"output_text","logprobs":null},"sequence_number":34,"type":"response.content_part.done"}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.done
+
+      '
+    - 'data: {"item":{"id":"msg_8b9153183e425160","content":[{"annotations":[],"text":"HELLO","type":"output_text","logprobs":null}],"role":"assistant","status":"completed","type":"message","phase":null},"output_index":1,"sequence_number":35,"type":"response.output_item.done"}
+
+      '
+    - '
+
+      '
+    - 'event: response.completed
+
+      '
+    - 'data: {"response":{"id":"resp_b23d2c649fe8c967","created_at":1781669958,"incomplete_details":null,"instructions":null,"metadata":null,"model":"openai/gpt-oss-20b","object":"response","output":[{"id":"rs_a31e19b97b32c714","summary":[],"type":"reasoning","content":[{"text":"User
+      says: \"Reply with exactly one word: HELLO\". So they want me to reply with
+      exactly one word: \"HELLO\". Just output HELLO.","type":"reasoning_text"}],"encrypted_content":null,"status":null},{"id":"msg_adec7efbbb2ad5cc","content":[{"annotations":[],"text":"HELLO","type":"output_text","logprobs":null}],"role":"assistant","status":"completed","type":"message","phase":null}],"parallel_tool_calls":true,"temperature":1.0,"tool_choice":"none","tools":[],"top_p":1.0,"background":false,"max_output_tokens":130997,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"completed","text":null,"top_logprobs":null,"truncation":"disabled","usage":{"input_tokens":75,"input_tokens_details":{"cached_tokens":64,"input_tokens_per_turn":[75],"cached_tokens_per_turn":[64]},"output_tokens":45,"output_tokens_details":{"reasoning_tokens":27,"tool_output_tokens":0,"output_tokens_per_turn":[45],"tool_output_tokens_per_turn":[0]},"total_tokens":120},"user":null,"presence_penalty":0.0,"frequency_penalty":0.0,"kv_transfer_params":null,"input_messages":null,"output_messages":null},"sequence_number":36,"type":"response.completed"}
+
+      '
+    - '
+
+      '
+    status_code: 200

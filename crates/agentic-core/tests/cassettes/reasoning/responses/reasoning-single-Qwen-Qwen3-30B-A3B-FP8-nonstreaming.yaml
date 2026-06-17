@@ -1,0 +1,99 @@
+turns:
+- filename: t1
+  request:
+    body:
+      input: 'Reply with exactly one word: HELLO'
+      model: Qwen/Qwen3-30B-A3B-FP8
+      store: true
+      stream: false
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      background: false
+      created_at: 1781669660
+      frequency_penalty: 0.0
+      id: resp_b2761c3ff936af2e
+      incomplete_details: null
+      input_messages: null
+      instructions: null
+      kv_transfer_params: null
+      max_output_tokens: 40944
+      max_tool_calls: null
+      metadata: null
+      model: Qwen/Qwen3-30B-A3B-FP8
+      object: response
+      output:
+      - content:
+        - text: '
+
+            Okay, the user sent "Reply with exactly one word: HELLO". So they want
+            me to respond with just one word, which is "HELLO". But wait, the instruction
+            says to reply with exactly one word, so maybe they want me to say "HELLO"
+            as the response. But the user already wrote "HELLO" in their message.
+            Maybe they want me to confirm by saying "HELLO" again. But the user might
+            be testing if I follow instructions. Let me check the query again. The
+            user says "Reply with exactly one word: HELLO". So the correct response
+            is "HELLO". But sometimes, people might expect a different answer. However,
+            the instruction is clear. I should just reply with "HELLO" as the one
+            word. No need for extra text. Let me make sure there''s no trick here.
+            The user might be checking if I can follow simple instructions. So the
+            answer is "HELLO".
+
+            '
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_98dbd4f6b0248e8e
+        status: null
+        summary: []
+        type: reasoning
+      - content:
+        - annotations: []
+          logprobs: null
+          text: '
+
+
+            HELLO'
+          type: output_text
+        id: msg_96a5475d3ce09fb6
+        phase: null
+        role: assistant
+        status: completed
+        type: message
+      output_messages: null
+      parallel_tool_calls: true
+      presence_penalty: 0.0
+      previous_response_id: null
+      prompt: null
+      reasoning: null
+      service_tier: auto
+      status: completed
+      temperature: 0.6
+      text: null
+      tool_choice: none
+      tools: []
+      top_logprobs: null
+      top_p: 0.95
+      truncation: disabled
+      usage:
+        input_tokens: 16
+        input_tokens_details:
+          cached_tokens: 0
+          cached_tokens_per_turn: []
+          input_tokens_per_turn: []
+        output_tokens: 201
+        output_tokens_details:
+          output_tokens_per_turn: []
+          reasoning_tokens: 195
+          tool_output_tokens: 0
+          tool_output_tokens_per_turn: []
+        total_tokens: 217
+      user: null
+    headers:
+      content-type: application/json
+    status_code: 200

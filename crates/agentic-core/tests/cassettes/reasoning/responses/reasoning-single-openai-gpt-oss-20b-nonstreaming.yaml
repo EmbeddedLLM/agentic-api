@@ -1,0 +1,92 @@
+turns:
+- filename: t1
+  request:
+    body:
+      input: 'Reply with exactly one word: HELLO'
+      model: openai/gpt-oss-20b
+      store: true
+      stream: false
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      background: false
+      created_at: 1781669946
+      frequency_penalty: 0.0
+      id: resp_9208ccdf1a7aaf55
+      incomplete_details: null
+      input_messages: null
+      instructions: null
+      kv_transfer_params: null
+      max_output_tokens: 130997
+      max_tool_calls: null
+      metadata: null
+      model: openai/gpt-oss-20b
+      object: response
+      output:
+      - content:
+        - text: 'User says: "Reply with exactly one word: HELLO". They want exactly
+            one word. Could be "HELLO". They said "Reply with exactly one word: HELLO".
+            That might be instruction to answer with exactly one word, which is HELLO?
+            The phrasing: "Reply with exactly one word: HELLO" indicates that the
+            reply should be exactly one word, which is "HELLO". So we reply with HELLO.
+
+
+            Thus only one word: HELLO. Done.'
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_b55b5395d3481c06
+        status: null
+        summary: []
+        type: reasoning
+      - content:
+        - annotations: []
+          logprobs: null
+          text: HELLO
+          type: output_text
+        id: msg_8a264d7b3234bea8
+        phase: null
+        role: assistant
+        status: completed
+        type: message
+      output_messages: null
+      parallel_tool_calls: true
+      presence_penalty: 0.0
+      previous_response_id: null
+      prompt: null
+      reasoning: null
+      service_tier: auto
+      status: completed
+      temperature: 1.0
+      text: null
+      tool_choice: none
+      tools: []
+      top_logprobs: null
+      top_p: 1.0
+      truncation: disabled
+      usage:
+        input_tokens: 75
+        input_tokens_details:
+          cached_tokens: 0
+          cached_tokens_per_turn:
+          - 0
+          input_tokens_per_turn:
+          - 75
+        output_tokens: 112
+        output_tokens_details:
+          output_tokens_per_turn:
+          - 112
+          reasoning_tokens: 101
+          tool_output_tokens: 0
+          tool_output_tokens_per_turn:
+          - 0
+        total_tokens: 187
+      user: null
+    headers:
+      content-type: application/json
+    status_code: 200
