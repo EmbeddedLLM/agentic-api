@@ -1,0 +1,404 @@
+turns:
+- filename: t1
+  request:
+    body:
+      input: What is the current NVIDIA stock price, and search the web for the latest
+        vLLM release news?
+      model: Qwen/Qwen3-30B-A3B-FP8
+      store: true
+      stream: false
+      tool_choice: auto
+      tools:
+      - description: Get current temperature and conditions for a city
+        name: get_weather
+        parameters:
+          additionalProperties: false
+          properties:
+            location:
+              description: City name
+              type: string
+            unit:
+              enum:
+              - celsius
+              - fahrenheit
+              type: string
+          required:
+          - location
+          type: object
+        strict: true
+        type: function
+      - description: Get the current date and time in a given IANA timezone
+        name: get_time
+        parameters:
+          additionalProperties: false
+          properties:
+            timezone:
+              description: IANA timezone, e.g. Europe/Paris
+              type: string
+          required:
+          - timezone
+          type: object
+        strict: true
+        type: function
+      - description: Get the latest stock price and daily change for a ticker symbol
+        name: get_stock_price
+        parameters:
+          additionalProperties: false
+          properties:
+            currency:
+              description: Currency to return the price in, e.g. USD
+              type: string
+            ticker:
+              description: Stock ticker symbol, e.g. AAPL
+              type: string
+          required:
+          - ticker
+          type: object
+        strict: true
+        type: function
+      - description: Search the web and return the top results for a query
+        name: search_web
+        parameters:
+          additionalProperties: false
+          properties:
+            num_results:
+              default: 3
+              description: Number of results to return (1-10)
+              type: integer
+            query:
+              description: Search query string
+              type: string
+          required:
+          - query
+          type: object
+        strict: true
+        type: function
+      - description: Translate text from one language to another
+        name: translate_text
+        parameters:
+          additionalProperties: false
+          properties:
+            source_language:
+              description: Source language code; omit for auto-detect
+              type: string
+            target_language:
+              description: Target language code, e.g. fr, de, ja
+              type: string
+            text:
+              description: Text to translate
+              type: string
+          required:
+          - text
+          - target_language
+          type: object
+        strict: true
+        type: function
+      - description: Evaluate a mathematical expression and return the numeric result
+        name: calculate
+        parameters:
+          additionalProperties: false
+          properties:
+            expression:
+              description: Math expression to evaluate, e.g. (12 * 8) / 3 + sqrt(16)
+              type: string
+          required:
+          - expression
+          type: object
+        strict: true
+        type: function
+      - description: Send an email to one or more recipients
+        name: send_email
+        parameters:
+          additionalProperties: false
+          properties:
+            body:
+              description: Plain-text email body
+              type: string
+            cc:
+              description: CC recipients (optional)
+              items:
+                type: string
+              type: array
+            subject:
+              description: Email subject line
+              type: string
+            to:
+              description: Recipient email addresses
+              items:
+                type: string
+              type: array
+          required:
+          - to
+          - subject
+          - body
+          type: object
+        strict: true
+        type: function
+      - description: Read the contents of a file at the given path
+        name: read_file
+        parameters:
+          additionalProperties: false
+          properties:
+            encoding:
+              description: File encoding
+              enum:
+              - utf-8
+              - latin-1
+              - ascii
+              type: string
+            path:
+              description: Absolute or relative file path
+              type: string
+          required:
+          - path
+          type: object
+        strict: true
+        type: function
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      background: false
+      created_at: 1781677833
+      frequency_penalty: 0.0
+      id: resp_884dd7c282eb365a
+      incomplete_details: null
+      input_messages: null
+      instructions: null
+      kv_transfer_params: null
+      max_output_tokens: 39857
+      max_tool_calls: null
+      metadata: null
+      model: Qwen/Qwen3-30B-A3B-FP8
+      object: response
+      output:
+      - content:
+        - annotations: []
+          logprobs: null
+          text: "<think>\nOkay, the user is asking two things: the current NVIDIA\
+            \ stock price and the latest vLLM release news. Let me break this down.\n\
+            \nFirst, for the NVIDIA stock price, I need to use the get_stock_price\
+            \ function. The required parameter is the ticker symbol. NVIDIA's ticker\
+            \ is NVDA, right? So I'll set the ticker to \"NVDA\" and maybe specify\
+            \ the currency as USD since that's common for US stocks.\n\nNext, the\
+            \ user wants a web search for the latest vLLM release news. The search_web\
+            \ function is the way to go here. The query should be \"latest vLLM release\
+            \ news\". I'll set the number of results to maybe 3 as the default, but\
+            \ the user didn't specify, so sticking with the default is safe.\n\nWait,\
+            \ do I need to check if both functions are available? Looking back at\
+            \ the tools provided, yes, both get_stock_price and search_web are there.\
+            \ No issues there. \n\nI should make sure the parameters are correctly\
+            \ formatted. For get_stock_price, the parameters are \"ticker\" and \"\
+            currency\". The user didn't mention currency, but including USD makes\
+            \ sense. For search_web, the query is straightforward. \n\nI think that's\
+            \ all. I'll generate the two tool calls separately.\n</think>\n\n"
+          type: output_text
+        id: msg_b197449e0d74245c
+        phase: null
+        role: assistant
+        status: completed
+        type: message
+      - arguments: '{"ticker": "NVDA", "currency": "USD"}'
+        call_id: chatcmpl-tool-aefa6dedd2b3243f
+        id: fc_880cf91f8e37f3c3
+        name: get_stock_price
+        namespace: null
+        status: completed
+        type: function_call
+      - arguments: '{"query": "latest vLLM release news", "num_results": 3}'
+        call_id: chatcmpl-tool-877b48c2913eec42
+        id: fc_a0667c7834107ceb
+        name: search_web
+        namespace: null
+        status: completed
+        type: function_call
+      output_messages: null
+      parallel_tool_calls: true
+      presence_penalty: 0.0
+      previous_response_id: null
+      prompt: null
+      reasoning: null
+      service_tier: auto
+      status: completed
+      temperature: 0.6
+      text: null
+      tool_choice: auto
+      tools:
+      - defer_loading: null
+        description: Get current temperature and conditions for a city
+        name: get_weather
+        parameters:
+          additionalProperties: false
+          properties:
+            location:
+              description: City name
+              type: string
+            unit:
+              enum:
+              - celsius
+              - fahrenheit
+              type: string
+          required:
+          - location
+          type: object
+        strict: true
+        type: function
+      - defer_loading: null
+        description: Get the current date and time in a given IANA timezone
+        name: get_time
+        parameters:
+          additionalProperties: false
+          properties:
+            timezone:
+              description: IANA timezone, e.g. Europe/Paris
+              type: string
+          required:
+          - timezone
+          type: object
+        strict: true
+        type: function
+      - defer_loading: null
+        description: Get the latest stock price and daily change for a ticker symbol
+        name: get_stock_price
+        parameters:
+          additionalProperties: false
+          properties:
+            currency:
+              description: Currency to return the price in, e.g. USD
+              type: string
+            ticker:
+              description: Stock ticker symbol, e.g. AAPL
+              type: string
+          required:
+          - ticker
+          type: object
+        strict: true
+        type: function
+      - defer_loading: null
+        description: Search the web and return the top results for a query
+        name: search_web
+        parameters:
+          additionalProperties: false
+          properties:
+            num_results:
+              default: 3
+              description: Number of results to return (1-10)
+              type: integer
+            query:
+              description: Search query string
+              type: string
+          required:
+          - query
+          type: object
+        strict: true
+        type: function
+      - defer_loading: null
+        description: Translate text from one language to another
+        name: translate_text
+        parameters:
+          additionalProperties: false
+          properties:
+            source_language:
+              description: Source language code; omit for auto-detect
+              type: string
+            target_language:
+              description: Target language code, e.g. fr, de, ja
+              type: string
+            text:
+              description: Text to translate
+              type: string
+          required:
+          - text
+          - target_language
+          type: object
+        strict: true
+        type: function
+      - defer_loading: null
+        description: Evaluate a mathematical expression and return the numeric result
+        name: calculate
+        parameters:
+          additionalProperties: false
+          properties:
+            expression:
+              description: Math expression to evaluate, e.g. (12 * 8) / 3 + sqrt(16)
+              type: string
+          required:
+          - expression
+          type: object
+        strict: true
+        type: function
+      - defer_loading: null
+        description: Send an email to one or more recipients
+        name: send_email
+        parameters:
+          additionalProperties: false
+          properties:
+            body:
+              description: Plain-text email body
+              type: string
+            cc:
+              description: CC recipients (optional)
+              items:
+                type: string
+              type: array
+            subject:
+              description: Email subject line
+              type: string
+            to:
+              description: Recipient email addresses
+              items:
+                type: string
+              type: array
+          required:
+          - to
+          - subject
+          - body
+          type: object
+        strict: true
+        type: function
+      - defer_loading: null
+        description: Read the contents of a file at the given path
+        name: read_file
+        parameters:
+          additionalProperties: false
+          properties:
+            encoding:
+              description: File encoding
+              enum:
+              - utf-8
+              - latin-1
+              - ascii
+              type: string
+            path:
+              description: Absolute or relative file path
+              type: string
+          required:
+          - path
+          type: object
+        strict: true
+        type: function
+      top_logprobs: null
+      top_p: 0.95
+      truncation: disabled
+      usage:
+        input_tokens: 1103
+        input_tokens_details:
+          cached_tokens: 0
+          cached_tokens_per_turn: []
+          input_tokens_per_turn: []
+        output_tokens: 324
+        output_tokens_details:
+          output_tokens_per_turn: []
+          reasoning_tokens: 0
+          tool_output_tokens: 0
+          tool_output_tokens_per_turn: []
+        total_tokens: 1427
+      user: null
+    headers:
+      content-type: application/json
+    status_code: 200

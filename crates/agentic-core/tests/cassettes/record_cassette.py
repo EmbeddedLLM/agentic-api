@@ -325,6 +325,13 @@ def _prompt(label: str) -> str:
         sys.exit(0)
 
 
+def _inject_tools(body: dict, tools: list | None, tool_choice: Any) -> None:
+    if tools is not None:
+        body["tools"] = tools
+    if tool_choice is not None:
+        body["tool_choice"] = tool_choice
+
+
 def run_conv(
     client: httpx.Client,
     turns: int,
@@ -470,6 +477,8 @@ def run_responses(
     store: bool,
     branches: list[tuple[int, int | None]],
     proxy_url: str,
+    tools: list | None = None,
+    tool_choice: Any = None,
 ) -> None:
     response_ids: dict[int, str] = {}
     branch_map: dict[int, int] = {}
@@ -497,6 +506,7 @@ def run_responses(
         body: dict = {"model": model, "input": prompt, "stream": stream, "store": store}
         if previous_response_id and store:
             body["previous_response_id"] = previous_response_id
+        _inject_tools(body, tools, tool_choice)
         response_id = _send(client, body, stream, proxy_url)
         previous_response_id = response_id if store else None
         if response_id:
@@ -522,6 +532,7 @@ def run_responses(
             "store": store,
             "previous_response_id": branch_resp_id,
         }
+        _inject_tools(body, tools, tool_choice)
         _send(client, body, stream, proxy_url)
 
 
@@ -593,6 +604,21 @@ def run_responses(
     default=None,
     help="vLLM upstream URL, e.g. http://localhost:8000 (responses mode only, no auth).",
 )
+@click.option(
+    "--tools",
+    "tools_file",
+    metavar="FILE",
+    default=None,
+    type=click.Path(exists=True),
+    help="Path to a JSON file containing a tools array to inject into every request.",
+)
+@click.option(
+    "--tool-choice",
+    "tool_choice_raw",
+    metavar="VALUE",
+    default=None,
+    help='tool_choice value: "auto", "none", "required", or JSON e.g. \'{"type":"function","name":"foo"}\'.',
+)
 def main(
     turns: int,
     output: str,
@@ -605,6 +631,8 @@ def main(
     proxy_port: int,
     openai_url: str | None,
     vllm_url: str | None,
+    tools_file: str | None,
+    tool_choice_raw: str | None,
 ) -> None:
     """Interactive multi-turn cassette recorder (proxy embedded)."""
     if branch_turn_number and not branch_from:
@@ -624,6 +652,21 @@ def main(
         raise click.UsageError(
             f"--vllm is only supported with --mode responses (got --mode {mode})."
         )
+
+    tools: list | None = None
+    if tools_file:
+        with open(tools_file, encoding="utf-8") as f:
+            tools = json.load(f)
+        if not isinstance(tools, list):
+            raise click.UsageError("--tools file must contain a JSON array.")
+
+    tool_choice: Any = None
+    if tool_choice_raw:
+        stripped = tool_choice_raw.strip()
+        if stripped.startswith("{") or stripped.startswith("["):
+            tool_choice = json.loads(stripped)
+        else:
+            tool_choice = stripped
 
     if vllm_url:
         target = vllm_url.rstrip("/")
@@ -660,7 +703,7 @@ def main(
             elif mode == "mixed":
                 run_mixed(client, turns, model, stream, store, proxy_url)
             elif mode == "responses":
-                run_responses(client, turns, model, stream, store, branches, proxy_url)
+                run_responses(client, turns, model, stream, store, branches, proxy_url, tools, tool_choice)
             elif mode == "store_true_then_store_false":
                 run_store_true_then_store_false(client, turns, model, stream, proxy_url)
     finally:

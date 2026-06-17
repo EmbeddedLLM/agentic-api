@@ -1,0 +1,408 @@
+turns:
+- filename: t1
+  request:
+    body:
+      input: Translate the phrase Hello, how are you? into Japanese.
+      model: Qwen/Qwen3-30B-A3B-FP8
+      store: true
+      stream: false
+      tool_choice: none
+      tools:
+      - description: Get current temperature and conditions for a city
+        name: get_weather
+        parameters:
+          additionalProperties: false
+          properties:
+            location:
+              description: City name
+              type: string
+            unit:
+              enum:
+              - celsius
+              - fahrenheit
+              type: string
+          required:
+          - location
+          type: object
+        strict: true
+        type: function
+      - description: Get the current date and time in a given IANA timezone
+        name: get_time
+        parameters:
+          additionalProperties: false
+          properties:
+            timezone:
+              description: IANA timezone, e.g. Europe/Paris
+              type: string
+          required:
+          - timezone
+          type: object
+        strict: true
+        type: function
+      - description: Get the latest stock price and daily change for a ticker symbol
+        name: get_stock_price
+        parameters:
+          additionalProperties: false
+          properties:
+            currency:
+              description: Currency to return the price in, e.g. USD
+              type: string
+            ticker:
+              description: Stock ticker symbol, e.g. AAPL
+              type: string
+          required:
+          - ticker
+          type: object
+        strict: true
+        type: function
+      - description: Search the web and return the top results for a query
+        name: search_web
+        parameters:
+          additionalProperties: false
+          properties:
+            num_results:
+              default: 3
+              description: Number of results to return (1-10)
+              type: integer
+            query:
+              description: Search query string
+              type: string
+          required:
+          - query
+          type: object
+        strict: true
+        type: function
+      - description: Translate text from one language to another
+        name: translate_text
+        parameters:
+          additionalProperties: false
+          properties:
+            source_language:
+              description: Source language code; omit for auto-detect
+              type: string
+            target_language:
+              description: Target language code, e.g. fr, de, ja
+              type: string
+            text:
+              description: Text to translate
+              type: string
+          required:
+          - text
+          - target_language
+          type: object
+        strict: true
+        type: function
+      - description: Evaluate a mathematical expression and return the numeric result
+        name: calculate
+        parameters:
+          additionalProperties: false
+          properties:
+            expression:
+              description: Math expression to evaluate, e.g. (12 * 8) / 3 + sqrt(16)
+              type: string
+          required:
+          - expression
+          type: object
+        strict: true
+        type: function
+      - description: Send an email to one or more recipients
+        name: send_email
+        parameters:
+          additionalProperties: false
+          properties:
+            body:
+              description: Plain-text email body
+              type: string
+            cc:
+              description: CC recipients (optional)
+              items:
+                type: string
+              type: array
+            subject:
+              description: Email subject line
+              type: string
+            to:
+              description: Recipient email addresses
+              items:
+                type: string
+              type: array
+          required:
+          - to
+          - subject
+          - body
+          type: object
+        strict: true
+        type: function
+      - description: Read the contents of a file at the given path
+        name: read_file
+        parameters:
+          additionalProperties: false
+          properties:
+            encoding:
+              description: File encoding
+              enum:
+              - utf-8
+              - latin-1
+              - ascii
+              type: string
+            path:
+              description: Absolute or relative file path
+              type: string
+          required:
+          - path
+          type: object
+        strict: true
+        type: function
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      background: false
+      created_at: 1781677875
+      frequency_penalty: 0.0
+      id: resp_8cc0a7566ac032fe
+      incomplete_details: null
+      input_messages: null
+      instructions: null
+      kv_transfer_params: null
+      max_output_tokens: 40940
+      max_tool_calls: null
+      metadata: null
+      model: Qwen/Qwen3-30B-A3B-FP8
+      object: response
+      output:
+      - content:
+        - annotations: []
+          logprobs: null
+          text: '<think>
+
+            Okay, I need to translate "Hello, how are you?" into Japanese. Let me
+            think. The user probably wants a common and polite way to say that.
+
+
+            First, "Hello" in Japanese is usually "こんにちは" (Konnichiwa). But sometimes
+            people use "やあ" (Yaa) for a more casual tone. However, since the original
+            is a standard greeting, "こんにちは" is safer.
+
+
+            Next, "how are you?" The direct translation would be "お元気ですか？" (Ogenki
+            desu ka?), which is polite. But there''s also "お元気？" (Ogenki?), which
+            is more casual. Depending on the context, but since the original is neutral,
+            maybe the polite form is better.
+
+
+            Putting it together: "こんにちは、お元気ですか？" (Konnichiwa, ogenki desu ka?) That
+            sounds right. Alternatively, some might use "おはよう" (Ohayou) for "good
+            morning," but the original is just "Hello," not specific to time of day.
+            So "こんにちは" is better.
+
+
+            Wait, another thought: In some regions, people might use "おげんき" instead
+            of "お元気," but I think "お元気" is more standard. Also, the particles: "は"
+            for the topic, "が" for the question. So "お元気ですか" is correct.
+
+
+            I think that''s it. Let me double-check. Yes, "こんにちは、お元気ですか？" is the standard
+            translation. Alternatively, in a very casual setting, "やあ、元気？" but the
+            user probably wants the polite version. So the answer should be "こんにちは、お元気ですか？"
+
+            </think>
+
+
+            こんにちは、お元気ですか？'
+          type: output_text
+        id: msg_afbc6eedfc5b99e8
+        phase: null
+        role: assistant
+        status: completed
+        type: message
+      output_messages: null
+      parallel_tool_calls: true
+      presence_penalty: 0.0
+      previous_response_id: null
+      prompt: null
+      reasoning: null
+      service_tier: auto
+      status: completed
+      temperature: 0.6
+      text: null
+      tool_choice: none
+      tools:
+      - defer_loading: null
+        description: Get current temperature and conditions for a city
+        name: get_weather
+        parameters:
+          additionalProperties: false
+          properties:
+            location:
+              description: City name
+              type: string
+            unit:
+              enum:
+              - celsius
+              - fahrenheit
+              type: string
+          required:
+          - location
+          type: object
+        strict: true
+        type: function
+      - defer_loading: null
+        description: Get the current date and time in a given IANA timezone
+        name: get_time
+        parameters:
+          additionalProperties: false
+          properties:
+            timezone:
+              description: IANA timezone, e.g. Europe/Paris
+              type: string
+          required:
+          - timezone
+          type: object
+        strict: true
+        type: function
+      - defer_loading: null
+        description: Get the latest stock price and daily change for a ticker symbol
+        name: get_stock_price
+        parameters:
+          additionalProperties: false
+          properties:
+            currency:
+              description: Currency to return the price in, e.g. USD
+              type: string
+            ticker:
+              description: Stock ticker symbol, e.g. AAPL
+              type: string
+          required:
+          - ticker
+          type: object
+        strict: true
+        type: function
+      - defer_loading: null
+        description: Search the web and return the top results for a query
+        name: search_web
+        parameters:
+          additionalProperties: false
+          properties:
+            num_results:
+              default: 3
+              description: Number of results to return (1-10)
+              type: integer
+            query:
+              description: Search query string
+              type: string
+          required:
+          - query
+          type: object
+        strict: true
+        type: function
+      - defer_loading: null
+        description: Translate text from one language to another
+        name: translate_text
+        parameters:
+          additionalProperties: false
+          properties:
+            source_language:
+              description: Source language code; omit for auto-detect
+              type: string
+            target_language:
+              description: Target language code, e.g. fr, de, ja
+              type: string
+            text:
+              description: Text to translate
+              type: string
+          required:
+          - text
+          - target_language
+          type: object
+        strict: true
+        type: function
+      - defer_loading: null
+        description: Evaluate a mathematical expression and return the numeric result
+        name: calculate
+        parameters:
+          additionalProperties: false
+          properties:
+            expression:
+              description: Math expression to evaluate, e.g. (12 * 8) / 3 + sqrt(16)
+              type: string
+          required:
+          - expression
+          type: object
+        strict: true
+        type: function
+      - defer_loading: null
+        description: Send an email to one or more recipients
+        name: send_email
+        parameters:
+          additionalProperties: false
+          properties:
+            body:
+              description: Plain-text email body
+              type: string
+            cc:
+              description: CC recipients (optional)
+              items:
+                type: string
+              type: array
+            subject:
+              description: Email subject line
+              type: string
+            to:
+              description: Recipient email addresses
+              items:
+                type: string
+              type: array
+          required:
+          - to
+          - subject
+          - body
+          type: object
+        strict: true
+        type: function
+      - defer_loading: null
+        description: Read the contents of a file at the given path
+        name: read_file
+        parameters:
+          additionalProperties: false
+          properties:
+            encoding:
+              description: File encoding
+              enum:
+              - utf-8
+              - latin-1
+              - ascii
+              type: string
+            path:
+              description: Absolute or relative file path
+              type: string
+          required:
+          - path
+          type: object
+        strict: true
+        type: function
+      top_logprobs: null
+      top_p: 0.95
+      truncation: disabled
+      usage:
+        input_tokens: 20
+        input_tokens_details:
+          cached_tokens: 0
+          cached_tokens_per_turn: []
+          input_tokens_per_turn: []
+        output_tokens: 371
+        output_tokens_details:
+          output_tokens_per_turn: []
+          reasoning_tokens: 0
+          tool_output_tokens: 0
+          tool_output_tokens_per_turn: []
+        total_tokens: 391
+      user: null
+    headers:
+      content-type: application/json
+    status_code: 200

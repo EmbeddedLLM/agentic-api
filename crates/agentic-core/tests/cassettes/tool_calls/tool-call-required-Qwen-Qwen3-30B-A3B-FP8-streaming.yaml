@@ -1,0 +1,818 @@
+turns:
+- filename: t1
+  request:
+    body:
+      input: Calculate (128 * 0.75) + 42, and send an email to alice@example.com with
+        subject Daily Report and body All systems nominal.
+      model: Qwen/Qwen3-30B-A3B-FP8
+      store: true
+      stream: true
+      tool_choice: required
+      tools:
+      - description: Get current temperature and conditions for a city
+        name: get_weather
+        parameters:
+          additionalProperties: false
+          properties:
+            location:
+              description: City name
+              type: string
+            unit:
+              enum:
+              - celsius
+              - fahrenheit
+              type: string
+          required:
+          - location
+          type: object
+        strict: true
+        type: function
+      - description: Get the current date and time in a given IANA timezone
+        name: get_time
+        parameters:
+          additionalProperties: false
+          properties:
+            timezone:
+              description: IANA timezone, e.g. Europe/Paris
+              type: string
+          required:
+          - timezone
+          type: object
+        strict: true
+        type: function
+      - description: Get the latest stock price and daily change for a ticker symbol
+        name: get_stock_price
+        parameters:
+          additionalProperties: false
+          properties:
+            currency:
+              description: Currency to return the price in, e.g. USD
+              type: string
+            ticker:
+              description: Stock ticker symbol, e.g. AAPL
+              type: string
+          required:
+          - ticker
+          type: object
+        strict: true
+        type: function
+      - description: Search the web and return the top results for a query
+        name: search_web
+        parameters:
+          additionalProperties: false
+          properties:
+            num_results:
+              default: 3
+              description: Number of results to return (1-10)
+              type: integer
+            query:
+              description: Search query string
+              type: string
+          required:
+          - query
+          type: object
+        strict: true
+        type: function
+      - description: Translate text from one language to another
+        name: translate_text
+        parameters:
+          additionalProperties: false
+          properties:
+            source_language:
+              description: Source language code; omit for auto-detect
+              type: string
+            target_language:
+              description: Target language code, e.g. fr, de, ja
+              type: string
+            text:
+              description: Text to translate
+              type: string
+          required:
+          - text
+          - target_language
+          type: object
+        strict: true
+        type: function
+      - description: Evaluate a mathematical expression and return the numeric result
+        name: calculate
+        parameters:
+          additionalProperties: false
+          properties:
+            expression:
+              description: Math expression to evaluate, e.g. (12 * 8) / 3 + sqrt(16)
+              type: string
+          required:
+          - expression
+          type: object
+        strict: true
+        type: function
+      - description: Send an email to one or more recipients
+        name: send_email
+        parameters:
+          additionalProperties: false
+          properties:
+            body:
+              description: Plain-text email body
+              type: string
+            cc:
+              description: CC recipients (optional)
+              items:
+                type: string
+              type: array
+            subject:
+              description: Email subject line
+              type: string
+            to:
+              description: Recipient email addresses
+              items:
+                type: string
+              type: array
+          required:
+          - to
+          - subject
+          - body
+          type: object
+        strict: true
+        type: function
+      - description: Read the contents of a file at the given path
+        name: read_file
+        parameters:
+          additionalProperties: false
+          properties:
+            encoding:
+              description: File encoding
+              enum:
+              - utf-8
+              - latin-1
+              - ascii
+              type: string
+            path:
+              description: Absolute or relative file path
+              type: string
+          required:
+          - path
+          type: object
+        strict: true
+        type: function
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    headers:
+      content-type: text/event-stream; charset=utf-8
+    sse:
+    - 'event: response.created
+
+      '
+    - 'data: {"response":{"id":"resp_a2e7b4671f6e52c7","created_at":1781677891,"incomplete_details":null,"instructions":null,"metadata":null,"model":"Qwen/Qwen3-30B-A3B-FP8","object":"response","output":[],"parallel_tool_calls":true,"temperature":0.6,"tool_choice":"required","tools":[{"name":"get_weather","parameters":{"type":"object","properties":{"location":{"type":"string","description":"City
+      name"},"unit":{"type":"string","enum":["celsius","fahrenheit"]}},"required":["location"],"additionalProperties":false},"strict":true,"type":"function","defer_loading":null,"description":"Get
+      current temperature and conditions for a city"},{"name":"get_time","parameters":{"type":"object","properties":{"timezone":{"type":"string","description":"IANA
+      timezone, e.g. Europe/Paris"}},"required":["timezone"],"additionalProperties":false},"strict":true,"type":"function","defer_loading":null,"description":"Get
+      the current date and time in a given IANA timezone"},{"name":"get_stock_price","parameters":{"type":"object","properties":{"ticker":{"type":"string","description":"Stock
+      ticker symbol, e.g. AAPL"},"currency":{"type":"string","description":"Currency
+      to return the price in, e.g. USD"}},"required":["ticker"],"additionalProperties":false},"strict":true,"type":"function","defer_loading":null,"description":"Get
+      the latest stock price and daily change for a ticker symbol"},{"name":"search_web","parameters":{"type":"object","properties":{"query":{"type":"string","description":"Search
+      query string"},"num_results":{"type":"integer","description":"Number of results
+      to return (1-10)","default":3}},"required":["query"],"additionalProperties":false},"strict":true,"type":"function","defer_loading":null,"description":"Search
+      the web and return the top results for a query"},{"name":"translate_text","parameters":{"type":"object","properties":{"text":{"type":"string","description":"Text
+      to translate"},"target_language":{"type":"string","description":"Target language
+      code, e.g. fr, de, ja"},"source_language":{"type":"string","description":"Source
+      language code; omit for auto-detect"}},"required":["text","target_language"],"additionalProperties":false},"strict":true,"type":"function","defer_loading":null,"description":"Translate
+      text from one language to another"},{"name":"calculate","parameters":{"type":"object","properties":{"expression":{"type":"string","description":"Math
+      expression to evaluate, e.g. (12 * 8) / 3 + sqrt(16)"}},"required":["expression"],"additionalProperties":false},"strict":true,"type":"function","defer_loading":null,"description":"Evaluate
+      a mathematical expression and return the numeric result"},{"name":"send_email","parameters":{"type":"object","properties":{"to":{"type":"array","items":{"type":"string"},"description":"Recipient
+      email addresses"},"subject":{"type":"string","description":"Email subject line"},"body":{"type":"string","description":"Plain-text
+      email body"},"cc":{"type":"array","items":{"type":"string"},"description":"CC
+      recipients (optional)"}},"required":["to","subject","body"],"additionalProperties":false},"strict":true,"type":"function","defer_loading":null,"description":"Send
+      an email to one or more recipients"},{"name":"read_file","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Absolute
+      or relative file path"},"encoding":{"type":"string","enum":["utf-8","latin-1","ascii"],"description":"File
+      encoding"}},"required":["path"],"additionalProperties":false},"strict":true,"type":"function","defer_loading":null,"description":"Read
+      the contents of a file at the given path"}],"top_p":0.95,"background":false,"max_output_tokens":39843,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","text":{"format":{"name":"tool_calling_response","schema":{"type":"array","minItems":1,"items":{"type":"object","anyOf":[{"properties":{"name":{"type":"string","enum":["get_weather"]},"parameters":{"type":"object","properties":{"location":{"type":"string","description":"City
+      name"},"unit":{"type":"string","enum":["celsius","fahrenheit"]}},"required":["location"],"additionalProperties":false}},"required":["name","parameters"]},{"properties":{"name":{"type":"string","enum":["get_time"]},"parameters":{"type":"object","properties":{"timezone":{"type":"string","description":"IANA
+      timezone, e.g. Europe/Paris"}},"required":["timezone"],"additionalProperties":false}},"required":["name","parameters"]},{"properties":{"name":{"type":"string","enum":["get_stock_price"]},"parameters":{"type":"object","properties":{"ticker":{"type":"string","description":"Stock
+      ticker symbol, e.g. AAPL"},"currency":{"type":"string","description":"Currency
+      to return the price in, e.g. USD"}},"required":["ticker"],"additionalProperties":false}},"required":["name","parameters"]},{"properties":{"name":{"type":"string","enum":["search_web"]},"parameters":{"type":"object","properties":{"query":{"type":"string","description":"Search
+      query string"},"num_results":{"type":"integer","description":"Number of results
+      to return (1-10)","default":3}},"required":["query"],"additionalProperties":false}},"required":["name","parameters"]},{"properties":{"name":{"type":"string","enum":["translate_text"]},"parameters":{"type":"object","properties":{"text":{"type":"string","description":"Text
+      to translate"},"target_language":{"type":"string","description":"Target language
+      code, e.g. fr, de, ja"},"source_language":{"type":"string","description":"Source
+      language code; omit for auto-detect"}},"required":["text","target_language"],"additionalProperties":false}},"required":["name","parameters"]},{"properties":{"name":{"type":"string","enum":["calculate"]},"parameters":{"type":"object","properties":{"expression":{"type":"string","description":"Math
+      expression to evaluate, e.g. (12 * 8) / 3 + sqrt(16)"}},"required":["expression"],"additionalProperties":false}},"required":["name","parameters"]},{"properties":{"name":{"type":"string","enum":["send_email"]},"parameters":{"type":"object","properties":{"to":{"type":"array","items":{"type":"string"},"description":"Recipient
+      email addresses"},"subject":{"type":"string","description":"Email subject line"},"body":{"type":"string","description":"Plain-text
+      email body"},"cc":{"type":"array","items":{"type":"string"},"description":"CC
+      recipients (optional)"}},"required":["to","subject","body"],"additionalProperties":false}},"required":["name","parameters"]},{"properties":{"name":{"type":"string","enum":["read_file"]},"parameters":{"type":"object","properties":{"path":{"type":"string","description":"Absolute
+      or relative file path"},"encoding":{"type":"string","enum":["utf-8","latin-1","ascii"],"description":"File
+      encoding"}},"required":["path"],"additionalProperties":false}},"required":["name","parameters"]}]}},"type":"json_schema","description":null,"strict":true},"verbosity":null},"top_logprobs":null,"truncation":"disabled","usage":null,"user":null,"presence_penalty":0.0,"frequency_penalty":0.0,"kv_transfer_params":null,"input_messages":null,"output_messages":null},"sequence_number":0,"type":"response.created"}
+
+      '
+    - '
+
+      '
+    - 'event: response.in_progress
+
+      '
+    - 'data: {"response":{"id":"resp_a2e7b4671f6e52c7","created_at":1781677891,"incomplete_details":null,"instructions":null,"metadata":null,"model":"Qwen/Qwen3-30B-A3B-FP8","object":"response","output":[],"parallel_tool_calls":true,"temperature":0.6,"tool_choice":"required","tools":[{"name":"get_weather","parameters":{"type":"object","properties":{"location":{"type":"string","description":"City
+      name"},"unit":{"type":"string","enum":["celsius","fahrenheit"]}},"required":["location"],"additionalProperties":false},"strict":true,"type":"function","defer_loading":null,"description":"Get
+      current temperature and conditions for a city"},{"name":"get_time","parameters":{"type":"object","properties":{"timezone":{"type":"string","description":"IANA
+      timezone, e.g. Europe/Paris"}},"required":["timezone"],"additionalProperties":false},"strict":true,"type":"function","defer_loading":null,"description":"Get
+      the current date and time in a given IANA timezone"},{"name":"get_stock_price","parameters":{"type":"object","properties":{"ticker":{"type":"string","description":"Stock
+      ticker symbol, e.g. AAPL"},"currency":{"type":"string","description":"Currency
+      to return the price in, e.g. USD"}},"required":["ticker"],"additionalProperties":false},"strict":true,"type":"function","defer_loading":null,"description":"Get
+      the latest stock price and daily change for a ticker symbol"},{"name":"search_web","parameters":{"type":"object","properties":{"query":{"type":"string","description":"Search
+      query string"},"num_results":{"type":"integer","description":"Number of results
+      to return (1-10)","default":3}},"required":["query"],"additionalProperties":false},"strict":true,"type":"function","defer_loading":null,"description":"Search
+      the web and return the top results for a query"},{"name":"translate_text","parameters":{"type":"object","properties":{"text":{"type":"string","description":"Text
+      to translate"},"target_language":{"type":"string","description":"Target language
+      code, e.g. fr, de, ja"},"source_language":{"type":"string","description":"Source
+      language code; omit for auto-detect"}},"required":["text","target_language"],"additionalProperties":false},"strict":true,"type":"function","defer_loading":null,"description":"Translate
+      text from one language to another"},{"name":"calculate","parameters":{"type":"object","properties":{"expression":{"type":"string","description":"Math
+      expression to evaluate, e.g. (12 * 8) / 3 + sqrt(16)"}},"required":["expression"],"additionalProperties":false},"strict":true,"type":"function","defer_loading":null,"description":"Evaluate
+      a mathematical expression and return the numeric result"},{"name":"send_email","parameters":{"type":"object","properties":{"to":{"type":"array","items":{"type":"string"},"description":"Recipient
+      email addresses"},"subject":{"type":"string","description":"Email subject line"},"body":{"type":"string","description":"Plain-text
+      email body"},"cc":{"type":"array","items":{"type":"string"},"description":"CC
+      recipients (optional)"}},"required":["to","subject","body"],"additionalProperties":false},"strict":true,"type":"function","defer_loading":null,"description":"Send
+      an email to one or more recipients"},{"name":"read_file","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Absolute
+      or relative file path"},"encoding":{"type":"string","enum":["utf-8","latin-1","ascii"],"description":"File
+      encoding"}},"required":["path"],"additionalProperties":false},"strict":true,"type":"function","defer_loading":null,"description":"Read
+      the contents of a file at the given path"}],"top_p":0.95,"background":false,"max_output_tokens":39843,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","text":{"format":{"name":"tool_calling_response","schema":{"type":"array","minItems":1,"items":{"type":"object","anyOf":[{"properties":{"name":{"type":"string","enum":["get_weather"]},"parameters":{"type":"object","properties":{"location":{"type":"string","description":"City
+      name"},"unit":{"type":"string","enum":["celsius","fahrenheit"]}},"required":["location"],"additionalProperties":false}},"required":["name","parameters"]},{"properties":{"name":{"type":"string","enum":["get_time"]},"parameters":{"type":"object","properties":{"timezone":{"type":"string","description":"IANA
+      timezone, e.g. Europe/Paris"}},"required":["timezone"],"additionalProperties":false}},"required":["name","parameters"]},{"properties":{"name":{"type":"string","enum":["get_stock_price"]},"parameters":{"type":"object","properties":{"ticker":{"type":"string","description":"Stock
+      ticker symbol, e.g. AAPL"},"currency":{"type":"string","description":"Currency
+      to return the price in, e.g. USD"}},"required":["ticker"],"additionalProperties":false}},"required":["name","parameters"]},{"properties":{"name":{"type":"string","enum":["search_web"]},"parameters":{"type":"object","properties":{"query":{"type":"string","description":"Search
+      query string"},"num_results":{"type":"integer","description":"Number of results
+      to return (1-10)","default":3}},"required":["query"],"additionalProperties":false}},"required":["name","parameters"]},{"properties":{"name":{"type":"string","enum":["translate_text"]},"parameters":{"type":"object","properties":{"text":{"type":"string","description":"Text
+      to translate"},"target_language":{"type":"string","description":"Target language
+      code, e.g. fr, de, ja"},"source_language":{"type":"string","description":"Source
+      language code; omit for auto-detect"}},"required":["text","target_language"],"additionalProperties":false}},"required":["name","parameters"]},{"properties":{"name":{"type":"string","enum":["calculate"]},"parameters":{"type":"object","properties":{"expression":{"type":"string","description":"Math
+      expression to evaluate, e.g. (12 * 8) / 3 + sqrt(16)"}},"required":["expression"],"additionalProperties":false}},"required":["name","parameters"]},{"properties":{"name":{"type":"string","enum":["send_email"]},"parameters":{"type":"object","properties":{"to":{"type":"array","items":{"type":"string"},"description":"Recipient
+      email addresses"},"subject":{"type":"string","description":"Email subject line"},"body":{"type":"string","description":"Plain-text
+      email body"},"cc":{"type":"array","items":{"type":"string"},"description":"CC
+      recipients (optional)"}},"required":["to","subject","body"],"additionalProperties":false}},"required":["name","parameters"]},{"properties":{"name":{"type":"string","enum":["read_file"]},"parameters":{"type":"object","properties":{"path":{"type":"string","description":"Absolute
+      or relative file path"},"encoding":{"type":"string","enum":["utf-8","latin-1","ascii"],"description":"File
+      encoding"}},"required":["path"],"additionalProperties":false}},"required":["name","parameters"]}]}},"type":"json_schema","description":null,"strict":true},"verbosity":null},"top_logprobs":null,"truncation":"disabled","usage":null,"user":null,"presence_penalty":0.0,"frequency_penalty":0.0,"kv_transfer_params":null,"input_messages":null,"output_messages":null},"sequence_number":1,"type":"response.in_progress"}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.added
+
+      '
+    - 'data: {"item":{"arguments":"","call_id":"call_bf2ee341d62b0a3f","name":"calculate","type":"function_call","id":"bfeda38c97ec2536","namespace":null,"status":"in_progress"},"output_index":0,"sequence_number":2,"type":"response.output_item.added"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"{","item_id":"bfeda38c97ec2536","output_index":0,"sequence_number":3,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":" \"","item_id":"bfeda38c97ec2536","output_index":0,"sequence_number":4,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"expression","item_id":"bfeda38c97ec2536","output_index":0,"sequence_number":5,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"\":","item_id":"bfeda38c97ec2536","output_index":0,"sequence_number":6,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":" \"(","item_id":"bfeda38c97ec2536","output_index":0,"sequence_number":7,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"1","item_id":"bfeda38c97ec2536","output_index":0,"sequence_number":8,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"2","item_id":"bfeda38c97ec2536","output_index":0,"sequence_number":9,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"8","item_id":"bfeda38c97ec2536","output_index":0,"sequence_number":10,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":" *","item_id":"bfeda38c97ec2536","output_index":0,"sequence_number":11,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":" ","item_id":"bfeda38c97ec2536","output_index":0,"sequence_number":12,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"0","item_id":"bfeda38c97ec2536","output_index":0,"sequence_number":13,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":".","item_id":"bfeda38c97ec2536","output_index":0,"sequence_number":14,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"7","item_id":"bfeda38c97ec2536","output_index":0,"sequence_number":15,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"5","item_id":"bfeda38c97ec2536","output_index":0,"sequence_number":16,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":")","item_id":"bfeda38c97ec2536","output_index":0,"sequence_number":17,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":" +","item_id":"bfeda38c97ec2536","output_index":0,"sequence_number":18,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":" ","item_id":"bfeda38c97ec2536","output_index":0,"sequence_number":19,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"4","item_id":"bfeda38c97ec2536","output_index":0,"sequence_number":20,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"2","item_id":"bfeda38c97ec2536","output_index":0,"sequence_number":21,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"\"","item_id":"bfeda38c97ec2536","output_index":0,"sequence_number":22,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":" }","item_id":"bfeda38c97ec2536","output_index":0,"sequence_number":23,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":" ","item_id":"bfeda38c97ec2536","output_index":0,"sequence_number":24,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.done
+
+      '
+    - 'data: {"arguments":"{ \"expression\": \"(128 * 0.75) + 42\" } ","item_id":"bfeda38c97ec2536","name":"calculate","output_index":0,"sequence_number":25,"type":"response.function_call_arguments.done"}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.done
+
+      '
+    - 'data: {"item":{"arguments":"{ \"expression\": \"(128 * 0.75) + 42\" } ","call_id":"call_bf2ee341d62b0a3f","name":"calculate","type":"function_call","id":"bfeda38c97ec2536","namespace":null,"status":"completed"},"output_index":0,"sequence_number":26,"type":"response.output_item.done"}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.added
+
+      '
+    - 'data: {"item":{"arguments":"","call_id":"call_8882cfe179e26739","name":"send_email","type":"function_call","id":"91db9f60d766f853","namespace":null,"status":"in_progress"},"output_index":1,"sequence_number":27,"type":"response.output_item.added"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"{","item_id":"91db9f60d766f853","output_index":1,"sequence_number":28,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":" \"","item_id":"91db9f60d766f853","output_index":1,"sequence_number":29,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"to","item_id":"91db9f60d766f853","output_index":1,"sequence_number":30,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"\":","item_id":"91db9f60d766f853","output_index":1,"sequence_number":31,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":" [","item_id":"91db9f60d766f853","output_index":1,"sequence_number":32,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":" \"","item_id":"91db9f60d766f853","output_index":1,"sequence_number":33,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"alice","item_id":"91db9f60d766f853","output_index":1,"sequence_number":34,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"@example","item_id":"91db9f60d766f853","output_index":1,"sequence_number":35,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":".com","item_id":"91db9f60d766f853","output_index":1,"sequence_number":36,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"\"","item_id":"91db9f60d766f853","output_index":1,"sequence_number":37,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":" ],","item_id":"91db9f60d766f853","output_index":1,"sequence_number":38,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":" \"","item_id":"91db9f60d766f853","output_index":1,"sequence_number":39,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"subject","item_id":"91db9f60d766f853","output_index":1,"sequence_number":40,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"\":","item_id":"91db9f60d766f853","output_index":1,"sequence_number":41,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":" \"","item_id":"91db9f60d766f853","output_index":1,"sequence_number":42,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"Daily","item_id":"91db9f60d766f853","output_index":1,"sequence_number":43,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":" Report","item_id":"91db9f60d766f853","output_index":1,"sequence_number":44,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"\",","item_id":"91db9f60d766f853","output_index":1,"sequence_number":45,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":" \"","item_id":"91db9f60d766f853","output_index":1,"sequence_number":46,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"body","item_id":"91db9f60d766f853","output_index":1,"sequence_number":47,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"\":","item_id":"91db9f60d766f853","output_index":1,"sequence_number":48,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":" \"","item_id":"91db9f60d766f853","output_index":1,"sequence_number":49,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"All","item_id":"91db9f60d766f853","output_index":1,"sequence_number":50,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":" systems","item_id":"91db9f60d766f853","output_index":1,"sequence_number":51,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":" nominal","item_id":"91db9f60d766f853","output_index":1,"sequence_number":52,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":".\"","item_id":"91db9f60d766f853","output_index":1,"sequence_number":53,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":" }","item_id":"91db9f60d766f853","output_index":1,"sequence_number":54,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":" ","item_id":"91db9f60d766f853","output_index":1,"sequence_number":55,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.done
+
+      '
+    - 'data: {"arguments":"{ \"to\": [ \"alice@example.com\" ], \"subject\": \"Daily
+      Report\", \"body\": \"All systems nominal.\" } ","item_id":"91db9f60d766f853","name":"send_email","output_index":1,"sequence_number":56,"type":"response.function_call_arguments.done"}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.done
+
+      '
+    - 'data: {"item":{"arguments":"{ \"to\": [ \"alice@example.com\" ], \"subject\":
+      \"Daily Report\", \"body\": \"All systems nominal.\" } ","call_id":"call_8882cfe179e26739","name":"send_email","type":"function_call","id":"91db9f60d766f853","namespace":null,"status":"completed"},"output_index":1,"sequence_number":57,"type":"response.output_item.done"}
+
+      '
+    - '
+
+      '
+    - 'event: response.completed
+
+      '
+    - 'data: {"response":{"id":"resp_a2e7b4671f6e52c7","created_at":1781677891,"incomplete_details":null,"instructions":null,"metadata":null,"model":"Qwen/Qwen3-30B-A3B-FP8","object":"response","output":[{"arguments":"{\"expression\":
+      \"(128 * 0.75) + 42\"}","call_id":"chatcmpl-tool-9749100573c29412","name":"calculate","type":"function_call","id":"fc_9f11038bbfc18811","namespace":null,"status":"completed"},{"arguments":"{\"to\":
+      [\"alice@example.com\"], \"subject\": \"Daily Report\", \"body\": \"All systems
+      nominal.\"}","call_id":"chatcmpl-tool-b2043bbe02e6422a","name":"send_email","type":"function_call","id":"fc_a6e92700b70ea5c8","namespace":null,"status":"completed"}],"parallel_tool_calls":true,"temperature":0.6,"tool_choice":"required","tools":[{"name":"get_weather","parameters":{"type":"object","properties":{"location":{"type":"string","description":"City
+      name"},"unit":{"type":"string","enum":["celsius","fahrenheit"]}},"required":["location"],"additionalProperties":false},"strict":true,"type":"function","defer_loading":null,"description":"Get
+      current temperature and conditions for a city"},{"name":"get_time","parameters":{"type":"object","properties":{"timezone":{"type":"string","description":"IANA
+      timezone, e.g. Europe/Paris"}},"required":["timezone"],"additionalProperties":false},"strict":true,"type":"function","defer_loading":null,"description":"Get
+      the current date and time in a given IANA timezone"},{"name":"get_stock_price","parameters":{"type":"object","properties":{"ticker":{"type":"string","description":"Stock
+      ticker symbol, e.g. AAPL"},"currency":{"type":"string","description":"Currency
+      to return the price in, e.g. USD"}},"required":["ticker"],"additionalProperties":false},"strict":true,"type":"function","defer_loading":null,"description":"Get
+      the latest stock price and daily change for a ticker symbol"},{"name":"search_web","parameters":{"type":"object","properties":{"query":{"type":"string","description":"Search
+      query string"},"num_results":{"type":"integer","description":"Number of results
+      to return (1-10)","default":3}},"required":["query"],"additionalProperties":false},"strict":true,"type":"function","defer_loading":null,"description":"Search
+      the web and return the top results for a query"},{"name":"translate_text","parameters":{"type":"object","properties":{"text":{"type":"string","description":"Text
+      to translate"},"target_language":{"type":"string","description":"Target language
+      code, e.g. fr, de, ja"},"source_language":{"type":"string","description":"Source
+      language code; omit for auto-detect"}},"required":["text","target_language"],"additionalProperties":false},"strict":true,"type":"function","defer_loading":null,"description":"Translate
+      text from one language to another"},{"name":"calculate","parameters":{"type":"object","properties":{"expression":{"type":"string","description":"Math
+      expression to evaluate, e.g. (12 * 8) / 3 + sqrt(16)"}},"required":["expression"],"additionalProperties":false},"strict":true,"type":"function","defer_loading":null,"description":"Evaluate
+      a mathematical expression and return the numeric result"},{"name":"send_email","parameters":{"type":"object","properties":{"to":{"type":"array","items":{"type":"string"},"description":"Recipient
+      email addresses"},"subject":{"type":"string","description":"Email subject line"},"body":{"type":"string","description":"Plain-text
+      email body"},"cc":{"type":"array","items":{"type":"string"},"description":"CC
+      recipients (optional)"}},"required":["to","subject","body"],"additionalProperties":false},"strict":true,"type":"function","defer_loading":null,"description":"Send
+      an email to one or more recipients"},{"name":"read_file","parameters":{"type":"object","properties":{"path":{"type":"string","description":"Absolute
+      or relative file path"},"encoding":{"type":"string","enum":["utf-8","latin-1","ascii"],"description":"File
+      encoding"}},"required":["path"],"additionalProperties":false},"strict":true,"type":"function","defer_loading":null,"description":"Read
+      the contents of a file at the given path"}],"top_p":0.95,"background":false,"max_output_tokens":39843,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"completed","text":{"format":{"name":"tool_calling_response","schema":{"type":"array","minItems":1,"items":{"type":"object","anyOf":[{"properties":{"name":{"type":"string","enum":["get_weather"]},"parameters":{"type":"object","properties":{"location":{"type":"string","description":"City
+      name"},"unit":{"type":"string","enum":["celsius","fahrenheit"]}},"required":["location"],"additionalProperties":false}},"required":["name","parameters"]},{"properties":{"name":{"type":"string","enum":["get_time"]},"parameters":{"type":"object","properties":{"timezone":{"type":"string","description":"IANA
+      timezone, e.g. Europe/Paris"}},"required":["timezone"],"additionalProperties":false}},"required":["name","parameters"]},{"properties":{"name":{"type":"string","enum":["get_stock_price"]},"parameters":{"type":"object","properties":{"ticker":{"type":"string","description":"Stock
+      ticker symbol, e.g. AAPL"},"currency":{"type":"string","description":"Currency
+      to return the price in, e.g. USD"}},"required":["ticker"],"additionalProperties":false}},"required":["name","parameters"]},{"properties":{"name":{"type":"string","enum":["search_web"]},"parameters":{"type":"object","properties":{"query":{"type":"string","description":"Search
+      query string"},"num_results":{"type":"integer","description":"Number of results
+      to return (1-10)","default":3}},"required":["query"],"additionalProperties":false}},"required":["name","parameters"]},{"properties":{"name":{"type":"string","enum":["translate_text"]},"parameters":{"type":"object","properties":{"text":{"type":"string","description":"Text
+      to translate"},"target_language":{"type":"string","description":"Target language
+      code, e.g. fr, de, ja"},"source_language":{"type":"string","description":"Source
+      language code; omit for auto-detect"}},"required":["text","target_language"],"additionalProperties":false}},"required":["name","parameters"]},{"properties":{"name":{"type":"string","enum":["calculate"]},"parameters":{"type":"object","properties":{"expression":{"type":"string","description":"Math
+      expression to evaluate, e.g. (12 * 8) / 3 + sqrt(16)"}},"required":["expression"],"additionalProperties":false}},"required":["name","parameters"]},{"properties":{"name":{"type":"string","enum":["send_email"]},"parameters":{"type":"object","properties":{"to":{"type":"array","items":{"type":"string"},"description":"Recipient
+      email addresses"},"subject":{"type":"string","description":"Email subject line"},"body":{"type":"string","description":"Plain-text
+      email body"},"cc":{"type":"array","items":{"type":"string"},"description":"CC
+      recipients (optional)"}},"required":["to","subject","body"],"additionalProperties":false}},"required":["name","parameters"]},{"properties":{"name":{"type":"string","enum":["read_file"]},"parameters":{"type":"object","properties":{"path":{"type":"string","description":"Absolute
+      or relative file path"},"encoding":{"type":"string","enum":["utf-8","latin-1","ascii"],"description":"File
+      encoding"}},"required":["path"],"additionalProperties":false}},"required":["name","parameters"]}]}},"type":"json_schema","description":null,"strict":true},"verbosity":null},"top_logprobs":null,"truncation":"disabled","usage":{"input_tokens":1117,"input_tokens_details":{"cached_tokens":1104,"input_tokens_per_turn":[],"cached_tokens_per_turn":[]},"output_tokens":73,"output_tokens_details":{"reasoning_tokens":0,"tool_output_tokens":0,"output_tokens_per_turn":[],"tool_output_tokens_per_turn":[]},"total_tokens":1190},"user":null,"presence_penalty":0.0,"frequency_penalty":0.0,"kv_transfer_params":null,"input_messages":null,"output_messages":null},"sequence_number":58,"type":"response.completed"}
+
+      '
+    - '
+
+      '
+    status_code: 200

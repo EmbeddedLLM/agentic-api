@@ -1,0 +1,123 @@
+[
+  {
+    "type": "function",
+    "name": "get_weather",
+    "description": "Get current temperature and conditions for a city",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "location": { "type": "string", "description": "City name" },
+        "unit":     { "type": "string", "enum": ["celsius", "fahrenheit"] }
+      },
+      "required": ["location"],
+      "additionalProperties": false
+    },
+    "strict": true
+  },
+  {
+    "type": "function",
+    "name": "get_time",
+    "description": "Get the current date and time in a given IANA timezone",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "timezone": { "type": "string", "description": "IANA timezone, e.g. Europe/Paris" }
+      },
+      "required": ["timezone"],
+      "additionalProperties": false
+    },
+    "strict": true
+  },
+  {
+    "type": "function",
+    "name": "get_stock_price",
+    "description": "Get the latest stock price and daily change for a ticker symbol",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "ticker":   { "type": "string", "description": "Stock ticker symbol, e.g. AAPL" },
+        "currency": { "type": "string", "description": "Currency to return the price in, e.g. USD" }
+      },
+      "required": ["ticker"],
+      "additionalProperties": false
+    },
+    "strict": true
+  },
+  {
+    "type": "function",
+    "name": "search_web",
+    "description": "Search the web and return the top results for a query",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query":       { "type": "string", "description": "Search query string" },
+        "num_results": { "type": "integer", "description": "Number of results to return (1-10)", "default": 3 }
+      },
+      "required": ["query"],
+      "additionalProperties": false
+    },
+    "strict": true
+  },
+  {
+    "type": "function",
+    "name": "translate_text",
+    "description": "Translate text from one language to another",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "text":            { "type": "string", "description": "Text to translate" },
+        "target_language": { "type": "string", "description": "Target language code, e.g. fr, de, ja" },
+        "source_language": { "type": "string", "description": "Source language code; omit for auto-detect" }
+      },
+      "required": ["text", "target_language"],
+      "additionalProperties": false
+    },
+    "strict": true
+  },
+  {
+    "type": "function",
+    "name": "calculate",
+    "description": "Evaluate a mathematical expression and return the numeric result",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "expression": { "type": "string", "description": "Math expression to evaluate, e.g. (12 * 8) / 3 + sqrt(16)" }
+      },
+      "required": ["expression"],
+      "additionalProperties": false
+    },
+    "strict": true
+  },
+  {
+    "type": "function",
+    "name": "send_email",
+    "description": "Send an email to one or more recipients",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "to":      { "type": "array", "items": { "type": "string" }, "description": "Recipient email addresses" },
+        "subject": { "type": "string", "description": "Email subject line" },
+        "body":    { "type": "string", "description": "Plain-text email body" },
+        "cc":      { "type": "array", "items": { "type": "string" }, "description": "CC recipients (optional)" }
+      },
+      "required": ["to", "subject", "body"],
+      "additionalProperties": false
+    },
+    "strict": true
+  },
+  {
+    "type": "function",
+    "name": "read_file",
+    "description": "Read the contents of a file at the given path",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path":     { "type": "string", "description": "Absolute or relative file path" },
+        "encoding": { "type": "string", "enum": ["utf-8", "latin-1", "ascii"], "description": "File encoding" }
+      },
+      "required": ["path"],
+      "additionalProperties": false
+    },
+    "strict": true
+  }
+]
