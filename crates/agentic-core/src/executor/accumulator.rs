@@ -242,7 +242,7 @@ impl ResponseAccumulator {
     /// Non-`data:` lines, `[DONE]`, and malformed JSON are silently skipped.
     fn process_sse_line(&mut self, line: &str) {
         if let Some(frame) = normalize_sse_line(line) {
-            self.process_event(frame);
+            self.process_event(&frame);
         }
     }
 
@@ -251,28 +251,12 @@ impl ResponseAccumulator {
     /// This is the core state machine — callers that already have a normalized
     /// frame (e.g. [`StreamTee`](future)) can call this directly without
     /// re-parsing from a raw line.
-    pub(crate) fn process_event(&mut self, frame: EventFrame) {
-        match (frame.event_type, frame.payload) {
+    pub(crate) fn process_event(&mut self, frame: &EventFrame) {
+        match (&frame.event_type, &frame.payload) {
             (SSEEventType::ResponseCreated, EventPayload::Response { id, .. }) if !id.is_empty() => {
-                self.response_id = id;
+                self.response_id.clone_from(id);
             }
-            (
-                SSEEventType::OutputItemAdded,
-                EventPayload::OutputItemAdded {
-                    item_id,
-                    item_type,
-                    call_id,
-                    name,
-                    output_index,
-                },
-            ) => {
-                let payload = EventPayload::OutputItemAdded {
-                    item_id,
-                    item_type,
-                    call_id,
-                    name,
-                    output_index,
-                };
+            (SSEEventType::OutputItemAdded, payload @ EventPayload::OutputItemAdded { item_type, .. }) => {
                 match item_type {
                     SSEItemType::Reasoning => {
                         self.finalize_except_reasoning();
@@ -292,7 +276,7 @@ impl ResponseAccumulator {
                 }
             }
             (SSEEventType::ReasoningTextDelta, EventPayload::ReasoningDelta { delta, .. }) => {
-                self.accumulated_reasoning_text.push_str(&delta);
+                self.accumulated_reasoning_text.push_str(delta);
             }
             (SSEEventType::ReasoningTextDone, payload) => {
                 if let Some(r) = self.current_reasoning.as_mut() {
@@ -300,7 +284,7 @@ impl ResponseAccumulator {
                 }
             }
             (SSEEventType::FunctionCallArgumentsDelta, EventPayload::FunctionCallArgsDelta { delta, .. }) => {
-                self.accumulated_arguments.push_str(&delta);
+                self.accumulated_arguments.push_str(delta);
             }
             (SSEEventType::FunctionCallArgumentsDone, payload) => {
                 if let Some(fc) = self.current_function_call.as_mut() {
@@ -309,12 +293,14 @@ impl ResponseAccumulator {
                 self.finalize_current_function_call();
             }
             (SSEEventType::OutputTextDelta, EventPayload::TextDelta { delta, .. }) => {
-                self.accumulated_text.push_str(&delta);
+                self.accumulated_text.push_str(delta);
             }
             (SSEEventType::ResponseCompleted, EventPayload::Response { usage, .. }) => {
                 self.finalize_all();
                 self.status = ResponseStatus::Completed;
-                self.usage = usage.and_then(deserialize_from_value_opt::<ResponseUsage>);
+                self.usage = usage
+                    .as_ref()
+                    .and_then(|u| deserialize_from_value_opt::<ResponseUsage>(u.clone()));
             }
             _ => {}
         }
@@ -441,7 +427,7 @@ mod tests {
             sequence_number: Some(0),
         };
 
-        acc.process_event(frame);
+        acc.process_event(&frame);
         assert_eq!(acc.response_id, "resp_new");
     }
 
@@ -459,7 +445,7 @@ mod tests {
             sequence_number: Some(0),
         };
 
-        acc.process_event(frame);
+        acc.process_event(&frame);
         assert_eq!(acc.response_id, "resp_keep");
     }
 
@@ -469,7 +455,7 @@ mod tests {
         let mut acc = ResponseAccumulator::new("resp_1".into(), None);
 
         // Start a message
-        acc.process_event(EventFrame {
+        acc.process_event(&EventFrame {
             event_type: SSEEventType::OutputItemAdded,
             payload: EventPayload::OutputItemAdded {
                 item_id: "msg_1".into(),
@@ -482,7 +468,7 @@ mod tests {
         });
 
         // Feed deltas
-        acc.process_event(EventFrame {
+        acc.process_event(&EventFrame {
             event_type: SSEEventType::OutputTextDelta,
             payload: EventPayload::TextDelta {
                 delta: "Hello".into(),
@@ -492,7 +478,7 @@ mod tests {
             },
             sequence_number: Some(2),
         });
-        acc.process_event(EventFrame {
+        acc.process_event(&EventFrame {
             event_type: SSEEventType::OutputTextDelta,
             payload: EventPayload::TextDelta {
                 delta: " world".into(),
@@ -504,7 +490,7 @@ mod tests {
         });
 
         // Finalize
-        acc.process_event(EventFrame {
+        acc.process_event(&EventFrame {
             event_type: SSEEventType::ResponseCompleted,
             payload: EventPayload::Response {
                 id: "resp_1".into(),
@@ -541,7 +527,7 @@ mod tests {
             sequence_number: Some(9),
         };
 
-        acc.process_event(frame);
+        acc.process_event(&frame);
         assert_eq!(acc.status, ResponseStatus::Completed);
         assert!(acc.usage.is_some());
         assert_eq!(acc.usage.unwrap().total_tokens, 15);
@@ -558,7 +544,7 @@ mod tests {
             sequence_number: Some(3),
         };
 
-        acc.process_event(frame);
+        acc.process_event(&frame);
         // No state change — still initial state
         assert_eq!(acc.response_id, "resp_1");
         assert_eq!(acc.status, ResponseStatus::InProgress);
@@ -677,7 +663,7 @@ mod tests {
     fn test_function_call_accumulation_basic() {
         let mut acc = ResponseAccumulator::new("resp_1".into(), None);
 
-        acc.process_event(EventFrame {
+        acc.process_event(&EventFrame {
             event_type: SSEEventType::OutputItemAdded,
             payload: EventPayload::OutputItemAdded {
                 item_id: "fc_1".into(),
@@ -689,7 +675,7 @@ mod tests {
             sequence_number: Some(1),
         });
 
-        acc.process_event(EventFrame {
+        acc.process_event(&EventFrame {
             event_type: SSEEventType::FunctionCallArgumentsDelta,
             payload: EventPayload::FunctionCallArgsDelta {
                 delta: r#"{"location""#.into(),
@@ -700,7 +686,7 @@ mod tests {
             sequence_number: Some(2),
         });
 
-        acc.process_event(EventFrame {
+        acc.process_event(&EventFrame {
             event_type: SSEEventType::FunctionCallArgumentsDelta,
             payload: EventPayload::FunctionCallArgsDelta {
                 delta: r#":"Paris"}"#.into(),
@@ -711,7 +697,7 @@ mod tests {
             sequence_number: Some(3),
         });
 
-        acc.process_event(EventFrame {
+        acc.process_event(&EventFrame {
             event_type: SSEEventType::FunctionCallArgumentsDone,
             payload: EventPayload::FunctionCallArgsDone {
                 arguments: r#"{"location":"Paris"}"#.into(),
@@ -723,7 +709,7 @@ mod tests {
             sequence_number: Some(4),
         });
 
-        acc.process_event(EventFrame {
+        acc.process_event(&EventFrame {
             event_type: SSEEventType::ResponseCompleted,
             payload: EventPayload::Response {
                 id: "resp_1".into(),
@@ -751,7 +737,7 @@ mod tests {
     fn test_function_call_done_uses_deltas_when_arguments_empty() {
         let mut acc = ResponseAccumulator::new("resp_1".into(), None);
 
-        acc.process_event(EventFrame {
+        acc.process_event(&EventFrame {
             event_type: SSEEventType::OutputItemAdded,
             payload: EventPayload::OutputItemAdded {
                 item_id: "fc_1".into(),
@@ -763,7 +749,7 @@ mod tests {
             sequence_number: Some(1),
         });
 
-        acc.process_event(EventFrame {
+        acc.process_event(&EventFrame {
             event_type: SSEEventType::FunctionCallArgumentsDelta,
             payload: EventPayload::FunctionCallArgsDelta {
                 delta: r#"{"q":"rust"}"#.into(),
@@ -774,7 +760,7 @@ mod tests {
             sequence_number: Some(2),
         });
 
-        acc.process_event(EventFrame {
+        acc.process_event(&EventFrame {
             event_type: SSEEventType::FunctionCallArgumentsDone,
             payload: EventPayload::FunctionCallArgsDone {
                 arguments: String::new(),
@@ -800,7 +786,7 @@ mod tests {
         let mut acc = ResponseAccumulator::new("resp_1".into(), None);
 
         // First function call
-        acc.process_event(EventFrame {
+        acc.process_event(&EventFrame {
             event_type: SSEEventType::OutputItemAdded,
             payload: EventPayload::OutputItemAdded {
                 item_id: "fc_1".into(),
@@ -811,7 +797,7 @@ mod tests {
             },
             sequence_number: Some(1),
         });
-        acc.process_event(EventFrame {
+        acc.process_event(&EventFrame {
             event_type: SSEEventType::FunctionCallArgumentsDone,
             payload: EventPayload::FunctionCallArgsDone {
                 arguments: r#"{"city":"NYC"}"#.into(),
@@ -824,7 +810,7 @@ mod tests {
         });
 
         // Second function call
-        acc.process_event(EventFrame {
+        acc.process_event(&EventFrame {
             event_type: SSEEventType::OutputItemAdded,
             payload: EventPayload::OutputItemAdded {
                 item_id: "fc_2".into(),
@@ -835,7 +821,7 @@ mod tests {
             },
             sequence_number: Some(3),
         });
-        acc.process_event(EventFrame {
+        acc.process_event(&EventFrame {
             event_type: SSEEventType::FunctionCallArgumentsDone,
             payload: EventPayload::FunctionCallArgsDone {
                 arguments: r#"{"tz":"EST"}"#.into(),
@@ -847,7 +833,7 @@ mod tests {
             sequence_number: Some(4),
         });
 
-        acc.process_event(EventFrame {
+        acc.process_event(&EventFrame {
             event_type: SSEEventType::ResponseCompleted,
             payload: EventPayload::Response {
                 id: "resp_1".into(),
@@ -868,7 +854,7 @@ mod tests {
         let mut acc = ResponseAccumulator::new("resp_1".into(), None);
 
         // Message first
-        acc.process_event(EventFrame {
+        acc.process_event(&EventFrame {
             event_type: SSEEventType::OutputItemAdded,
             payload: EventPayload::OutputItemAdded {
                 item_id: "msg_1".into(),
@@ -879,7 +865,7 @@ mod tests {
             },
             sequence_number: Some(1),
         });
-        acc.process_event(EventFrame {
+        acc.process_event(&EventFrame {
             event_type: SSEEventType::OutputTextDelta,
             payload: EventPayload::TextDelta {
                 delta: "Let me check".into(),
@@ -891,7 +877,7 @@ mod tests {
         });
 
         // Then function call
-        acc.process_event(EventFrame {
+        acc.process_event(&EventFrame {
             event_type: SSEEventType::OutputItemAdded,
             payload: EventPayload::OutputItemAdded {
                 item_id: "fc_1".into(),
@@ -902,7 +888,7 @@ mod tests {
             },
             sequence_number: Some(3),
         });
-        acc.process_event(EventFrame {
+        acc.process_event(&EventFrame {
             event_type: SSEEventType::FunctionCallArgumentsDone,
             payload: EventPayload::FunctionCallArgsDone {
                 arguments: "{}".into(),
@@ -914,7 +900,7 @@ mod tests {
             sequence_number: Some(4),
         });
 
-        acc.process_event(EventFrame {
+        acc.process_event(&EventFrame {
             event_type: SSEEventType::ResponseCompleted,
             payload: EventPayload::Response {
                 id: "resp_1".into(),
@@ -934,7 +920,7 @@ mod tests {
     fn test_function_call_done_updates_metadata() {
         let mut acc = ResponseAccumulator::new("resp_1".into(), None);
 
-        acc.process_event(EventFrame {
+        acc.process_event(&EventFrame {
             event_type: SSEEventType::OutputItemAdded,
             payload: EventPayload::OutputItemAdded {
                 item_id: "fc_1".into(),
@@ -946,7 +932,7 @@ mod tests {
             sequence_number: Some(1),
         });
 
-        acc.process_event(EventFrame {
+        acc.process_event(&EventFrame {
             event_type: SSEEventType::FunctionCallArgumentsDone,
             payload: EventPayload::FunctionCallArgsDone {
                 arguments: "{}".into(),
@@ -971,7 +957,7 @@ mod tests {
     fn test_function_call_empty_item_id_generates_uuid() {
         let mut acc = ResponseAccumulator::new("resp_1".into(), None);
 
-        acc.process_event(EventFrame {
+        acc.process_event(&EventFrame {
             event_type: SSEEventType::OutputItemAdded,
             payload: EventPayload::OutputItemAdded {
                 item_id: String::new(),
@@ -983,7 +969,7 @@ mod tests {
             sequence_number: Some(1),
         });
 
-        acc.process_event(EventFrame {
+        acc.process_event(&EventFrame {
             event_type: SSEEventType::FunctionCallArgumentsDone,
             payload: EventPayload::FunctionCallArgsDone {
                 arguments: "{}".into(),
@@ -1007,7 +993,7 @@ mod tests {
     fn test_function_call_orphaned_delta_safe() {
         let mut acc = ResponseAccumulator::new("resp_1".into(), None);
 
-        acc.process_event(EventFrame {
+        acc.process_event(&EventFrame {
             event_type: SSEEventType::FunctionCallArgumentsDelta,
             payload: EventPayload::FunctionCallArgsDelta {
                 delta: "orphan".into(),
@@ -1027,7 +1013,7 @@ mod tests {
     fn test_function_call_finalized_on_response_completed() {
         let mut acc = ResponseAccumulator::new("resp_1".into(), None);
 
-        acc.process_event(EventFrame {
+        acc.process_event(&EventFrame {
             event_type: SSEEventType::OutputItemAdded,
             payload: EventPayload::OutputItemAdded {
                 item_id: "fc_1".into(),
@@ -1038,7 +1024,7 @@ mod tests {
             },
             sequence_number: Some(1),
         });
-        acc.process_event(EventFrame {
+        acc.process_event(&EventFrame {
             event_type: SSEEventType::FunctionCallArgumentsDelta,
             payload: EventPayload::FunctionCallArgsDelta {
                 delta: r#"{"x":1}"#.into(),
@@ -1050,7 +1036,7 @@ mod tests {
         });
 
         // No ArgumentsDone — jump straight to ResponseCompleted
-        acc.process_event(EventFrame {
+        acc.process_event(&EventFrame {
             event_type: SSEEventType::ResponseCompleted,
             payload: EventPayload::Response {
                 id: "resp_1".into(),

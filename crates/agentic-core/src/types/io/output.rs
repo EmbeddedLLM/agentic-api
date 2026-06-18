@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::events::EventPayload;
+use crate::executor::error::ExecutorError;
 use crate::types::event::MessageStatus;
 use crate::utils::uuid7_str;
 
@@ -46,14 +47,18 @@ impl OutputMessage {
     }
 }
 
-impl TryFrom<EventPayload> for OutputMessage {
-    type Error = EventPayload;
+impl TryFrom<&EventPayload> for OutputMessage {
+    type Error = ExecutorError;
 
-    fn try_from(payload: EventPayload) -> Result<Self, Self::Error> {
+    fn try_from(payload: &EventPayload) -> Result<Self, Self::Error> {
         let EventPayload::OutputItemAdded { item_id, .. } = payload else {
-            return Err(payload);
+            return Err(ExecutorError::ParseError("expected OutputItemAdded payload".into()));
         };
-        let id = if item_id.is_empty() { uuid7_str("msg_") } else { item_id };
+        let id = if item_id.is_empty() {
+            uuid7_str("msg_")
+        } else {
+            item_id.clone()
+        };
         Ok(Self::new(id, MessageStatus::InProgress.as_str()))
     }
 }
@@ -86,21 +91,25 @@ pub struct FunctionToolCall {
     pub status: String,
 }
 
-impl TryFrom<EventPayload> for FunctionToolCall {
-    type Error = EventPayload;
+impl TryFrom<&EventPayload> for FunctionToolCall {
+    type Error = ExecutorError;
 
-    fn try_from(payload: EventPayload) -> Result<Self, Self::Error> {
+    fn try_from(payload: &EventPayload) -> Result<Self, Self::Error> {
         let EventPayload::OutputItemAdded {
             item_id, call_id, name, ..
         } = payload
         else {
-            return Err(payload);
+            return Err(ExecutorError::ParseError("expected OutputItemAdded payload".into()));
         };
-        let id = if item_id.is_empty() { uuid7_str("fc_") } else { item_id };
+        let id = if item_id.is_empty() {
+            uuid7_str("fc_")
+        } else {
+            item_id.clone()
+        };
         Ok(Self {
             id,
-            call_id: call_id.unwrap_or_default(),
-            name: name.unwrap_or_default(),
+            call_id: call_id.as_deref().unwrap_or_default().to_owned(),
+            name: name.as_deref().unwrap_or_default().to_owned(),
             arguments: String::new(),
             status: MessageStatus::InProgress.as_str().to_owned(),
         })
@@ -146,14 +155,18 @@ impl ReasoningOutput {
     }
 }
 
-impl TryFrom<EventPayload> for ReasoningOutput {
-    type Error = EventPayload;
+impl TryFrom<&EventPayload> for ReasoningOutput {
+    type Error = ExecutorError;
 
-    fn try_from(payload: EventPayload) -> Result<Self, Self::Error> {
+    fn try_from(payload: &EventPayload) -> Result<Self, Self::Error> {
         let EventPayload::OutputItemAdded { item_id, .. } = payload else {
-            return Err(payload);
+            return Err(ExecutorError::ParseError("expected OutputItemAdded payload".into()));
         };
-        let id = if item_id.is_empty() { uuid7_str("rs_") } else { item_id };
+        let id = if item_id.is_empty() {
+            uuid7_str("rs_")
+        } else {
+            item_id.clone()
+        };
         Ok(Self::new(id))
     }
 }
@@ -164,11 +177,11 @@ impl TryFrom<EventPayload> for ReasoningOutput {
 /// is empty the buffer is used as the final value and then cleared; otherwise
 /// the buffer is discarded and the payload value is used directly.
 pub trait ApplyDone {
-    fn apply_done(&mut self, payload: EventPayload, buffer: &mut String);
+    fn apply_done(&mut self, payload: &EventPayload, buffer: &mut String);
 }
 
 impl ApplyDone for ReasoningOutput {
-    fn apply_done(&mut self, payload: EventPayload, buffer: &mut String) {
+    fn apply_done(&mut self, payload: &EventPayload, buffer: &mut String) {
         let EventPayload::ReasoningDone { text, .. } = payload else {
             return;
         };
@@ -176,7 +189,7 @@ impl ApplyDone for ReasoningOutput {
             std::mem::take(buffer)
         } else {
             buffer.clear();
-            text
+            text.clone()
         };
         if !text.is_empty() {
             self.content.push(ReasoningTextContent::new(text));
@@ -185,7 +198,7 @@ impl ApplyDone for ReasoningOutput {
 }
 
 impl ApplyDone for FunctionToolCall {
-    fn apply_done(&mut self, payload: EventPayload, buffer: &mut String) {
+    fn apply_done(&mut self, payload: &EventPayload, buffer: &mut String) {
         let EventPayload::FunctionCallArgsDone {
             arguments,
             call_id,
@@ -199,13 +212,13 @@ impl ApplyDone for FunctionToolCall {
             std::mem::take(buffer)
         } else {
             buffer.clear();
-            arguments
+            arguments.clone()
         };
-        if let Some(cid) = call_id.filter(|s| !s.is_empty()) {
-            self.call_id = cid;
+        if let Some(cid) = call_id.as_deref().filter(|s| !s.is_empty()) {
+            cid.clone_into(&mut self.call_id);
         }
         if !name.is_empty() {
-            self.name = name;
+            name.clone_into(&mut self.name);
         }
     }
 }
