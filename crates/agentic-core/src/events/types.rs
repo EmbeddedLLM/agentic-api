@@ -1,5 +1,7 @@
 use serde_json::Value;
 
+use crate::types::io::ResponseUsage;
+
 /// The type of an output item received during streaming.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SSEItemType {
@@ -102,7 +104,7 @@ pub enum EventPayload {
     Response {
         id: String,
         status: String,
-        usage: Option<Value>,
+        usage: Option<ResponseUsage>,
     },
 
     /// `response.output_item.added`

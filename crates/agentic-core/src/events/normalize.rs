@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use super::types::{EventFrame, EventPayload, SSEEventType, SSEItemType};
-use crate::utils::common::deserialize_from_str_opt;
+use crate::utils::common::{deserialize_from_str_opt, deserialize_from_value_opt};
 
 /// Normalize a raw SSE data line into a typed [`EventFrame`].
 ///
@@ -113,7 +113,10 @@ fn extract_response_payload(json: &Value) -> EventPayload {
     EventPayload::Response {
         id: json_str(response, "id"),
         status: json_str(response, "status"),
-        usage: response.get("usage").filter(|v| !v.is_null()).cloned(),
+        usage: response
+            .get("usage")
+            .filter(|v| !v.is_null())
+            .and_then(|v| deserialize_from_value_opt(v.clone())),
     }
 }
 
