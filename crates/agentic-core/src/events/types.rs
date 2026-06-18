@@ -1,5 +1,52 @@
 use serde_json::Value;
 
+/// The type of an output item received during streaming.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SSEItemType {
+    Reasoning,
+    FunctionCall,
+    Message,
+}
+
+impl SSEItemType {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Reasoning => "reasoning",
+            Self::FunctionCall => "function_call",
+            Self::Message => "message",
+        }
+    }
+}
+
+impl From<&str> for SSEItemType {
+    fn from(s: &str) -> Self {
+        match s {
+            "reasoning" => Self::Reasoning,
+            "function_call" => Self::FunctionCall,
+            _ => Self::Message,
+        }
+    }
+}
+
+impl From<String> for SSEItemType {
+    fn from(s: String) -> Self {
+        Self::from(s.as_str())
+    }
+}
+
+impl PartialEq<str> for SSEItemType {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+
+impl PartialEq<&str> for SSEItemType {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+
 /// Classification of SSE event types from the Responses API.
 ///
 /// Covers both the `OpenAI` and vLLM wire formats (e.g. `response.done` vs
@@ -61,7 +108,7 @@ pub enum EventPayload {
     /// `response.output_item.added`
     OutputItemAdded {
         item_id: String,
-        item_type: String,
+        item_type: SSEItemType,
         output_index: u32,
         name: Option<String>,
         call_id: Option<String>,
@@ -70,7 +117,7 @@ pub enum EventPayload {
     /// `response.output_item.done`
     OutputItemDone {
         item_id: String,
-        item_type: String,
+        item_type: SSEItemType,
         output_index: u32,
         item: Value,
     },

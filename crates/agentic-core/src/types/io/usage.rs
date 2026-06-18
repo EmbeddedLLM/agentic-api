@@ -1,0 +1,22 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct InputTokenDetails {
+    pub cached_tokens: i64,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct OutputTokenDetails {
+    pub reasoning_tokens: i64,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct ResponseUsage {
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub total_tokens: i64,
+    #[serde(default)]
+    pub input_tokens_details: InputTokenDetails,
+    #[serde(default)]
+    pub output_tokens_details: OutputTokenDetails,
+}
