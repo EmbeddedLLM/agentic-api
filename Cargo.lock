@@ -14,6 +14,7 @@ dependencies = [
  "either",
  "futures",
  "http",
+ "indexmap",
  "reqwest",
  "serde",
  "serde_json",

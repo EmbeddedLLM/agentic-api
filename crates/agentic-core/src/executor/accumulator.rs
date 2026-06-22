@@ -10,6 +10,8 @@
 use std::pin::Pin;
 use std::sync::mpsc;
 
+use indexmap::IndexMap;
+
 use futures::{Stream, StreamExt};
 
 use crate::events::{EventFrame, EventPayload, SSEEventType, SSEItemType, normalize_sse_line};
@@ -77,8 +79,8 @@ pub struct ResponseAccumulator {
     usage: Option<ResponseUsage>,
     status: ResponseStatus,
     incomplete_details: Option<IncompleteDetails>,
-    /// The single in-flight output item. SSE streams items sequentially.
-    in_flight: Option<InFlight>,
+    /// In-flight output items keyed by `item_id`, in insertion order.
+    in_flight: IndexMap<String, InFlight>,
 }
 
 impl ResponseAccumulator {
@@ -88,11 +90,11 @@ impl ResponseAccumulator {
         Self {
             response_id,
             conversation_id,
-            output: Vec::with_capacity(4),
+            output: Vec::new(),
             usage: None,
             status: ResponseStatus::InProgress,
             incomplete_details: None,
-            in_flight: None,
+            in_flight: IndexMap::new(),
         }
     }
 
@@ -129,7 +131,7 @@ impl ResponseAccumulator {
             usage,
             status,
             incomplete_details: None,
-            in_flight: None,
+            in_flight: IndexMap::new(),
         })
     }
 
@@ -202,9 +204,9 @@ impl ResponseAccumulator {
         acc
     }
 
-    /// Finalizes the current in-flight item, pushing it to `output`.
+    /// Finalizes all in-flight items in insertion order, pushing them to `output`.
     pub(crate) fn finalize_all(&mut self) {
-        if let Some(entry) = self.in_flight.take() {
+        for (_, entry) in self.in_flight.drain(..) {
             entry.finalize(&mut self.output);
         }
     }
@@ -225,9 +227,8 @@ impl ResponseAccumulator {
             (SSEEventType::ResponseCreated, EventPayload::Response { id, .. }) if !id.is_empty() => {
                 self.response_id.clone_from(id);
             }
-            (SSEEventType::OutputItemAdded, payload @ EventPayload::OutputItemAdded { item_type, .. }) => {
-                self.finalize_all();
-                self.in_flight = match item_type {
+            (SSEEventType::OutputItemAdded, payload @ EventPayload::OutputItemAdded { item_id, item_type, .. }) => {
+                let entry = match item_type {
                     SSEItemType::Reasoning => ReasoningOutput::try_from(payload).ok().map(|item| InFlight::Reasoning {
                         item,
                         text: String::with_capacity(256),
@@ -245,29 +246,32 @@ impl ResponseAccumulator {
                         text: String::with_capacity(256),
                     }),
                 };
+                if let Some(inflight) = entry {
+                    self.in_flight.insert(item_id.clone(), inflight);
+                }
             }
-            (SSEEventType::ReasoningTextDelta, EventPayload::ReasoningDelta { delta, .. }) => {
-                if let Some(InFlight::Reasoning { text, .. }) = &mut self.in_flight {
+            (SSEEventType::ReasoningTextDelta, EventPayload::ReasoningDelta { delta, item_id }) => {
+                if let Some(InFlight::Reasoning { text, .. }) = self.in_flight.get_mut(item_id) {
                     text.push_str(delta);
                 }
             }
-            (SSEEventType::ReasoningTextDone, _) => {
-                if let Some(InFlight::Reasoning { item, text }) = &mut self.in_flight {
+            (SSEEventType::ReasoningTextDone, EventPayload::ReasoningDone { item_id, .. }) => {
+                if let Some(InFlight::Reasoning { item, text }) = self.in_flight.get_mut(item_id) {
                     item.apply_done(&frame.payload, text);
                 }
             }
-            (SSEEventType::FunctionCallArgumentsDelta, EventPayload::FunctionCallArgsDelta { delta, .. }) => {
-                if let Some(InFlight::FunctionCall { arguments, .. }) = &mut self.in_flight {
+            (SSEEventType::FunctionCallArgumentsDelta, EventPayload::FunctionCallArgsDelta { delta, item_id, .. }) => {
+                if let Some(InFlight::FunctionCall { arguments, .. }) = self.in_flight.get_mut(item_id) {
                     arguments.push_str(delta);
                 }
             }
-            (SSEEventType::FunctionCallArgumentsDone, _) => {
-                if let Some(InFlight::FunctionCall { item, arguments }) = &mut self.in_flight {
+            (SSEEventType::FunctionCallArgumentsDone, EventPayload::FunctionCallArgsDone { item_id, .. }) => {
+                if let Some(InFlight::FunctionCall { item, arguments }) = self.in_flight.get_mut(item_id) {
                     item.apply_done(&frame.payload, arguments);
                 }
             }
-            (SSEEventType::OutputTextDelta, EventPayload::TextDelta { delta, .. }) => {
-                if let Some(InFlight::Message { text, .. }) = &mut self.in_flight {
+            (SSEEventType::OutputTextDelta, EventPayload::TextDelta { delta, item_id, .. }) => {
+                if let Some(InFlight::Message { text, .. }) = self.in_flight.get_mut(item_id) {
                     text.push_str(delta);
                 }
             }
@@ -950,7 +954,7 @@ mod tests {
         });
 
         assert!(acc.output.is_empty());
-        assert!(acc.in_flight.is_none());
+        assert!(acc.in_flight.is_empty());
     }
 
     #[test]
