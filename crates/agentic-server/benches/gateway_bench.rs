@@ -165,7 +165,6 @@ async fn spawn_gateway(llm_url: &str) -> (Arc<reqwest::Client>, String) {
         ResponseHandler::new(ResponseStore::new(pool)),
         Arc::new(reqwest::Client::new()),
         config.llm_api_base.clone(),
-        config.openai_api_key.clone(),
     ));
     let state = AppState {
         proxy_state,
@@ -279,19 +278,18 @@ pub fn gateway_benchmarks(c: &mut Criterion) {
             "  [seed] conversation_rehydration/non_streaming  turns={turns}  prior={}",
             turns - 1
         );
-        let (conv_id, prev_id) = rt.block_on(seed_conversation(&client, &gw_url, &model, turns - 1));
+        let (conv_id, _) = rt.block_on(seed_conversation(&client, &gw_url, &model, turns - 1));
         group.bench_with_input(BenchmarkId::new("turns", turns), &turns, |b, _| {
             b.to_async(Runtime::new().unwrap()).iter_batched(
-                || (conv_id.clone(), prev_id.clone(), model.clone()),
-                |(cid, pid, mdl)| {
+                || (conv_id.clone(), model.clone()),
+                |(cid, mdl)| {
                     let client = Arc::clone(&client);
                     let url = format!("{gw_url}/v1/responses");
                     async move {
-                        let mut body = serde_json::json!({"model": mdl, "input": "bench",
-                            "store": true, "stream": false, "conversation_id": cid});
-                        if let Some(id) = pid {
-                            body["previous_response_id"] = serde_json::Value::String(id);
-                        }
+                        let body = serde_json::json!({
+                            "model": mdl, "input": "bench",
+                            "store": true, "stream": false, "conversation_id": cid
+                        });
                         client
                             .post(&url)
                             .json(&body)
@@ -315,19 +313,18 @@ pub fn gateway_benchmarks(c: &mut Criterion) {
             "  [seed] conversation_rehydration/streaming  turns={turns}  prior={}",
             turns - 1
         );
-        let (conv_id, prev_id) = rt.block_on(seed_conversation(&client, &gw_url, &model, turns - 1));
+        let (conv_id, _) = rt.block_on(seed_conversation(&client, &gw_url, &model, turns - 1));
         group.bench_with_input(BenchmarkId::new("turns", turns), &turns, |b, _| {
             b.to_async(Runtime::new().unwrap()).iter_batched(
-                || (conv_id.clone(), prev_id.clone(), model.clone()),
-                |(cid, pid, mdl)| {
+                || (conv_id.clone(), model.clone()),
+                |(cid, mdl)| {
                     let client = Arc::clone(&client);
                     let url = format!("{gw_url}/v1/responses");
                     async move {
-                        let mut body = serde_json::json!({"model": mdl, "input": "bench",
-                            "store": true, "stream": true, "conversation_id": cid});
-                        if let Some(id) = pid {
-                            body["previous_response_id"] = serde_json::Value::String(id);
-                        }
+                        let body = serde_json::json!({
+                            "model": mdl, "input": "bench",
+                            "store": true, "stream": true, "conversation_id": cid
+                        });
                         client
                             .post(&url)
                             .json(&body)

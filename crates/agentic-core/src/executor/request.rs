@@ -39,6 +39,8 @@ impl RequestContext {
 /// Runtime dependencies passed into `execute()`.
 ///
 /// Owns the storage handlers, HTTP client, and LLM endpoint configuration.
+/// Per-request auth is supplied via [`crate::executor::engine::ExecuteRequest::with_auth`]
+/// rather than stored here, keeping this context purely shared and immutable.
 #[derive(Clone, Debug)]
 pub struct ExecutionContext {
     pub conv_handler: ConversationHandler,
@@ -46,8 +48,6 @@ pub struct ExecutionContext {
     pub client: Arc<reqwest::Client>,
     /// Base URL for the LLM backend, e.g. `"http://localhost:8000"`.
     pub llm_base_url: String,
-    /// Bearer token forwarded from the client, if any.
-    pub client_auth: Option<String>,
     /// Maximum wait time for the next SSE chunk.  `Duration::ZERO` disables the timeout.
     /// Sourced from [`Config::streaming_chunk_timeout_s`](crate::config::Config::streaming_chunk_timeout_s).
     pub streaming_timeout: Duration,
@@ -72,14 +72,12 @@ impl ExecutionContext {
         resp_handler: ResponseHandler,
         client: Arc<reqwest::Client>,
         llm_base_url: String,
-        client_auth: Option<String>,
     ) -> Self {
         Self {
             conv_handler,
             resp_handler,
             client,
             llm_base_url,
-            client_auth,
             streaming_timeout: Duration::from_secs(30),
         }
     }
@@ -108,7 +106,6 @@ impl ExecutionContext {
             resp_handler,
             client,
             llm_base_url: cfg.llm_api_base.clone(),
-            client_auth: cfg.openai_api_key.clone(),
             streaming_timeout: Duration::from_secs(30),
         })
     }

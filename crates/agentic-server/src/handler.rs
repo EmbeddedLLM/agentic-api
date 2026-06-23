@@ -11,7 +11,7 @@ use http::StatusCode;
 use serde_json::json;
 use tracing::warn;
 
-use agentic_core::executor::{BoxStream, ExecutionContext, ExecutorError, create_conversation, execute};
+use agentic_core::executor::{BoxStream, ExecuteRequest, ExecutorError, create_conversation};
 use agentic_core::proxy::{ProxyBody, ProxyRequest, ProxyResponse, error_response, proxy_request};
 use agentic_core::types::request_response::RequestPayload;
 
@@ -94,22 +94,14 @@ async fn proxy_responses(state: &AppState, parts: Parts, body: Bytes) -> Respons
     convert_response(proxy_request(proxy_req, &state.proxy_state).await)
 }
 
-fn resolve_exec_ctx(state: &AppState, parts: &Parts) -> Arc<ExecutionContext> {
-    let request_auth = parts
+fn extract_bearer(parts: &Parts) -> Option<String> {
+    parts
         .headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .filter(|s| !s.is_empty())
-        .map(str::to_string);
-
-    if request_auth.is_some() && request_auth != state.exec_ctx.client_auth {
-        let mut ctx = (*state.exec_ctx).clone();
-        ctx.client_auth = request_auth;
-        Arc::new(ctx)
-    } else {
-        Arc::clone(&state.exec_ctx)
-    }
+        .map(str::to_string)
 }
 
 fn sse_response(stream: BoxStream) -> Response {
@@ -124,7 +116,12 @@ fn sse_response(stream: BoxStream) -> Response {
 }
 
 async fn execute_responses(state: &AppState, parts: Parts, payload: RequestPayload) -> Response {
-    match execute(payload, resolve_exec_ctx(state, &parts)).await {
+    let auth = extract_bearer(&parts);
+    match ExecuteRequest::new(payload, Arc::clone(&state.exec_ctx))
+        .with_auth(auth)
+        .run()
+        .await
+    {
         Ok(Either::Left(response_payload)) => axum::Json(response_payload).into_response(),
         Ok(Either::Right(stream)) => sse_response(stream),
         Err(e) => executor_error_response(e),

@@ -264,7 +264,6 @@ impl TestFixture {
             resp_handler,
             client,
             server.url().to_string(),
-            None,
         ));
 
         Self { exec_ctx, server }
@@ -282,7 +281,6 @@ impl TestFixture {
             resp_handler,
             client,
             server.url().to_string(),
-            None,
         ));
 
         Self { exec_ctx, server }
