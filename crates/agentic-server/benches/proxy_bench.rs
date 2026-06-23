@@ -81,7 +81,6 @@ async fn spawn_gateway(config: Config) -> String {
         ResponseHandler::new(ResponseStore::disabled()),
         Arc::new(reqwest::Client::new()),
         config.llm_api_base.clone(),
-        config.openai_api_key.clone(),
     ));
     let state = AppState {
         proxy_state,
