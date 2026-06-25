@@ -63,7 +63,7 @@ impl InFlight {
                 if !text.is_empty() {
                     item.content.push(OutputTextContent::new(text));
                 }
-                item.status = MessageStatus::Completed.as_str().to_owned();
+                item.status = MessageStatus::Completed;
                 output.push(OutputItem::Message(item));
             }
         }

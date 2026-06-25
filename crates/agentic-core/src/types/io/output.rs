@@ -31,17 +31,17 @@ impl OutputTextContent {
 pub struct OutputMessage {
     pub id: String,
     pub role: String,
-    pub status: String,
+    pub status: MessageStatus,
     #[serde(default)]
     pub content: Vec<OutputTextContent>,
 }
 
 impl OutputMessage {
-    pub fn new(id: impl Into<String>, status: impl Into<String>) -> Self {
+    pub fn new(id: impl Into<String>, status: MessageStatus) -> Self {
         Self {
             id: id.into(),
             role: "assistant".into(),
-            status: status.into(),
+            status,
             content: vec![],
         }
     }
@@ -59,7 +59,7 @@ impl TryFrom<&EventPayload> for OutputMessage {
         } else {
             item_id.clone()
         };
-        Ok(Self::new(id, MessageStatus::InProgress.as_str()))
+        Ok(Self::new(id, MessageStatus::InProgress))
     }
 }
 
