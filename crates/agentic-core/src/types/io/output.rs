@@ -88,7 +88,21 @@ pub struct FunctionToolCall {
     pub call_id: String,
     pub name: String,
     pub arguments: String,
-    pub status: String,
+    #[serde(default = "default_completed_status")]
+    #[serde(deserialize_with = "deserialize_status_or_default")]
+    pub status: MessageStatus,
+}
+
+fn default_completed_status() -> MessageStatus {
+    MessageStatus::Completed
+}
+
+fn deserialize_status_or_default<'de, D>(deserializer: D) -> Result<MessageStatus, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let opt: Option<MessageStatus> = Option::deserialize(deserializer)?;
+    Ok(opt.unwrap_or(MessageStatus::Completed))
 }
 
 impl TryFrom<&EventPayload> for FunctionToolCall {

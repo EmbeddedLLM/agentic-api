@@ -681,7 +681,7 @@ mod tests {
             assert_eq!(fc.call_id, "call_abc");
             assert_eq!(fc.name, "get_weather");
             assert_eq!(fc.arguments, r#"{"location":"Paris"}"#);
-            assert_eq!(fc.status, "completed");
+            assert_eq!(fc.status, MessageStatus::Completed);
         } else {
             panic!("expected FunctionCall");
         }
@@ -996,7 +996,7 @@ mod tests {
         assert_eq!(acc.output.len(), 1);
         if let OutputItem::FunctionCall(fc) = &acc.output[0] {
             assert_eq!(fc.arguments, r#"{"x":1}"#);
-            assert_eq!(fc.status, "completed");
+            assert_eq!(fc.status, MessageStatus::Completed);
         } else {
             panic!("expected FunctionCall");
         }
