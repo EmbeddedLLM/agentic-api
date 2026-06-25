@@ -56,14 +56,14 @@ impl InFlight {
                 if !arguments.is_empty() && item.arguments.is_empty() {
                     item.arguments = arguments;
                 }
-                item.status = MessageStatus::Completed.as_str().into();
+                item.status = MessageStatus::Completed;
                 output.push(OutputItem::FunctionCall(item));
             }
             Self::Message { mut item, text } => {
                 if !text.is_empty() {
                     item.content.push(OutputTextContent::new(text));
                 }
-                item.status = MessageStatus::Completed.as_str().into();
+                item.status = MessageStatus::Completed.as_str().to_owned();
                 output.push(OutputItem::Message(item));
             }
         }

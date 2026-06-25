@@ -125,7 +125,7 @@ impl TryFrom<&EventPayload> for FunctionToolCall {
             call_id: call_id.as_deref().unwrap_or_default().to_owned(),
             name: name.as_deref().unwrap_or_default().to_owned(),
             arguments: String::new(),
-            status: MessageStatus::InProgress.as_str().to_owned(),
+            status: MessageStatus::InProgress,
         })
     }
 }
