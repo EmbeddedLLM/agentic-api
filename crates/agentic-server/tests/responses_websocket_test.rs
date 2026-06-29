@@ -186,6 +186,7 @@ async fn storage_backed_state(llm_url: &str) -> StorageBackedState {
         exec_ctx,
         shutdown_token: CancellationToken::new(),
         llm_api_base: config.llm_api_base,
+        openai_api_key: config.openai_api_key,
     };
     StorageBackedState { state, _db: db }
 }

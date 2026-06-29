@@ -88,6 +88,7 @@ async fn spawn_gateway(config: Config) -> String {
         exec_ctx,
         shutdown_token: CancellationToken::new(),
         llm_api_base: config.llm_api_base,
+        openai_api_key: config.openai_api_key,
     };
     let server_config = ServerConfig::from_env();
     let router = build_router(state, &server_config);

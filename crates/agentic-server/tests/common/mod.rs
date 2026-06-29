@@ -36,6 +36,7 @@ pub fn test_state(config: &Config) -> AppState {
         exec_ctx,
         shutdown_token: CancellationToken::new(),
         llm_api_base: config.llm_api_base.clone(),
+        openai_api_key: config.openai_api_key.clone(),
     }
 }
 

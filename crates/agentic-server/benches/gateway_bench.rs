@@ -172,6 +172,7 @@ async fn spawn_gateway(llm_url: &str) -> (Arc<reqwest::Client>, String) {
         exec_ctx,
         shutdown_token: CancellationToken::new(),
         llm_api_base: config.llm_api_base,
+        openai_api_key: config.openai_api_key,
     };
 
     let router = build_router(state, &ServerConfig::from_env());

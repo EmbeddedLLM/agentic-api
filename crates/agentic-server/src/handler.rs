@@ -190,13 +190,14 @@ async fn proxy_responses(state: &AppState, parts: Parts, body: Bytes) -> Respons
     convert_response(proxy_request(proxy_req, &state.proxy_state).await)
 }
 
-fn extract_bearer(headers: &HeaderMap) -> Option<String> {
+fn extract_bearer(headers: &HeaderMap, config_key: Option<&str>) -> Option<String> {
     headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .filter(|s| !s.is_empty())
         .map(str::to_string)
+        .or_else(|| config_key.filter(|s| !s.is_empty()).map(str::to_string))
 }
 
 fn sse_response(stream: BoxStream) -> Response {
@@ -211,7 +212,7 @@ fn sse_response(stream: BoxStream) -> Response {
 }
 
 async fn execute_responses(state: &AppState, parts: Parts, payload: RequestPayload) -> Response {
-    let auth = extract_bearer(&parts.headers);
+    let auth = extract_bearer(&parts.headers, state.openai_api_key.as_deref());
     match ExecuteRequest::new(payload, Arc::clone(&state.exec_ctx))
         .with_auth(auth)
         .run()
@@ -353,7 +354,7 @@ async fn handle_ws_text(
     let mut payload = serde_json::from_value::<RequestPayload>(value).map_err(ExecutorError::from)?;
     payload.stream = true;
 
-    let auth = extract_bearer(headers);
+    let auth = extract_bearer(headers, state.openai_api_key.as_deref());
     let exec_ctx = Arc::clone(&state.exec_ctx);
     let ctx = rehydrate_conversation(payload, &exec_ctx).await?;
     let upstream_json =
