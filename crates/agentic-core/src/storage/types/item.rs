@@ -90,7 +90,8 @@ impl InOutItem {
                 InOutItem::Input(item) => Some(item),
                 InOutItem::Output(OutputItem::Message(msg)) => Some(InputItem::Message(msg.into())),
                 InOutItem::Output(OutputItem::Reasoning(r)) => Some(InputItem::Reasoning(r)),
-                InOutItem::Output(OutputItem::FunctionCall(_) | OutputItem::Unknown) => None,
+                InOutItem::Output(OutputItem::FunctionCall(f)) => Some(InputItem::FunctionCall(f)),
+                InOutItem::Output(OutputItem::Unknown) => None,
             })
             .collect()
     }
@@ -161,11 +162,12 @@ mod tests {
                     InputMessageContent::Parts(parts) => {
                         assert_eq!(parts.len(), 1);
                         match &parts[0] {
-                            InputContent::Text(t) => {
-                                assert_eq!(t.type_, "output_text");
+                            InputContent::InputText(t) | InputContent::OutputText(t) => {
                                 assert_eq!(t.text, "answer");
                             }
-                            InputContent::Image(_) => panic!("expected text part"),
+                            InputContent::InputImage(_) | InputContent::ReasoningText(_) | InputContent::Unknown => {
+                                panic!("expected text part")
+                            }
                         }
                     }
                     InputMessageContent::Text(_) => panic!("expected parts content"),

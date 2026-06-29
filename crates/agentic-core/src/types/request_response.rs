@@ -4,6 +4,8 @@ use serde_json::Value;
 use super::io::{
     InputItem, InputMessage, InputMessageContent, OutputItem, ResponseUsage, ResponsesInput, ResponsesTool, ToolChoice,
 };
+use crate::tool::IncomingTool;
+use crate::tool::codex::normalize_incoming_tools;
 use crate::utils::common::serialize_to_string;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,7 +15,7 @@ pub struct RequestPayload {
     pub instructions: Option<String>,
     pub previous_response_id: Option<String>,
     pub conversation_id: Option<String>,
-    pub tools: Option<Vec<ResponsesTool>>,
+    pub tools: Option<Vec<IncomingTool>>,
     #[serde(default)]
     pub tool_choice: ToolChoice,
     #[serde(default)]
@@ -40,7 +42,7 @@ pub struct UpstreamRequest<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instructions: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tools: Option<&'a Vec<ResponsesTool>>,
+    pub tools: Option<Vec<ResponsesTool>>,
     #[serde(skip_serializing_if = "is_default_tool_choice")]
     pub tool_choice: &'a ToolChoice,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -65,12 +67,13 @@ impl RequestPayload {
     /// Construct an `UpstreamRequest` borrowing from this request, suitable for forwarding to vLLM.
     #[must_use]
     pub fn to_upstream_request(&self, stream: bool) -> UpstreamRequest<'_> {
+        let normalized_tools = self.tools.as_ref().map(|tools| normalize_incoming_tools(tools));
         UpstreamRequest {
             model: &self.model,
             input: &self.input,
             stream,
             instructions: self.instructions.as_deref(),
-            tools: self.tools.as_ref(),
+            tools: normalized_tools,
             tool_choice: &self.tool_choice,
             include: self.include.as_ref(),
             temperature: self.temperature,

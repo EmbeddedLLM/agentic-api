@@ -119,6 +119,72 @@ pub async fn health() -> impl IntoResponse {
     StatusCode::OK
 }
 
+/// Return a Codex-compatible model list for GET /v1/models.
+///
+/// Codex CLI expects `{ "models": [...] }` with rich metadata fields (`slug`,
+/// `context_window`, `shell_type`, etc.) — not the standard OpenAI/vLLM
+/// `{ "object": "list", "data": [...] }` shape.  We fetch the vLLM model list
+/// to get the real model id and `max_model_len`, then synthesize the Codex
+/// shape so the CLI can find the model metadata without falling back.
+pub async fn models(State(state): State<AppState>) -> Response {
+    let url = format!("{}/v1/models", state.llm_api_base.trim_end_matches('/'));
+
+    let vllm_models: Vec<Value> = match state.proxy_state.non_stream_client.get(&url).send().await {
+        Ok(resp) => match resp.bytes().await {
+            Ok(bytes) => serde_json::from_slice::<Value>(&bytes)
+                .ok()
+                .and_then(|v| v["data"].as_array().cloned())
+                .unwrap_or_default(),
+            Err(e) => {
+                warn!("failed to read vLLM /v1/models body: {e}");
+                vec![]
+            }
+        },
+        Err(e) => {
+            warn!("failed to fetch vLLM /v1/models: {e}");
+            vec![]
+        }
+    };
+
+    let codex_models: Vec<Value> = vllm_models
+        .iter()
+        .filter_map(|m| {
+            let id = m["id"].as_str()?;
+            let context_window = m["max_model_len"].as_i64().unwrap_or(32_768);
+            Some(json!({
+                "slug": id,
+                "display_name": id,
+                "description": "",
+                "default_reasoning_level": "medium",
+                "supported_reasoning_levels": [
+                    {"effort": "low", "description": "low"},
+                    {"effort": "medium", "description": "medium"},
+                    {"effort": "high", "description": "high"}
+                ],
+                "shell_type": "shell_command",
+                "visibility": "list",
+                "minimal_client_version": [0, 0, 0],
+                "supported_in_api": true,
+                "priority": 1,
+                "upgrade": null,
+                "base_instructions": "",
+                "supports_reasoning_summaries": false,
+                "support_verbosity": false,
+                "default_verbosity": null,
+                "apply_patch_tool_type": null,
+                "truncation_policy": null,
+                "supports_parallel_tool_calls": true,
+                "supports_image_detail_original": false,
+                "context_window": context_window,
+                "experimental_supported_tools": []
+            }))
+        })
+        .collect();
+
+    let body = json!({ "models": codex_models });
+    axum::Json(body).into_response()
+}
+
 pub async fn ready(State(state): State<AppState>) -> impl IntoResponse {
     let base = state.llm_api_base.trim_end_matches('/');
     let url = format!("{base}/health");
@@ -156,6 +222,7 @@ async fn read_bytes(body: Body) -> Result<Bytes, Response> {
 
 async fn read_and_parse(body: Body) -> Result<(Bytes, RequestPayload), Response> {
     let bytes = read_bytes(body).await?;
+    tracing::debug!(body = %String::from_utf8_lossy(&bytes), "incoming /v1/responses body");
     let payload = serde_json::from_slice::<RequestPayload>(&bytes)
         .map_err(|e| executor_error_response(ExecutorError::from(e)))?;
     Ok((bytes, payload))
@@ -351,6 +418,7 @@ async fn handle_ws_text(
     text: &str,
     shutdown_token: &CancellationToken,
 ) -> Result<(), WsError> {
+    tracing::debug!(body = %text, "incoming websocket /v1/responses body");
     let value = serde_json::from_str::<Value>(text).map_err(WsError::InvalidJson)?;
 
     if value.get("type").and_then(Value::as_str) != Some("response.create") {
