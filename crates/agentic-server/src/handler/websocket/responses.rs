@@ -9,7 +9,7 @@ use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
-use tracing::warn;
+use tracing::{debug, warn};
 
 use agentic_core::executor::accumulator::ResponseAccumulator;
 use agentic_core::executor::{
@@ -119,6 +119,14 @@ async fn handle_ws_text(
     payload.stream = true;
     payload.store = true;
 
+    debug!(
+        model = %payload.model,
+        store = payload.store,
+        previous_response_id = ?payload.previous_response_id,
+        conversation_id = ?payload.conversation_id,
+        "ws response.create received"
+    );
+
     let exec_ctx = resolve_exec_ctx_from_headers(state, headers);
     let ctx = rehydrate_conversation(payload, &exec_ctx).await?;
     let upstream_json =
@@ -143,6 +151,15 @@ async fn stream_ws_response(
     let should_persist = ctx.original_request.store
         || ctx.original_request.previous_response_id.is_some()
         || ctx.conversation_id.is_some();
+
+    debug!(
+        should_persist,
+        store = ctx.original_request.store,
+        previous_response_id = ?ctx.original_request.previous_response_id,
+        conversation_id = ?ctx.conversation_id,
+        response_id = %ctx.response_id,
+        "ws stream_ws_response: persist decision"
+    );
     let mut lines = Vec::new();
     let mut stream = Box::pin(call_inference(
         upstream_json,
@@ -201,6 +218,7 @@ async fn stream_ws_response(
     }
 
     if should_persist && !lines.is_empty() {
+        debug!(sse_lines = lines.len(), response_id = %ctx.response_id, "ws persisting response");
         let acc = ResponseAccumulator::from_sse_lines(lines, ctx.conversation_id.as_deref());
         let mut payload = acc.finalize(
             &ctx.enriched_request.model,
@@ -210,9 +228,14 @@ async fn stream_ws_response(
         apply_gateway_payload_ids(&mut payload, &ctx);
         let ch = exec_ctx.conv_handler.clone();
         let rh = exec_ctx.resp_handler.clone();
-        if let Err(e) = persist_response(payload, ctx, ch, rh).await {
-            warn!("persist failed: {e}");
+        match persist_response(payload, ctx, ch, rh).await {
+            Ok(()) => debug!("ws persist succeeded"),
+            Err(e) => warn!("persist failed: {e}"),
         }
+    } else if should_persist {
+        debug!("ws should_persist=true but no SSE lines collected, skipping persist");
+    } else {
+        debug!("ws should_persist=false, skipping persist");
     }
 
     Ok(())

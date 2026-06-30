@@ -183,12 +183,36 @@ pub fn normalize_incoming_tools(tools: &[IncomingTool]) -> Vec<FunctionTool> {
 }
 
 fn flatten_one(tool: &IncomingTool, out: &mut Vec<FunctionTool>) {
-    match tool {
-        IncomingTool::Function(f) => out.push(f.clone()),
+    flatten_one_with_prefix(tool, None, out);
+}
 
-        IncomingTool::Namespace { tools, .. } => {
+fn flatten_one_with_prefix(tool: &IncomingTool, prefix: Option<&str>, out: &mut Vec<FunctionTool>) {
+    match tool {
+        IncomingTool::Function(f) => {
+            if let Some(ns) = prefix {
+                out.push(FunctionTool {
+                    name: format!("{ns}__{}", f.name),
+                    ..f.clone()
+                });
+            } else {
+                out.push(f.clone());
+            }
+        }
+
+        IncomingTool::Namespace { name, tools, .. } => {
+            // Strip trailing underscores from the namespace name to match Codex's
+            // own join_tool_name behaviour (e.g. "mcp__foo__" -> "mcp__foo").
+            let ns_part = name.trim_end_matches('_');
+            let combined;
+            let ns = match prefix {
+                Some(outer) => {
+                    combined = format!("{outer}__{ns_part}");
+                    combined.as_str()
+                }
+                None => ns_part,
+            };
             for subtool in tools {
-                flatten_one(subtool, out);
+                flatten_one_with_prefix(subtool, Some(ns), out);
             }
         }
 
@@ -286,8 +310,8 @@ mod tests {
         }];
         let out = normalize_incoming_tools(&tools);
         assert_eq!(out.len(), 2);
-        assert_eq!(out[0].name, "create_issue");
-        assert_eq!(out[1].name, "search_code");
+        assert_eq!(out[0].name, "mcp__github__create_issue");
+        assert_eq!(out[1].name, "mcp__github__search_code");
     }
 
     #[test]
@@ -304,7 +328,7 @@ mod tests {
         }];
         let out = normalize_incoming_tools(&tools);
         assert_eq!(out.len(), 1);
-        assert_eq!(out[0].name, "leaf");
+        assert_eq!(out[0].name, "outer__inner__leaf");
     }
 
     #[test]
@@ -325,7 +349,7 @@ mod tests {
         let out = normalize_incoming_tools(&tools);
         assert_eq!(out.len(), 3);
         assert_eq!(out[0].name, "fn_a");
-        assert_eq!(out[1].name, "ns_tool");
+        assert_eq!(out[1].name, "ns__ns_tool");
         assert_eq!(out[2].name, "tool_search");
     }
 
@@ -367,7 +391,7 @@ mod tests {
         let tool: IncomingTool = serde_json::from_value(json).unwrap();
         let out = normalize_incoming_tools(&[tool]);
         assert_eq!(out.len(), 1);
-        assert_eq!(out[0].name, "create_issue");
+        assert_eq!(out[0].name, "mcp__github__create_issue");
     }
 
     #[test]

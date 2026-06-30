@@ -1,5 +1,7 @@
 //! Response storage handler — owns all response store operations.
 
+use tracing::{debug, warn};
+
 use crate::storage::{InOutItem, ResponseData, ResponseMetadata, ResponseStore};
 use crate::types::io::OutputItem;
 
@@ -55,9 +57,16 @@ impl ResponseHandler {
     /// Returns `ExecutorError` if the store is disabled or the database query fails.
     pub async fn rehydrate(&self, ctx: &RequestContext) -> ExecutorResult<Vec<InOutItem>> {
         let Some(prev_id) = ctx.original_request.previous_response_id.as_deref() else {
+            debug!(response_id = %ctx.response_id, "rehydrate: no previous_response_id, returning empty history");
             return Ok(vec![]);
         };
-        self.store.rehydrate(prev_id).await.map_err(ExecutorError::Storage)
+        debug!(response_id = %ctx.response_id, previous_response_id = %prev_id, "rehydrate: loading history");
+        let result = self.store.rehydrate(prev_id).await.map_err(ExecutorError::Storage);
+        match &result {
+            Ok(items) => debug!(response_id = %ctx.response_id, items = items.len(), "rehydrate: loaded history"),
+            Err(e) => warn!(response_id = %ctx.response_id, error = %e, "rehydrate: failed"),
+        }
+        result
     }
 
     /// Persists a response record — only the new items from this turn.
@@ -69,6 +78,14 @@ impl ResponseHandler {
     /// # Errors
     /// Returns `ExecutorError` if the store is disabled or the database operation fails.
     pub async fn execute_turn(&self, ctx: RequestContext, output_items: Vec<OutputItem>) -> ExecutorResult<()> {
+        debug!(
+            response_id = %ctx.response_id,
+            previous_response_id = ?ctx.original_request.previous_response_id,
+            conversation_id = ?ctx.conversation_id,
+            new_input_items = ctx.new_input_items.len(),
+            output_items = output_items.len(),
+            "execute_turn: persisting response"
+        );
         let metadata = ResponseMetadata {
             model: ctx.enriched_request.model,
             previous_response_id: ctx.original_request.previous_response_id,
@@ -92,7 +109,9 @@ impl ResponseHandler {
         new_items.extend(ctx.new_input_items.into_iter().map(InOutItem::Input));
         new_items.extend(output_items.into_iter().map(InOutItem::Output));
 
-        self.store
+        let response_id = ctx.response_id.clone();
+        let result = self
+            .store
             .persist(
                 &ctx.response_id,
                 metadata.previous_response_id.as_deref(),
@@ -100,7 +119,12 @@ impl ResponseHandler {
                 &metadata,
             )
             .await
-            .map_err(ExecutorError::Storage)
+            .map_err(ExecutorError::Storage);
+        match &result {
+            Ok(()) => debug!(response_id = %response_id, "execute_turn: persist succeeded"),
+            Err(e) => warn!(response_id = %response_id, error = %e, "execute_turn: persist failed"),
+        }
+        result
     }
 }
 
