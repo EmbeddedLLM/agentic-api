@@ -21,9 +21,6 @@ pub(super) enum WsError {
     #[error("websocket messages must be JSON text frames")]
     BinaryFrame,
 
-    #[error("websocket received a new message while response stream is active")]
-    ConcurrentMessage,
-
     #[error("websocket send failed")]
     SendFailed,
 
@@ -41,9 +38,7 @@ impl WsError {
     pub(super) fn status(&self) -> StatusCode {
         match self {
             Self::Executor(err) => err.http_status(),
-            Self::InvalidJson(_) | Self::UnexpectedType | Self::BinaryFrame | Self::ConcurrentMessage => {
-                StatusCode::BAD_REQUEST
-            }
+            Self::InvalidJson(_) | Self::UnexpectedType | Self::BinaryFrame => StatusCode::BAD_REQUEST,
             Self::SerializeJson(_)
             | Self::SendFailed
             | Self::ClientDisconnected
@@ -56,7 +51,7 @@ impl WsError {
         match self {
             Self::Executor(err) => err.error_code(),
             Self::InvalidJson(_) => "invalid_json",
-            Self::UnexpectedType | Self::BinaryFrame | Self::ConcurrentMessage => "invalid_request_error",
+            Self::UnexpectedType | Self::BinaryFrame => "invalid_request_error",
             Self::SerializeJson(_)
             | Self::SendFailed
             | Self::ClientDisconnected

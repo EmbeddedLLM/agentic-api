@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use axum::extract::State;
@@ -35,56 +36,70 @@ async fn responses_ws_loop(socket: WebSocket, state: AppState, headers: HeaderMa
     let shutdown_token = state.shutdown_token.clone();
     let (mut sender, mut receiver) = socket.split();
 
+    // Requests received while a stream is active, processed in order after it completes.
+    let mut queue: VecDeque<String> = VecDeque::new();
+
     loop {
-        let message = tokio::select! {
-            () = shutdown_token.cancelled() => break,
-            message = receiver.next() => message,
-        };
+        let text = if let Some(buffered) = queue.pop_front() {
+            buffered
+        } else {
+            let message = tokio::select! {
+                () = shutdown_token.cancelled() => break,
+                message = receiver.next() => message,
+            };
 
-        let Some(message) = message else {
-            break;
-        };
-
-        match message {
-            Ok(Message::Text(text)) => {
-                match handle_ws_text(
-                    &mut sender,
-                    &mut receiver,
-                    &state,
-                    &headers,
-                    text.as_str(),
-                    &shutdown_token,
-                )
-                .await
-                {
-                    Ok(()) => {}
-                    Err(err) => {
-                        if !handle_ws_error(&mut sender, err).await {
-                            break;
-                        }
-                    }
-                }
-            }
-            Ok(Message::Binary(_)) => {
-                if !handle_ws_error(&mut sender, WsError::BinaryFrame).await {
-                    break;
-                }
-            }
-            Ok(Message::Close(_)) => break,
-            Ok(Message::Ping(payload)) => {
-                if sender.send(Message::Pong(payload)).await.is_err() {
-                    break;
-                }
-            }
-            Ok(Message::Pong(_)) => {}
-            Err(e) => {
-                warn!("responses websocket receive error: {e}");
+            let Some(message) = message else {
                 break;
+            };
+
+            match message {
+                Ok(Message::Text(text)) => text.to_string(),
+                Ok(Message::Binary(_)) => {
+                    if !handle_ws_error(&mut sender, WsError::BinaryFrame).await {
+                        break;
+                    }
+                    continue;
+                }
+                Ok(Message::Close(_)) => break,
+                Ok(Message::Ping(payload)) => {
+                    if sender.send(Message::Pong(payload)).await.is_err() {
+                        break;
+                    }
+                    continue;
+                }
+                Ok(Message::Pong(_)) => continue,
+                Err(e) => {
+                    warn!("responses websocket receive error: {e}");
+                    break;
+                }
+            }
+        };
+
+        match handle_ws_text(
+            &mut sender,
+            &mut receiver,
+            &state,
+            &headers,
+            &text,
+            &shutdown_token,
+            &mut queue,
+        )
+        .await
+        {
+            Ok(()) => {}
+            Err(err) => {
+                if !handle_ws_error(&mut sender, err).await {
+                    break;
+                }
             }
         }
     }
 }
 
+/// Process one `response.create` message.
+///
+/// Any requests received from the client while the stream is active are
+/// pushed onto `queue` and processed by the caller in order after this returns.
 async fn handle_ws_text(
     sender: &mut WsSender,
     receiver: &mut WsReceiver,
@@ -92,6 +107,7 @@ async fn handle_ws_text(
     headers: &HeaderMap,
     text: &str,
     shutdown_token: &CancellationToken,
+    queue: &mut VecDeque<String>,
 ) -> Result<(), WsError> {
     let value = serde_json::from_str::<Value>(text).map_err(WsError::InvalidJson)?;
 
@@ -101,15 +117,20 @@ async fn handle_ws_text(
 
     let mut payload = serde_json::from_value::<RequestPayload>(value).map_err(ExecutorError::from)?;
     payload.stream = true;
+    payload.store = true;
 
     let exec_ctx = resolve_exec_ctx_from_headers(state, headers);
     let ctx = rehydrate_conversation(payload, &exec_ctx).await?;
     let upstream_json =
         serialize_to_string(&ctx.enriched_request.to_upstream_request(true)).map_err(ExecutorError::from)?;
 
-    stream_ws_response(sender, receiver, exec_ctx, ctx, upstream_json, shutdown_token).await
+    stream_ws_response(sender, receiver, exec_ctx, ctx, upstream_json, shutdown_token, queue).await
 }
 
+/// Stream a response from the upstream LLM to the client.
+///
+/// Requests arriving from the client while the stream is active are pushed
+/// onto `queue` so the caller can process them in order after this returns.
 async fn stream_ws_response(
     sender: &mut WsSender,
     receiver: &mut WsReceiver,
@@ -117,6 +138,7 @@ async fn stream_ws_response(
     ctx: RequestContext,
     upstream_json: String,
     shutdown_token: &CancellationToken,
+    queue: &mut VecDeque<String>,
 ) -> Result<(), WsError> {
     let should_persist = ctx.original_request.store
         || ctx.original_request.previous_response_id.is_some()
@@ -142,7 +164,12 @@ async fn stream_ws_response(
                     }
                     Some(Ok(Message::Pong(_))) => continue 'stream,
                     Some(Ok(Message::Binary(_))) => return Err(WsError::BinaryFrame),
-                    Some(Ok(Message::Text(_))) => return Err(WsError::ConcurrentMessage),
+                    Some(Ok(Message::Text(text))) => {
+                        // Client pipelined the next request while we are still streaming.
+                        // Enqueue it and keep draining the current stream.
+                        queue.push_back(text.to_string());
+                        continue 'stream;
+                    }
                     Some(Err(e)) => return Err(WsError::Receive(e.to_string())),
                 }
             }
@@ -187,6 +214,7 @@ async fn stream_ws_response(
             warn!("persist failed: {e}");
         }
     }
+
     Ok(())
 }
 
