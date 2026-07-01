@@ -12,7 +12,7 @@ use tracing::warn;
 
 use crate::config::{Config, resolve_model_alias};
 use crate::error::Error;
-use crate::types::io::{
+use crate::tool::{
     alternate_model_visible_namespace_member_name, legacy_model_visible_namespace_member_name,
     model_visible_namespace_member_name,
 };
@@ -775,6 +775,48 @@ pub fn error_response(status: StatusCode, code: &str, message: &str) -> ProxyRes
         status,
         headers,
         body: ProxyBody::Full(Bytes::from(serde_json::to_vec(&body).unwrap_or_default())),
+    }
+}
+
+/// Proxy a GET request to an arbitrary upstream path.
+///
+/// Applies the same header filtering and auth injection as [`proxy_request`].
+/// Uses the non-streaming client; the response body is returned as a full
+/// [`ProxyBody::Full`] payload.
+pub async fn proxy_get(path: &str, request_headers: &HeaderMap, state: &ProxyState) -> ProxyResponse {
+    let llm_headers = filter_request_headers(request_headers, &state.config);
+    let base = state.config.llm_api_base.trim_end_matches('/');
+    let url = format!("{base}/{}", path.trim_start_matches('/'));
+
+    let llm_resp = match state.non_stream_client.get(&url).headers(llm_headers).send().await {
+        Ok(r) => r,
+        Err(e) if e.is_timeout() => {
+            warn!("upstream GET {path} timed out: {e}");
+            return error_response(StatusCode::GATEWAY_TIMEOUT, "upstream_timeout", "upstream timeout");
+        }
+        Err(e) => {
+            warn!("upstream GET {path} failed: {e}");
+            return error_response(StatusCode::BAD_GATEWAY, "upstream_unavailable", "upstream unavailable");
+        }
+    };
+
+    let status = StatusCode::from_u16(llm_resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    let response_headers = filter_response_headers(llm_resp.headers());
+
+    match llm_resp.bytes().await {
+        Ok(payload) => ProxyResponse {
+            status,
+            headers: response_headers,
+            body: ProxyBody::Full(payload),
+        },
+        Err(e) => {
+            warn!("failed to read upstream GET {path} body: {e}");
+            error_response(
+                StatusCode::BAD_GATEWAY,
+                "upstream_unavailable",
+                "failed to read upstream response",
+            )
+        }
     }
 }
 

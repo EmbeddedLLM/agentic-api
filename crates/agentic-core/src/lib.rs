@@ -5,6 +5,7 @@ pub mod executor;
 pub mod proxy;
 pub mod readiness;
 pub mod storage;
+pub mod tool;
 pub mod types;
 pub mod utils;
 
@@ -13,12 +14,16 @@ pub use storage::{
     SchemaManager, StorageError, StoreResult, create_pool, create_pool_with_schema,
     models::{Conversation as DbConversation, Item as DbItem, Response as DbResponse},
 };
+pub use tool::{
+    FunctionHandler, GatewayExecutor, ToolEntry, ToolError, ToolHandler, ToolOutput, ToolRegistry, ToolType,
+};
 pub use types::{
-    CodexCustomTool, CodexNamespaceMember, CodexNamespaceTool, CodexToolSearchTool, FunctionTool, FunctionToolCall,
-    FunctionToolResultMessage, IncompleteDetails, InputContent, InputImageContent, InputItem, InputMessage,
-    InputMessageContent, InputTextContent, InputTokenDetails, KnownResponsesTool, OutputItem, OutputMessage,
-    OutputTextContent, OutputTokenDetails, ReasoningOutput, ReasoningTextContent, RequestPayload, ResponsePayload,
-    ResponseUsage, ResponsesFunctionTool, ResponsesInput, ResponsesTool, ToolChoice, ToolExecutionOwner, ToolName,
-    ToolRegistry, ToolRegistryEntry, ToolSearchExecution, UpstreamRequest,
+    CodeInterpreterToolParam, CodexCustomToolParam, CodexNamespaceMember, CodexNamespaceToolParam,
+    CodexToolSearchToolParam, EmptyToolNameError, FileSearchToolParam, FunctionTool, FunctionToolCall,
+    FunctionToolParam, FunctionToolResultMessage, IncompleteDetails, InputContent, InputImageContent, InputItem,
+    InputMessage, InputMessageContent, InputTextContent, InputTokenDetails, McpToolParam, NonEmptyToolName, OutputItem,
+    OutputMessage, OutputTextContent, OutputTokenDetails, ReasoningOutput, ReasoningTextContent, RequestPayload,
+    ResponsePayload, ResponseUsage, ResponsesInput, ResponsesTool, ToolChoice, ToolSearchExecution, UpstreamRequest,
+    WebSearchToolParam,
 };
 pub use utils::{utcnow_str, uuid7_str};

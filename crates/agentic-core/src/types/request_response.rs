@@ -2,8 +2,9 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 use super::io::{
-    InputItem, InputMessage, InputMessageContent, OutputItem, ResponseUsage, ResponsesInput, ResponsesTool, ToolChoice,
+    FunctionTool, InputItem, InputMessage, InputMessageContent, OutputItem, ResponseUsage, ResponsesInput, ToolChoice,
 };
+use super::tools::ResponsesTool;
 use crate::utils::common::serialize_to_string;
 
 #[derive(Debug, Clone, Serialize)]
@@ -89,8 +90,11 @@ pub struct UpstreamRequest<'a> {
     pub stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instructions: Option<&'a str>,
+    /// Normalized tools forwarded to vLLM. Namespace tools must be flattened
+    /// before this is built; non-function/provider/client-owned tools are not
+    /// sent on the typed executor path.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tools: Option<&'a Vec<ResponsesTool>>,
+    pub tools: Option<Vec<FunctionTool>>,
     #[serde(skip_serializing_if = "is_default_tool_choice")]
     pub tool_choice: &'a ToolChoice,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -119,15 +123,21 @@ impl RequestPayload {
         self.input.normalize_for_upstream();
     }
 
-    /// Construct an `UpstreamRequest` borrowing from this request, suitable for forwarding to vLLM.
+    /// Construct an `UpstreamRequest` suitable for forwarding to vLLM.
     #[must_use]
     pub fn to_upstream_request(&self, stream: bool) -> UpstreamRequest<'_> {
+        let tools: Option<Vec<FunctionTool>> = self
+            .tools
+            .as_ref()
+            .map(|tools| tools.iter().filter_map(ResponsesTool::to_function_tool).collect());
+        let tools = tools.filter(|tools| !tools.is_empty());
+
         UpstreamRequest {
             model: &self.model,
             input: &self.input,
             stream,
             instructions: self.instructions.as_deref(),
-            tools: self.tools.as_ref(),
+            tools,
             tool_choice: &self.tool_choice,
             include: self.include.as_ref(),
             temperature: self.temperature,

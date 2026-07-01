@@ -1,12 +1,17 @@
 pub mod event;
 pub mod io;
 pub mod request_response;
+pub mod tools;
 
 pub use io::{
-    CodexCustomTool, CodexNamespaceMember, CodexNamespaceTool, CodexToolSearchTool, FunctionTool, FunctionToolCall,
-    FunctionToolResultMessage, InputContent, InputImageContent, InputItem, InputMessage, InputMessageContent,
-    InputTextContent, InputTokenDetails, KnownResponsesTool, OutputItem, OutputMessage, OutputTextContent,
-    OutputTokenDetails, ReasoningOutput, ReasoningTextContent, ResponseUsage, ResponsesFunctionTool, ResponsesInput,
-    ResponsesTool, ToolChoice, ToolExecutionOwner, ToolName, ToolRegistry, ToolRegistryEntry, ToolSearchExecution,
+    FunctionTool, FunctionToolCall, FunctionToolResultMessage, InputContent, InputImageContent, InputItem,
+    InputMessage, InputMessageContent, InputTextContent, InputTokenDetails, OutputItem, OutputMessage,
+    OutputTextContent, OutputTokenDetails, ReasoningOutput, ReasoningTextContent, ResponseUsage, ResponsesInput,
+    ToolChoice,
 };
 pub use request_response::{IncompleteDetails, RequestPayload, ResponsePayload, UpstreamRequest};
+pub use tools::{
+    CodeInterpreterToolParam, CodexCustomToolParam, CodexNamespaceMember, CodexNamespaceToolParam,
+    CodexToolSearchToolParam, EmptyToolNameError, FileSearchToolParam, FunctionToolParam, McpToolParam,
+    NonEmptyToolName, ResponsesTool, ToolSearchExecution, WebSearchToolParam,
+};

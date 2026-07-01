@@ -102,9 +102,10 @@ impl InOutItem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::event::MessageStatus;
     use crate::types::io::{
-        InputContent, InputMessage, InputMessageContent, OutputMessage, OutputTextContent, ReasoningOutput,
-        ReasoningTextContent,
+        FunctionToolCall, InputContent, InputMessage, InputMessageContent, OutputMessage, OutputTextContent,
+        ReasoningOutput, ReasoningTextContent,
     };
 
     #[test]
@@ -119,7 +120,7 @@ mod tests {
 
     #[test]
     fn test_inout_item_from_output() {
-        let output = OutputItem::Message(OutputMessage::new("msg_1", "completed"));
+        let output = OutputItem::Message(OutputMessage::new("msg_1", MessageStatus::Completed));
         let item: InOutItem = output.into();
         assert!(matches!(item, InOutItem::Output(_)));
     }
@@ -140,7 +141,7 @@ mod tests {
 
     #[test]
     fn test_into_input_items_converts_output_messages() {
-        let mut output = OutputMessage::new("out1", "done");
+        let mut output = OutputMessage::new("out1", MessageStatus::Completed);
         output.content.push(OutputTextContent::new("answer"));
         let items = vec![
             InOutItem::Input(InputItem::Message(InputMessage {
@@ -163,11 +164,10 @@ mod tests {
                     InputMessageContent::Parts(parts) => {
                         assert_eq!(parts.len(), 1);
                         match &parts[0] {
-                            InputContent::Text(t) => {
-                                assert_eq!(t.type_, "output_text");
+                            InputContent::OutputText(t) => {
                                 assert_eq!(t.text, "answer");
                             }
-                            InputContent::Image(_) => panic!("expected text part"),
+                            _ => panic!("expected OutputText part"),
                         }
                     }
                     InputMessageContent::Text(_) => panic!("expected parts content"),
@@ -183,7 +183,10 @@ mod tests {
         reasoning.content.push(ReasoningTextContent::new("thinking..."));
         let items = vec![
             InOutItem::Output(OutputItem::Reasoning(reasoning)),
-            InOutItem::Output(OutputItem::Message(OutputMessage::new("msg_1", "completed"))),
+            InOutItem::Output(OutputItem::Message(OutputMessage::new(
+                "msg_1",
+                MessageStatus::Completed,
+            ))),
         ];
 
         let inputs = InOutItem::into_input_items(items);
@@ -192,6 +195,26 @@ mod tests {
         if let InputItem::Reasoning(r) = &inputs[0] {
             assert_eq!(r.id, "rs_1");
             assert_eq!(r.content[0].text, "thinking...");
+        }
+    }
+
+    #[test]
+    fn test_into_input_items_preserves_function_calls() {
+        use crate::types::event::MessageStatus;
+        let fc = FunctionToolCall {
+            id: "fc_1".to_string(),
+            call_id: "call_abc".to_string(),
+            name: "my_tool".to_string(),
+            namespace: None,
+            arguments: "{}".to_string(),
+            status: MessageStatus::Completed,
+        };
+        let items = vec![InOutItem::Output(OutputItem::FunctionCall(fc))];
+        let inputs = InOutItem::into_input_items(items);
+        assert_eq!(inputs.len(), 1);
+        assert!(matches!(inputs[0], InputItem::FunctionCall(_)));
+        if let InputItem::FunctionCall(f) = &inputs[0] {
+            assert_eq!(f.name, "my_tool");
         }
     }
 

@@ -17,11 +17,9 @@ use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::executor::modes::{ConversationHandler, ResponseHandler};
 use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::storage::InOutItem;
+use crate::tool::{flatten_tool_choice_for_upstream, flatten_tools_for_upstream, normalize_output_items_with_tools};
 use crate::types::event::ResponseStatus;
-use crate::types::io::{
-    InputItem, ResponsesInput, flatten_tool_choice_for_upstream, flatten_tools_for_upstream,
-    normalize_output_items_with_tools, resolve_tool_choice, resolve_tools,
-};
+use crate::types::io::{InputItem, ResponsesInput, resolve_tool_choice, resolve_tools};
 use crate::types::request_response::{RequestPayload, ResponsePayload};
 use crate::utils::common::serialize_to_string;
 use crate::utils::uuid7_str;
@@ -233,6 +231,25 @@ async fn rehydrate_from_conversation(ctx: &mut RequestContext, exec_ctx: &Execut
     Ok(())
 }
 
+/// Apply request transformations required before sending a hydrated context
+/// to the upstream Responses endpoint.
+pub fn prepare_context_for_upstream(ctx: &mut RequestContext, exec_ctx: &ExecutionContext) {
+    ctx.enriched_request.model = exec_ctx.resolve_model_alias(&ctx.enriched_request.model);
+    ctx.enriched_request.normalize_for_upstream();
+}
+
+/// Serialize a hydrated, upstream-prepared context into the vLLM request body.
+///
+/// The original request stored on the context is left untouched; namespace
+/// tools and tool choices are flattened only in this cloned upstream body.
+pub fn upstream_request_json(ctx: &RequestContext, stream: bool) -> ExecutorResult<String> {
+    let mut upstream_request = ctx.enriched_request.clone();
+    upstream_request.tools = flatten_tools_for_upstream(ctx.enriched_request.tools.as_deref());
+    upstream_request.tool_choice =
+        flatten_tool_choice_for_upstream(&ctx.enriched_request.tool_choice, ctx.enriched_request.tools.as_deref());
+    serialize_to_string(&upstream_request.to_upstream_request(stream)).map_err(ExecutorError::JsonError)
+}
+
 /// Step 2 — Call the LLM inference backend; yields raw SSE lines (`data: …`).
 ///
 /// Always requests `stream=true` upstream. Stops on `[DONE]`.
@@ -313,13 +330,7 @@ pub async fn persist_response(
 
 async fn run_blocking(ctx: RequestContext, exec_ctx: &ExecutionContext) -> ExecutorResult<ResponsePayload> {
     let url = exec_ctx.responses_url();
-    // Non-streaming request: stream=false → full JSON body → from_json.
-    let mut upstream_request = ctx.enriched_request.clone();
-    upstream_request.tools = flatten_tools_for_upstream(ctx.enriched_request.tools.as_deref());
-    upstream_request.tool_choice =
-        flatten_tool_choice_for_upstream(&ctx.enriched_request.tool_choice, ctx.enriched_request.tools.as_deref());
-    let upstream_json =
-        serialize_to_string(&upstream_request.to_upstream_request(false)).map_err(ExecutorError::JsonError)?;
+    let upstream_json = upstream_request_json(&ctx, false)?;
 
     let body = fetch_response_json(upstream_json, &url, &exec_ctx.client, exec_ctx.client_auth.as_deref()).await?;
 
@@ -348,12 +359,7 @@ async fn run_blocking(ctx: RequestContext, exec_ctx: &ExecutionContext) -> Execu
 
 fn run_stream(ctx: RequestContext, exec_ctx: Arc<ExecutionContext>) -> BoxStream {
     let url = exec_ctx.responses_url();
-    // Streaming request: stream=true → SSE lines → from_stream.
-    let mut upstream_request = ctx.enriched_request.clone();
-    upstream_request.tools = flatten_tools_for_upstream(ctx.enriched_request.tools.as_deref());
-    upstream_request.tool_choice =
-        flatten_tool_choice_for_upstream(&ctx.enriched_request.tool_choice, ctx.enriched_request.tools.as_deref());
-    let upstream_json = match serialize_to_string(&upstream_request.to_upstream_request(true)) {
+    let upstream_json = match upstream_request_json(&ctx, true) {
         Ok(s) => s,
         Err(e) => {
             return Box::pin(stream! {
@@ -434,8 +440,7 @@ pub async fn execute(
     exec_ctx: Arc<ExecutionContext>,
 ) -> ExecutorResult<Either<ResponsePayload, BoxStream>> {
     let mut ctx = rehydrate_conversation(request, &exec_ctx).await?;
-    ctx.enriched_request.model = exec_ctx.resolve_model_alias(&ctx.enriched_request.model);
-    ctx.enriched_request.normalize_for_upstream();
+    prepare_context_for_upstream(&mut ctx, &exec_ctx);
     if ctx.original_request.stream {
         Ok(Either::Right(run_stream(ctx, exec_ctx)))
     } else {

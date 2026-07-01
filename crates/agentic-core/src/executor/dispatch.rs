@@ -1,4 +1,5 @@
-use crate::types::io::{InputItem, OutputItem, ToolRegistry};
+use crate::tool::ToolRegistry;
+use crate::types::io::{InputItem, OutputItem};
 
 #[derive(Debug, Clone)]
 pub enum LoopDecision {

@@ -275,21 +275,13 @@ async fn test_codex_tool_shapes_rehydrate_from_previous_response_metadata() {
     let _p3 = unwrap_blocking(execute(third, Arc::clone(&fixture.exec_ctx)).await.expect("third turn"));
 
     let requests = fixture.request_bodies().await;
-    assert_eq!(requests[1]["tools"][0]["type"], "function");
-    assert_eq!(requests[1]["tools"][0]["name"], "agentic_ns__mcp__shell__run");
-    assert_eq!(
-        requests[1]["tools"][0]["parameters"],
-        tool_json[0]["tools"][0]["parameters"]
-    );
-    assert_eq!(requests[1]["tools"][1], tool_json[1]);
-    assert_eq!(requests[1]["tools"][2], tool_json[2]);
-    assert_eq!(requests[1]["tools"][3], tool_json[3]);
-
-    assert_eq!(requests[2]["tools"][0]["type"], "function");
-    assert_eq!(requests[2]["tools"][0]["name"], "agentic_ns__mcp__shell__run");
-    assert_eq!(requests[2]["tools"][1], tool_json[1]);
-    assert_eq!(requests[2]["tools"][2], tool_json[2]);
-    assert_eq!(requests[2]["tools"][3], tool_json[3]);
+    for request in &requests {
+        let tools = request["tools"].as_array().expect("typed upstream tools array");
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["type"], "function");
+        assert_eq!(tools[0]["name"], "agentic_ns__mcp__shell__run");
+        assert_eq!(tools[0]["parameters"], tool_json[0]["tools"][0]["parameters"]);
+    }
 }
 
 #[tokio::test]

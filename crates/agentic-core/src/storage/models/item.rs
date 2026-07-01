@@ -63,14 +63,14 @@ impl Item {
             }
         }
 
-        let input = self.as_input();
-        if input.as_ref().is_some_and(|item| !is_unknown_input(item)) {
-            return input.map(InOutItem::Input);
-        }
-
         let output = self.as_output();
         if output.as_ref().is_some_and(|item| !is_unknown_output(item)) {
             return output.map(InOutItem::Output);
+        }
+
+        let input = self.as_input();
+        if input.as_ref().is_some_and(|item| !is_unknown_input(item)) {
+            return input.map(InOutItem::Input);
         }
 
         match (input, output) {
@@ -190,6 +190,7 @@ pub async fn conversation_item_count(tx: &mut DbTransaction<'_>, conversation_id
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::event::MessageStatus;
     use crate::types::io::{InputItem, OutputItem, ReasoningOutput, ReasoningTextContent};
 
     #[test]
@@ -272,7 +273,7 @@ mod tests {
             name: "run".to_string(),
             namespace: Some("mcp__shell".to_string()),
             arguments: "{\"cmd\":\"pwd\"}".to_string(),
-            status: "completed".to_string(),
+            status: MessageStatus::Completed,
         }));
         let item = Item {
             id: "item_function_call".to_string(),
@@ -303,7 +304,7 @@ mod tests {
                 name: "run".to_string(),
                 namespace: Some("mcp__shell".to_string()),
                 arguments: "{\"cmd\":\"pwd\"}".to_string(),
-                status: "completed".to_string(),
+                status: MessageStatus::Completed,
             })),
             InOutItem::Output(OutputItem::FunctionCall(crate::types::io::FunctionToolCall {
                 id: "fc_2".to_string(),
@@ -311,7 +312,7 @@ mod tests {
                 name: "run".to_string(),
                 namespace: Some("mcp__git".to_string()),
                 arguments: "{\"args\":[\"status\",\"--short\"]}".to_string(),
-                status: "completed".to_string(),
+                status: MessageStatus::Completed,
             })),
         ];
         let rows: Vec<InOutItem> = stored_items
