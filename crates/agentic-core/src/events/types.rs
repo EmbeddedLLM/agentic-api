@@ -64,6 +64,7 @@ pub enum EventPayload {
         item_type: String,
         output_index: u32,
         name: Option<String>,
+        namespace: Option<String>,
         call_id: Option<String>,
     },
 

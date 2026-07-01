@@ -137,6 +137,7 @@ fn make_request(input: &str, stream: bool, prev_id: Option<String>) -> RequestPa
         conversation_id: None,
         tools: None,
         tool_choice: ToolChoice::Auto,
+        tool_choice_explicitly_set: false,
         stream,
         store: true,
         include: None,

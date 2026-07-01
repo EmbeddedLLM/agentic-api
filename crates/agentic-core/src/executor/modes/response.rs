@@ -72,8 +72,8 @@ impl ResponseHandler {
         let metadata = ResponseMetadata {
             model: ctx.enriched_request.model,
             previous_response_id: ctx.original_request.previous_response_id,
-            effective_tools: ctx.original_request.tools,
-            effective_tool_choice: ctx.original_request.tool_choice,
+            effective_tools: ctx.enriched_request.tools,
+            effective_tool_choice: ctx.enriched_request.tool_choice,
             effective_instructions: ctx.original_request.instructions,
         };
 
@@ -112,6 +112,7 @@ mod tests {
             conversation_id: None,
             tools: None,
             tool_choice: ToolChoice::Auto,
+            tool_choice_explicitly_set: false,
             stream: false,
             store: true,
             include: None,

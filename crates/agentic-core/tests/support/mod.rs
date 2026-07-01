@@ -359,6 +359,7 @@ pub fn make_request(
         conversation_id,
         tools: None,
         tool_choice: ToolChoice::Auto,
+        tool_choice_explicitly_set: false,
         stream,
         store,
         include: None,
@@ -404,7 +405,11 @@ pub fn output_text(payload: &ResponsePayload) -> String {
         .iter()
         .filter_map(|item| match item {
             OutputItem::Message(msg) => Some(msg.content.iter().map(|c| c.text.as_str()).collect::<String>()),
-            OutputItem::FunctionCall(_) | OutputItem::Reasoning(_) | OutputItem::Unknown => None,
+            OutputItem::FunctionCall(_)
+            | OutputItem::ToolSearchCall(_)
+            | OutputItem::CustomToolCall(_)
+            | OutputItem::Reasoning(_)
+            | OutputItem::Unknown(_) => None,
         })
         .collect::<String>()
 }

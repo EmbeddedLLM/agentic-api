@@ -247,6 +247,7 @@ impl ResponseAccumulator {
                     item_id,
                     item_type,
                     name,
+                    namespace,
                     call_id,
                     ..
                 },
@@ -276,6 +277,7 @@ impl ResponseAccumulator {
                             id: item_id,
                             call_id: call_id.clone().unwrap_or_default(),
                             name: name.clone().unwrap_or_default(),
+                            namespace: namespace.clone(),
                             arguments: String::new(),
                             status: "in_progress".to_string(),
                         });
@@ -512,6 +514,7 @@ mod tests {
                 item_type: "message".into(),
                 output_index: 0,
                 name: None,
+                namespace: None,
                 call_id: None,
             },
             sequence_number: Some(1),
@@ -720,6 +723,7 @@ mod tests {
                 item_type: "function_call".into(),
                 output_index: 0,
                 name: Some("get_weather".into()),
+                namespace: Some("mcp__weather".into()),
                 call_id: Some("call_abc".into()),
             },
             sequence_number: Some(1),
@@ -775,6 +779,7 @@ mod tests {
             assert_eq!(fc.id, "fc_1");
             assert_eq!(fc.call_id, "call_abc");
             assert_eq!(fc.name, "get_weather");
+            assert_eq!(fc.namespace.as_deref(), Some("mcp__weather"));
             assert_eq!(fc.arguments, r#"{"location":"Paris"}"#);
             assert_eq!(fc.status, "completed");
         } else {
@@ -794,6 +799,7 @@ mod tests {
                 item_type: "function_call".into(),
                 output_index: 0,
                 name: Some("search".into()),
+                namespace: None,
                 call_id: Some("call_1".into()),
             },
             sequence_number: Some(1),
@@ -843,6 +849,7 @@ mod tests {
                 item_type: "function_call".into(),
                 output_index: 0,
                 name: Some("get_weather".into()),
+                namespace: None,
                 call_id: Some("call_1".into()),
             },
             sequence_number: Some(1),
@@ -867,6 +874,7 @@ mod tests {
                 item_type: "function_call".into(),
                 output_index: 1,
                 name: Some("get_time".into()),
+                namespace: None,
                 call_id: Some("call_2".into()),
             },
             sequence_number: Some(3),
@@ -911,6 +919,7 @@ mod tests {
                 item_type: "message".into(),
                 output_index: 0,
                 name: None,
+                namespace: None,
                 call_id: None,
             },
             sequence_number: Some(1),
@@ -934,6 +943,7 @@ mod tests {
                 item_type: "function_call".into(),
                 output_index: 1,
                 name: Some("lookup".into()),
+                namespace: None,
                 call_id: Some("call_x".into()),
             },
             sequence_number: Some(3),
@@ -977,6 +987,7 @@ mod tests {
                 item_type: "function_call".into(),
                 output_index: 0,
                 name: Some("old_name".into()),
+                namespace: None,
                 call_id: Some("old_call".into()),
             },
             sequence_number: Some(1),
@@ -1014,6 +1025,7 @@ mod tests {
                 item_type: "function_call".into(),
                 output_index: 0,
                 name: Some("tool".into()),
+                namespace: None,
                 call_id: Some("c1".into()),
             },
             sequence_number: Some(1),
@@ -1070,6 +1082,7 @@ mod tests {
                 item_type: "function_call".into(),
                 output_index: 0,
                 name: Some("partial".into()),
+                namespace: None,
                 call_id: Some("c1".into()),
             },
             sequence_number: Some(1),

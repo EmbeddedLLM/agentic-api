@@ -177,7 +177,7 @@ fn test_output_item_added_message() {
 
 #[test]
 fn test_output_item_added_function_call() {
-    let line = r#"data: {"type":"response.output_item.added","item":{"id":"fc_1","type":"function_call","status":"in_progress","name":"get_weather","call_id":"call_1","arguments":""},"output_index":1,"sequence_number":5}"#;
+    let line = r#"data: {"type":"response.output_item.added","item":{"id":"fc_1","type":"function_call","status":"in_progress","name":"get_weather","namespace":"mcp__weather","call_id":"call_1","arguments":""},"output_index":1,"sequence_number":5}"#;
     let frame = normalize_sse_line(line).unwrap();
     assert_eq!(frame.event_type, SSEEventType::OutputItemAdded);
     if let EventPayload::OutputItemAdded {
@@ -185,6 +185,7 @@ fn test_output_item_added_function_call() {
         item_type,
         output_index,
         name,
+        namespace,
         call_id,
     } = &frame.payload
     {
@@ -192,6 +193,7 @@ fn test_output_item_added_function_call() {
         assert_eq!(item_type, "function_call");
         assert_eq!(*output_index, 1);
         assert_eq!(name.as_deref(), Some("get_weather"));
+        assert_eq!(namespace.as_deref(), Some("mcp__weather"));
         assert_eq!(call_id.as_deref(), Some("call_1"));
     } else {
         panic!("expected OutputItemAdded payload");

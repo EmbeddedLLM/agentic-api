@@ -18,7 +18,10 @@ use crate::executor::modes::{ConversationHandler, ResponseHandler};
 use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::storage::InOutItem;
 use crate::types::event::ResponseStatus;
-use crate::types::io::{InputItem, ResponsesInput, resolve_tool_choice, resolve_tools};
+use crate::types::io::{
+    InputItem, ResponsesInput, flatten_tool_choice_for_upstream, flatten_tools_for_upstream,
+    normalize_output_items_with_tools, resolve_tool_choice, resolve_tools,
+};
 use crate::types::request_response::{RequestPayload, ResponsePayload};
 use crate::utils::common::serialize_to_string;
 use crate::utils::uuid7_str;
@@ -94,6 +97,22 @@ async fn send_request(
     }
 
     Ok(resp)
+}
+
+fn drain_complete_utf8_lines(buffer: &mut Vec<u8>) -> Vec<String> {
+    let mut lines = Vec::new();
+    while let Some(pos) = buffer.iter().position(|byte| *byte == b'\n') {
+        let line = buffer.drain(..=pos).collect::<Vec<_>>();
+        let line_end = if pos > 0 && line.get(pos - 1) == Some(&b'\r') {
+            pos - 1
+        } else {
+            pos
+        };
+        if let Ok(line) = std::str::from_utf8(&line[..line_end]) {
+            lines.push(line.to_string());
+        }
+    }
+    lines
 }
 
 /// Makes a non-streaming HTTP POST to the LLM backend and returns the full JSON body.
@@ -183,7 +202,7 @@ async fn rehydrate_from_response(ctx: &mut RequestContext, exec_ctx: &ExecutionC
     ctx.enriched_request.tool_choice = resolve_tool_choice(
         &ctx.original_request.tool_choice,
         &stored.metadata.effective_tool_choice,
-        false,
+        ctx.original_request.tool_choice_explicitly_set,
     );
     ctx.conversation_id = stored.conversation_id;
     Ok(())
@@ -237,7 +256,7 @@ pub fn call_inference(
         };
 
         let mut bytes = resp.bytes_stream();
-        let mut buf = String::with_capacity(8192);
+        let mut buf = Vec::with_capacity(8192);
 
         loop {
             let chunk = match next_chunk(&mut bytes, chunk_timeout).await {
@@ -246,19 +265,14 @@ pub fn call_inference(
                 Err(e) => { yield Err(e); return; }
             };
 
-            match std::str::from_utf8(&chunk) {
-                Ok(s) => buf.push_str(s),
-                Err(_) => buf.push_str(&String::from_utf8_lossy(&chunk)),
-            }
+            buf.extend_from_slice(&chunk);
 
-            while let Some(pos) = buf.find('\n') {
-                let line = buf[..pos].trim_end_matches('\r');
-                match line {
+            for line in drain_complete_utf8_lines(&mut buf) {
+                match line.as_str() {
                     "data: [DONE]" => return,
-                    l if l.starts_with("data: ") => yield Ok(l.to_string()),
+                    l if l.starts_with("data: ") => yield Ok(line),
                     _ => {}
                 }
-                buf.drain(..=pos);
             }
         }
     }
@@ -300,8 +314,12 @@ pub async fn persist_response(
 async fn run_blocking(ctx: RequestContext, exec_ctx: &ExecutionContext) -> ExecutorResult<ResponsePayload> {
     let url = exec_ctx.responses_url();
     // Non-streaming request: stream=false → full JSON body → from_json.
+    let mut upstream_request = ctx.enriched_request.clone();
+    upstream_request.tools = flatten_tools_for_upstream(ctx.enriched_request.tools.as_deref());
+    upstream_request.tool_choice =
+        flatten_tool_choice_for_upstream(&ctx.enriched_request.tool_choice, ctx.enriched_request.tools.as_deref());
     let upstream_json =
-        serialize_to_string(&ctx.enriched_request.to_upstream_request(false)).map_err(ExecutorError::JsonError)?;
+        serialize_to_string(&upstream_request.to_upstream_request(false)).map_err(ExecutorError::JsonError)?;
 
     let body = fetch_response_json(upstream_json, &url, &exec_ctx.client, exec_ctx.client_auth.as_deref()).await?;
 
@@ -311,6 +329,7 @@ async fn run_blocking(ctx: RequestContext, exec_ctx: &ExecutionContext) -> Execu
         ctx.original_request.previous_response_id.as_deref(),
         ctx.original_request.instructions.as_deref(),
     );
+    normalize_output_items_with_tools(&mut payload.output, ctx.enriched_request.tools.as_deref());
     ctx.inject_ids(&mut payload);
 
     let should_persist = ctx.original_request.store
@@ -330,7 +349,11 @@ async fn run_blocking(ctx: RequestContext, exec_ctx: &ExecutionContext) -> Execu
 fn run_stream(ctx: RequestContext, exec_ctx: Arc<ExecutionContext>) -> BoxStream {
     let url = exec_ctx.responses_url();
     // Streaming request: stream=true → SSE lines → from_stream.
-    let upstream_json = match serialize_to_string(&ctx.enriched_request.to_upstream_request(true)) {
+    let mut upstream_request = ctx.enriched_request.clone();
+    upstream_request.tools = flatten_tools_for_upstream(ctx.enriched_request.tools.as_deref());
+    upstream_request.tool_choice =
+        flatten_tool_choice_for_upstream(&ctx.enriched_request.tool_choice, ctx.enriched_request.tools.as_deref());
+    let upstream_json = match serialize_to_string(&upstream_request.to_upstream_request(true)) {
         Ok(s) => s,
         Err(e) => {
             return Box::pin(stream! {
@@ -368,6 +391,7 @@ fn run_stream(ctx: RequestContext, exec_ctx: Arc<ExecutionContext>) -> BoxStream
                     ctx.original_request.previous_response_id.as_deref(),
                     ctx.original_request.instructions.as_deref(),
                 );
+                normalize_output_items_with_tools(&mut payload.output, ctx.enriched_request.tools.as_deref());
                 ctx.inject_ids(&mut payload);
                 yield payload.as_responses_chunk();
                 yield DONE_MARKER.to_string();
@@ -409,10 +433,39 @@ pub async fn execute(
     request: RequestPayload,
     exec_ctx: Arc<ExecutionContext>,
 ) -> ExecutorResult<Either<ResponsePayload, BoxStream>> {
-    let ctx = rehydrate_conversation(request, &exec_ctx).await?;
+    let mut ctx = rehydrate_conversation(request, &exec_ctx).await?;
+    ctx.enriched_request.model = exec_ctx.resolve_model_alias(&ctx.enriched_request.model);
+    ctx.enriched_request.normalize_for_upstream();
     if ctx.original_request.stream {
         Ok(Either::Right(run_stream(ctx, exec_ctx)))
     } else {
         Ok(Either::Left(run_blocking(ctx, &exec_ctx).await?))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn utf8_line_reader_preserves_split_multibyte_characters() {
+        let snowman = "\u{2603}";
+        let line = format!(r#"data: {{"delta":"snow {snowman}"}}"#);
+        let bytes = format!("{line}\n").into_bytes();
+        let split_at = bytes
+            .windows(snowman.len())
+            .position(|window| window == snowman.as_bytes())
+            .expect("snowman bytes present")
+            + 1;
+        let mut buffer = bytes[..split_at].to_vec();
+
+        assert!(drain_complete_utf8_lines(&mut buffer).is_empty());
+
+        buffer.extend_from_slice(&bytes[split_at..]);
+        let lines = drain_complete_utf8_lines(&mut buffer);
+
+        assert!(buffer.is_empty());
+        assert_eq!(lines, vec![line]);
+        assert!(!lines[0].contains('\u{FFFD}'));
     }
 }

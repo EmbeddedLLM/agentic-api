@@ -1,6 +1,6 @@
 use clap::{Args, Parser, Subcommand};
 
-use agentic_core::config::{Config, normalize_base_url};
+use agentic_core::config::{Config, normalize_base_url, parse_model_aliases};
 use agentic_core::error::Error;
 
 mod server;
@@ -22,6 +22,10 @@ struct CommonArgs {
     #[arg(long, default_value_t = 2.0, global = true)]
     llm_ready_interval_s: f64,
 
+    /// Skip the upstream /health readiness probe. Useful for hosted OpenAI-compatible providers.
+    #[arg(long, env = "SKIP_LLM_READY_CHECK", default_value_t = false, global = true)]
+    skip_llm_ready_check: bool,
+
     /// `SQLite` or `PostgreSQL` URL for conversation and response storage.
     /// Defaults to a local `SQLite` file.
     #[arg(
@@ -31,6 +35,10 @@ struct CommonArgs {
         global = true
     )]
     db_url: String,
+
+    /// Model alias mapping, repeatable or comma-separated with `MODEL_ALIASES`.
+    #[arg(long = "model-alias", env = "MODEL_ALIASES", value_delimiter = ',', global = true)]
+    model_aliases: Vec<String>,
 }
 
 #[derive(Parser)]
@@ -63,14 +71,17 @@ enum Commands {
     },
 }
 
-fn build_config(llm_api_base: String, common: &CommonArgs) -> Config {
-    Config {
+fn build_config(llm_api_base: String, common: &CommonArgs) -> Result<Config, Error> {
+    let model_aliases = parse_model_aliases(&common.model_aliases).map_err(Error::Config)?;
+    Ok(Config {
         llm_api_base,
         openai_api_key: common.openai_api_key.clone(),
         llm_ready_timeout_s: common.llm_ready_timeout_s,
         llm_ready_interval_s: common.llm_ready_interval_s,
+        skip_llm_ready_check: common.skip_llm_ready_check,
         db_url: Some(common.db_url.clone()),
-    }
+        model_aliases,
+    })
 }
 
 #[tokio::main]
@@ -96,7 +107,7 @@ async fn main() -> Result<(), Error> {
                         .to_owned(),
                 )
             })?;
-            let config = build_config(normalize_base_url(&base), &common);
+            let config = build_config(normalize_base_url(&base), &common)?;
             server::run(config, &common.gateway_host, common.gateway_port).await
         }
         Some(Commands::Serve { model, port, llm_args }) => {
@@ -105,7 +116,7 @@ async fn main() -> Result<(), Error> {
                     "--llm-api-base is only valid in standalone mode; remove it when using `serve`".to_owned(),
                 ));
             }
-            let config = build_config(normalize_base_url(&format!("http://127.0.0.1:{port}")), &common);
+            let config = build_config(normalize_base_url(&format!("http://127.0.0.1:{port}")), &common)?;
             let mut args = vec!["--model".to_owned(), model];
             args.push("--port".to_owned());
             args.push(port.to_string());

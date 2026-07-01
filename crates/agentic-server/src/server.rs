@@ -37,8 +37,12 @@ async fn serve_gateway(state: AppState, host: &str, port: u16) -> Result<(), Err
 /// Returns an error if DB initialisation, LLM readiness polling, or the
 /// server binding fails.
 pub async fn run(config: Config, host: &str, port: u16) -> Result<(), Error> {
-    wait_llm_ready(&config).await?;
-    info!("LLM ready: {}", config.llm_api_base);
+    if config.skip_llm_ready_check {
+        info!("skipping LLM readiness check: {}", config.llm_api_base);
+    } else {
+        wait_llm_ready(&config).await?;
+        info!("LLM ready: {}", config.llm_api_base);
+    }
     let state = build_state(&config).await?;
     serve_gateway(state, host, port).await
 }
@@ -57,11 +61,16 @@ pub async fn run_with_llm(config: Config, host: &str, port: u16, llm_args: Vec<S
     let mut child = cmd.spawn()?;
     info!("spawned vLLM subprocess (pid {})", child.id().unwrap_or(0));
 
-    let readiness_result = tokio::select! {
-        ready = wait_llm_ready(&config) => ready,
-        status = child.wait() => {
-            let status = status?;
-            Err(Error::LlmProcessExited { status: status.to_string() })
+    let readiness_result = if config.skip_llm_ready_check {
+        info!("skipping LLM readiness check: {}", config.llm_api_base);
+        Ok(())
+    } else {
+        tokio::select! {
+            ready = wait_llm_ready(&config) => ready,
+            status = child.wait() => {
+                let status = status?;
+                Err(Error::LlmProcessExited { status: status.to_string() })
+            }
         }
     };
 

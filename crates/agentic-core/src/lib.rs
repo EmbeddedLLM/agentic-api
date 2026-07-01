@@ -14,9 +14,11 @@ pub use storage::{
     models::{Conversation as DbConversation, Item as DbItem, Response as DbResponse},
 };
 pub use types::{
-    FunctionTool, FunctionToolCall, FunctionToolResultMessage, IncompleteDetails, InputContent, InputImageContent,
-    InputItem, InputMessage, InputMessageContent, InputTextContent, InputTokenDetails, OutputItem, OutputMessage,
+    CodexCustomTool, CodexNamespaceMember, CodexNamespaceTool, CodexToolSearchTool, FunctionTool, FunctionToolCall,
+    FunctionToolResultMessage, IncompleteDetails, InputContent, InputImageContent, InputItem, InputMessage,
+    InputMessageContent, InputTextContent, InputTokenDetails, KnownResponsesTool, OutputItem, OutputMessage,
     OutputTextContent, OutputTokenDetails, ReasoningOutput, ReasoningTextContent, RequestPayload, ResponsePayload,
-    ResponseUsage, ResponsesInput, ResponsesTool, ToolChoice, UpstreamRequest,
+    ResponseUsage, ResponsesFunctionTool, ResponsesInput, ResponsesTool, ToolChoice, ToolExecutionOwner, ToolName,
+    ToolRegistry, ToolRegistryEntry, ToolSearchExecution, UpstreamRequest,
 };
 pub use utils::{utcnow_str, uuid7_str};
