@@ -8,7 +8,7 @@ use http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use reqwest::Client;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-use tracing::warn;
+use tracing::{debug, warn};
 
 use crate::config::{Config, resolve_model_alias};
 use crate::error::Error;
@@ -346,6 +346,11 @@ fn normalize_proxy_request_body(body: Bytes, config: &Config) -> NormalizedProxy
         if let Some(model) = object.get("model").and_then(Value::as_str) {
             let resolved = resolve_model_alias(model, &config.model_aliases);
             if resolved != model {
+                debug!(
+                    model_before = %model,
+                    model_after = %resolved,
+                    "rewrote proxy request model alias"
+                );
                 object.insert("model".to_string(), Value::String(resolved));
                 changed = true;
             }
@@ -360,6 +365,7 @@ fn normalize_proxy_request_body(body: Bytes, config: &Config) -> NormalizedProxy
         if let Some(instructions) = instructions {
             if let Some(input) = object.get_mut("input") {
                 prepend_system_message(input, &instructions);
+                debug!("moved proxy request instructions into input");
                 changed = true;
             } else {
                 object.insert("instructions".to_string(), Value::String(instructions));
@@ -478,6 +484,10 @@ fn flatten_namespace_tools_for_upstream(
             continue;
         }
         if raw_namespace_has_flat_name_collision(namespace_name, &function_members, &top_level_names) {
+            debug!(
+                namespace = %namespace_name,
+                "leaving raw namespace tool unflattened because a top-level tool uses a generated name"
+            );
             upstream_tools.push(tool);
             continue;
         }
@@ -488,6 +498,12 @@ fn flatten_namespace_tools_for_upstream(
                 continue;
             };
             let flat_name = model_visible_namespace_member_name(namespace_name, member_name);
+            debug!(
+                namespace = %namespace_name,
+                member = %member_name,
+                upstream_name = %flat_name,
+                "flattened raw namespace tool member for upstream"
+            );
             let mut upstream_member = (*member).clone();
             if let Some(member_object) = upstream_member.as_object_mut() {
                 member_object.insert("name".to_string(), Value::String(flat_name.clone()));
@@ -583,12 +599,20 @@ fn normalize_call_object(value: &mut Value, namespace: &NamespaceNormalization) 
     let Some(mapping) = namespace.calls.get(name) else {
         return false;
     };
+    let original_name = name.to_string();
 
     object.insert("namespace".to_string(), Value::String(mapping.member.namespace.clone()));
     object.insert("name".to_string(), Value::String(mapping.member.name.clone()));
     if mapping.strip_container_arguments {
         strip_namespace_container_arguments(value);
     }
+    debug!(
+        upstream_name = %original_name,
+        namespace = %mapping.member.namespace,
+        member = %mapping.member.name,
+        stripped_container_arguments = mapping.strip_container_arguments,
+        "restored raw proxy namespace function call"
+    );
     true
 }
 
@@ -821,6 +845,7 @@ pub async fn proxy_get(path: &str, request_headers: &HeaderMap, state: &ProxySta
 }
 
 pub async fn proxy_request(request: ProxyRequest, state: &ProxyState) -> ProxyResponse {
+    let request_body_bytes = request.body.len();
     let is_streaming = serde_json::from_slice::<Value>(&request.body)
         .ok()
         .and_then(|v| v.get("stream")?.as_bool())
@@ -837,6 +862,14 @@ pub async fn proxy_request(request: ProxyRequest, state: &ProxyState) -> ProxyRe
         url.push('?');
         url.push_str(q);
     }
+    debug!(
+        url = %url,
+        stream = is_streaming,
+        request_body_bytes,
+        normalized_body_bytes = body.len(),
+        has_namespace_normalization = !namespace.is_empty(),
+        "proxying responses request to upstream"
+    );
 
     let client = if is_streaming {
         &state.stream_client
@@ -857,9 +890,16 @@ pub async fn proxy_request(request: ProxyRequest, state: &ProxyState) -> ProxyRe
     };
 
     let status = StatusCode::from_u16(llm_resp.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    let response_is_sse = is_sse_content_type(llm_resp.headers());
+    debug!(
+        status = status.as_u16(),
+        response_is_sse,
+        has_namespace_normalization = !namespace.is_empty(),
+        "received upstream proxy response"
+    );
     let mut response_headers = filter_response_headers(llm_resp.headers());
 
-    if is_sse_content_type(llm_resp.headers()) {
+    if response_is_sse {
         response_headers.insert("x-accel-buffering", HeaderValue::from_static("no"));
 
         let byte_stream: Pin<Box<dyn Stream<Item = Result<Bytes, std::io::Error>> + Send>> =
@@ -867,6 +907,7 @@ pub async fn proxy_request(request: ProxyRequest, state: &ProxyState) -> ProxyRe
         let byte_stream = if namespace.is_empty() {
             byte_stream
         } else {
+            debug!("normalizing namespace calls in upstream SSE proxy response");
             normalize_sse_stream(byte_stream, namespace)
         };
 
@@ -889,6 +930,7 @@ pub async fn proxy_request(request: ProxyRequest, state: &ProxyState) -> ProxyRe
         }
     };
     if !namespace.is_empty() {
+        debug!("normalizing namespace calls in upstream JSON proxy response");
         payload = normalize_response_body(payload, &namespace);
     }
 

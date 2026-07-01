@@ -10,7 +10,7 @@ use std::sync::Arc;
 use async_stream::stream;
 use either::Either;
 use futures::{Stream, StreamExt};
-use tracing::warn;
+use tracing::{debug, warn};
 
 use crate::executor::accumulator::ResponseAccumulator;
 use crate::executor::error::{ExecutorError, ExecutorResult};
@@ -31,6 +31,13 @@ pub type BoxStream = Pin<Box<dyn Stream<Item = String> + Send>>;
 
 /// Wire-format marker signalling end-of-stream to the client.
 const DONE_MARKER: &str = "data: [DONE]\n\n";
+
+fn responses_input_item_count(input: &ResponsesInput) -> usize {
+    match input {
+        ResponsesInput::Text(_) => 1,
+        ResponsesInput::Items(items) => items.len(),
+    }
+}
 
 /// Fetch the next raw bytes chunk from a streaming response.
 ///
@@ -156,8 +163,23 @@ pub async fn rehydrate_conversation(
         response_id,
         conversation_id: None,
     };
+    debug!(
+        response_id = %ctx.response_id,
+        model = %ctx.original_request.model,
+        store = ctx.original_request.store,
+        stream = ctx.original_request.stream,
+        has_previous_response_id = ctx.original_request.previous_response_id.is_some(),
+        has_conversation_id = ctx.original_request.conversation_id.is_some(),
+        new_input_items = ctx.new_input_items.len(),
+        tools = ctx.original_request.tools.as_ref().map_or(0, Vec::len),
+        "rehydrating responses request"
+    );
 
     if ctx.original_request.conversation_id.is_some() && ctx.original_request.previous_response_id.is_some() {
+        debug!(
+            response_id = %ctx.response_id,
+            "rejecting responses request with both conversation_id and previous_response_id"
+        );
         return Err(ExecutorError::InvalidRequest(
             "provide only one of conversation_id or previous_response_id".into(),
         ));
@@ -174,6 +196,11 @@ pub async fn rehydrate_conversation(
     }
 
     ctx.enriched_request.input = ResponsesInput::Items(ctx.new_input_items.clone());
+    debug!(
+        response_id = %ctx.response_id,
+        input_items = responses_input_item_count(&ctx.enriched_request.input),
+        "responses request has no server-side history to hydrate"
+    );
     Ok(ctx)
 }
 
@@ -187,6 +214,7 @@ async fn rehydrate_from_response(ctx: &mut RequestContext, exec_ctx: &ExecutionC
     let history = exec_ctx.resp_handler.rehydrate(ctx).await?;
 
     let mut items = InOutItem::into_input_items(history);
+    let history_item_count = items.len();
     items.reserve(ctx.new_input_items.len());
     items.extend(ctx.new_input_items.iter().cloned());
 
@@ -203,6 +231,15 @@ async fn rehydrate_from_response(ctx: &mut RequestContext, exec_ctx: &ExecutionC
         ctx.original_request.tool_choice_explicitly_set,
     );
     ctx.conversation_id = stored.conversation_id;
+    debug!(
+        response_id = %ctx.response_id,
+        previous_response_id = ?ctx.original_request.previous_response_id,
+        conversation_id = ?ctx.conversation_id,
+        history_items = history_item_count,
+        new_input_items = ctx.new_input_items.len(),
+        effective_tools = ctx.enriched_request.tools.as_ref().map_or(0, Vec::len),
+        "rehydrated responses request from previous response"
+    );
     Ok(())
 }
 
@@ -223,19 +260,41 @@ async fn rehydrate_from_conversation(ctx: &mut RequestContext, exec_ctx: &Execut
     )?;
 
     let mut items = InOutItem::into_input_items(history);
+    let history_item_count = items.len();
     items.reserve(ctx.new_input_items.len());
     items.extend(ctx.new_input_items.iter().cloned());
 
     ctx.enriched_request.input = ResponsesInput::Items(items);
-    ctx.conversation_id = Some(conv_data.conversation_id);
+    let conversation_id = conv_data.conversation_id;
+    ctx.conversation_id = Some(conversation_id.clone());
+    debug!(
+        response_id = %ctx.response_id,
+        conversation_id = %conversation_id,
+        store = ctx.original_request.store,
+        history_items = history_item_count,
+        new_input_items = ctx.new_input_items.len(),
+        "rehydrated responses request from conversation"
+    );
     Ok(())
 }
 
 /// Apply request transformations required before sending a hydrated context
 /// to the upstream Responses endpoint.
 pub fn prepare_context_for_upstream(ctx: &mut RequestContext, exec_ctx: &ExecutionContext) {
-    ctx.enriched_request.model = exec_ctx.resolve_model_alias(&ctx.enriched_request.model);
+    let original_model = ctx.enriched_request.model.clone();
+    let resolved_model = exec_ctx.resolve_model_alias(&original_model);
+    let alias_rewritten = resolved_model != original_model;
+    ctx.enriched_request.model = resolved_model;
     ctx.enriched_request.normalize_for_upstream();
+    debug!(
+        response_id = %ctx.response_id,
+        model_before = %original_model,
+        model_after = %ctx.enriched_request.model,
+        alias_rewritten,
+        input_items = responses_input_item_count(&ctx.enriched_request.input),
+        tools = ctx.enriched_request.tools.as_ref().map_or(0, Vec::len),
+        "prepared responses request for upstream"
+    );
 }
 
 /// Serialize a hydrated, upstream-prepared context into the vLLM request body.
@@ -244,9 +303,22 @@ pub fn prepare_context_for_upstream(ctx: &mut RequestContext, exec_ctx: &Executi
 /// tools and tool choices are flattened only in this cloned upstream body.
 pub fn upstream_request_json(ctx: &RequestContext, stream: bool) -> ExecutorResult<String> {
     let mut upstream_request = ctx.enriched_request.clone();
+    let original_tools = ctx.enriched_request.tools.as_ref().map_or(0, Vec::len);
     upstream_request.tools = flatten_tools_for_upstream(ctx.enriched_request.tools.as_deref());
     upstream_request.tool_choice =
         flatten_tool_choice_for_upstream(&ctx.enriched_request.tool_choice, ctx.enriched_request.tools.as_deref());
+    let upstream_tools = upstream_request.tools.as_ref().map_or(0, Vec::len);
+    let tool_choice_flattened = upstream_request.tool_choice != ctx.enriched_request.tool_choice;
+    debug!(
+        response_id = %ctx.response_id,
+        model = %upstream_request.model,
+        stream,
+        input_items = responses_input_item_count(&upstream_request.input),
+        original_tools,
+        upstream_tools,
+        tool_choice_flattened,
+        "serializing upstream responses request"
+    );
     serialize_to_string(&upstream_request.to_upstream_request(stream)).map_err(ExecutorError::JsonError)
 }
 
@@ -330,6 +402,11 @@ pub async fn persist_response(
 
 async fn run_blocking(ctx: RequestContext, exec_ctx: &ExecutionContext) -> ExecutorResult<ResponsePayload> {
     let url = exec_ctx.responses_url();
+    debug!(
+        response_id = %ctx.response_id,
+        url = %url,
+        "executing non-streaming responses request"
+    );
     let upstream_json = upstream_request_json(&ctx, false)?;
 
     let body = fetch_response_json(upstream_json, &url, &exec_ctx.client, exec_ctx.client_auth.as_deref()).await?;
@@ -349,8 +426,15 @@ async fn run_blocking(ctx: RequestContext, exec_ctx: &ExecutionContext) -> Execu
     if should_persist {
         let ch = exec_ctx.conv_handler.clone();
         let rh = exec_ctx.resp_handler.clone();
-        if let Err(e) = persist_response(payload.clone(), ctx, ch, rh).await {
-            warn!("persist failed: {e}");
+        let response_id = ctx.response_id.clone();
+        let output_items = payload.output.len();
+        match persist_response(payload.clone(), ctx, ch, rh).await {
+            Ok(()) => debug!(
+                response_id = %response_id,
+                output_items,
+                "persisted non-streaming responses output"
+            ),
+            Err(e) => warn!("persist failed: {e}"),
         }
     }
 
@@ -359,6 +443,11 @@ async fn run_blocking(ctx: RequestContext, exec_ctx: &ExecutionContext) -> Execu
 
 fn run_stream(ctx: RequestContext, exec_ctx: Arc<ExecutionContext>) -> BoxStream {
     let url = exec_ctx.responses_url();
+    debug!(
+        response_id = %ctx.response_id,
+        url = %url,
+        "executing streaming responses request"
+    );
     let upstream_json = match upstream_request_json(&ctx, true) {
         Ok(s) => s,
         Err(e) => {
@@ -405,8 +494,15 @@ fn run_stream(ctx: RequestContext, exec_ctx: Arc<ExecutionContext>) -> BoxStream
                 if should_persist {
                     let ch = exec_ctx.conv_handler.clone();
                     let rh = exec_ctx.resp_handler.clone();
-                    if let Err(e) = persist_response(payload, ctx, ch, rh).await {
-                        warn!("persist failed: {e}");
+                    let response_id = ctx.response_id.clone();
+                    let output_items = payload.output.len();
+                    match persist_response(payload, ctx, ch, rh).await {
+                        Ok(()) => debug!(
+                            response_id = %response_id,
+                            output_items,
+                            "persisted streaming responses output"
+                        ),
+                        Err(e) => warn!("persist failed: {e}"),
                     }
                 }
             }
@@ -439,6 +535,15 @@ pub async fn execute(
     request: RequestPayload,
     exec_ctx: Arc<ExecutionContext>,
 ) -> ExecutorResult<Either<ResponsePayload, BoxStream>> {
+    debug!(
+        model = %request.model,
+        store = request.store,
+        stream = request.stream,
+        has_previous_response_id = request.previous_response_id.is_some(),
+        has_conversation_id = request.conversation_id.is_some(),
+        tools = request.tools.as_ref().map_or(0, Vec::len),
+        "executor received responses request"
+    );
     let mut ctx = rehydrate_conversation(request, &exec_ctx).await?;
     prepare_context_for_upstream(&mut ctx, &exec_ctx);
     if ctx.original_request.stream {

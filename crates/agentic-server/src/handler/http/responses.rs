@@ -3,6 +3,7 @@ use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 use either::Either;
+use tracing::debug;
 
 use agentic_core::executor::execute;
 use agentic_core::proxy::{ProxyRequest, proxy_request};
@@ -36,6 +37,15 @@ pub async fn responses(State(state): State<AppState>, req: Request) -> Response 
     };
 
     let should_persist = payload.store || payload.previous_response_id.is_some() || payload.conversation_id.is_some();
+    debug!(
+        route = if should_persist { "executor" } else { "proxy" },
+        store = payload.store,
+        stream = payload.stream,
+        has_previous_response_id = payload.previous_response_id.is_some(),
+        has_conversation_id = payload.conversation_id.is_some(),
+        tools = payload.tools.as_ref().map_or(0, Vec::len),
+        "routing HTTP responses request"
+    );
 
     if should_persist {
         execute_responses(&state, parts, payload).await

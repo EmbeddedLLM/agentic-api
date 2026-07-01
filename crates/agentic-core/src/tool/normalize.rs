@@ -95,6 +95,10 @@ pub fn flatten_tools_for_upstream(tools: Option<&[ResponsesTool]>) -> Option<Vec
             match tool {
                 ResponsesTool::Namespace(namespace) => {
                     if namespace_has_flat_name_collision(namespace, &top_level_names) {
+                        tracing::debug!(
+                            namespace = %namespace.name,
+                            "leaving namespace tool unflattened because a top-level tool uses a generated name"
+                        );
                         upstream_tools.push(tool.clone());
                         continue;
                     }
@@ -102,11 +106,17 @@ pub fn flatten_tools_for_upstream(tools: Option<&[ResponsesTool]>) -> Option<Vec
                     let mut emitted_members = false;
                     for member in &namespace.tools {
                         if let CodexNamespaceMember::Function(function) = member {
-                            let flat_name =
+                            let flat_name_text =
                                 model_visible_namespace_member_name(&namespace.name, function.name.as_str());
-                            let Ok(flat_name) = NonEmptyToolName::try_from(flat_name) else {
+                            let Ok(flat_name) = NonEmptyToolName::try_from(flat_name_text.clone()) else {
                                 continue;
                             };
+                            tracing::debug!(
+                                namespace = %namespace.name,
+                                member = %function.name.as_str(),
+                                upstream_name = %flat_name_text,
+                                "flattened namespace tool member for upstream"
+                            );
                             let mut function = function.clone();
                             function.name = flat_name;
                             upstream_tools.push(ResponsesTool::Function(function));
@@ -114,6 +124,10 @@ pub fn flatten_tools_for_upstream(tools: Option<&[ResponsesTool]>) -> Option<Vec
                         }
                     }
                     if !emitted_members {
+                        tracing::debug!(
+                            namespace = %namespace.name,
+                            "leaving namespace tool unflattened because it has no function members"
+                        );
                         upstream_tools.push(tool.clone());
                     }
                 }
@@ -229,17 +243,39 @@ fn normalize_function_call_with_tools(call: &mut FunctionToolCall, tools: Option
     };
 
     if let Some((namespace, function)) = namespace_member_call(&call.name, tools) {
+        tracing::debug!(
+            upstream_name = %call.name,
+            namespace = %namespace.name,
+            member = %function.name.as_str(),
+            match_kind = "namespace_member",
+            "normalized upstream namespace function call"
+        );
         apply_namespace_member_call(call, namespace, function);
         return;
     }
 
     if let Some((namespace, function)) = namespace_container_call(&call.name, tools) {
+        tracing::debug!(
+            upstream_name = %call.name,
+            namespace = %namespace.name,
+            member = %function.name.as_str(),
+            match_kind = "namespace_container",
+            stripped_container_arguments = true,
+            "normalized upstream namespace function call"
+        );
         apply_namespace_member_call(call, namespace, function);
         strip_namespace_container_arguments(&mut call.arguments);
         return;
     }
 
     if let Some((namespace, function)) = unambiguous_namespace_member_call(&call.name, tools) {
+        tracing::debug!(
+            upstream_name = %call.name,
+            namespace = %namespace.name,
+            member = %function.name.as_str(),
+            match_kind = "bare_member",
+            "normalized upstream namespace function call"
+        );
         apply_namespace_member_call(call, namespace, function);
     }
 }

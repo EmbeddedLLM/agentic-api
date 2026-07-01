@@ -9,7 +9,7 @@ use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
-use tracing::warn;
+use tracing::{debug, warn};
 
 use agentic_core::executor::accumulator::ResponseAccumulator;
 use agentic_core::executor::{
@@ -34,6 +34,7 @@ pub async fn responses_ws(State(state): State<AppState>, headers: HeaderMap, ws:
 }
 
 async fn responses_ws_loop(socket: WebSocket, state: AppState, headers: HeaderMap) {
+    debug!("responses websocket session opened");
     let shutdown_token = state.shutdown_token.clone();
     let (mut sender, mut receiver) = socket.split();
 
@@ -95,6 +96,7 @@ async fn responses_ws_loop(socket: WebSocket, state: AppState, headers: HeaderMa
             }
         }
     }
+    debug!("responses websocket session closed");
 }
 
 /// Process one `response.create` message.
@@ -117,8 +119,20 @@ async fn handle_ws_text(
     }
 
     let mut payload = serde_json::from_value::<RequestPayload>(value).map_err(ExecutorError::from)?;
+    let requested_stream = payload.stream;
+    let requested_store = payload.store;
     payload.stream = true;
     payload.store = true;
+    debug!(
+        requested_stream,
+        requested_store,
+        forced_stream = payload.stream,
+        forced_store = payload.store,
+        has_previous_response_id = payload.previous_response_id.is_some(),
+        has_conversation_id = payload.conversation_id.is_some(),
+        tools = payload.tools.as_ref().map_or(0, Vec::len),
+        "accepted websocket response.create"
+    );
 
     let exec_ctx = resolve_exec_ctx_from_headers(state, headers);
     let mut ctx = rehydrate_conversation(payload, &exec_ctx).await?;
@@ -144,7 +158,14 @@ async fn stream_ws_response(
     let should_persist = ctx.original_request.store
         || ctx.original_request.previous_response_id.is_some()
         || ctx.conversation_id.is_some();
+    debug!(
+        response_id = %ctx.response_id,
+        should_persist,
+        has_conversation_id = ctx.conversation_id.is_some(),
+        "streaming websocket responses request"
+    );
     let mut lines = Vec::new();
+    let mut forwarded_events = 0usize;
     let mut stream = Box::pin(call_inference(
         upstream_json,
         exec_ctx.responses_url(),
@@ -169,6 +190,11 @@ async fn stream_ws_response(
                         // Client pipelined the next request while we are still streaming.
                         // Enqueue it and keep draining the current stream.
                         queue.push_back(text.to_string());
+                        debug!(
+                            response_id = %ctx.response_id,
+                            queued_requests = queue.len(),
+                            "queued pipelined websocket response.create while upstream stream is active"
+                        );
                         continue 'stream;
                     }
                     Some(Err(e)) => return Err(WsError::Receive(e.to_string())),
@@ -197,10 +223,17 @@ async fn stream_ws_response(
         apply_gateway_response_ids(&mut value, &ctx);
         normalize_response_value_with_tools(&mut value, ctx.enriched_request.tools.as_deref());
         send_ws_json(sender, value).await?;
+        forwarded_events += 1;
         if should_persist {
             lines.push(line);
         }
     }
+    debug!(
+        response_id = %ctx.response_id,
+        forwarded_events,
+        persisted_sse_lines = lines.len(),
+        "finished websocket upstream response stream"
+    );
 
     if should_persist && !lines.is_empty() {
         let acc = ResponseAccumulator::from_sse_lines(lines, ctx.conversation_id.as_deref());
@@ -213,8 +246,15 @@ async fn stream_ws_response(
         apply_gateway_payload_ids(&mut payload, &ctx);
         let ch = exec_ctx.conv_handler.clone();
         let rh = exec_ctx.resp_handler.clone();
-        if let Err(e) = persist_response(payload, ctx, ch, rh).await {
-            warn!("persist failed: {e}");
+        let response_id = ctx.response_id.clone();
+        let output_items = payload.output.len();
+        match persist_response(payload, ctx, ch, rh).await {
+            Ok(()) => debug!(
+                response_id = %response_id,
+                output_items,
+                "persisted websocket responses output"
+            ),
+            Err(e) => warn!("persist failed: {e}"),
         }
     }
 
