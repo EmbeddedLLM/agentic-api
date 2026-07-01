@@ -301,6 +301,9 @@ pub fn prepare_context_for_upstream(ctx: &mut RequestContext, exec_ctx: &Executi
 ///
 /// The original request stored on the context is left untouched; namespace
 /// tools and tool choices are flattened only in this cloned upstream body.
+///
+/// # Errors
+/// Returns [`ExecutorError::JsonError`] when the upstream request body cannot be serialized.
 pub fn upstream_request_json(ctx: &RequestContext, stream: bool) -> ExecutorResult<String> {
     let mut upstream_request = ctx.enriched_request.clone();
     let original_tools = ctx.enriched_request.tools.as_ref().map_or(0, Vec::len);

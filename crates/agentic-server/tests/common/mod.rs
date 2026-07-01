@@ -33,7 +33,7 @@ pub fn test_state(config: &Config) -> AppState {
         config.llm_api_base.clone(),
         config.openai_api_key.clone(),
     );
-    exec_ctx.model_aliases = config.model_aliases.clone();
+    exec_ctx.model_aliases.clone_from(&config.model_aliases);
     let exec_ctx = Arc::new(exec_ctx);
     let proxy_state = ProxyState::new(config.clone()).expect("proxy state");
     AppState {

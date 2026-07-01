@@ -236,29 +236,33 @@ async fn stream_ws_response(
     );
 
     if should_persist && !lines.is_empty() {
-        let acc = ResponseAccumulator::from_sse_lines(lines, ctx.conversation_id.as_deref());
-        let mut payload = acc.finalize(
-            &ctx.enriched_request.model,
-            ctx.original_request.previous_response_id.as_deref(),
-            ctx.original_request.instructions.as_deref(),
-        );
-        normalize_output_items_with_tools(&mut payload.output, ctx.enriched_request.tools.as_deref());
-        apply_gateway_payload_ids(&mut payload, &ctx);
-        let ch = exec_ctx.conv_handler.clone();
-        let rh = exec_ctx.resp_handler.clone();
-        let response_id = ctx.response_id.clone();
-        let output_items = payload.output.len();
-        match persist_response(payload, ctx, ch, rh).await {
-            Ok(()) => debug!(
-                response_id = %response_id,
-                output_items,
-                "persisted websocket responses output"
-            ),
-            Err(e) => warn!("persist failed: {e}"),
-        }
+        persist_ws_response(&exec_ctx, ctx, lines).await;
     }
 
     Ok(())
+}
+
+async fn persist_ws_response(exec_ctx: &ExecutionContext, ctx: RequestContext, lines: Vec<String>) {
+    let acc = ResponseAccumulator::from_sse_lines(lines, ctx.conversation_id.as_deref());
+    let mut payload = acc.finalize(
+        &ctx.enriched_request.model,
+        ctx.original_request.previous_response_id.as_deref(),
+        ctx.original_request.instructions.as_deref(),
+    );
+    normalize_output_items_with_tools(&mut payload.output, ctx.enriched_request.tools.as_deref());
+    apply_gateway_payload_ids(&mut payload, &ctx);
+    let ch = exec_ctx.conv_handler.clone();
+    let rh = exec_ctx.resp_handler.clone();
+    let response_id = ctx.response_id.clone();
+    let output_items = payload.output.len();
+    match persist_response(payload, ctx, ch, rh).await {
+        Ok(()) => debug!(
+            response_id = %response_id,
+            output_items,
+            "persisted websocket responses output"
+        ),
+        Err(e) => warn!("persist failed: {e}"),
+    }
 }
 
 fn apply_gateway_response_ids(value: &mut Value, ctx: &RequestContext) {

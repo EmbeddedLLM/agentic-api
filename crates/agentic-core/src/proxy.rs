@@ -440,6 +440,32 @@ fn raw_namespace_has_flat_name_collision(
     })
 }
 
+fn record_single_member_namespace_container_candidate(
+    container_candidates: &mut HashMap<String, Option<NamespaceCallMapping>>,
+    namespace_name: &str,
+    function_members: &[&Value],
+) {
+    if function_members.len() != 1 {
+        return;
+    }
+    let Some(member_name) = function_members[0].get("name").and_then(Value::as_str) else {
+        return;
+    };
+    let flat_name = model_visible_namespace_member_name(namespace_name, member_name);
+    record_alias_candidate(
+        container_candidates,
+        namespace_name.to_string(),
+        NamespaceCallMapping {
+            member: NamespaceMemberName {
+                namespace: namespace_name.to_string(),
+                name: member_name.to_string(),
+            },
+            upstream_name: flat_name,
+            strip_container_arguments: true,
+        },
+    );
+}
+
 fn flatten_namespace_tools_for_upstream(
     object: &mut serde_json::Map<String, Value>,
     normalization: &mut NamespaceNormalization,
@@ -533,23 +559,11 @@ fn flatten_namespace_tools_for_upstream(
             continue;
         }
 
-        if function_members.len() == 1 {
-            if let Some(member_name) = function_members[0].get("name").and_then(Value::as_str) {
-                let flat_name = model_visible_namespace_member_name(namespace_name, member_name);
-                record_alias_candidate(
-                    &mut container_candidates,
-                    namespace_name.to_string(),
-                    NamespaceCallMapping {
-                        member: NamespaceMemberName {
-                            namespace: namespace_name.to_string(),
-                            name: member_name.to_string(),
-                        },
-                        upstream_name: flat_name,
-                        strip_container_arguments: true,
-                    },
-                );
-            }
-        }
+        record_single_member_namespace_container_candidate(
+            &mut container_candidates,
+            namespace_name,
+            &function_members,
+        );
     }
 
     if changed {
