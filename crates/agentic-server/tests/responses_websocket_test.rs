@@ -455,6 +455,53 @@ async fn test_websocket_restores_namespace_tool_call_events() {
 }
 
 #[tokio::test]
+async fn test_websocket_preserves_plain_function_tool_call_events() {
+    let mock = MockResponsesServer::start(vec![sse_function_call_response("resp_upstream_1", "get_weather")]).await;
+    let fixture = storage_backed_state(&mock.url).await;
+    let (gateway_url, _gateway) = spawn_gateway(fixture.state.clone()).await;
+    let mut ws = connect_responses_ws(&gateway_url).await;
+
+    send_json(
+        &mut ws,
+        json!({
+            "type": "response.create",
+            "model": "test-model",
+            "input": [{"type": "message", "role": "user", "content": "use the tool"}],
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "get_weather",
+                    "parameters": {"type": "object"}
+                }
+            ],
+            "store": true,
+            "stream": true
+        }),
+    )
+    .await;
+
+    let events = recv_until_completed(&mut ws).await;
+    let added = events
+        .iter()
+        .find(|event| event["type"] == "response.output_item.added")
+        .unwrap();
+    let done = events
+        .iter()
+        .find(|event| event["type"] == "response.output_item.done")
+        .unwrap();
+
+    assert!(added["item"].get("namespace").is_none());
+    assert_eq!(added["item"]["name"], "get_weather");
+    assert!(done["item"].get("namespace").is_none());
+    assert_eq!(done["item"]["name"], "get_weather");
+
+    let requests = mock.request_bodies().await;
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0]["tools"][0]["type"], "function");
+    assert_eq!(requests[0]["tools"][0]["name"], "get_weather");
+}
+
+#[tokio::test]
 async fn test_websocket_continuation_rehydrates_previous_response() {
     let mock = MockResponsesServer::start(vec![
         sse_response("resp_upstream_1", "msg_upstream_1", "HELLO"),

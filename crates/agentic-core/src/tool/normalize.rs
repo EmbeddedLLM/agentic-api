@@ -689,6 +689,33 @@ mod tests {
     }
 
     #[test]
+    fn plain_function_call_round_trip() {
+        let tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([
+            {
+                "type": "function",
+                "name": "get_weather",
+                "parameters": {"type": "object"}
+            }
+        ]))
+        .unwrap();
+        let upstream = flatten_tools_for_upstream(Some(&tools)).expect("tools");
+        let mut output = vec![completed_call("get_weather", "{\"city\":\"SF\"}")];
+
+        normalize_output_items_with_tools(&mut output, Some(&tools));
+
+        assert!(matches!(
+            upstream.as_slice(),
+            [ResponsesTool::Function(function)] if function.name.as_str() == "get_weather"
+        ));
+        let OutputItem::FunctionCall(call) = &output[0] else {
+            panic!("expected function call");
+        };
+        assert!(call.namespace.is_none());
+        assert_eq!(call.name, "get_weather");
+        assert_eq!(call.arguments, "{\"city\":\"SF\"}");
+    }
+
+    #[test]
     fn underscore_namespace_member_alias_normalizes_to_member_call() {
         let tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([
             {
