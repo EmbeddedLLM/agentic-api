@@ -435,6 +435,8 @@ mod tests {
                 output_index: 0,
                 name: None,
                 call_id: None,
+
+                namespace: None,
             },
             sequence_number: Some(1),
         });
@@ -626,6 +628,8 @@ mod tests {
                 output_index: 0,
                 name: Some("get_weather".into()),
                 call_id: Some("call_abc".into()),
+
+                namespace: None,
             },
             sequence_number: Some(1),
         });
@@ -699,6 +703,8 @@ mod tests {
                 output_index: 0,
                 name: Some("search".into()),
                 call_id: Some("call_1".into()),
+
+                namespace: None,
             },
             sequence_number: Some(1),
         });
@@ -747,6 +753,8 @@ mod tests {
                 output_index: 0,
                 name: Some("get_weather".into()),
                 call_id: Some("call_1".into()),
+
+                namespace: None,
             },
             sequence_number: Some(1),
         });
@@ -770,6 +778,8 @@ mod tests {
                 output_index: 1,
                 name: Some("get_time".into()),
                 call_id: Some("call_2".into()),
+
+                namespace: None,
             },
             sequence_number: Some(3),
         });
@@ -812,6 +822,8 @@ mod tests {
                 output_index: 0,
                 name: None,
                 call_id: None,
+
+                namespace: None,
             },
             sequence_number: Some(1),
         });
@@ -834,6 +846,8 @@ mod tests {
                 output_index: 1,
                 name: Some("lookup".into()),
                 call_id: Some("call_x".into()),
+
+                namespace: None,
             },
             sequence_number: Some(3),
         });
@@ -876,6 +890,8 @@ mod tests {
                 output_index: 0,
                 name: Some("old_name".into()),
                 call_id: Some("old_call".into()),
+
+                namespace: None,
             },
             sequence_number: Some(1),
         });
@@ -913,6 +929,8 @@ mod tests {
                 output_index: 0,
                 name: Some("tool".into()),
                 call_id: Some("c1".into()),
+
+                namespace: None,
             },
             sequence_number: Some(1),
         });
@@ -969,6 +987,8 @@ mod tests {
                 output_index: 0,
                 name: Some("partial".into()),
                 call_id: Some("c1".into()),
+
+                namespace: None,
             },
             sequence_number: Some(1),
         });

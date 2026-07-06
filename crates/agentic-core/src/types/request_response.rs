@@ -76,10 +76,16 @@ impl RequestPayload {
     /// containers expand into one `FunctionTool` per subtool.
     #[must_use]
     pub fn to_upstream_request(&self, stream: bool) -> UpstreamRequest<'_> {
-        let normalized_tools = self
+        let normalized_tools: Option<Vec<FunctionTool>> = self
             .tools
             .as_ref()
             .map(|tools| tools.iter().flat_map(ResponsesTool::to_function_tools).collect());
+        if let Some(tools) = &normalized_tools {
+            tracing::debug!(
+                tool_names = ?tools.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(),
+                "final tool names sent upstream to vLLM"
+            );
+        }
         UpstreamRequest {
             model: &self.model,
             input: &self.input,

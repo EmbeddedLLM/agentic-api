@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::tool::codex::CodexTools;
+use crate::tool::codex::CodexParams;
 
 /// Error returned when a tool name is empty.
 ///
@@ -74,12 +74,12 @@ impl std::fmt::Display for NonEmptyToolName {
 /// Replaces the `pub type ResponsesTool = FunctionTool` alias in `io/tools.rs`.
 ///
 /// `RequestPayload.tools` is the single entry point regardless of which client
-/// sent the request, so Codex CLI's own tool shapes ([`CodexTools`]) live here
+/// sent the request, so Codex CLI's own tool shapes ([`CodexParams`]) live here
 /// too, nested under [`ResponsesTool::Codex`].
 ///
 /// Marked `#[non_exhaustive]`: serde requires the `#[serde(untagged)]` variant
 /// to be last, so `Codex` — not this enum — owns the catch-all for any `type`
-/// value not matched above; see [`CodexTools::Unknown`]. Downstream match arms
+/// value not matched above; see [`CodexParams::Unknown`]. Downstream match arms
 /// must still include a catch-all for future variants added to this enum.
 #[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,9 +101,9 @@ pub enum ResponsesTool {
     CodeInterpreter(CodeInterpreterToolParam),
 
     /// Codex CLI's own tool shapes (`namespace`, `tool_search`, `custom`).
-    /// Untagged since `CodexTools` carries its own internal `type` tag.
+    /// Untagged since `CodexParams` carries its own internal `type` tag.
     #[serde(untagged)]
-    Codex(CodexTools),
+    Codex(CodexParams),
 }
 
 /// Parameters for a user-defined function tool.

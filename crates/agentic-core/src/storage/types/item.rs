@@ -205,6 +205,7 @@ mod tests {
             name: "my_tool".to_string(),
             arguments: "{}".to_string(),
             status: MessageStatus::Completed,
+            namespace: None,
         };
         let items = vec![InOutItem::Output(OutputItem::FunctionCall(fc))];
         let inputs = InOutItem::into_input_items(items);

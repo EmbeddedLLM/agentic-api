@@ -102,7 +102,7 @@ impl ToolRegistry {
                 ResponsesTool::CodeInterpreter(_) => (ToolType::CodeInterpreter, vec!["code_interpreter".to_owned()]),
                 ResponsesTool::Mcp(_) => unreachable!("Mcp is handled above and continues before reaching here"),
             };
-            // `names` is empty for a `Codex(CodexTools::Unknown)` shape — the
+            // `names` is empty for a `Codex(CodexParams::Unknown)` shape — the
             // loop below is then a no-op, which is the desired "skip silently"
             // behavior for unrecognized tool types.
 

@@ -186,6 +186,7 @@ fn test_output_item_added_function_call() {
         output_index,
         name,
         call_id,
+        namespace,
     } = &frame.payload
     {
         assert_eq!(item_id, "fc_1");
@@ -193,6 +194,18 @@ fn test_output_item_added_function_call() {
         assert_eq!(*output_index, 1);
         assert_eq!(name.as_deref(), Some("get_weather"));
         assert_eq!(call_id.as_deref(), Some("call_1"));
+        assert_eq!(namespace.as_deref(), None);
+    } else {
+        panic!("expected OutputItemAdded payload");
+    }
+}
+
+#[test]
+fn test_output_item_added_function_call_with_namespace() {
+    let line = r#"data: {"type":"response.output_item.added","item":{"id":"fc_1","type":"function_call","status":"in_progress","name":"add_numbers","call_id":"call_1","arguments":"","namespace":"mcp__agentic_fixture"},"output_index":1,"sequence_number":5}"#;
+    let frame = normalize_sse_line(line).unwrap();
+    if let EventPayload::OutputItemAdded { namespace, .. } = &frame.payload {
+        assert_eq!(namespace.as_deref(), Some("mcp__agentic_fixture"));
     } else {
         panic!("expected OutputItemAdded payload");
     }

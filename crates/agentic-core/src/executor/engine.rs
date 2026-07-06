@@ -17,9 +17,11 @@ use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::executor::modes::{ConversationHandler, ResponseHandler};
 use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::storage::InOutItem;
+use crate::tool::ToolRegistry;
 use crate::types::event::ResponseStatus;
 use crate::types::io::{InputItem, ResponsesInput, resolve_tool_choice, resolve_tools};
 use crate::types::request_response::{RequestPayload, ResponsePayload};
+use crate::types::tools::ResponsesTool;
 use crate::utils::common::serialize_to_string;
 use crate::utils::uuid7_str;
 
@@ -148,15 +150,11 @@ pub async fn rehydrate_conversation(
 
     if ctx.original_request.conversation_id.is_some() {
         rehydrate_from_conversation(&mut ctx, exec_ctx).await?;
-        return Ok(ctx);
-    }
-
-    if ctx.original_request.previous_response_id.is_some() {
+    } else if ctx.original_request.previous_response_id.is_some() {
         rehydrate_from_response(&mut ctx, exec_ctx).await?;
-        return Ok(ctx);
+    } else {
+        ctx.enriched_request.input = ResponsesInput::Items(ctx.new_input_items.clone());
     }
-
-    ctx.enriched_request.input = ResponsesInput::Items(ctx.new_input_items.clone());
     Ok(ctx)
 }
 
@@ -310,6 +308,7 @@ async fn run_blocking(ctx: RequestContext, exec_ctx: &ExecutionContext) -> Execu
         ctx.original_request.previous_response_id.as_deref(),
         ctx.original_request.instructions.as_deref(),
     );
+    ResponsesTool::unnormalize_output_items(ctx.enriched_request.tools.as_deref(), &mut payload.output);
     ctx.inject_ids(&mut payload);
 
     let should_persist = ctx.original_request.store
@@ -367,6 +366,7 @@ fn run_stream(ctx: RequestContext, exec_ctx: Arc<ExecutionContext>) -> BoxStream
                     ctx.original_request.previous_response_id.as_deref(),
                     ctx.original_request.instructions.as_deref(),
                 );
+                ResponsesTool::unnormalize_output_items(ctx.enriched_request.tools.as_deref(), &mut payload.output);
                 ctx.inject_ids(&mut payload);
 
                 yield payload.as_responses_chunk();

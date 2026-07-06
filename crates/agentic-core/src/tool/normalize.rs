@@ -1,5 +1,5 @@
-use crate::types::io::FunctionTool;
 use crate::types::io::input::FunctionToolResultMessage;
+use crate::types::io::{FunctionTool, OutputItem};
 use crate::types::tools::ResponsesTool;
 use crate::utils::common::serialize_to_value;
 
@@ -13,7 +13,7 @@ impl ResponsesTool {
     /// (`Mcp`, `WebSearch`, `FileSearch`, `CodeInterpreter`).
     ///
     /// `Codex` covers both Codex CLI's own shapes and, via
-    /// [`super::codex::CodexTools::Unknown`], any tool `type` unrecognized by
+    /// [`super::codex::CodexParams::Unknown`], any tool `type` unrecognized by
     /// the other variants (`#[non_exhaustive]` catch-all — see
     /// [`crate::types::tools::ResponsesTool`]'s docs).
     ///
@@ -51,6 +51,36 @@ impl ResponsesTool {
             return vec![];
         };
         handler.normalize(&serialize_to_value(self))
+    }
+
+    /// Reverses tool-declaration normalization on every `function_call` in
+    /// `output`, via each declared tool's [`ToolHandler::unnormalize`].
+    ///
+    /// Needed because some declarations (e.g. a Codex `namespace`) generate a
+    /// model-visible name that differs from what the call should look like
+    /// once it reaches the client — see
+    /// [`super::codex::CodexToolHandler::unnormalize`]. Tries every declared
+    /// tool against each call until one claims it (sets `call.namespace`); a
+    /// call that already has `namespace` set, or that doesn't match any
+    /// declared tool's generated name, is left unchanged.
+    pub fn unnormalize_output_items(tools: Option<&[ResponsesTool]>, output: &mut [OutputItem]) {
+        let Some(tools) = tools else {
+            return;
+        };
+        for item in output {
+            let OutputItem::FunctionCall(call) = item else {
+                continue;
+            };
+            for tool in tools {
+                let Some(handler) = tool.handler() else {
+                    continue;
+                };
+                handler.unnormalize(&serialize_to_value(tool), call);
+                if call.namespace.is_some() {
+                    break;
+                }
+            }
+        }
     }
 }
 

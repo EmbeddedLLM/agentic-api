@@ -114,6 +114,7 @@ pub enum EventPayload {
         output_index: u32,
         name: Option<String>,
         call_id: Option<String>,
+        namespace: Option<String>,
     },
 
     /// `response.output_item.done`

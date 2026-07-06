@@ -3,7 +3,7 @@ use std::pin::Pin;
 
 use serde_json::Value;
 
-use crate::types::io::FunctionTool;
+use crate::types::io::{FunctionTool, FunctionToolCall};
 
 #[derive(Debug, Clone)]
 pub struct ToolOutput {
@@ -40,6 +40,14 @@ pub trait ToolHandler: Send + Sync {
     /// Normalise this tool declaration into vLLM-compatible `FunctionTool` entries.
     #[must_use]
     fn normalize(&self, param: &Value) -> Vec<FunctionTool>;
+
+    /// Reverses [`Self::normalize`] on a single function call the model made,
+    /// rewriting `call` in place if `param` declares a shape that needed
+    /// normalization (e.g. a Codex `namespace` flattens its members into
+    /// generated names that must be split back apart before the client sees
+    /// them). The default implementation is a no-op — most tool shapes
+    /// round-trip their name unchanged.
+    fn unnormalize(&self, _param: &Value, _call: &mut FunctionToolCall) {}
 }
 
 /// Extension of [`ToolHandler`] for tool types that are executed by the gateway.

@@ -86,6 +86,8 @@ pub struct FunctionToolCall {
     #[serde(default = "default_completed_status")]
     #[serde(deserialize_with = "deserialize_status_or_default")]
     pub status: MessageStatus,
+    #[serde(default)]
+    pub namespace: Option<String>,
 }
 
 fn default_completed_status() -> MessageStatus {
@@ -105,7 +107,11 @@ impl TryFrom<&EventPayload> for FunctionToolCall {
 
     fn try_from(payload: &EventPayload) -> Result<Self, Self::Error> {
         let EventPayload::OutputItemAdded {
-            item_id, call_id, name, ..
+            item_id,
+            call_id,
+            name,
+            namespace,
+            ..
         } = payload
         else {
             return Err(ExecutorError::ParseError("expected OutputItemAdded payload".into()));
@@ -121,6 +127,7 @@ impl TryFrom<&EventPayload> for FunctionToolCall {
             name: name.as_deref().unwrap_or_default().to_owned(),
             arguments: String::new(),
             status: MessageStatus::InProgress,
+            namespace: namespace.clone(),
         })
     }
 }

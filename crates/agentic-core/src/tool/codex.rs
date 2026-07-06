@@ -1,11 +1,11 @@
 //! Codex CLI's own tool shapes — the wire formats it sends that don't already
 //! exist in the standard `OpenAI` Responses API taxonomy ([`ResponsesTool`](crate::types::tools::ResponsesTool)).
 //!
-//! Defines [`CodexTools`] — a tagged enum covering `namespace`, `tool_search`,
+//! Defines [`CodexParams`] — a tagged enum covering `namespace`, `tool_search`,
 //! `custom`, and an `Unknown` catch-all — and [`CodexToolHandler`], the
 //! [`ToolHandler`] implementation that validates and normalizes it. Codex's
 //! `function` shape is wire-identical to `ResponsesTool::Function` and is
-//! handled there directly. `ResponsesTool::Codex(CodexTools)` is the single
+//! handled there directly. `ResponsesTool::Codex(CodexParams)` is the single
 //! entry point: every client (Codex CLI or otherwise) declares tools through
 //! `RequestPayload.tools: Vec<ResponsesTool>`.
 //!
@@ -27,7 +27,7 @@ use serde_json::Value;
 
 use crate::tool::handler::{ToolError, ToolHandler};
 use crate::tool::registry::ToolType;
-use crate::types::io::FunctionTool;
+use crate::types::io::{FunctionTool, FunctionToolCall};
 use crate::types::tools::ResponsesTool;
 
 /// Codex CLI's tool shapes that have no equivalent in the standard `OpenAI`
@@ -37,12 +37,12 @@ use crate::types::tools::ResponsesTool;
 /// Codex tool declaration deserializes into the right place regardless of
 /// which variant it lands in. Also serves as `ResponsesTool`'s own catch-all:
 /// serde requires the `#[serde(untagged)]` `Codex` variant to be the last
-/// variant in `ResponsesTool`, so `CodexTools::Unknown` (via its own
+/// variant in `ResponsesTool`, so `CodexParams::Unknown` (via its own
 /// `#[serde(other)]`) is where any `type` value unmatched by `ResponsesTool`'s
 /// other variants (e.g. `computer_use_preview`) actually lands.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum CodexTools {
+pub enum CodexParams {
     /// A named container of subtools (e.g. `mcp__github`).
     ///
     /// The model selects individual subtools by name, so normalization
@@ -79,13 +79,13 @@ pub enum CodexTools {
     Unknown,
 }
 
-/// Normalize a single [`CodexTools`] value, correctly expanding `namespace`
+/// Normalize a single [`CodexParams`] value, correctly expanding `namespace`
 /// containers into individual `FunctionTool`s.
 ///
 /// Used by [`CodexToolHandler::normalize`] and directly by
 /// [`super::normalize::ResponsesTool::to_function_tools`] (which already holds
-/// a typed `CodexTools` and does not need to round-trip through `Value`).
-pub(crate) fn normalize_codex_tool(tool: &CodexTools) -> Vec<FunctionTool> {
+/// a typed `CodexParams` and does not need to round-trip through `Value`).
+pub(crate) fn normalize_codex_tool(tool: &CodexParams) -> Vec<FunctionTool> {
     let mut out = Vec::new();
     push_codex_tool(tool, None, &mut out);
     out
@@ -93,9 +93,9 @@ pub(crate) fn normalize_codex_tool(tool: &CodexTools) -> Vec<FunctionTool> {
 
 /// Normalizes `tool`, prefixing produced names with `prefix__` when set (used
 /// for subtools nested inside an enclosing `namespace`).
-fn push_codex_tool(tool: &CodexTools, prefix: Option<&str>, out: &mut Vec<FunctionTool>) {
+fn push_codex_tool(tool: &CodexParams, prefix: Option<&str>, out: &mut Vec<FunctionTool>) {
     match tool {
-        CodexTools::Namespace { name, tools, .. } => {
+        CodexParams::Namespace { name, tools, .. } => {
             // Strip trailing underscores from the namespace name to match Codex's
             // own join_tool_name behaviour (e.g. "mcp__foo__" -> "mcp__foo").
             let ns_part = name.trim_end_matches('_');
@@ -107,12 +107,20 @@ fn push_codex_tool(tool: &CodexTools, prefix: Option<&str>, out: &mut Vec<Functi
                 }
                 None => ns_part,
             };
+            tracing::debug!(
+                raw_name = %name,
+                stripped = %ns_part,
+                prefix = ?prefix,
+                resolved_ns = %ns,
+                subtool_count = tools.len(),
+                "flattening codex namespace"
+            );
             for subtool in tools {
                 push_responses_tool(subtool, ns, out);
             }
         }
 
-        CodexTools::ToolSearch {
+        CodexParams::ToolSearch {
             description,
             parameters,
         } => {
@@ -125,7 +133,7 @@ fn push_codex_tool(tool: &CodexTools, prefix: Option<&str>, out: &mut Vec<Functi
             });
         }
 
-        CodexTools::Custom {
+        CodexParams::Custom {
             name,
             description,
             format,
@@ -139,8 +147,26 @@ fn push_codex_tool(tool: &CodexTools, prefix: Option<&str>, out: &mut Vec<Functi
             });
         }
 
-        CodexTools::Unknown => {}
+        CodexParams::Unknown => {}
     }
+}
+
+/// Prefix marking a flattened namespace member name as gateway-generated.
+///
+/// Codex CLI needs to tell apart "a plain tool it declared" from "a member of
+/// a namespace it declared" when a `function_call` comes back, so it can
+/// route the call to the right MCP server. Without a distinctive marker, a
+/// flattened name like `mcp__agentic_fixture__add_numbers` is indistinguishable
+/// from a plain tool that happens to contain `__`, and Codex rejects the call
+/// as unsupported. See [`model_visible_namespace_member_name`].
+pub(crate) const MODEL_VISIBLE_NAMESPACE_MEMBER_PREFIX: &str = "agentic_ns__";
+
+/// Builds the flattened, model-visible name for a `namespace` subtool.
+///
+/// `ns` is the (possibly nested) namespace path already joined with `__`;
+/// `member` is the subtool's own name.
+pub(crate) fn model_visible_namespace_member_name(ns: &str, member: &str) -> String {
+    format!("{MODEL_VISIBLE_NAMESPACE_MEMBER_PREFIX}{ns}__{member}")
 }
 
 /// Normalizes a [`ResponsesTool`] subtool nested inside a Codex `namespace`,
@@ -154,14 +180,55 @@ fn push_responses_tool(tool: &ResponsesTool, ns: &str, out: &mut Vec<FunctionToo
     match tool {
         ResponsesTool::Function(p) => {
             let f = FunctionTool::from(p);
+            let flattened_name = model_visible_namespace_member_name(ns, &f.name);
+            tracing::debug!(ns = %ns, original_name = %f.name, flattened_name = %flattened_name, "flattened codex namespace subtool");
             out.push(FunctionTool {
-                name: format!("{ns}__{}", f.name),
+                name: flattened_name,
                 ..f
             });
         }
         ResponsesTool::Codex(inner) => push_codex_tool(inner, Some(ns), out),
         _ => {}
     }
+}
+
+/// Searches `tool` for the namespace member whose flattened, model-visible
+/// name equals `flat_name` (see [`model_visible_namespace_member_name`]),
+/// returning the member's declaring namespace path and its own (bare) name.
+///
+/// Recurses into nested namespaces, tracking the joined `ns` path the same
+/// way [`push_codex_tool`]/[`push_responses_tool`] build it going forward, so
+/// the two directions agree on what a given flattened name means.
+fn find_namespace_member_by_flat_name(flat_name: &str, tool: &CodexParams) -> Option<(String, String)> {
+    let CodexParams::Namespace { name, tools, .. } = tool else {
+        return None;
+    };
+    find_in_namespace(flat_name, name, tools)
+}
+
+fn find_in_namespace(flat_name: &str, ns: &str, members: &[ResponsesTool]) -> Option<(String, String)> {
+    let ns_part = ns.trim_end_matches('_');
+    for member in members {
+        match member {
+            ResponsesTool::Function(p) => {
+                if flat_name == model_visible_namespace_member_name(ns_part, p.name.as_str()) {
+                    return Some((ns_part.to_owned(), p.name.as_str().to_owned()));
+                }
+            }
+            ResponsesTool::Codex(CodexParams::Namespace {
+                name: inner_name,
+                tools: inner_tools,
+                ..
+            }) => {
+                let combined = format!("{ns_part}__{}", inner_name.trim_end_matches('_'));
+                if let Some(found) = find_in_namespace(flat_name, &combined, inner_tools) {
+                    return Some(found);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Handler for Codex CLI's own tool shapes (`namespace`, `tool_search`, `custom`).
@@ -188,13 +255,13 @@ impl ToolHandler for CodexToolHandler {
     /// name-bearing shapes (`namespace`, `custom`) are rejected; `tool_search`
     /// is always accepted.
     fn validate(&self, param: &Value) -> Result<(), ToolError> {
-        let tool: CodexTools =
+        let tool: CodexParams =
             serde_json::from_value(param.clone()).map_err(|e| ToolError::Config(format!("invalid codex tool: {e}")))?;
         match tool {
-            CodexTools::Namespace { name, .. } if name.is_empty() => Err(ToolError::Config(
+            CodexParams::Namespace { name, .. } if name.is_empty() => Err(ToolError::Config(
                 "codex namespace tool must have a non-empty name".into(),
             )),
-            CodexTools::Custom { name, .. } if name.is_empty() => {
+            CodexParams::Custom { name, .. } if name.is_empty() => {
                 Err(ToolError::Config("codex custom tool must have a non-empty name".into()))
             }
             _ => Ok(()),
@@ -202,7 +269,7 @@ impl ToolHandler for CodexToolHandler {
     }
 
     fn normalize(&self, param: &Value) -> Vec<FunctionTool> {
-        match serde_json::from_value::<CodexTools>(param.clone()) {
+        match serde_json::from_value::<CodexParams>(param.clone()) {
             Ok(tool) => normalize_codex_tool(&tool),
             Err(e) => {
                 tracing::warn!(
@@ -212,11 +279,40 @@ impl ToolHandler for CodexToolHandler {
             }
         }
     }
+
+    /// Reverses [`Self::normalize`]'s namespace flattening: if `call.name`
+    /// matches a member this `namespace` declares (see
+    /// [`model_visible_namespace_member_name`]), rewrites it to the bare
+    /// member name and sets `call.namespace` to the declaring path.
+    ///
+    /// A no-op for `param` shapes other than `namespace`, and for calls that
+    /// don't match any of `param`'s members — the caller tries every declared
+    /// tool via `unnormalize` until one claims the call.
+    fn unnormalize(&self, param: &Value, call: &mut FunctionToolCall) {
+        if call.namespace.is_some() {
+            return;
+        }
+        let Ok(tool) = serde_json::from_value::<CodexParams>(param.clone()) else {
+            return;
+        };
+        let Some((ns, member_name)) = find_namespace_member_by_flat_name(&call.name, &tool) else {
+            return;
+        };
+        tracing::debug!(
+            upstream_name = %call.name,
+            namespace = %ns,
+            member = %member_name,
+            "reverse-normalized flattened codex namespace call"
+        );
+        call.namespace = Some(ns);
+        call.name = member_name;
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::io::OutputItem;
     use crate::types::tools::FunctionToolParam;
     use serde_json::json;
 
@@ -229,14 +325,14 @@ mod tests {
         })
     }
 
-    fn normalize_one(tool: &CodexTools) -> Vec<FunctionTool> {
+    fn normalize_one(tool: &CodexParams) -> Vec<FunctionTool> {
         CodexToolHandler.normalize(&serde_json::to_value(tool).unwrap())
     }
 
     #[test]
     fn normalize_tool_search_becomes_function() {
         let params = json!({"type": "object", "properties": {"query": {"type": "string"}}});
-        let tool = CodexTools::ToolSearch {
+        let tool = CodexParams::ToolSearch {
             description: Some("Search".into()),
             parameters: Some(params.clone()),
         };
@@ -249,7 +345,7 @@ mod tests {
     #[test]
     fn normalize_custom_becomes_function() {
         let fmt = json!({"type": "grammar"});
-        let tool = CodexTools::Custom {
+        let tool = CodexParams::Custom {
             name: "lark_parser".into(),
             description: None,
             format: Some(fmt.clone()),
@@ -262,44 +358,44 @@ mod tests {
 
     #[test]
     fn normalize_namespace_flattens_subtools() {
-        let tool = CodexTools::Namespace {
+        let tool = CodexParams::Namespace {
             name: "mcp__github".into(),
             description: None,
             tools: vec![function_tool("create_issue"), function_tool("search_code")],
         };
         let out = normalize_codex_tool(&tool);
         assert_eq!(out.len(), 2);
-        assert_eq!(out[0].name, "mcp__github__create_issue");
-        assert_eq!(out[1].name, "mcp__github__search_code");
+        assert_eq!(out[0].name, "agentic_ns__mcp__github__create_issue");
+        assert_eq!(out[1].name, "agentic_ns__mcp__github__search_code");
     }
 
     #[test]
     fn normalize_nested_namespace_recurses() {
-        let inner = ResponsesTool::Codex(CodexTools::Namespace {
+        let inner = ResponsesTool::Codex(CodexParams::Namespace {
             name: "inner".into(),
             description: None,
             tools: vec![function_tool("leaf")],
         });
-        let tool = CodexTools::Namespace {
+        let tool = CodexParams::Namespace {
             name: "outer".into(),
             description: None,
             tools: vec![inner],
         };
         let out = normalize_codex_tool(&tool);
         assert_eq!(out.len(), 1);
-        assert_eq!(out[0].name, "outer__inner__leaf");
+        assert_eq!(out[0].name, "agentic_ns__outer__inner__leaf");
     }
 
     #[test]
     fn normalize_namespace_drops_non_function_subtools() {
-        let tool = CodexTools::Namespace {
+        let tool = CodexParams::Namespace {
             name: "ns".into(),
             description: None,
-            tools: vec![function_tool("ns_tool"), ResponsesTool::Codex(CodexTools::Unknown)],
+            tools: vec![function_tool("ns_tool"), ResponsesTool::Codex(CodexParams::Unknown)],
         };
         let out = normalize_codex_tool(&tool);
         assert_eq!(out.len(), 1);
-        assert_eq!(out[0].name, "ns__ns_tool");
+        assert_eq!(out[0].name, "agentic_ns__ns__ns_tool");
     }
 
     #[test]
@@ -313,10 +409,10 @@ mod tests {
                  "parameters": {"type": "object", "properties": {}}}
             ]
         });
-        let tool: CodexTools = serde_json::from_value(json).unwrap();
+        let tool: CodexParams = serde_json::from_value(json).unwrap();
         let out = normalize_codex_tool(&tool);
         assert_eq!(out.len(), 1);
-        assert_eq!(out[0].name, "mcp__github__create_issue");
+        assert_eq!(out[0].name, "agentic_ns__mcp__github__create_issue");
     }
 
     #[test]
@@ -326,7 +422,7 @@ mod tests {
             "description": "Search for deferred tools",
             "parameters": {"type": "object", "properties": {"query": {"type": "string"}}}
         });
-        let tool: CodexTools = serde_json::from_value(json).unwrap();
+        let tool: CodexParams = serde_json::from_value(json).unwrap();
         assert_eq!(normalize_one(&tool)[0].name, "tool_search");
     }
 
@@ -338,7 +434,7 @@ mod tests {
             "description": "Parse Lark grammar files",
             "format": {"type": "grammar", "syntax": "lark"}
         });
-        let tool: CodexTools = serde_json::from_value(json).unwrap();
+        let tool: CodexParams = serde_json::from_value(json).unwrap();
         assert_eq!(normalize_one(&tool)[0].name, "lark_parser");
     }
 
@@ -346,7 +442,7 @@ mod tests {
     fn responses_tool_routes_namespace_to_codex_variant() {
         let json = json!({"type": "namespace", "name": "ns", "tools": []});
         let tool: ResponsesTool = serde_json::from_value(json).unwrap();
-        assert!(matches!(tool, ResponsesTool::Codex(CodexTools::Namespace { .. })));
+        assert!(matches!(tool, ResponsesTool::Codex(CodexParams::Namespace { .. })));
     }
 
     #[test]
@@ -372,5 +468,93 @@ mod tests {
     fn validate_accepts_tool_search() {
         let param = json!({"type": "tool_search"});
         assert!(CodexToolHandler.validate(&param).is_ok());
+    }
+
+    fn function_call(name: &str) -> FunctionToolCall {
+        FunctionToolCall {
+            id: "fc_1".into(),
+            call_id: "call_1".into(),
+            name: name.into(),
+            arguments: "{}".into(),
+            status: crate::types::event::MessageStatus::Completed,
+            namespace: None,
+        }
+    }
+
+    #[test]
+    fn unnormalize_splits_flattened_member_name_back_apart() {
+        let namespace = CodexParams::Namespace {
+            name: "mcp__agentic_fixture".into(),
+            description: None,
+            tools: vec![function_tool("add_numbers")],
+        };
+        let param = serde_json::to_value(&namespace).unwrap();
+        let mut call = function_call("agentic_ns__mcp__agentic_fixture__add_numbers");
+
+        CodexToolHandler.unnormalize(&param, &mut call);
+
+        assert_eq!(call.name, "add_numbers");
+        assert_eq!(call.namespace.as_deref(), Some("mcp__agentic_fixture"));
+    }
+
+    #[test]
+    fn unnormalize_ignores_unrelated_call_names() {
+        let namespace = CodexParams::Namespace {
+            name: "mcp__agentic_fixture".into(),
+            description: None,
+            tools: vec![function_tool("add_numbers")],
+        };
+        let param = serde_json::to_value(&namespace).unwrap();
+        let mut call = function_call("exec_command");
+
+        CodexToolHandler.unnormalize(&param, &mut call);
+
+        assert_eq!(call.name, "exec_command");
+        assert!(call.namespace.is_none());
+    }
+
+    #[test]
+    fn unnormalize_is_noop_once_namespace_already_set() {
+        let namespace = CodexParams::Namespace {
+            name: "mcp__agentic_fixture".into(),
+            description: None,
+            tools: vec![function_tool("add_numbers")],
+        };
+        let param = serde_json::to_value(&namespace).unwrap();
+        let mut call = function_call("agentic_ns__mcp__agentic_fixture__add_numbers");
+        call.namespace = Some("already_resolved".into());
+
+        CodexToolHandler.unnormalize(&param, &mut call);
+
+        assert_eq!(call.name, "agentic_ns__mcp__agentic_fixture__add_numbers");
+        assert_eq!(call.namespace.as_deref(), Some("already_resolved"));
+    }
+
+    #[test]
+    fn unnormalize_output_items_round_trips_through_full_request_cycle() {
+        let json = json!([{
+            "type": "namespace",
+            "name": "mcp__agentic_fixture",
+            "tools": [
+                {"type": "function", "name": "add_numbers", "parameters": {"type": "object"}}
+            ]
+        }]);
+        let tools: Vec<ResponsesTool> = serde_json::from_value(json).unwrap();
+
+        let normalized = tools
+            .iter()
+            .flat_map(ResponsesTool::to_function_tools)
+            .collect::<Vec<_>>();
+        assert_eq!(normalized.len(), 1);
+        assert_eq!(normalized[0].name, "agentic_ns__mcp__agentic_fixture__add_numbers");
+
+        let mut output = vec![OutputItem::FunctionCall(function_call(&normalized[0].name))];
+        ResponsesTool::unnormalize_output_items(Some(&tools), &mut output);
+
+        let OutputItem::FunctionCall(call) = &output[0] else {
+            panic!("expected function call");
+        };
+        assert_eq!(call.name, "add_numbers");
+        assert_eq!(call.namespace.as_deref(), Some("mcp__agentic_fixture"));
     }
 }
