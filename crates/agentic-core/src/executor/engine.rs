@@ -17,8 +17,6 @@ use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::executor::modes::{ConversationHandler, ResponseHandler};
 use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::storage::InOutItem;
-use crate::tool::codex::normalize_incoming_tools;
-use crate::tool::{IncomingTool, execute_server_tool_calls};
 use crate::types::event::ResponseStatus;
 use crate::types::io::{InputItem, ResponsesInput, resolve_tool_choice, resolve_tools};
 use crate::types::request_response::{RequestPayload, ResponsePayload};
@@ -177,13 +175,11 @@ async fn rehydrate_from_response(ctx: &mut RequestContext, exec_ctx: &ExecutionC
 
     ctx.enriched_request.previous_response_id = None;
     ctx.enriched_request.input = ResponsesInput::Items(items);
-    let request_tools_normalized = ctx.original_request.tools.as_ref().map(|t| normalize_incoming_tools(t));
     ctx.enriched_request.tools = resolve_tools(
-        request_tools_normalized.as_deref(),
+        ctx.original_request.tools.as_deref(),
         stored.metadata.effective_tools.as_deref(),
         ctx.original_request.tools.is_some(),
-    )
-    .map(|tools| tools.into_iter().map(IncomingTool::Function).collect());
+    );
     ctx.enriched_request.tool_choice = resolve_tool_choice(
         &ctx.original_request.tool_choice,
         &stored.metadata.effective_tool_choice,
@@ -316,14 +312,6 @@ async fn run_blocking(ctx: RequestContext, exec_ctx: &ExecutionContext) -> Execu
     );
     ctx.inject_ids(&mut payload);
 
-    // Execute any server-side tool calls (code_interpreter, web_search).
-    // Results are logged here; the full agentic loop is handled by the caller.
-    let tools = ctx.enriched_request.tools.as_deref().unwrap_or(&[]);
-    let server_results = execute_server_tool_calls(&payload.output, tools).await;
-    if !server_results.is_empty() {
-        tracing::debug!(count = server_results.len(), "server-side tool calls executed");
-    }
-
     let should_persist = ctx.original_request.store
         || ctx.original_request.previous_response_id.is_some()
         || ctx.original_request.conversation_id.is_some();
@@ -380,13 +368,6 @@ fn run_stream(ctx: RequestContext, exec_ctx: Arc<ExecutionContext>) -> BoxStream
                     ctx.original_request.instructions.as_deref(),
                 );
                 ctx.inject_ids(&mut payload);
-
-                // Execute any server-side tool calls (code_interpreter, web_search).
-                let tools = ctx.enriched_request.tools.as_deref().unwrap_or(&[]);
-                let server_results = execute_server_tool_calls(&payload.output, tools).await;
-                if !server_results.is_empty() {
-                    tracing::debug!(count = server_results.len(), "server-side tool calls executed");
-                }
 
                 yield payload.as_responses_chunk();
                 yield DONE_MARKER.to_string();

@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::types::tools::ResponsesTool;
+
 fn default_function_type() -> String {
     "function".to_string()
 }
@@ -14,8 +16,6 @@ pub struct FunctionTool {
     pub parameters: Option<Value>,
     pub strict: Option<bool>,
 }
-
-pub type ResponsesTool = FunctionTool;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -32,6 +32,11 @@ pub enum ToolChoice {
 
 /// Returns the effective tool list, preferring `request_tools` when explicitly
 /// set by the caller, otherwise falling back to the stored configuration.
+///
+/// Operates on [`ResponsesTool`] — the client-facing wire enum — not the
+/// normalized `FunctionTool` shape. Validation and normalization into
+/// `FunctionTool` happen once, at `to_upstream_request()` time, via each
+/// variant's [`crate::tool::ToolHandler`].
 #[inline]
 pub(crate) fn resolve_tools(
     request_tools: Option<&[ResponsesTool]>,

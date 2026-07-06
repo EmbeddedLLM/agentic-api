@@ -2,10 +2,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::io::{
-    InputItem, InputMessage, InputMessageContent, OutputItem, ResponseUsage, ResponsesInput, ResponsesTool, ToolChoice,
+    FunctionTool, InputItem, InputMessage, InputMessageContent, OutputItem, ResponseUsage, ResponsesInput, ToolChoice,
 };
-use crate::tool::IncomingTool;
-use crate::tool::codex::normalize_incoming_tools;
+use crate::types::tools::ResponsesTool;
 use crate::utils::common::serialize_to_string;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,7 +14,7 @@ pub struct RequestPayload {
     pub instructions: Option<String>,
     pub previous_response_id: Option<String>,
     pub conversation_id: Option<String>,
-    pub tools: Option<Vec<IncomingTool>>,
+    pub tools: Option<Vec<ResponsesTool>>,
     #[serde(default)]
     pub tool_choice: ToolChoice,
     #[serde(default)]
@@ -41,8 +40,12 @@ pub struct UpstreamRequest<'a> {
     pub stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instructions: Option<&'a str>,
+    /// Normalised tools forwarded to vLLM — always `Vec<FunctionTool>` regardless of
+    /// what tool types the client declared. Gateway-managed types (`MCP`, `web_search`, …)
+    /// are normalized to function stubs; function tools pass through unchanged.
+    /// Skipped when empty so vLLM does not receive an empty array.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tools: Option<Vec<ResponsesTool>>,
+    pub tools: Option<Vec<FunctionTool>>,
     #[serde(skip_serializing_if = "is_default_tool_choice")]
     pub tool_choice: &'a ToolChoice,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -64,10 +67,19 @@ fn is_default_tool_choice(choice: &ToolChoice) -> bool {
 }
 
 impl RequestPayload {
-    /// Construct an `UpstreamRequest` borrowing from this request, suitable for forwarding to vLLM.
+    /// Construct an `UpstreamRequest` suitable for forwarding to vLLM.
+    ///
+    /// All tool types are normalised to `Vec<FunctionTool>` via
+    /// [`ResponsesTool::to_function_tools`]. Gateway-managed tool types whose handlers
+    /// have not yet landed (`MCP`, `web_search`, `file_search`, `code_interpreter`) are skipped
+    /// with a warning — vLLM only understands `type: "function"`. `Codex(Namespace)`
+    /// containers expand into one `FunctionTool` per subtool.
     #[must_use]
     pub fn to_upstream_request(&self, stream: bool) -> UpstreamRequest<'_> {
-        let normalized_tools = self.tools.as_ref().map(|tools| normalize_incoming_tools(tools));
+        let normalized_tools = self
+            .tools
+            .as_ref()
+            .map(|tools| tools.iter().flat_map(ResponsesTool::to_function_tools).collect());
         UpstreamRequest {
             model: &self.model,
             input: &self.input,

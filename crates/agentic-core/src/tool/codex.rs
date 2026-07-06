@@ -1,62 +1,58 @@
-//! Codex CLI tool normalization and execution.
+//! Codex CLI's own tool shapes — the wire formats it sends that don't already
+//! exist in the standard `OpenAI` Responses API taxonomy ([`ResponsesTool`](crate::types::tools::ResponsesTool)).
 //!
-//! Defines [`IncomingTool`] — a tagged enum covering every tool variant Codex
-//! CLI can send — and implements [`NormalizeTool`] and [`ExecuteTool`] on it.
+//! Defines [`CodexTools`] — a tagged enum covering `namespace`, `tool_search`,
+//! `custom`, and an `Unknown` catch-all — and [`CodexToolHandler`], the
+//! [`ToolHandler`] implementation that validates and normalizes it. Codex's
+//! `function` shape is wire-identical to `ResponsesTool::Function` and is
+//! handled there directly. `ResponsesTool::Codex(CodexTools)` is the single
+//! entry point: every client (Codex CLI or otherwise) declares tools through
+//! `RequestPayload.tools: Vec<ResponsesTool>`.
 //!
 //! # Normalize variant mapping
 //!
 //! | Codex type         | Normalized to                                    |
 //! |--------------------|--------------------------------------------------|
-//! | `function`         | itself, unchanged                                |
 //! | `namespace`        | one `FunctionTool` per subtool (flattened)       |
 //! | `tool_search`      | one `FunctionTool` named `"tool_search"`         |
 //! | `custom`           | one `FunctionTool` using the custom tool's name  |
 //! | unknown / other    | dropped                                          |
 //!
-//! All tool execution is Codex CLI's responsibility. [`ExecuteTool::execute`]
-//! always returns `None` — agentic-api passes `FunctionCall` items through
-//! and Codex CLI drives the next turn with `function_call_output`.
+//! All tool execution is Codex CLI's responsibility — agentic-api never
+//! executes a Codex tool call, it only normalizes the declarations forwarded
+//! upstream. Codex CLI drives the next turn with `function_call_output` itself.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::tool::{ExecuteTool, NormalizeTool};
-use crate::types::io::{FunctionTool, FunctionToolResultMessage};
+use crate::tool::handler::{ToolError, ToolHandler};
+use crate::tool::registry::ToolType;
+use crate::types::io::FunctionTool;
+use crate::types::tools::ResponsesTool;
 
-/// All tool definition shapes that Codex CLI may include in a request.
+/// Codex CLI's tool shapes that have no equivalent in the standard `OpenAI`
+/// Responses API taxonomy. Nested inside [`ResponsesTool::Codex`].
 ///
-/// Intermediate struct used during deserialization to peek at the `type` field.
-#[derive(Deserialize)]
-struct RawTool {
-    #[serde(rename = "type")]
-    type_: String,
-    name: Option<String>,
-    description: Option<String>,
-    parameters: Option<Value>,
-    format: Option<Value>,
-    tools: Option<Vec<IncomingTool>>,
-}
-
-/// All tool definition shapes that Codex CLI may include in a request.
-///
-/// Uses a manual `Deserialize` impl (via `RawTool`) so that unknown tool types
-/// with arbitrary extra fields (e.g. `web_search` with `external_web_access`)
-/// are accepted and mapped to `Unknown` without errors. Serde's `#[serde(other)]`
-/// on unit variants rejects objects with extra fields in internally-tagged enums.
-#[derive(Debug, Clone, Serialize)]
+/// Internally-tagged on `type`, matching [`ResponsesTool`]'s own tagging so a
+/// Codex tool declaration deserializes into the right place regardless of
+/// which variant it lands in. Also serves as `ResponsesTool`'s own catch-all:
+/// serde requires the `#[serde(untagged)]` `Codex` variant to be the last
+/// variant in `ResponsesTool`, so `CodexTools::Unknown` (via its own
+/// `#[serde(other)]`) is where any `type` value unmatched by `ResponsesTool`'s
+/// other variants (e.g. `computer_use_preview`) actually lands.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum IncomingTool {
-    /// Standard OpenAI function tool — passed through unchanged.
-    Function(FunctionTool),
-
+pub enum CodexTools {
     /// A named container of subtools (e.g. `mcp__github`).
     ///
     /// The model selects individual subtools by name, so normalization
-    /// flattens the container into one `FunctionTool` per subtool.
+    /// flattens the container into one `FunctionTool` per subtool. Subtools
+    /// are `ResponsesTool` since a namespace commonly contains plain
+    /// `function` tools.
     Namespace {
         name: String,
         description: Option<String>,
-        tools: Vec<IncomingTool>,
+        tools: Vec<ResponsesTool>,
     },
 
     /// Deferred tool discovery — normalized to a single `FunctionTool`
@@ -75,131 +71,31 @@ pub enum IncomingTool {
         format: Option<Value>,
     },
 
-    /// Any Codex type not listed above (e.g. `web_search`, `code_interpreter`)
-    /// — dropped gracefully during normalization.
+    /// Any tool `type` not recognized by `ResponsesTool` or the variants
+    /// above (e.g. `web_search`, `code_interpreter` as sent by Codex CLI, or
+    /// future Responses API additions) — dropped gracefully during
+    /// normalization rather than erroring.
+    #[serde(other)]
     Unknown,
 }
 
-impl<'de> Deserialize<'de> for IncomingTool {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let raw = RawTool::deserialize(deserializer)?;
-        Ok(match raw.type_.as_str() {
-            "function" => {
-                let name = raw.name.unwrap_or_default();
-                Self::Function(FunctionTool {
-                    type_: "function".into(),
-                    name,
-                    description: raw.description,
-                    parameters: raw.parameters,
-                    strict: None,
-                })
-            }
-            "namespace" => Self::Namespace {
-                name: raw.name.unwrap_or_default(),
-                description: raw.description,
-                tools: raw.tools.unwrap_or_default(),
-            },
-            "tool_search" => Self::ToolSearch {
-                description: raw.description,
-                parameters: raw.parameters,
-            },
-            "custom" => Self::Custom {
-                name: raw.name.unwrap_or_default(),
-                description: raw.description,
-                format: raw.format,
-            },
-            _ => Self::Unknown,
-        })
-    }
-}
-
-impl NormalizeTool for IncomingTool {
-    /// Flatten this tool into the `FunctionTool` shape vLLM accepts.
-    ///
-    /// `namespace` expands into its first subtool only — callers that need the
-    /// full expansion should use [`normalize_tools`](crate::tool::normalize_tools)
-    /// which iterates over the collection. For a single top-level namespace call
-    /// `normalize_all` on the namespace's `tools` field instead.
-    ///
-    /// `code_interpreter`, `web_search`, and `unknown` return `None` — they are
-    /// either handled server-side after the response or dropped entirely.
-    fn normalize(&self) -> Option<FunctionTool> {
-        match self {
-            Self::Function(f) => Some(f.clone()),
-
-            // Namespaces expand to N tools; normalize_tools handles the iteration.
-            // A single normalize() call on a namespace returns the first subtool only.
-            // Callers should prefer normalize_all_tools() for namespace expansion.
-            Self::Namespace { tools, .. } => tools.first().and_then(|t| t.normalize()),
-
-            Self::ToolSearch {
-                description,
-                parameters,
-            } => Some(FunctionTool {
-                type_: "function".into(),
-                name: "tool_search".into(),
-                description: description.clone(),
-                parameters: parameters.clone(),
-                strict: None,
-            }),
-
-            Self::Custom {
-                name,
-                description,
-                format,
-            } => Some(FunctionTool {
-                type_: "function".into(),
-                name: name.clone(),
-                description: description.clone(),
-                parameters: format.clone(),
-                strict: None,
-            }),
-
-            // Unknown types: dropped from the vLLM tool list.
-            Self::Unknown => None,
-        }
-    }
-}
-
-impl ExecuteTool for IncomingTool {
-    async fn execute(&self, _call_id: &str, _arguments: &str) -> Option<FunctionToolResultMessage> {
-        // All tool execution is Codex CLI's responsibility.
-        None
-    }
-}
-
-/// Normalize a collection of [`IncomingTool`]s, correctly expanding `namespace`
+/// Normalize a single [`CodexTools`] value, correctly expanding `namespace`
 /// containers into individual `FunctionTool`s.
 ///
-/// This is the correct entry point for building the vLLM tool list from a
-/// `RequestPayload`. Unlike calling `normalize()` on each item, this function
-/// recurses into `Namespace` variants rather than returning just the first subtool.
-pub fn normalize_incoming_tools(tools: &[IncomingTool]) -> Vec<FunctionTool> {
-    let mut out = Vec::with_capacity(tools.len());
-    for tool in tools {
-        flatten_one(tool, &mut out);
-    }
+/// Used by [`CodexToolHandler::normalize`] and directly by
+/// [`super::normalize::ResponsesTool::to_function_tools`] (which already holds
+/// a typed `CodexTools` and does not need to round-trip through `Value`).
+pub(crate) fn normalize_codex_tool(tool: &CodexTools) -> Vec<FunctionTool> {
+    let mut out = Vec::new();
+    push_codex_tool(tool, None, &mut out);
     out
 }
 
-fn flatten_one(tool: &IncomingTool, out: &mut Vec<FunctionTool>) {
-    flatten_one_with_prefix(tool, None, out);
-}
-
-fn flatten_one_with_prefix(tool: &IncomingTool, prefix: Option<&str>, out: &mut Vec<FunctionTool>) {
+/// Normalizes `tool`, prefixing produced names with `prefix__` when set (used
+/// for subtools nested inside an enclosing `namespace`).
+fn push_codex_tool(tool: &CodexTools, prefix: Option<&str>, out: &mut Vec<FunctionTool>) {
     match tool {
-        IncomingTool::Function(f) => {
-            if let Some(ns) = prefix {
-                out.push(FunctionTool {
-                    name: format!("{ns}__{}", f.name),
-                    ..f.clone()
-                });
-            } else {
-                out.push(f.clone());
-            }
-        }
-
-        IncomingTool::Namespace { name, tools, .. } => {
+        CodexTools::Namespace { name, tools, .. } => {
             // Strip trailing underscores from the namespace name to match Codex's
             // own join_tool_name behaviour (e.g. "mcp__foo__" -> "mcp__foo").
             let ns_part = name.trim_end_matches('_');
@@ -212,11 +108,11 @@ fn flatten_one_with_prefix(tool: &IncomingTool, prefix: Option<&str>, out: &mut 
                 None => ns_part,
             };
             for subtool in tools {
-                flatten_one_with_prefix(subtool, Some(ns), out);
+                push_responses_tool(subtool, ns, out);
             }
         }
 
-        IncomingTool::ToolSearch {
+        CodexTools::ToolSearch {
             description,
             parameters,
         } => {
@@ -229,7 +125,7 @@ fn flatten_one_with_prefix(tool: &IncomingTool, prefix: Option<&str>, out: &mut 
             });
         }
 
-        IncomingTool::Custom {
+        CodexTools::Custom {
             name,
             description,
             format,
@@ -243,138 +139,167 @@ fn flatten_one_with_prefix(tool: &IncomingTool, prefix: Option<&str>, out: &mut 
             });
         }
 
-        IncomingTool::Unknown => {}
+        CodexTools::Unknown => {}
+    }
+}
+
+/// Normalizes a [`ResponsesTool`] subtool nested inside a Codex `namespace`,
+/// prefixing its name with the enclosing namespace path (`ns`).
+///
+/// Only `Function` and nested `Codex` subtools produce output — other
+/// gateway-owned shapes (`Mcp`, `WebSearch`, …) do not make sense nested
+/// inside a Codex namespace and are dropped. `#[non_exhaustive]` on
+/// `ResponsesTool` requires the wildcard arm for variants added later.
+fn push_responses_tool(tool: &ResponsesTool, ns: &str, out: &mut Vec<FunctionTool>) {
+    match tool {
+        ResponsesTool::Function(p) => {
+            let f = FunctionTool::from(p);
+            out.push(FunctionTool {
+                name: format!("{ns}__{}", f.name),
+                ..f
+            });
+        }
+        ResponsesTool::Codex(inner) => push_codex_tool(inner, Some(ns), out),
+        _ => {}
+    }
+}
+
+/// Handler for Codex CLI's own tool shapes (`namespace`, `tool_search`, `custom`).
+///
+/// These are all just wire-format flavors of "a tool Codex CLI declared" that
+/// have no equivalent in the standard `OpenAI` taxonomy — they are always
+/// client-executed and normalized together as one wire concept (namespaces
+/// flatten into their subtools), mirroring how `FunctionHandler` is one
+/// handler for the whole `OpenAI` `function` wire concept.
+///
+/// All Codex tools are client-owned — Codex CLI executes them and drives the next
+/// turn itself. `CodexToolHandler` intentionally implements only [`ToolHandler`],
+/// not [`crate::tool::handler::GatewayExecutor`] — the type system makes it
+/// impossible to call `execute()` on a client-owned tool.
+#[derive(Debug, Default)]
+pub struct CodexToolHandler;
+
+impl ToolHandler for CodexToolHandler {
+    fn tool_type(&self) -> ToolType {
+        ToolType::Codex
+    }
+
+    /// Permissive validation: deserialization failures and empty names on
+    /// name-bearing shapes (`namespace`, `custom`) are rejected; `tool_search`
+    /// is always accepted.
+    fn validate(&self, param: &Value) -> Result<(), ToolError> {
+        let tool: CodexTools =
+            serde_json::from_value(param.clone()).map_err(|e| ToolError::Config(format!("invalid codex tool: {e}")))?;
+        match tool {
+            CodexTools::Namespace { name, .. } if name.is_empty() => Err(ToolError::Config(
+                "codex namespace tool must have a non-empty name".into(),
+            )),
+            CodexTools::Custom { name, .. } if name.is_empty() => {
+                Err(ToolError::Config("codex custom tool must have a non-empty name".into()))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn normalize(&self, param: &Value) -> Vec<FunctionTool> {
+        match serde_json::from_value::<CodexTools>(param.clone()) {
+            Ok(tool) => normalize_codex_tool(&tool),
+            Err(e) => {
+                tracing::warn!(
+                    "normalize() called with invalid codex tool param: {e} — validate() must be called first"
+                );
+                vec![]
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tool::normalize_tools;
+    use crate::types::tools::FunctionToolParam;
     use serde_json::json;
 
-    fn function_tool(name: &str) -> IncomingTool {
-        IncomingTool::Function(FunctionTool {
-            type_: "function".into(),
-            name: name.into(),
+    fn function_tool(name: &str) -> ResponsesTool {
+        ResponsesTool::Function(FunctionToolParam {
+            name: name.try_into().unwrap(),
             description: None,
             parameters: None,
             strict: None,
         })
     }
 
-    #[test]
-    fn normalize_function_passes_through() {
-        let tool = function_tool("my_fn");
-        let out = tool.normalize().unwrap();
-        assert_eq!(out.name, "my_fn");
-        assert_eq!(out.type_, "function");
+    fn normalize_one(tool: &CodexTools) -> Vec<FunctionTool> {
+        CodexToolHandler.normalize(&serde_json::to_value(tool).unwrap())
     }
 
     #[test]
     fn normalize_tool_search_becomes_function() {
         let params = json!({"type": "object", "properties": {"query": {"type": "string"}}});
-        let tool = IncomingTool::ToolSearch {
+        let tool = CodexTools::ToolSearch {
             description: Some("Search".into()),
             parameters: Some(params.clone()),
         };
-        let out = tool.normalize().unwrap();
-        assert_eq!(out.name, "tool_search");
-        assert_eq!(out.parameters.as_ref().unwrap(), &params);
+        let out = normalize_one(&tool);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].name, "tool_search");
+        assert_eq!(out[0].parameters.as_ref().unwrap(), &params);
     }
 
     #[test]
     fn normalize_custom_becomes_function() {
         let fmt = json!({"type": "grammar"});
-        let tool = IncomingTool::Custom {
+        let tool = CodexTools::Custom {
             name: "lark_parser".into(),
             description: None,
             format: Some(fmt.clone()),
         };
-        let out = tool.normalize().unwrap();
-        assert_eq!(out.name, "lark_parser");
-        assert_eq!(out.parameters.as_ref().unwrap(), &fmt);
+        let out = normalize_one(&tool);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].name, "lark_parser");
+        assert_eq!(out[0].parameters.as_ref().unwrap(), &fmt);
     }
 
     #[test]
-    fn normalize_unknown_returns_none() {
-        assert!(IncomingTool::Unknown.normalize().is_none());
-    }
-
-    #[test]
-    fn normalize_incoming_namespace_flattens_subtools() {
-        let tools = vec![IncomingTool::Namespace {
+    fn normalize_namespace_flattens_subtools() {
+        let tool = CodexTools::Namespace {
             name: "mcp__github".into(),
             description: None,
             tools: vec![function_tool("create_issue"), function_tool("search_code")],
-        }];
-        let out = normalize_incoming_tools(&tools);
+        };
+        let out = normalize_codex_tool(&tool);
         assert_eq!(out.len(), 2);
         assert_eq!(out[0].name, "mcp__github__create_issue");
         assert_eq!(out[1].name, "mcp__github__search_code");
     }
 
     #[test]
-    fn normalize_incoming_nested_namespace_recurses() {
-        let inner = IncomingTool::Namespace {
+    fn normalize_nested_namespace_recurses() {
+        let inner = ResponsesTool::Codex(CodexTools::Namespace {
             name: "inner".into(),
             description: None,
             tools: vec![function_tool("leaf")],
-        };
-        let tools = vec![IncomingTool::Namespace {
+        });
+        let tool = CodexTools::Namespace {
             name: "outer".into(),
             description: None,
             tools: vec![inner],
-        }];
-        let out = normalize_incoming_tools(&tools);
+        };
+        let out = normalize_codex_tool(&tool);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].name, "outer__inner__leaf");
     }
 
     #[test]
-    fn normalize_incoming_mixed_list() {
-        let tools = vec![
-            function_tool("fn_a"),
-            IncomingTool::Namespace {
-                name: "ns".into(),
-                description: None,
-                tools: vec![function_tool("ns_tool")],
-            },
-            IncomingTool::ToolSearch {
-                description: None,
-                parameters: None,
-            },
-            IncomingTool::Unknown,
-        ];
-        let out = normalize_incoming_tools(&tools);
-        assert_eq!(out.len(), 3);
-        assert_eq!(out[0].name, "fn_a");
-        assert_eq!(out[1].name, "ns__ns_tool");
-        assert_eq!(out[2].name, "tool_search");
-    }
-
-    #[test]
-    fn normalize_tools_uses_trait() {
-        let tools = vec![function_tool("a"), IncomingTool::Unknown];
-        let out = normalize_tools(&tools);
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0].name, "a");
-    }
-
-    #[tokio::test]
-    async fn execute_always_returns_none() {
-        assert!(function_tool("my_fn").execute("call_1", "{}").await.is_none());
-        assert!(IncomingTool::Unknown.execute("call_2", "{}").await.is_none());
-    }
-
-    #[tokio::test]
-    async fn execute_namespace_returns_none() {
-        let tool = IncomingTool::Namespace {
+    fn normalize_namespace_drops_non_function_subtools() {
+        let tool = CodexTools::Namespace {
             name: "ns".into(),
             description: None,
-            tools: vec![],
+            tools: vec![function_tool("ns_tool"), ResponsesTool::Codex(CodexTools::Unknown)],
         };
-        assert!(tool.execute("call_4", "{}").await.is_none());
+        let out = normalize_codex_tool(&tool);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].name, "ns__ns_tool");
     }
 
     #[test]
@@ -388,8 +313,8 @@ mod tests {
                  "parameters": {"type": "object", "properties": {}}}
             ]
         });
-        let tool: IncomingTool = serde_json::from_value(json).unwrap();
-        let out = normalize_incoming_tools(&[tool]);
+        let tool: CodexTools = serde_json::from_value(json).unwrap();
+        let out = normalize_codex_tool(&tool);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].name, "mcp__github__create_issue");
     }
@@ -401,8 +326,8 @@ mod tests {
             "description": "Search for deferred tools",
             "parameters": {"type": "object", "properties": {"query": {"type": "string"}}}
         });
-        let tool: IncomingTool = serde_json::from_value(json).unwrap();
-        assert_eq!(tool.normalize().unwrap().name, "tool_search");
+        let tool: CodexTools = serde_json::from_value(json).unwrap();
+        assert_eq!(normalize_one(&tool)[0].name, "tool_search");
     }
 
     #[test]
@@ -413,7 +338,39 @@ mod tests {
             "description": "Parse Lark grammar files",
             "format": {"type": "grammar", "syntax": "lark"}
         });
-        let tool: IncomingTool = serde_json::from_value(json).unwrap();
-        assert_eq!(tool.normalize().unwrap().name, "lark_parser");
+        let tool: CodexTools = serde_json::from_value(json).unwrap();
+        assert_eq!(normalize_one(&tool)[0].name, "lark_parser");
+    }
+
+    #[test]
+    fn responses_tool_routes_namespace_to_codex_variant() {
+        let json = json!({"type": "namespace", "name": "ns", "tools": []});
+        let tool: ResponsesTool = serde_json::from_value(json).unwrap();
+        assert!(matches!(tool, ResponsesTool::Codex(CodexTools::Namespace { .. })));
+    }
+
+    #[test]
+    fn responses_tool_routes_function_to_function_variant_not_codex() {
+        let json = json!({"type": "function", "name": "f1"});
+        let tool: ResponsesTool = serde_json::from_value(json).unwrap();
+        assert!(matches!(tool, ResponsesTool::Function(_)));
+    }
+
+    #[test]
+    fn validate_rejects_empty_namespace_name() {
+        let param = json!({"type": "namespace", "name": "", "tools": []});
+        assert!(CodexToolHandler.validate(&param).is_err());
+    }
+
+    #[test]
+    fn validate_rejects_empty_custom_name() {
+        let param = json!({"type": "custom", "name": ""});
+        assert!(CodexToolHandler.validate(&param).is_err());
+    }
+
+    #[test]
+    fn validate_accepts_tool_search() {
+        let param = json!({"type": "tool_search"});
+        assert!(CodexToolHandler.validate(&param).is_ok());
     }
 }

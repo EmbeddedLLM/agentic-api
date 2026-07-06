@@ -91,6 +91,18 @@ pub fn deserialize_from_value_opt<T: serde::de::DeserializeOwned>(value: serde_j
     serde_json::from_value(value).ok()
 }
 
+/// Serialize any type to a `serde_json::Value`.
+///
+/// # Panics
+///
+/// Panics if serialization fails, which cannot happen for types built from
+/// plain structs/enums with `#[derive(Serialize)]` — the same guarantee
+/// [`serialize_to_string`] documents.
+#[must_use]
+pub fn serialize_to_value<T: serde::Serialize>(value: &T) -> serde_json::Value {
+    serde_json::to_value(value).expect("serialization of known struct is infallible")
+}
+
 /// Serialize any type to JSON bytes, returning an empty `Vec` on error.
 #[must_use]
 pub fn serialize_to_vec_or_default<T: serde::Serialize>(value: &T) -> Vec<u8> {

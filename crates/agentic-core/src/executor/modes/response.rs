@@ -89,18 +89,7 @@ impl ResponseHandler {
         let metadata = ResponseMetadata {
             model: ctx.enriched_request.model,
             previous_response_id: ctx.original_request.previous_response_id,
-            effective_tools: ctx.enriched_request.tools.map(|tools| {
-                tools
-                    .into_iter()
-                    .filter_map(|t| {
-                        if let crate::tool::IncomingTool::Function(f) = t {
-                            Some(f)
-                        } else {
-                            None
-                        }
-                    })
-                    .collect()
-            }),
+            effective_tools: ctx.enriched_request.tools,
             effective_tool_choice: ctx.original_request.tool_choice,
             effective_instructions: ctx.original_request.instructions,
         };

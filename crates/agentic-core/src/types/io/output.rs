@@ -68,7 +68,7 @@ impl From<OutputMessage> for InputMessage {
         let parts = msg
             .content
             .into_iter()
-            .map(|c| InputContent::InputText(InputTextContent { text: c.text }))
+            .map(|c| InputContent::OutputText(InputTextContent { text: c.text }))
             .collect();
         Self {
             role: msg.role,
