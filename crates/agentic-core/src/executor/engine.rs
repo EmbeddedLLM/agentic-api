@@ -410,6 +410,7 @@ async fn run_blocking(ctx: RequestContext, exec_ctx: &ExecutionContext) -> Execu
         url = %url,
         "executing non-streaming responses request"
     );
+    // Non-streaming request: stream=false → full JSON body → from_json.
     let upstream_json = upstream_request_json(&ctx, false)?;
 
     let body = fetch_response_json(upstream_json, &url, &exec_ctx.client, exec_ctx.client_auth.as_deref()).await?;
@@ -451,6 +452,7 @@ fn run_stream(ctx: RequestContext, exec_ctx: Arc<ExecutionContext>) -> BoxStream
         url = %url,
         "executing streaming responses request"
     );
+    // Streaming request: stream=true → SSE lines → from_stream.
     let upstream_json = match upstream_request_json(&ctx, true) {
         Ok(s) => s,
         Err(e) => {

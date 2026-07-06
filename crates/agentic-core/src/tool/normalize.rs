@@ -19,6 +19,8 @@ impl ResponsesTool {
     #[must_use]
     pub fn to_function_tool(&self) -> Option<FunctionTool> {
         match self {
+            // name is NonEmptyToolName — empty names are rejected by serde at
+            // deserialization time, so no runtime check is needed here.
             ResponsesTool::Function(p) => Some(FunctionTool::from(p)),
             ResponsesTool::Mcp(p) => {
                 tracing::debug!(

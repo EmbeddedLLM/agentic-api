@@ -52,6 +52,8 @@ pub struct FunctionToolResultMessage {
 #[derive(Debug, Clone)]
 pub enum InputItem {
     Message(InputMessage),
+    /// The model's tool invocation — appears in rehydrated history so vLLM sees
+    /// the full call/output pair across turns.
     FunctionCall(FunctionToolCall),
     FunctionCallOutput(FunctionToolResultMessage),
     ToolSearchCall(Value),

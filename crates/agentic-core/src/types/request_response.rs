@@ -130,6 +130,7 @@ impl RequestPayload {
             .tools
             .as_ref()
             .map(|tools| tools.iter().filter_map(ResponsesTool::to_function_tool).collect());
+        // Treat an empty normalised list the same as no tools (skip the field entirely).
         let tools = tools.filter(|tools| !tools.is_empty());
 
         UpstreamRequest {

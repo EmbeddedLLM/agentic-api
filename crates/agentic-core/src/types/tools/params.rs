@@ -86,6 +86,12 @@ pub enum ResponsesTool {
 }
 
 /// Parameters for a user-defined function tool.
+///
+/// Does NOT carry a `type` field — serde consumes the tag during
+/// deserialization and the payload struct must not also carry it.
+///
+/// `name` is a [`NonEmptyToolName`]: serde rejects empty strings at
+/// deserialization time, making the invalid state unrepresentable.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionToolParam {
     pub name: NonEmptyToolName,
