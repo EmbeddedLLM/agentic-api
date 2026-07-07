@@ -28,140 +28,319 @@ turns:
     headers:
       content-type: text/event-stream; charset=utf-8
     sse:
-    - 'data: {"item":{"arguments":{"server":"repo","uri":"repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml"},"id":"mcp_9f33614cc83cd1b7","server":"repo","status":"in_progress","tool":"read_mcp_resource","type":"mcp_tool_call"},"output_index":1,"type":"response.output_item.added"}
+    - 'data: {"item":{"arguments":{"server":"repo","uri":"repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml"},"id":"mcp_ad3c46dc602b7d48","server":"repo","status":"in_progress","tool":"read_mcp_resource","type":"mcp_tool_call"},"output_index":1,"type":"response.output_item.added"}
 
       '
     - '
 
       '
-    - 'data: {"item_id":"mcp_9f33614cc83cd1b7","output_index":1,"type":"response.mcp_tool_call.in_progress"}
+    - 'data: {"item_id":"mcp_ad3c46dc602b7d48","output_index":1,"type":"response.mcp_tool_call.in_progress"}
 
       '
     - '
 
       '
-    - 'data: {"item":{"arguments":{"server":"repo","uri":"repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml"},"id":"mcp_8b90e0a716260414","server":"repo","status":"in_progress","tool":"read_mcp_resource","type":"mcp_tool_call"},"output_index":2,"type":"response.output_item.added"}
+    - 'data: {"item":{"arguments":{"server":"repo","uri":"repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml"},"id":"mcp_a07587bfc1c54b05","server":"repo","status":"in_progress","tool":"read_mcp_resource","type":"mcp_tool_call"},"output_index":2,"type":"response.output_item.added"}
 
       '
     - '
 
       '
-    - 'data: {"item_id":"mcp_8b90e0a716260414","output_index":2,"type":"response.mcp_tool_call.in_progress"}
+    - 'data: {"item_id":"mcp_a07587bfc1c54b05","output_index":2,"type":"response.mcp_tool_call.in_progress"}
 
       '
     - '
 
       '
-    - 'data: {"item":{"arguments":{"server":"repo","uri":"repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml"},"id":"mcp_85557fd5d9290611","server":"repo","status":"in_progress","tool":"read_mcp_resource","type":"mcp_tool_call"},"output_index":3,"type":"response.output_item.added"}
+    - 'data: {"item":{"arguments":{"server":"repo","uri":"repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml"},"id":"mcp_ad3c46dc602b7d48","result":{"contents":[{"mimeType":"text/plain","text":"turns:\n-
+      filename: t1\n  request:\n    body:\n      input: Use web search to look up
+      potato, then summarize in one sentence.\n      max_output_tokens: 1024\n      model:
+      openai/gpt-oss-20b\n      store: true\n      stream: false\n      tool_choice:
+      auto\n      tools:\n      - type: web_search_preview\n    headers:\n      accept:
+      ''*/*''\n      content-type: application/json\n      user-agent: python-httpx/0.28.1\n    method:
+      POST\n    path: /v1/responses\n    query_params: {}\n  response:\n    body:\n      conversation_id:
+      null\n      created_at: 1783307879\n      error: null\n      id: resp_019f356e-aacf-7ea3-87c6-075c2fcc1eb2\n      incomplete_details:
+      null\n      instructions: null\n      model: openai/gpt-oss-20b\n      object:
+      response\n      output:\n      - content:\n        - text: ''User: \"Use web
+      search to look up potato, then summarize in one sentence.\"\n            We
+      need to call web_search. Use search query \"potato\". Provide let''''s\n            say
+      count=5. Ask for news? Might not need. We just want general info.\n            Probably
+      get definition. Use general web search. Use appropriate countries.\n            Use
+      English. Use default. Ok.''\n          type: reasoning_text\n        encrypted_content:
+      null\n        id: rs_8c5223df3fb54ba8\n        status: null\n        summary:
+      []\n        type: reasoning\n      - action:\n          query: potato\n          sources:\n          -
+      title: Potato - Wikipedia\n            url: https://en.wikipedia.org/wiki/Potato\n          -
+      title: Potatoes | Potato Nutrition | Types of Potatoes | Recipes\n            url:
+      https://potatogoodness.com/\n          - title: Potato Facts\n            url:
+      https://www.idahopotatomuseum.com/potato-facts/\n          - title: Idaho Potato
+      Commission\n            url: https://idahopotato.com/\n          - title: Home
+      of U.S. Potato Farmers | Potatoes USA\n            url: https://potatoesusa.com/\n          type:
+      search\n        id: ws_b67561c650733812\n        status: completed\n        type:
+      web_search_call\n      - content:\n        - text: ''We have a summary from
+      Wikipedia. Enough.\n\n\n            Now produce one sentence summary: \"Potato
+      is a starchy tuberous vegetable\n            native to the Americas, cultivated
+      from Solanum tuberosum, and is a staple\n            food worldwide.\" Provide
+      brief.''\n          type: reasoning_text\n        encrypted_content: null\n        id:
+      rs_9d6b942ea84e3e00\n        status: null\n        summary: []\n        type:
+      reasoning\n      - content:\n        - annotations: []\n          text: Potato
+      (Solanum tuberosum) is a starchy, underground tuber native\n            to the
+      Americas that has been domesticated for thousands of years and\n            is
+      today a staple food in many cultures worldwide.\n          type: output_text\n        id:
+      msg_a8af96caf08bdc00\n        role: assistant\n        status: completed\n        type:
+      message\n      previous_response_id: null\n      status: completed\n      usage:\n        input_tokens:
+      2285\n        input_tokens_details:\n          cached_tokens: 352\n        output_tokens:
+      204\n        output_tokens_details:\n          reasoning_tokens: 135\n        total_tokens:
+      2489\n    headers:\n      content-type: application/json\n    status_code: 200\n","uri":"repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml"}]},"server":"repo","status":"completed","tool":"read_mcp_resource","type":"mcp_tool_call"},"item_id":"mcp_ad3c46dc602b7d48","output_index":1,"type":"response.mcp_tool_call.completed"}
 
       '
     - '
 
       '
-    - 'data: {"item_id":"mcp_85557fd5d9290611","output_index":3,"type":"response.mcp_tool_call.in_progress"}
+    - 'data: {"item":{"arguments":{"server":"repo","uri":"repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml"},"id":"mcp_ad3c46dc602b7d48","result":{"contents":[{"mimeType":"text/plain","text":"turns:\n-
+      filename: t1\n  request:\n    body:\n      input: Use web search to look up
+      potato, then summarize in one sentence.\n      max_output_tokens: 1024\n      model:
+      openai/gpt-oss-20b\n      store: true\n      stream: false\n      tool_choice:
+      auto\n      tools:\n      - type: web_search_preview\n    headers:\n      accept:
+      ''*/*''\n      content-type: application/json\n      user-agent: python-httpx/0.28.1\n    method:
+      POST\n    path: /v1/responses\n    query_params: {}\n  response:\n    body:\n      conversation_id:
+      null\n      created_at: 1783307879\n      error: null\n      id: resp_019f356e-aacf-7ea3-87c6-075c2fcc1eb2\n      incomplete_details:
+      null\n      instructions: null\n      model: openai/gpt-oss-20b\n      object:
+      response\n      output:\n      - content:\n        - text: ''User: \"Use web
+      search to look up potato, then summarize in one sentence.\"\n            We
+      need to call web_search. Use search query \"potato\". Provide let''''s\n            say
+      count=5. Ask for news? Might not need. We just want general info.\n            Probably
+      get definition. Use general web search. Use appropriate countries.\n            Use
+      English. Use default. Ok.''\n          type: reasoning_text\n        encrypted_content:
+      null\n        id: rs_8c5223df3fb54ba8\n        status: null\n        summary:
+      []\n        type: reasoning\n      - action:\n          query: potato\n          sources:\n          -
+      title: Potato - Wikipedia\n            url: https://en.wikipedia.org/wiki/Potato\n          -
+      title: Potatoes | Potato Nutrition | Types of Potatoes | Recipes\n            url:
+      https://potatogoodness.com/\n          - title: Potato Facts\n            url:
+      https://www.idahopotatomuseum.com/potato-facts/\n          - title: Idaho Potato
+      Commission\n            url: https://idahopotato.com/\n          - title: Home
+      of U.S. Potato Farmers | Potatoes USA\n            url: https://potatoesusa.com/\n          type:
+      search\n        id: ws_b67561c650733812\n        status: completed\n        type:
+      web_search_call\n      - content:\n        - text: ''We have a summary from
+      Wikipedia. Enough.\n\n\n            Now produce one sentence summary: \"Potato
+      is a starchy tuberous vegetable\n            native to the Americas, cultivated
+      from Solanum tuberosum, and is a staple\n            food worldwide.\" Provide
+      brief.''\n          type: reasoning_text\n        encrypted_content: null\n        id:
+      rs_9d6b942ea84e3e00\n        status: null\n        summary: []\n        type:
+      reasoning\n      - content:\n        - annotations: []\n          text: Potato
+      (Solanum tuberosum) is a starchy, underground tuber native\n            to the
+      Americas that has been domesticated for thousands of years and\n            is
+      today a staple food in many cultures worldwide.\n          type: output_text\n        id:
+      msg_a8af96caf08bdc00\n        role: assistant\n        status: completed\n        type:
+      message\n      previous_response_id: null\n      status: completed\n      usage:\n        input_tokens:
+      2285\n        input_tokens_details:\n          cached_tokens: 352\n        output_tokens:
+      204\n        output_tokens_details:\n          reasoning_tokens: 135\n        total_tokens:
+      2489\n    headers:\n      content-type: application/json\n    status_code: 200\n","uri":"repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml"}]},"server":"repo","status":"completed","tool":"read_mcp_resource","type":"mcp_tool_call"},"output_index":1,"type":"response.output_item.done"}
 
       '
     - '
 
       '
-    - 'data: {"item":{"arguments":{"server":"repo","uri":"repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml"},"id":"mcp_915c15b2df1ed83a","server":"repo","status":"in_progress","tool":"read_mcp_resource","type":"mcp_tool_call"},"output_index":4,"type":"response.output_item.added"}
+    - 'data: {"item":{"arguments":{"server":"repo","uri":"repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml"},"id":"mcp_a07587bfc1c54b05","result":{"contents":[{"mimeType":"text/plain","text":"turns:\n-
+      filename: t1\n  request:\n    body:\n      input: Use web search to look up
+      potato, then summarize in one sentence.\n      max_output_tokens: 1024\n      model:
+      openai/gpt-oss-20b\n      store: true\n      stream: false\n      tool_choice:
+      auto\n      tools:\n      - type: web_search_preview\n    headers:\n      accept:
+      ''*/*''\n      content-type: application/json\n      user-agent: python-httpx/0.28.1\n    method:
+      POST\n    path: /v1/responses\n    query_params: {}\n  response:\n    body:\n      conversation_id:
+      null\n      created_at: 1783307879\n      error: null\n      id: resp_019f356e-aacf-7ea3-87c6-075c2fcc1eb2\n      incomplete_details:
+      null\n      instructions: null\n      model: openai/gpt-oss-20b\n      object:
+      response\n      output:\n      - content:\n        - text: ''User: \"Use web
+      search to look up potato, then summarize in one sentence.\"\n            We
+      need to call web_search. Use search query \"potato\". Provide let''''s\n            say
+      count=5. Ask for news? Might not need. We just want general info.\n            Probably
+      get definition. Use general web search. Use appropriate countries.\n            Use
+      English. Use default. Ok.''\n          type: reasoning_text\n        encrypted_content:
+      null\n        id: rs_8c5223df3fb54ba8\n        status: null\n        summary:
+      []\n        type: reasoning\n      - action:\n          query: potato\n          sources:\n          -
+      title: Potato - Wikipedia\n            url: https://en.wikipedia.org/wiki/Potato\n          -
+      title: Potatoes | Potato Nutrition | Types of Potatoes | Recipes\n            url:
+      https://potatogoodness.com/\n          - title: Potato Facts\n            url:
+      https://www.idahopotatomuseum.com/potato-facts/\n          - title: Idaho Potato
+      Commission\n            url: https://idahopotato.com/\n          - title: Home
+      of U.S. Potato Farmers | Potatoes USA\n            url: https://potatoesusa.com/\n          type:
+      search\n        id: ws_b67561c650733812\n        status: completed\n        type:
+      web_search_call\n      - content:\n        - text: ''We have a summary from
+      Wikipedia. Enough.\n\n\n            Now produce one sentence summary: \"Potato
+      is a starchy tuberous vegetable\n            native to the Americas, cultivated
+      from Solanum tuberosum, and is a staple\n            food worldwide.\" Provide
+      brief.''\n          type: reasoning_text\n        encrypted_content: null\n        id:
+      rs_9d6b942ea84e3e00\n        status: null\n        summary: []\n        type:
+      reasoning\n      - content:\n        - annotations: []\n          text: Potato
+      (Solanum tuberosum) is a starchy, underground tuber native\n            to the
+      Americas that has been domesticated for thousands of years and\n            is
+      today a staple food in many cultures worldwide.\n          type: output_text\n        id:
+      msg_a8af96caf08bdc00\n        role: assistant\n        status: completed\n        type:
+      message\n      previous_response_id: null\n      status: completed\n      usage:\n        input_tokens:
+      2285\n        input_tokens_details:\n          cached_tokens: 352\n        output_tokens:
+      204\n        output_tokens_details:\n          reasoning_tokens: 135\n        total_tokens:
+      2489\n    headers:\n      content-type: application/json\n    status_code: 200\n","uri":"repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml"}]},"server":"repo","status":"completed","tool":"read_mcp_resource","type":"mcp_tool_call"},"item_id":"mcp_a07587bfc1c54b05","output_index":2,"type":"response.mcp_tool_call.completed"}
 
       '
     - '
 
       '
-    - 'data: {"item_id":"mcp_915c15b2df1ed83a","output_index":4,"type":"response.mcp_tool_call.in_progress"}
+    - 'data: {"item":{"arguments":{"server":"repo","uri":"repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml"},"id":"mcp_a07587bfc1c54b05","result":{"contents":[{"mimeType":"text/plain","text":"turns:\n-
+      filename: t1\n  request:\n    body:\n      input: Use web search to look up
+      potato, then summarize in one sentence.\n      max_output_tokens: 1024\n      model:
+      openai/gpt-oss-20b\n      store: true\n      stream: false\n      tool_choice:
+      auto\n      tools:\n      - type: web_search_preview\n    headers:\n      accept:
+      ''*/*''\n      content-type: application/json\n      user-agent: python-httpx/0.28.1\n    method:
+      POST\n    path: /v1/responses\n    query_params: {}\n  response:\n    body:\n      conversation_id:
+      null\n      created_at: 1783307879\n      error: null\n      id: resp_019f356e-aacf-7ea3-87c6-075c2fcc1eb2\n      incomplete_details:
+      null\n      instructions: null\n      model: openai/gpt-oss-20b\n      object:
+      response\n      output:\n      - content:\n        - text: ''User: \"Use web
+      search to look up potato, then summarize in one sentence.\"\n            We
+      need to call web_search. Use search query \"potato\". Provide let''''s\n            say
+      count=5. Ask for news? Might not need. We just want general info.\n            Probably
+      get definition. Use general web search. Use appropriate countries.\n            Use
+      English. Use default. Ok.''\n          type: reasoning_text\n        encrypted_content:
+      null\n        id: rs_8c5223df3fb54ba8\n        status: null\n        summary:
+      []\n        type: reasoning\n      - action:\n          query: potato\n          sources:\n          -
+      title: Potato - Wikipedia\n            url: https://en.wikipedia.org/wiki/Potato\n          -
+      title: Potatoes | Potato Nutrition | Types of Potatoes | Recipes\n            url:
+      https://potatogoodness.com/\n          - title: Potato Facts\n            url:
+      https://www.idahopotatomuseum.com/potato-facts/\n          - title: Idaho Potato
+      Commission\n            url: https://idahopotato.com/\n          - title: Home
+      of U.S. Potato Farmers | Potatoes USA\n            url: https://potatoesusa.com/\n          type:
+      search\n        id: ws_b67561c650733812\n        status: completed\n        type:
+      web_search_call\n      - content:\n        - text: ''We have a summary from
+      Wikipedia. Enough.\n\n\n            Now produce one sentence summary: \"Potato
+      is a starchy tuberous vegetable\n            native to the Americas, cultivated
+      from Solanum tuberosum, and is a staple\n            food worldwide.\" Provide
+      brief.''\n          type: reasoning_text\n        encrypted_content: null\n        id:
+      rs_9d6b942ea84e3e00\n        status: null\n        summary: []\n        type:
+      reasoning\n      - content:\n        - annotations: []\n          text: Potato
+      (Solanum tuberosum) is a starchy, underground tuber native\n            to the
+      Americas that has been domesticated for thousands of years and\n            is
+      today a staple food in many cultures worldwide.\n          type: output_text\n        id:
+      msg_a8af96caf08bdc00\n        role: assistant\n        status: completed\n        type:
+      message\n      previous_response_id: null\n      status: completed\n      usage:\n        input_tokens:
+      2285\n        input_tokens_details:\n          cached_tokens: 352\n        output_tokens:
+      204\n        output_tokens_details:\n          reasoning_tokens: 135\n        total_tokens:
+      2489\n    headers:\n      content-type: application/json\n    status_code: 200\n","uri":"repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml"}]},"server":"repo","status":"completed","tool":"read_mcp_resource","type":"mcp_tool_call"},"output_index":2,"type":"response.output_item.done"}
 
       '
     - '
 
       '
-    - 'data: {"item":{"arguments":{"server":"repo","uri":"repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml"},"id":"mcp_bb7046dfe0102127","server":"repo","status":"in_progress","tool":"read_mcp_resource","type":"mcp_tool_call"},"output_index":5,"type":"response.output_item.added"}
-
-      '
-    - '
-
-      '
-    - 'data: {"item_id":"mcp_bb7046dfe0102127","output_index":5,"type":"response.mcp_tool_call.in_progress"}
-
-      '
-    - '
-
-      '
-    - 'data: {"item":{"arguments":{"server":"repo","uri":"repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml"},"id":"mcp_8509733a5fee3bfd","server":"repo","status":"in_progress","tool":"read_mcp_resource","type":"mcp_tool_call"},"output_index":6,"type":"response.output_item.added"}
-
-      '
-    - '
-
-      '
-    - 'data: {"item_id":"mcp_8509733a5fee3bfd","output_index":6,"type":"response.mcp_tool_call.in_progress"}
-
-      '
-    - '
-
-      '
-    - 'data: {"item":{"arguments":{"server":"repo","uri":"repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml"},"id":"mcp_9428cc3665409770","server":"repo","status":"in_progress","tool":"read_mcp_resource","type":"mcp_tool_call"},"output_index":7,"type":"response.output_item.added"}
-
-      '
-    - '
-
-      '
-    - 'data: {"item_id":"mcp_9428cc3665409770","output_index":7,"type":"response.mcp_tool_call.in_progress"}
-
-      '
-    - '
-
-      '
-    - 'data: {"item":{"arguments":{"server":"repo","uri":"repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml"},"id":"mcp_9633db48d854ec07","server":"repo","status":"in_progress","tool":"read_mcp_resource","type":"mcp_tool_call"},"output_index":8,"type":"response.output_item.added"}
-
-      '
-    - '
-
-      '
-    - 'data: {"item_id":"mcp_9633db48d854ec07","output_index":8,"type":"response.mcp_tool_call.in_progress"}
-
-      '
-    - '
-
-      '
-    - 'data: {"item":{"arguments":{"server":"repo","uri":"repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml"},"id":"mcp_a0ff89efa72e4736","server":"repo","status":"in_progress","tool":"read_mcp_resource","type":"mcp_tool_call"},"output_index":9,"type":"response.output_item.added"}
-
-      '
-    - '
-
-      '
-    - 'data: {"item_id":"mcp_a0ff89efa72e4736","output_index":9,"type":"response.mcp_tool_call.in_progress"}
-
-      '
-    - '
-
-      '
-    - 'data: {"item":{"arguments":{"server":"repo","uri":"repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml"},"id":"mcp_9770059c0d509570","server":"repo","status":"in_progress","tool":"read_mcp_resource","type":"mcp_tool_call"},"output_index":10,"type":"response.output_item.added"}
-
-      '
-    - '
-
-      '
-    - 'data: {"item_id":"mcp_9770059c0d509570","output_index":10,"type":"response.mcp_tool_call.in_progress"}
-
-      '
-    - '
-
-      '
-    - 'data: {"item":{"arguments":{},"id":"mcp_bc39650e0746643c","server":"","status":"in_progress","tool":"read_mcp_resource","type":"mcp_tool_call"},"output_index":11,"type":"response.output_item.added"}
-
-      '
-    - '
-
-      '
-    - 'data: {"item_id":"mcp_bc39650e0746643c","output_index":11,"type":"response.mcp_tool_call.in_progress"}
-
-      '
-    - '
-
-      '
-    - 'data: {"error":"invalid request: gateway tool call limit exceeded: got 11,
-      max 8 per round"}
+    - 'data: {"id":"resp_019f3d1b-d183-79c0-b52d-4a928d1bdc9f","object":"response","created_at":1783436666,"model":"Qwen/Qwen3-30B-A3B-FP8","status":"completed","output":[{"type":"reasoning","id":"9950a0333559a6f2","content":[{"type":"reasoning_text","text":"\nOkay,
+      the user wants me to use the read_mcp_resource function. The server label is
+      repo, and the URI is repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml.
+      I need to call that function once. Then, I have to summarize the YAML file in
+      2-3 sentences and mention that I used the tool.\n\nFirst, I''ll check the function
+      parameters. The function requires \"server\" and \"uri\". The server is \"repo\",
+      and the URI is given. So the arguments should be {\"server\": \"repo\", \"uri\":
+      \"repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml\"}.
+      \n\nWait, the URI starts with repo://, but the function''s description says
+      it''s the resource URI. I need to make sure that the URI is correctly formatted.
+      The user provided it as repo://... so I''ll use it as is. \n\nOnce the function
+      is called, the response will be the content of that YAML file. Then, I need
+      to summarize it. Since I don''t have the actual content, I''ll have to assume
+      what''s in the file. The filename suggests it''s a test cassette for a web search,
+      maybe containing test data or recorded responses. The summary should mention
+      that it''s a test cassette for a non-streaming web search, possibly including
+      example queries and responses. \n\nI should also remember to mention that I
+      used the read_mcp_resource tool to retrieve the data. Let me structure the response:
+      first the tool call, then the summary. Make sure the summary is concise and
+      includes the key points about the cassette''s purpose.\n"}],"summary":[],"encrypted_content":null,"status":null},{"type":"mcp_tool_call","id":"mcp_ad3c46dc602b7d48","server":"repo","tool":"read_mcp_resource","arguments":{"server":"repo","uri":"repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml"},"status":"completed","result":{"contents":[{"mimeType":"text/plain","text":"turns:\n-
+      filename: t1\n  request:\n    body:\n      input: Use web search to look up
+      potato, then summarize in one sentence.\n      max_output_tokens: 1024\n      model:
+      openai/gpt-oss-20b\n      store: true\n      stream: false\n      tool_choice:
+      auto\n      tools:\n      - type: web_search_preview\n    headers:\n      accept:
+      ''*/*''\n      content-type: application/json\n      user-agent: python-httpx/0.28.1\n    method:
+      POST\n    path: /v1/responses\n    query_params: {}\n  response:\n    body:\n      conversation_id:
+      null\n      created_at: 1783307879\n      error: null\n      id: resp_019f356e-aacf-7ea3-87c6-075c2fcc1eb2\n      incomplete_details:
+      null\n      instructions: null\n      model: openai/gpt-oss-20b\n      object:
+      response\n      output:\n      - content:\n        - text: ''User: \"Use web
+      search to look up potato, then summarize in one sentence.\"\n            We
+      need to call web_search. Use search query \"potato\". Provide let''''s\n            say
+      count=5. Ask for news? Might not need. We just want general info.\n            Probably
+      get definition. Use general web search. Use appropriate countries.\n            Use
+      English. Use default. Ok.''\n          type: reasoning_text\n        encrypted_content:
+      null\n        id: rs_8c5223df3fb54ba8\n        status: null\n        summary:
+      []\n        type: reasoning\n      - action:\n          query: potato\n          sources:\n          -
+      title: Potato - Wikipedia\n            url: https://en.wikipedia.org/wiki/Potato\n          -
+      title: Potatoes | Potato Nutrition | Types of Potatoes | Recipes\n            url:
+      https://potatogoodness.com/\n          - title: Potato Facts\n            url:
+      https://www.idahopotatomuseum.com/potato-facts/\n          - title: Idaho Potato
+      Commission\n            url: https://idahopotato.com/\n          - title: Home
+      of U.S. Potato Farmers | Potatoes USA\n            url: https://potatoesusa.com/\n          type:
+      search\n        id: ws_b67561c650733812\n        status: completed\n        type:
+      web_search_call\n      - content:\n        - text: ''We have a summary from
+      Wikipedia. Enough.\n\n\n            Now produce one sentence summary: \"Potato
+      is a starchy tuberous vegetable\n            native to the Americas, cultivated
+      from Solanum tuberosum, and is a staple\n            food worldwide.\" Provide
+      brief.''\n          type: reasoning_text\n        encrypted_content: null\n        id:
+      rs_9d6b942ea84e3e00\n        status: null\n        summary: []\n        type:
+      reasoning\n      - content:\n        - annotations: []\n          text: Potato
+      (Solanum tuberosum) is a starchy, underground tuber native\n            to the
+      Americas that has been domesticated for thousands of years and\n            is
+      today a staple food in many cultures worldwide.\n          type: output_text\n        id:
+      msg_a8af96caf08bdc00\n        role: assistant\n        status: completed\n        type:
+      message\n      previous_response_id: null\n      status: completed\n      usage:\n        input_tokens:
+      2285\n        input_tokens_details:\n          cached_tokens: 352\n        output_tokens:
+      204\n        output_tokens_details:\n          reasoning_tokens: 135\n        total_tokens:
+      2489\n    headers:\n      content-type: application/json\n    status_code: 200\n","uri":"repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml"}]}},{"type":"mcp_tool_call","id":"mcp_a07587bfc1c54b05","server":"repo","tool":"read_mcp_resource","arguments":{"server":"repo","uri":"repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml"},"status":"completed","result":{"contents":[{"mimeType":"text/plain","text":"turns:\n-
+      filename: t1\n  request:\n    body:\n      input: Use web search to look up
+      potato, then summarize in one sentence.\n      max_output_tokens: 1024\n      model:
+      openai/gpt-oss-20b\n      store: true\n      stream: false\n      tool_choice:
+      auto\n      tools:\n      - type: web_search_preview\n    headers:\n      accept:
+      ''*/*''\n      content-type: application/json\n      user-agent: python-httpx/0.28.1\n    method:
+      POST\n    path: /v1/responses\n    query_params: {}\n  response:\n    body:\n      conversation_id:
+      null\n      created_at: 1783307879\n      error: null\n      id: resp_019f356e-aacf-7ea3-87c6-075c2fcc1eb2\n      incomplete_details:
+      null\n      instructions: null\n      model: openai/gpt-oss-20b\n      object:
+      response\n      output:\n      - content:\n        - text: ''User: \"Use web
+      search to look up potato, then summarize in one sentence.\"\n            We
+      need to call web_search. Use search query \"potato\". Provide let''''s\n            say
+      count=5. Ask for news? Might not need. We just want general info.\n            Probably
+      get definition. Use general web search. Use appropriate countries.\n            Use
+      English. Use default. Ok.''\n          type: reasoning_text\n        encrypted_content:
+      null\n        id: rs_8c5223df3fb54ba8\n        status: null\n        summary:
+      []\n        type: reasoning\n      - action:\n          query: potato\n          sources:\n          -
+      title: Potato - Wikipedia\n            url: https://en.wikipedia.org/wiki/Potato\n          -
+      title: Potatoes | Potato Nutrition | Types of Potatoes | Recipes\n            url:
+      https://potatogoodness.com/\n          - title: Potato Facts\n            url:
+      https://www.idahopotatomuseum.com/potato-facts/\n          - title: Idaho Potato
+      Commission\n            url: https://idahopotato.com/\n          - title: Home
+      of U.S. Potato Farmers | Potatoes USA\n            url: https://potatoesusa.com/\n          type:
+      search\n        id: ws_b67561c650733812\n        status: completed\n        type:
+      web_search_call\n      - content:\n        - text: ''We have a summary from
+      Wikipedia. Enough.\n\n\n            Now produce one sentence summary: \"Potato
+      is a starchy tuberous vegetable\n            native to the Americas, cultivated
+      from Solanum tuberosum, and is a staple\n            food worldwide.\" Provide
+      brief.''\n          type: reasoning_text\n        encrypted_content: null\n        id:
+      rs_9d6b942ea84e3e00\n        status: null\n        summary: []\n        type:
+      reasoning\n      - content:\n        - annotations: []\n          text: Potato
+      (Solanum tuberosum) is a starchy, underground tuber native\n            to the
+      Americas that has been domesticated for thousands of years and\n            is
+      today a staple food in many cultures worldwide.\n          type: output_text\n        id:
+      msg_a8af96caf08bdc00\n        role: assistant\n        status: completed\n        type:
+      message\n      previous_response_id: null\n      status: completed\n      usage:\n        input_tokens:
+      2285\n        input_tokens_details:\n          cached_tokens: 352\n        output_tokens:
+      204\n        output_tokens_details:\n          reasoning_tokens: 135\n        total_tokens:
+      2489\n    headers:\n      content-type: application/json\n    status_code: 200\n","uri":"repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml"}]}},{"type":"message","id":"85ee428393aa22a4","role":"assistant","status":"completed","content":[{"type":"output_text","text":"<think>\nOkay,
+      let''s see. The user asked me to summarize the gpt_oss_web_search_nonstreaming.yaml
+      cassette. From the tool response, I can see the content of that file. The YAML
+      seems to be a test cassette for a web search interaction. The request involves
+      using web search to look up \"potato\" and summarize it in one sentence. The
+      response includes a detailed conversation where the system calls a web search,
+      retrieves information from sources like Wikipedia and other potato-related websites,
+      and then provides a summary.\n\nSo, the summary should mention that the cassette
+      contains a test scenario where a web search is performed for \"potato,\" leading
+      to a one-sentence summary. It also includes the sources used, like Wikipedia
+      and other agricultural sites. I need to keep it concise, 2-3 sentences, and
+      note that the read_mcp_resource was used. Let me structure that.\n</think>\n\nThe
+      `gpt_oss_web_search_nonstreaming.yaml` cassette demonstrates a test scenario
+      where a web search is conducted for \"potato,\" retrieving sources like Wikipedia
+      and potato nutrition websites, followed by a one-sentence summary of the tuberous
+      vegetable''s origin and global significance. The response includes detailed
+      token usage and interaction logs. This analysis was derived using the `read_mcp_resource`
+      tool.","annotations":[]}]}],"usage":{"input_tokens":2896,"output_tokens":723,"total_tokens":3619,"input_tokens_details":{"cached_tokens":928},"output_tokens_details":{"reasoning_tokens":528}},"incomplete_details":null,"error":null,"previous_response_id":null,"conversation_id":null,"instructions":null}
 
       '
     - '

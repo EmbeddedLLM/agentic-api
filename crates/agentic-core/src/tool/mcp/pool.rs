@@ -1,11 +1,15 @@
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::sync::Arc;
 
+use reqwest::Url;
 use serde::{Deserialize, Serialize};
 
 use super::READ_MCP_RESOURCE_TOOL_NAME;
 use super::client::McpClient;
 use crate::types::tools::McpToolParam;
+
+const MCP_ALLOWED_HOSTS_ENV: &str = "AGENTIC_MCP_ALLOWED_HOSTS";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -106,6 +110,20 @@ fn server_entry_from_param(param: &McpToolParam) -> Option<(String, McpServerEnt
     };
 
     if let Some(url) = clean_string(param.server_url.as_deref()) {
+        let url = match validate_request_server_url(&url) {
+            Ok(url) => url,
+            Err(reason) => {
+                tracing::warn!(
+                    server_label,
+                    name = %param.name,
+                    url,
+                    reason,
+                    "MCP tool param server_url rejected"
+                );
+                return None;
+            }
+        };
+
         return Some((
             server_label,
             McpServerEntry::Http {
@@ -115,24 +133,48 @@ fn server_entry_from_param(param: &McpToolParam) -> Option<(String, McpServerEnt
         ));
     }
 
-    if let Some(command) = clean_string(param.command.as_deref()) {
-        return Some((
-            server_label,
-            McpServerEntry::Stdio {
-                command,
-                args: param.args.clone(),
-                env: param.env.clone(),
-                cwd: param.cwd.clone(),
-            },
-        ));
-    }
-
     tracing::warn!(
         server_label,
         name = %param.name,
-        "MCP tool param has no server_url or command"
+        "MCP tool param has no server_url"
     );
     None
+}
+
+fn validate_request_server_url(value: &str) -> Result<String, String> {
+    let url = Url::parse(value).map_err(|error| format!("invalid URL: {error}"))?;
+    match url.scheme() {
+        "http" | "https" => {}
+        _ => return Err("URL scheme must be http or https".to_owned()),
+    }
+
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("URL must not include credentials".to_owned());
+    }
+
+    let host = url.host_str().ok_or_else(|| "URL must include a host".to_owned())?;
+    if is_allowed_request_host(host) {
+        return Ok(value.to_owned());
+    }
+
+    Err(format!(
+        "MCP server_url host is not allowed; set {MCP_ALLOWED_HOSTS_ENV} to allow it"
+    ))
+}
+
+fn is_allowed_request_host(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost")
+        || host.parse::<IpAddr>().is_ok_and(|ip| ip.is_loopback())
+        || host_allowed_by_env(host)
+}
+
+fn host_allowed_by_env(host: &str) -> bool {
+    std::env::var(MCP_ALLOWED_HOSTS_ENV).is_ok_and(|allowed_hosts| {
+        allowed_hosts
+            .split(',')
+            .map(str::trim)
+            .any(|allowed_host| allowed_host.eq_ignore_ascii_case(host))
+    })
 }
 
 fn clean_string(value: Option<&str>) -> Option<String> {
@@ -144,7 +186,8 @@ fn clean_string(value: Option<&str>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::McpServerEntry;
+    use super::{McpServerEntry, server_entry_from_param, validate_request_server_url};
+    use crate::types::tools::McpToolParam;
 
     #[test]
     fn mcp_server_entry_deserializes_http_config() {
@@ -187,5 +230,30 @@ mod tests {
             }
             McpServerEntry::Http { .. } => panic!("expected stdio MCP config"),
         }
+    }
+
+    #[test]
+    fn request_server_url_allows_loopback_http() {
+        let url = validate_request_server_url("http://127.0.0.1:8000/mcp").unwrap();
+        assert_eq!(url, "http://127.0.0.1:8000/mcp");
+    }
+
+    #[test]
+    fn request_server_url_rejects_unallowlisted_host() {
+        let error = validate_request_server_url("http://169.254.169.254/mcp").unwrap_err();
+        assert!(error.contains("not allowed"));
+    }
+
+    #[test]
+    fn request_params_do_not_accept_stdio_command() {
+        let param = serde_json::from_value::<McpToolParam>(serde_json::json!({
+            "name": "read_mcp_resource",
+            "server_label": "repo",
+            "command": "python3",
+            "args": ["/tmp/server.py"]
+        }))
+        .unwrap();
+
+        assert!(server_entry_from_param(&param).is_none());
     }
 }

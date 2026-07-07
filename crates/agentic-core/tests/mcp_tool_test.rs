@@ -45,6 +45,33 @@ fn process_nonstreaming_turn(cassette: &support::Cassette, turn_idx: usize, mode
     payload.output
 }
 
+fn process_streaming_turn(cassette: &support::Cassette, turn_idx: usize, model: &str) -> Vec<OutputItem> {
+    let sse = cassette.turns[turn_idx]
+        .response
+        .sse
+        .as_ref()
+        .unwrap_or_else(|| panic!("turn {} must have SSE events", turn_idx + 1));
+    let data_lines = extract_data_lines(sse);
+    assert!(
+        !data_lines.is_empty(),
+        "streaming turn {} must have SSE data lines",
+        turn_idx + 1
+    );
+    let final_payload = data_lines
+        .iter()
+        .rev()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .filter(|data| *data != "[DONE]")
+        .filter_map(|data| serde_json::from_str::<serde_json::Value>(data).ok())
+        .find(|event| event["status"].as_str() == Some("completed") && event["output"].is_array())
+        .unwrap_or_else(|| panic!("turn {} must include a completed final response payload", turn_idx + 1));
+    let final_payload = serde_json::to_string(&final_payload).unwrap();
+    let acc = ResponseAccumulator::from_json(&final_payload, None).unwrap();
+    let payload = acc.finalize(model, None, None);
+    assert_eq!(payload.status, "completed");
+    payload.output
+}
+
 fn assert_completed_read_mcp_resource(output: &[OutputItem]) {
     assert_eq!(
         count_function_calls(output),
@@ -54,10 +81,10 @@ fn assert_completed_read_mcp_resource(output: &[OutputItem]) {
     let mcp_call = output
         .iter()
         .find_map(|item| match item {
-            OutputItem::McpToolCall(call) => Some(call),
+            OutputItem::McpToolCall(call) if call.status.as_str() == "completed" => Some(call),
             _ => None,
         })
-        .expect("cassette output should include an mcp_tool_call item");
+        .expect("cassette output should include a completed mcp_tool_call item");
     assert_eq!(mcp_call.status.as_str(), "completed");
     assert_eq!(mcp_call.server, "repo");
     assert_eq!(mcp_call.tool, "read_mcp_resource");
@@ -97,7 +124,7 @@ fn read_mcp_resource_cassette_nonstreaming() {
 }
 
 #[test]
-fn read_mcp_resource_cassette_streaming_lifecycle_events() {
+fn read_mcp_resource_cassette_streaming_success_events() {
     let cassette = load_mcp_cassette("mcp-read-resource-Qwen-Qwen3-30B-A3B-FP8-streaming.yaml");
     assert_eq!(cassette.turns.len(), 1);
     let body = &cassette.turns[0].request.body;
@@ -116,6 +143,21 @@ fn read_mcp_resource_cassette_streaming_lifecycle_events() {
         .filter_map(|data| serde_json::from_str(data).ok())
         .collect();
     let event_types: Vec<&str> = events.iter().filter_map(|event| event["type"].as_str()).collect();
+    assert!(
+        !event_types.contains(&"response.error") && !event_types.contains(&"response.failed"),
+        "streaming MCP cassette must record a successful tool loop"
+    );
     assert!(event_types.contains(&"response.output_item.added"));
     assert!(event_types.contains(&"response.mcp_tool_call.in_progress"));
+    assert!(event_types.contains(&"response.mcp_tool_call.completed"));
+    assert!(event_types.contains(&"response.output_item.done"));
+    assert!(
+        events
+            .iter()
+            .any(|event| event["status"].as_str() == Some("completed") && event["output"].is_array()),
+        "streaming MCP cassette should include a completed final response payload"
+    );
+
+    let output = process_streaming_turn(&cassette, 0, "Qwen/Qwen3-30B-A3B-FP8");
+    assert_completed_read_mcp_resource(&output);
 }

@@ -8,6 +8,7 @@ use super::mcp::READ_MCP_RESOURCE_TOOL_NAME;
 use super::{GatewayExecutor, ToolError, ToolOutput};
 use crate::types::io::output::FunctionToolCall;
 use crate::types::tools::ResponsesTool;
+use crate::utils::common::serialize_to_value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -49,6 +50,21 @@ pub struct GatewayDispatchResult {
     pub output: Result<ToolOutput, ToolError>,
 }
 
+fn serialize_tool_config<T: Serialize>(tool_type: ToolType, name: &str, config: &T) -> Option<Value> {
+    match serialize_to_value(config) {
+        Ok(value) => Some(value),
+        Err(error) => {
+            tracing::warn!(
+                ?tool_type,
+                name,
+                error = %error,
+                "failed to serialize tool config"
+            );
+            None
+        }
+    }
+}
+
 /// Request-scoped registry built from `RequestPayload.tools`.
 /// Maps the name the LLM sees → routing metadata.
 #[derive(Debug, Default)]
@@ -61,11 +77,6 @@ impl ToolRegistry {
     ///
     /// Function tools with empty names are skipped with a warning. Duplicate
     /// tool names result in last-write-wins, also logged at `warn` level.
-    ///
-    /// # Panics
-    ///
-    /// Panics if serialization of a tool param struct fails, which cannot happen
-    /// for the types defined in this module (`#[derive(Serialize)]` on plain structs).
     #[must_use]
     pub fn build(tools: &[ResponsesTool]) -> Self {
         Self::build_with_handlers(tools, |_| None)
@@ -80,11 +91,6 @@ impl ToolRegistry {
 
     #[must_use]
     /// Build a registry from declared tools and attach gateway handlers for dispatchable tool types.
-    ///
-    /// # Panics
-    ///
-    /// Panics if serialization of a tool param struct fails, which cannot happen
-    /// for the types defined in this module (`#[derive(Serialize)]` on plain structs).
     pub fn build_with_handlers(
         tools: &[ResponsesTool],
         mut handler_for: impl FnMut(ToolType) -> Option<Arc<dyn GatewayExecutor>>,
@@ -96,12 +102,16 @@ impl ToolRegistry {
                 ResponsesTool::Function(p) => {
                     // p.name is NonEmptyToolName — empty names are impossible here
                     // (serde rejects them at deserialization time).
+                    let Some(config) = serialize_tool_config(ToolType::Function, p.name.as_str(), p) else {
+                        continue;
+                    };
+
                     if entries
                         .insert(
                             p.name.as_str().to_owned(),
                             ToolEntry {
                                 tool_type: ToolType::Function,
-                                config: serde_json::to_value(p).expect("serialization of known struct is infallible"),
+                                config,
                                 server_label: None,
                                 handler: None,
                             },
@@ -113,13 +123,16 @@ impl ToolRegistry {
                 }
                 ResponsesTool::Mcp(p) => {
                     if p.name.as_str() == READ_MCP_RESOURCE_TOOL_NAME {
+                        let Some(config) = serialize_tool_config(ToolType::Mcp, p.name.as_str(), p) else {
+                            continue;
+                        };
+
                         if entries
                             .insert(
                                 READ_MCP_RESOURCE_TOOL_NAME.to_owned(),
                                 ToolEntry {
                                     tool_type: ToolType::Mcp,
-                                    config: serde_json::to_value(p)
-                                        .expect("serialization of known struct is infallible"),
+                                    config,
                                     server_label: None,
                                     handler: handler_for(ToolType::Mcp),
                                 },
@@ -133,33 +146,45 @@ impl ToolRegistry {
                     }
                 }
                 ResponsesTool::WebSearch(p) => {
+                    let Some(config) = serialize_tool_config(ToolType::WebSearch, "web_search", p) else {
+                        continue;
+                    };
+
                     entries.insert(
                         "web_search".to_owned(),
                         ToolEntry {
                             tool_type: ToolType::WebSearch,
-                            config: serde_json::to_value(p).expect("serialization of known struct is infallible"),
+                            config,
                             server_label: None,
                             handler: handler_for(ToolType::WebSearch),
                         },
                     );
                 }
                 ResponsesTool::FileSearch(p) => {
+                    let Some(config) = serialize_tool_config(ToolType::FileSearch, "file_search", p) else {
+                        continue;
+                    };
+
                     entries.insert(
                         "file_search".to_owned(),
                         ToolEntry {
                             tool_type: ToolType::FileSearch,
-                            config: serde_json::to_value(p).expect("serialization of known struct is infallible"),
+                            config,
                             server_label: None,
                             handler: handler_for(ToolType::FileSearch),
                         },
                     );
                 }
                 ResponsesTool::CodeInterpreter(p) => {
+                    let Some(config) = serialize_tool_config(ToolType::CodeInterpreter, "code_interpreter", p) else {
+                        continue;
+                    };
+
                     entries.insert(
                         "code_interpreter".to_owned(),
                         ToolEntry {
                             tool_type: ToolType::CodeInterpreter,
-                            config: serde_json::to_value(p).expect("serialization of known struct is infallible"),
+                            config,
                             server_label: None,
                             handler: handler_for(ToolType::CodeInterpreter),
                         },
