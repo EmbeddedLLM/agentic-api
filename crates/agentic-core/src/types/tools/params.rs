@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Error returned when a tool name is empty.
@@ -68,21 +68,27 @@ impl std::fmt::Display for NonEmptyToolName {
 
 /// Request-side tool params.
 ///
-/// This enum covers the current generic tool framework plus Codex-specific
-/// Responses shapes (`namespace`, `tool_search`, `custom`) and a raw fallback
-/// so future provider tools do not make requests fail at the boundary.
+/// This enum covers the current generic tool framework plus the Codex namespace
+/// shape. Unknown provider tools are accepted at the boundary but their raw
+/// payloads are deliberately discarded.
 #[non_exhaustive]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
 pub enum ResponsesTool {
+    #[serde(rename = "function")]
     Function(FunctionToolParam),
+    #[serde(rename = "mcp")]
     Mcp(McpToolParam),
+    #[serde(rename = "web_search_preview", alias = "web_search")]
     WebSearch(WebSearchToolParam),
+    #[serde(rename = "file_search")]
     FileSearch(FileSearchToolParam),
+    #[serde(rename = "code_interpreter")]
     CodeInterpreter(CodeInterpreterToolParam),
+    #[serde(rename = "namespace")]
     Namespace(CodexNamespaceToolParam),
-    ToolSearch(CodexToolSearchToolParam),
-    Custom(CodexCustomToolParam),
-    Unknown(Value),
+    #[serde(rename = "unknown", other)]
+    Unknown,
 }
 
 /// Parameters for a user-defined function tool.
@@ -144,133 +150,19 @@ pub struct CodexNamespaceToolParam {
     pub extra: HashMap<String, Value>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
 pub enum CodexNamespaceMember {
+    #[serde(rename = "function")]
     Function(FunctionToolParam),
-    Unknown(Value),
+    #[serde(rename = "unknown", other)]
+    Unknown,
 }
 
-impl Serialize for CodexNamespaceMember {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        match self {
-            Self::Function(function) => serialize_with_type(serializer, "function", function),
-            Self::Unknown(value) => value.serialize(serializer),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for CodexNamespaceMember {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = Value::deserialize(deserializer)?;
-        if value.get("type").and_then(Value::as_str) == Some("function") {
-            return Ok(serde_json::from_value(value.clone()).map_or(Self::Unknown(value), Self::Function));
-        }
-        Ok(Self::Unknown(value))
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ToolSearchExecution {
-    Server,
-    Client,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CodexToolSearchToolParam {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub execution: Option<ToolSearchExecution>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub parameters: Option<Value>,
-    #[serde(default)]
-    #[serde(flatten)]
-    pub extra: HashMap<String, Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CodexCustomToolParam {
-    pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub format: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub defer_loading: Option<bool>,
-    #[serde(default)]
-    #[serde(flatten)]
-    pub extra: HashMap<String, Value>,
-}
-
-fn value_with_type<T: Serialize>(type_name: &str, value: &T) -> Result<Value, serde_json::Error> {
-    let mut value = serde_json::to_value(value)?;
-    if let Value::Object(map) = &mut value {
-        map.insert("type".to_string(), Value::String(type_name.to_string()));
-    }
-    Ok(value)
-}
-
-fn serialize_with_type<S, T>(serializer: S, type_name: &str, value: &T) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-    T: Serialize,
-{
-    value_with_type(type_name, value)
-        .map_err(serde::ser::Error::custom)?
-        .serialize(serializer)
-}
-
-impl Serialize for ResponsesTool {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        match self {
-            Self::Function(param) => serialize_with_type(serializer, "function", param),
-            Self::Mcp(param) => serialize_with_type(serializer, "mcp", param),
-            Self::WebSearch(param) => serialize_with_type(serializer, "web_search_preview", param),
-            Self::FileSearch(param) => serialize_with_type(serializer, "file_search", param),
-            Self::CodeInterpreter(param) => serialize_with_type(serializer, "code_interpreter", param),
-            Self::Namespace(param) => serialize_with_type(serializer, "namespace", param),
-            Self::ToolSearch(param) => serialize_with_type(serializer, "tool_search", param),
-            Self::Custom(param) => serialize_with_type(serializer, "custom", param),
-            Self::Unknown(value) => value.serialize(serializer),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for ResponsesTool {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = Value::deserialize(deserializer)?;
-        let Some(type_name) = value.get("type").and_then(Value::as_str) else {
-            return Ok(Self::Unknown(value));
-        };
-
-        match type_name {
-            "function" => Ok(serde_json::from_value(value.clone()).map_or(Self::Unknown(value), Self::Function)),
-            "mcp" => Ok(serde_json::from_value(value.clone()).map_or(Self::Unknown(value), Self::Mcp)),
-            "web_search_preview" | "web_search" => {
-                Ok(serde_json::from_value(value.clone()).map_or(Self::Unknown(value), Self::WebSearch))
-            }
-            "file_search" => Ok(serde_json::from_value(value.clone()).map_or(Self::Unknown(value), Self::FileSearch)),
-            "code_interpreter" => {
-                Ok(serde_json::from_value(value.clone()).map_or(Self::Unknown(value), Self::CodeInterpreter))
-            }
-            "namespace" => Ok(serde_json::from_value(value.clone()).map_or(Self::Unknown(value), Self::Namespace)),
-            "tool_search" => Ok(serde_json::from_value(value.clone()).map_or(Self::Unknown(value), Self::ToolSearch)),
-            "custom" => Ok(serde_json::from_value(value.clone()).map_or(Self::Unknown(value), Self::Custom)),
-            _ => Ok(Self::Unknown(value)),
-        }
+impl CodexNamespaceMember {
+    #[must_use]
+    pub(crate) fn is_unknown(&self) -> bool {
+        matches!(self, Self::Unknown)
     }
 }
 
@@ -284,9 +176,7 @@ impl ResponsesTool {
             Self::FileSearch(_) => Some("file_search"),
             Self::CodeInterpreter(_) => Some("code_interpreter"),
             Self::Namespace(_) => Some("namespace"),
-            Self::ToolSearch(_) => Some("tool_search"),
-            Self::Custom(_) => Some("custom"),
-            Self::Unknown(value) => value.get("type").and_then(Value::as_str),
+            Self::Unknown => None,
         }
     }
 
@@ -363,25 +253,65 @@ mod tests {
     }
 
     #[test]
-    fn codex_tool_shapes_round_trip() {
+    fn responses_tool_web_search_round_trips() {
+        let json = serde_json::json!({"type": "web_search_preview"});
+        let tool: ResponsesTool = serde_json::from_value(json).unwrap();
+        assert!(matches!(tool, ResponsesTool::WebSearch(_)));
+        assert_eq!(serde_json::to_value(&tool).unwrap()["type"], "web_search_preview");
+    }
+
+    #[test]
+    fn responses_tool_web_search_alias_deserializes_to_preview_type() {
+        let json = serde_json::json!({"type": "web_search"});
+        let tool: ResponsesTool = serde_json::from_value(json).unwrap();
+        assert!(matches!(tool, ResponsesTool::WebSearch(_)));
+        assert_eq!(serde_json::to_value(&tool).unwrap()["type"], "web_search_preview");
+    }
+
+    #[test]
+    fn responses_tool_file_search_round_trips() {
+        let json = serde_json::json!({"type": "file_search", "vector_store_ids": ["vs_abc"]});
+        let tool: ResponsesTool = serde_json::from_value(json).unwrap();
+        assert!(matches!(tool, ResponsesTool::FileSearch(_)));
+        let back = serde_json::to_value(&tool).unwrap();
+        assert_eq!(back["type"], "file_search");
+        assert_eq!(back["vector_store_ids"][0], "vs_abc");
+    }
+
+    #[test]
+    fn responses_tool_code_interpreter_round_trips() {
+        let json = serde_json::json!({"type": "code_interpreter"});
+        let tool: ResponsesTool = serde_json::from_value(json).unwrap();
+        assert!(matches!(tool, ResponsesTool::CodeInterpreter(_)));
+        assert_eq!(serde_json::to_value(&tool).unwrap()["type"], "code_interpreter");
+    }
+
+    #[test]
+    fn mcp_tool_param_round_trips_with_headers() {
+        let json = serde_json::json!({
+            "type": "mcp",
+            "server_label": "my_server",
+            "server_url": "http://localhost:9000",
+            "headers": {"Authorization": "Bearer tok"}
+        });
+        let tool: ResponsesTool = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            serde_json::to_value(&tool).unwrap()["headers"]["Authorization"],
+            "Bearer tok"
+        );
+    }
+
+    #[test]
+    fn codex_namespace_tool_shape_round_trips_and_unknowns_are_minimal() {
         let tools_json = serde_json::json!([
             {
                 "type": "namespace",
                 "name": "mcp__shell",
                 "tools": [
-                    {"type": "function", "name": "run", "parameters": {"type": "object"}}
-                ]
-            },
-            {
-                "type": "tool_search",
-                "execution": "client",
-                "parameters": {"type": "object"}
-            },
-            {
-                "type": "custom",
-                "name": "apply_patch",
-                "format": {"type": "grammar"},
-                "defer_loading": true
+                    {"type": "function", "name": "run", "parameters": {"type": "object"}},
+                    {"type": "future_member", "opaque": true}
+                ],
+                "x-extra": "kept"
             },
             {
                 "type": "future_tool",
@@ -391,12 +321,15 @@ mod tests {
 
         let tools: Vec<ResponsesTool> = serde_json::from_value(tools_json).unwrap();
         assert!(matches!(tools[0], ResponsesTool::Namespace(_)));
-        assert!(matches!(tools[1], ResponsesTool::ToolSearch(_)));
-        assert!(matches!(tools[2], ResponsesTool::Custom(_)));
-        assert!(matches!(tools[3], ResponsesTool::Unknown(_)));
+        assert!(matches!(tools[1], ResponsesTool::Unknown));
+        if let ResponsesTool::Namespace(namespace) = &tools[0] {
+            assert!(matches!(namespace.tools[0], CodexNamespaceMember::Function(_)));
+            assert!(matches!(namespace.tools[1], CodexNamespaceMember::Unknown));
+        }
 
         let serialized = serde_json::to_value(&tools).unwrap();
         assert_eq!(serialized[0]["tools"][0]["type"], "function");
-        assert_eq!(serialized[3]["opaque"], true);
+        assert_eq!(serialized[0]["tools"][1], serde_json::json!({"type": "unknown"}));
+        assert_eq!(serialized[1], serde_json::json!({"type": "unknown"}));
     }
 }

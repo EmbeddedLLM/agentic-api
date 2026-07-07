@@ -230,7 +230,7 @@ async fn test_model_alias_resolves_before_executor_upstream_request() {
 }
 
 #[tokio::test]
-async fn test_codex_tool_shapes_rehydrate_from_previous_response_metadata() {
+async fn test_codex_namespace_tool_shape_rehydrates_from_previous_response_metadata() {
     let fixture = TestFixture::new_with_responses(vec![
         text_response("seed answer"),
         text_response("next answer"),
@@ -242,21 +242,6 @@ async fn test_codex_tool_shapes_rehydrate_from_previous_response_metadata() {
             "type": "namespace",
             "name": "mcp__shell",
             "tools": [{"type": "function", "name": "run", "parameters": {"type": "object"}}]
-        },
-        {
-            "type": "tool_search",
-            "execution": "client",
-            "parameters": {"type": "object"}
-        },
-        {
-            "type": "custom",
-            "name": "apply_patch",
-            "format": {"type": "grammar"},
-            "defer_loading": true
-        },
-        {
-            "type": "future_tool",
-            "opaque": true
         }
     ]);
     let tools: Vec<ResponsesTool> = serde_json::from_value(tool_json.clone()).unwrap();

@@ -86,14 +86,13 @@ impl InOutItem {
     pub fn into_input_items(history: Vec<InOutItem>) -> Vec<InputItem> {
         history
             .into_iter()
-            .map(|i| match i {
-                InOutItem::Input(item) => item,
-                InOutItem::Output(OutputItem::Message(msg)) => InputItem::Message(msg.into()),
-                InOutItem::Output(OutputItem::FunctionCall(call)) => InputItem::FunctionCall(call),
-                InOutItem::Output(OutputItem::ToolSearchCall(item)) => InputItem::ToolSearchCall(item),
-                InOutItem::Output(OutputItem::CustomToolCall(item)) => InputItem::CustomToolCall(item),
-                InOutItem::Output(OutputItem::Reasoning(r)) => InputItem::Reasoning(r),
-                InOutItem::Output(OutputItem::Unknown(item)) => InputItem::Unknown(item),
+            .filter_map(|i| match i {
+                InOutItem::Input(item) if item.is_unknown() => None,
+                InOutItem::Input(item) => Some(item),
+                InOutItem::Output(OutputItem::Message(msg)) => Some(InputItem::Message(msg.into())),
+                InOutItem::Output(OutputItem::FunctionCall(call)) => Some(InputItem::FunctionCall(call)),
+                InOutItem::Output(OutputItem::Reasoning(r)) => Some(InputItem::Reasoning(r)),
+                InOutItem::Output(OutputItem::Unknown) => None,
             })
             .collect()
     }

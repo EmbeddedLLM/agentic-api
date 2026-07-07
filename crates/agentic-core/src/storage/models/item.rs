@@ -102,11 +102,11 @@ fn strip_stored_item_kind(value: &mut Value) {
 }
 
 fn is_unknown_input(item: &InputItem) -> bool {
-    matches!(item, InputItem::Unknown(_))
+    matches!(item, InputItem::Unknown)
 }
 
 fn is_unknown_output(item: &OutputItem) -> bool {
-    matches!(item, OutputItem::Unknown(_))
+    matches!(item, OutputItem::Unknown)
 }
 
 /// Create items in a transaction with optional conversation context.
@@ -349,14 +349,10 @@ mod tests {
     }
 
     #[test]
-    fn test_raw_rehydrated_items_strip_storage_marker() {
-        let stored = InOutItem::Output(OutputItem::ToolSearchCall(serde_json::json!({
-            "type": "tool_search_call",
-            "id": "ts_1",
-            "execution": "client"
-        })));
+    fn test_unknown_rehydrated_items_are_omitted() {
+        let stored = InOutItem::Output(OutputItem::Unknown);
         let item = Item {
-            id: "item_tool_search".to_string(),
+            id: "item_unknown".to_string(),
             data: String::try_from(&stored).expect("serialization failed"),
             created_at: 1_704_067_200,
             conversation_id: None,
@@ -364,13 +360,7 @@ mod tests {
         };
 
         let inputs = InOutItem::into_input_items(vec![item.as_inout().expect("stored item")]);
-        let value = serde_json::to_value(&inputs[0]).expect("input value");
 
-        assert_eq!(value["type"], "tool_search_call");
-        assert_eq!(value["execution"], "client");
-        assert!(value.get(STORED_ITEM_KIND_KEY).is_none());
-
-        println!("raw item round-trip: tool_search_call execution=client");
-        println!("storage marker stripped from raw item");
+        assert!(inputs.is_empty());
     }
 }

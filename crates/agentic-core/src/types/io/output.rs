@@ -1,4 +1,4 @@
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 use crate::events::EventPayload;
@@ -246,80 +246,14 @@ impl ApplyDone for FunctionToolCall {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum OutputItem {
     Message(OutputMessage),
     FunctionCall(FunctionToolCall),
-    ToolSearchCall(Value),
-    CustomToolCall(Value),
     Reasoning(ReasoningOutput),
-    Unknown(Value),
-}
-
-fn value_with_type<T: Serialize>(type_name: &str, value: &T) -> Result<Value, serde_json::Error> {
-    let mut value = serde_json::to_value(value)?;
-    if let Value::Object(map) = &mut value {
-        map.insert("type".to_string(), Value::String(type_name.to_string()));
-    }
-    Ok(value)
-}
-
-fn raw_value_with_type(type_name: &str, value: &Value) -> Value {
-    let mut value = value.clone();
-    if let Value::Object(map) = &mut value {
-        map.entry("type".to_string())
-            .or_insert_with(|| Value::String(type_name.to_string()));
-    }
-    value
-}
-
-fn serialize_typed<S, T>(serializer: S, type_name: &str, value: &T) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-    T: Serialize,
-{
-    value_with_type(type_name, value)
-        .map_err(serde::ser::Error::custom)?
-        .serialize(serializer)
-}
-
-impl Serialize for OutputItem {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        match self {
-            Self::Message(item) => serialize_typed(serializer, "message", item),
-            Self::FunctionCall(item) => serialize_typed(serializer, "function_call", item),
-            Self::ToolSearchCall(item) => raw_value_with_type("tool_search_call", item).serialize(serializer),
-            Self::CustomToolCall(item) => raw_value_with_type("custom_tool_call", item).serialize(serializer),
-            Self::Reasoning(item) => serialize_typed(serializer, "reasoning", item),
-            Self::Unknown(item) => item.serialize(serializer),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for OutputItem {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = Value::deserialize(deserializer)?;
-        let Some(type_name) = value.get("type").and_then(Value::as_str) else {
-            return Ok(Self::Unknown(value));
-        };
-
-        match type_name {
-            "message" => Ok(serde_json::from_value(value.clone()).map_or(Self::Unknown(value), Self::Message)),
-            "function_call" => {
-                Ok(serde_json::from_value(value.clone()).map_or(Self::Unknown(value), Self::FunctionCall))
-            }
-            "tool_search_call" => Ok(Self::ToolSearchCall(value)),
-            "custom_tool_call" => Ok(Self::CustomToolCall(value)),
-            "reasoning" => Ok(serde_json::from_value(value.clone()).map_or(Self::Unknown(value), Self::Reasoning)),
-            _ => Ok(Self::Unknown(value)),
-        }
-    }
+    #[serde(other)]
+    Unknown,
 }
 
 impl OutputItem {
@@ -329,12 +263,7 @@ impl OutputItem {
             Self::FunctionCall(call) => registry
                 .lookup(&call.name)
                 .is_none_or(|entry| entry.tool_type == ToolType::Function),
-            Self::ToolSearchCall(value) => value
-                .get("execution")
-                .and_then(Value::as_str)
-                .is_some_and(|execution| execution == "client"),
-            Self::CustomToolCall(_) => true,
-            Self::Message(_) | Self::Reasoning(_) | Self::Unknown(_) => false,
+            Self::Message(_) | Self::Reasoning(_) | Self::Unknown => false,
         }
     }
 }
@@ -402,7 +331,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_response_items_round_trip_raw_shapes() {
+    fn codex_response_items_round_trip_supported_shapes() {
         let function_call = serde_json::json!({
             "type": "function_call",
             "id": "fc_1",
@@ -421,27 +350,29 @@ mod tests {
         }
         assert_eq!(serde_json::to_value(&item).unwrap()["namespace"], "mcp__shell");
 
-        let custom_call = serde_json::json!({
-            "type": "custom_tool_call",
-            "id": "ctc_1",
-            "name": "apply_patch",
-            "input": "*** Begin Patch\n*** End Patch\n"
+        let future_item = serde_json::json!({
+            "type": "future_item",
+            "id": "future_1",
+            "payload": {"a": 1}
         });
-        let item: OutputItem = serde_json::from_value(custom_call).unwrap();
-        assert!(matches!(item, OutputItem::CustomToolCall(_)));
+        let item: OutputItem = serde_json::from_value(future_item).unwrap();
+        assert!(matches!(item, OutputItem::Unknown));
         assert_eq!(
-            serde_json::to_value(&item).unwrap()["input"],
-            "*** Begin Patch\n*** End Patch\n"
+            serde_json::to_value(&item).unwrap(),
+            serde_json::json!({"type": "unknown"})
         );
 
         let unknown = serde_json::json!({"type": "new_item", "payload": {"a": 1}});
         let item: InputItem = serde_json::from_value(unknown).unwrap();
-        assert!(matches!(item, InputItem::Unknown(_)));
-        assert_eq!(serde_json::to_value(&item).unwrap()["payload"]["a"], 1);
+        assert!(matches!(item, InputItem::Unknown));
+        assert_eq!(
+            serde_json::to_value(&item).unwrap(),
+            serde_json::json!({"type": "unknown"})
+        );
     }
 
     #[test]
-    fn known_items_with_new_nested_shapes_fall_back_to_raw() {
+    fn known_items_with_new_nested_shapes_fall_back_to_unknown() {
         let message = serde_json::json!({
             "type": "message",
             "role": "user",
@@ -454,7 +385,10 @@ mod tests {
         });
 
         let item: InputItem = serde_json::from_value(message).unwrap();
-        assert!(matches!(item, InputItem::Unknown(_)));
-        assert_eq!(serde_json::to_value(&item).unwrap()["content"][0]["type"], "input_file");
+        assert!(matches!(item, InputItem::Unknown));
+        assert_eq!(
+            serde_json::to_value(&item).unwrap(),
+            serde_json::json!({"type": "unknown"})
+        );
     }
 }

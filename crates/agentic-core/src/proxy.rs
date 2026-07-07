@@ -1353,14 +1353,14 @@ mod tests {
             br#"{"tools":[{"type":"namespace","name":"mcp__agentic_fixture","tools":[{"type":"function","name":"run"}]}]}"#,
         );
         let normalized_request = normalize_proxy_request_body(body, &test_config());
-        let line = r#"data: {"type":"response.output_item.done","item":{"type":"custom_tool_call","name":"mcp__agentic_fixture.run","input":"patch"}}"#;
+        let line = r#"data: {"type":"response.output_item.done","item":{"type":"web_search_call","name":"mcp__agentic_fixture.run","status":"completed"}}"#;
 
         let normalized = normalize_sse_line(line, &normalized_request.namespace);
         let value: Value = serde_json::from_str(normalized.strip_prefix("data: ").unwrap()).unwrap();
 
         assert!(value["item"].get("namespace").is_none());
         assert_eq!(value["item"]["name"], "mcp__agentic_fixture.run");
-        assert_eq!(value["item"]["type"], "custom_tool_call");
+        assert_eq!(value["item"]["type"], "web_search_call");
     }
 
     #[test]

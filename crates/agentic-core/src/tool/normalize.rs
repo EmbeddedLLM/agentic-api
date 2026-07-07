@@ -45,17 +45,8 @@ impl ResponsesTool {
                 tracing::debug!("namespace tool skipped in normalize - flatten_tools_for_upstream should run first");
                 None
             }
-            ResponsesTool::ToolSearch(_) => {
-                tracing::debug!("tool_search tool skipped in normalize - provider/client-owned");
-                None
-            }
-            ResponsesTool::Custom(_) => {
-                tracing::debug!("custom tool skipped in normalize - client-owned raw tool");
-                None
-            }
-            ResponsesTool::Unknown(value) => {
-                let tool_type = value.get("type").and_then(Value::as_str).unwrap_or("<missing>");
-                tracing::debug!(tool_type, "unknown tool skipped in normalize");
+            ResponsesTool::Unknown => {
+                tracing::debug!("unknown tool skipped in normalize");
                 None
             }
         }
@@ -137,10 +128,8 @@ pub fn flatten_tools_for_upstream(tools: Option<&[ResponsesTool]>) -> Option<Vec
                 | ResponsesTool::Mcp(_)
                 | ResponsesTool::WebSearch(_)
                 | ResponsesTool::FileSearch(_)
-                | ResponsesTool::CodeInterpreter(_)
-                | ResponsesTool::ToolSearch(_)
-                | ResponsesTool::Custom(_)
-                | ResponsesTool::Unknown(_) => upstream_tools.push(tool.clone()),
+                | ResponsesTool::CodeInterpreter(_) => upstream_tools.push(tool.clone()),
+                ResponsesTool::Unknown => {}
             }
         }
         upstream_tools
@@ -381,14 +370,12 @@ fn namespace_member_call_by_namespace<'a>(
 fn top_level_tool_named(tool: &ResponsesTool, name: &str) -> bool {
     match tool {
         ResponsesTool::Function(function) => function.name.as_str() == name,
-        ResponsesTool::Custom(custom) => custom.name == name,
-        ResponsesTool::Unknown(value) => value.get("name").and_then(Value::as_str) == Some(name),
         ResponsesTool::Mcp(_)
         | ResponsesTool::WebSearch(_)
         | ResponsesTool::FileSearch(_)
         | ResponsesTool::CodeInterpreter(_)
         | ResponsesTool::Namespace(_)
-        | ResponsesTool::ToolSearch(_) => false,
+        | ResponsesTool::Unknown => false,
     }
 }
 
@@ -397,14 +384,12 @@ fn top_level_tool_names(tools: &[ResponsesTool]) -> HashSet<String> {
         .iter()
         .filter_map(|tool| match tool {
             ResponsesTool::Function(function) => Some(function.name.as_str().to_string()),
-            ResponsesTool::Custom(custom) => Some(custom.name.clone()),
-            ResponsesTool::Unknown(value) => value.get("name").and_then(Value::as_str).map(str::to_string),
             ResponsesTool::Mcp(_)
             | ResponsesTool::WebSearch(_)
             | ResponsesTool::FileSearch(_)
             | ResponsesTool::CodeInterpreter(_)
             | ResponsesTool::Namespace(_)
-            | ResponsesTool::ToolSearch(_) => None,
+            | ResponsesTool::Unknown => None,
         })
         .collect()
 }
@@ -415,7 +400,7 @@ fn namespace_has_flat_name_collision(namespace: &CodexNamespaceToolParam, top_le
             &namespace.name,
             function.name.as_str(),
         )),
-        CodexNamespaceMember::Unknown(_) => false,
+        CodexNamespaceMember::Unknown => false,
     })
 }
 
@@ -431,7 +416,7 @@ fn namespace_member_flat_name_collides(
 fn namespace_flat_name_collides(namespace: &CodexNamespaceToolParam, tools: &[ResponsesTool]) -> bool {
     namespace.tools.iter().any(|member| match member {
         CodexNamespaceMember::Function(function) => namespace_member_flat_name_collides(namespace, function, tools),
-        CodexNamespaceMember::Unknown(_) => false,
+        CodexNamespaceMember::Unknown => false,
     })
 }
 
@@ -458,7 +443,7 @@ fn namespace_container_call<'a>(
 
         let mut function_members = namespace.tools.iter().filter_map(|member| match member {
             CodexNamespaceMember::Function(function) => Some(function),
-            CodexNamespaceMember::Unknown(_) => None,
+            CodexNamespaceMember::Unknown => None,
         });
         let Some(function) = function_members.next() else {
             continue;

@@ -108,7 +108,27 @@ pub(crate) fn resolve_tools(
     } else {
         stored_tools
     }
-    .map(<[_]>::to_vec)
+    .map(|tools| discard_unknown_tool_values(tools.iter().cloned()))
+}
+
+pub(crate) fn discard_unknown_tool_values(tools: impl IntoIterator<Item = ResponsesTool>) -> Vec<ResponsesTool> {
+    tools
+        .into_iter()
+        .filter_map(|mut tool| {
+            match &mut tool {
+                ResponsesTool::Namespace(namespace) => {
+                    namespace.tools.retain(|member| !member.is_unknown());
+                }
+                ResponsesTool::Unknown => return None,
+                ResponsesTool::Function(_)
+                | ResponsesTool::Mcp(_)
+                | ResponsesTool::WebSearch(_)
+                | ResponsesTool::FileSearch(_)
+                | ResponsesTool::CodeInterpreter(_) => {}
+            }
+            Some(tool)
+        })
+        .collect()
 }
 
 /// Returns the effective tool choice using the same precedence as [`resolve_tools`].

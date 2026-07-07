@@ -121,21 +121,8 @@ impl ToolRegistry {
                         "namespace tool declared but skipped in registry - client-owned Codex shape"
                     );
                 }
-                ResponsesTool::ToolSearch(p) => {
-                    tracing::debug!(
-                        execution = ?p.execution,
-                        "tool_search declared but skipped in registry - provider/client-owned Codex shape"
-                    );
-                }
-                ResponsesTool::Custom(p) => {
-                    tracing::debug!(
-                        name = %p.name,
-                        "custom tool declared but skipped in registry - client-owned Codex shape"
-                    );
-                }
-                ResponsesTool::Unknown(value) => {
-                    let tool_type = value.get("type").and_then(Value::as_str).unwrap_or("<missing>");
-                    tracing::debug!(tool_type, "unknown tool declared but skipped in registry");
+                ResponsesTool::Unknown => {
+                    tracing::debug!("unknown tool declared but skipped in registry");
                 }
             }
         }

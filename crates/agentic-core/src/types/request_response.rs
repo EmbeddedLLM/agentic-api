@@ -3,6 +3,7 @@ use serde_json::Value;
 
 use super::io::{
     FunctionTool, InputItem, InputMessage, InputMessageContent, OutputItem, ResponseUsage, ResponsesInput, ToolChoice,
+    discard_unknown_tool_values,
 };
 use super::tools::ResponsesTool;
 use crate::utils::common::serialize_to_string;
@@ -62,13 +63,14 @@ impl<'de> Deserialize<'de> for RequestPayload {
 
         let wire = WireRequestPayload::deserialize(deserializer)?;
         let tool_choice_explicitly_set = wire.tool_choice.is_some();
+        let tools = wire.tools.map(discard_unknown_tool_values);
         Ok(Self {
             model: wire.model,
             input: wire.input,
             instructions: wire.instructions,
             previous_response_id: wire.previous_response_id,
             conversation_id: wire.conversation_id,
-            tools: wire.tools,
+            tools,
             tool_choice: wire.tool_choice.unwrap_or_default(),
             tool_choice_explicitly_set,
             stream: wire.stream,
@@ -187,7 +189,7 @@ impl From<&ResponsesInput> for Vec<InputItem> {
                 role: "user".into(),
                 content: InputMessageContent::Text(text.clone()),
             })],
-            ResponsesInput::Items(items) => items.clone(),
+            ResponsesInput::Items(items) => items.iter().filter(|item| !item.is_unknown()).cloned().collect(),
         }
     }
 }
@@ -214,5 +216,45 @@ mod tests {
         .unwrap();
         assert_eq!(explicit.tool_choice, ToolChoice::None);
         assert!(explicit.tool_choice_explicitly_set);
+    }
+
+    #[test]
+    fn request_payload_discards_unknown_tools_and_namespace_members() {
+        let payload: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test",
+            "input": "hi",
+            "tools": [
+                {
+                    "type": "namespace",
+                    "name": "mcp__shell",
+                    "tools": [
+                        {"type": "function", "name": "run", "parameters": {"type": "object"}},
+                        {"type": "future_member", "opaque": true}
+                    ]
+                },
+                {"type": "future_tool", "opaque": true}
+            ]
+        }))
+        .unwrap();
+
+        let tools = payload.tools.expect("tools should preserve explicit presence");
+        assert_eq!(tools.len(), 1);
+        let ResponsesTool::Namespace(namespace) = &tools[0] else {
+            panic!("expected namespace tool");
+        };
+        assert_eq!(namespace.tools.len(), 1);
+    }
+
+    #[test]
+    fn responses_input_discards_unknown_items_when_converted_for_storage() {
+        let input: ResponsesInput = serde_json::from_value(serde_json::json!([
+            {"type": "message", "role": "user", "content": "hi"},
+            {"type": "future_item", "payload": {"a": 1}}
+        ]))
+        .unwrap();
+
+        let items = Vec::<InputItem>::from(&input);
+        assert_eq!(items.len(), 1);
+        assert!(matches!(items[0], InputItem::Message(_)));
     }
 }
