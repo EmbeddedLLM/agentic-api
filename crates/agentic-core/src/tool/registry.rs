@@ -4,6 +4,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::mcp::READ_MCP_RESOURCE_TOOL_NAME;
 use super::{GatewayExecutor, ToolError, ToolOutput};
 use crate::types::io::output::FunctionToolCall;
 use crate::types::tools::ResponsesTool;
@@ -71,6 +72,13 @@ impl ToolRegistry {
     }
 
     #[must_use]
+    pub fn with_entries(entries: impl IntoIterator<Item = (String, ToolEntry)>) -> Self {
+        Self {
+            entries: entries.into_iter().collect(),
+        }
+    }
+
+    #[must_use]
     /// Build a registry from declared tools and attach gateway handlers for dispatchable tool types.
     ///
     /// # Panics
@@ -104,16 +112,25 @@ impl ToolRegistry {
                     }
                 }
                 ResponsesTool::Mcp(p) => {
-                    // MCP tool names are discovered at request-time via `tools/list`.
-                    // Without discovery, we cannot know which tool names to register —
-                    // keying by server_label would cause all MCP calls to miss on lookup
-                    // since gateway_owned/client_owned look up by tool name, not server.
-                    // MCP entries will be populated in PR C once HttpMcpHandler
-                    // implements discover() and the executor calls it before build().
-                    tracing::debug!(
-                        server_label = %p.server_label,
-                        "MCP server declared but skipped in registry — tool names unknown until discovery (PR C)"
-                    );
+                    if p.name.as_str() == READ_MCP_RESOURCE_TOOL_NAME {
+                        if entries
+                            .insert(
+                                READ_MCP_RESOURCE_TOOL_NAME.to_owned(),
+                                ToolEntry {
+                                    tool_type: ToolType::Mcp,
+                                    config: serde_json::to_value(p)
+                                        .expect("serialization of known struct is infallible"),
+                                    server_label: None,
+                                    handler: handler_for(ToolType::Mcp),
+                                },
+                            )
+                            .is_some()
+                        {
+                            tracing::warn!(name = %p.name, "duplicate MCP tool name — previous definition overwritten");
+                        }
+                    } else {
+                        tracing::debug!(name = %p.name, "unknown MCP built-in skipped in registry");
+                    }
                 }
                 ResponsesTool::WebSearch(p) => {
                     entries.insert(
@@ -208,5 +225,64 @@ impl ToolRegistry {
                 .execute(&call.call_id, &call.name, &call.arguments, &config)
                 .await,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::{ToolRegistry, ToolType};
+    use crate::tool::{McpClientPool, McpHandler, READ_MCP_RESOURCE_TOOL_NAME};
+    use crate::types::tools::ResponsesTool;
+
+    #[test]
+    fn read_mcp_resource_function_stays_client_owned() {
+        let tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([{
+            "type": "function",
+            "name": READ_MCP_RESOURCE_TOOL_NAME,
+            "description": "Read a resource by URI from a connected MCP server.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "server": {"type": "string"},
+                    "uri": {"type": "string"}
+                },
+                "required": ["server", "uri"]
+            },
+            "strict": false
+        }]))
+        .unwrap();
+
+        let handler = Arc::new(McpHandler::read_resource(Arc::new(McpClientPool::default())));
+        let registry = ToolRegistry::build_with_handlers(&tools, |tool_type| {
+            (tool_type == ToolType::Mcp).then(|| handler.clone() as Arc<dyn crate::tool::GatewayExecutor>)
+        });
+
+        let entry = registry
+            .lookup(READ_MCP_RESOURCE_TOOL_NAME)
+            .expect("read_mcp_resource entry");
+        assert_eq!(entry.tool_type, ToolType::Function);
+        assert!(entry.handler.is_none());
+    }
+
+    #[test]
+    fn read_mcp_resource_mcp_tool_registers_as_gateway_mcp_when_handler_exists() {
+        let tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([{
+            "type": "mcp",
+            "name": READ_MCP_RESOURCE_TOOL_NAME
+        }]))
+        .unwrap();
+
+        let handler = Arc::new(McpHandler::read_resource(Arc::new(McpClientPool::default())));
+        let registry = ToolRegistry::build_with_handlers(&tools, |tool_type| {
+            (tool_type == ToolType::Mcp).then(|| handler.clone() as Arc<dyn crate::tool::GatewayExecutor>)
+        });
+
+        let entry = registry
+            .lookup(READ_MCP_RESOURCE_TOOL_NAME)
+            .expect("read_mcp_resource entry");
+        assert_eq!(entry.tool_type, ToolType::Mcp);
+        assert!(entry.handler.is_some());
     }
 }

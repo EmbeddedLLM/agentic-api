@@ -50,6 +50,10 @@ pub struct TurnBody {
     pub store: bool,
     #[serde(default)]
     pub stream: bool,
+    #[serde(default)]
+    pub tools: Vec<Value>,
+    #[serde(default)]
+    pub tool_choice: Option<Value>,
 }
 
 fn default_true() -> bool {
@@ -404,6 +408,7 @@ pub fn output_text(payload: &ResponsePayload) -> String {
             OutputItem::Message(msg) => Some(msg.content.iter().map(|c| c.text.as_str()).collect::<String>()),
             OutputItem::FunctionCall(_)
             | OutputItem::WebSearchCall(_)
+            | OutputItem::McpToolCall(_)
             | OutputItem::Reasoning(_)
             | OutputItem::Unknown => None,
         })

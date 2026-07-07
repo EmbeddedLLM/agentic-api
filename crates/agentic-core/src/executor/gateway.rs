@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::executor::request::RequestContext;
 use crate::tool::{ToolError, ToolOutput, ToolRegistry, ToolType};
-use crate::types::io::output::{FunctionToolCall, WebSearchCallStatus};
+use crate::types::io::output::{FunctionToolCall, GatewayCallStatus};
 use crate::types::io::{InputItem, OutputItem, ResponsesInput};
 use crate::utils::common::serialize_to_string;
 
@@ -62,9 +62,9 @@ async fn execute_gateway_call(call: FunctionToolCall, registry: &ToolRegistry) -
         )));
     };
     let (output, status) = match dispatch.output {
-        Ok(output) => (output, WebSearchCallStatus::Completed),
+        Ok(output) => (output, GatewayCallStatus::Completed),
         Err(ToolError::Execution(message) | ToolError::Config(message)) => {
-            (execution_error_output(&call, &message)?, WebSearchCallStatus::Failed)
+            (execution_error_output(&call, &message)?, GatewayCallStatus::Failed)
         }
     };
     let public_output = gateway_public_output(dispatch.tool_type, &call, &output, status);
@@ -79,11 +79,12 @@ fn gateway_public_output(
     tool_type: ToolType,
     call: &FunctionToolCall,
     output: &ToolOutput,
-    status: WebSearchCallStatus,
+    status: GatewayCallStatus,
 ) -> Option<OutputItem> {
     match tool_type {
         ToolType::WebSearch => Some(crate::tool::web_search::output_item(call, output, status)),
-        ToolType::Function | ToolType::Mcp | ToolType::FileSearch | ToolType::CodeInterpreter => None,
+        ToolType::Mcp => Some(crate::tool::mcp::handler::output_item(call, output, status)),
+        ToolType::Function | ToolType::FileSearch | ToolType::CodeInterpreter => None,
     }
 }
 
@@ -148,7 +149,8 @@ fn gateway_event_plans(
                 output_index: u32::try_from(output_index).unwrap_or(u32::MAX),
                 started_output: match entry.tool_type {
                     ToolType::WebSearch => Some(crate::tool::web_search::started_output_item(call)),
-                    ToolType::Function | ToolType::Mcp | ToolType::FileSearch | ToolType::CodeInterpreter => None,
+                    ToolType::Mcp => Some(crate::tool::mcp::handler::started_output_item(call)),
+                    ToolType::Function | ToolType::FileSearch | ToolType::CodeInterpreter => None,
                 },
             });
         }
@@ -179,9 +181,6 @@ fn emit_gateway_start_events(
         let Some(output_item) = &plan.started_output else {
             continue;
         };
-        let OutputItem::WebSearchCall(web_search_call) = output_item else {
-            continue;
-        };
         let item = output_item_value(output_item)?;
         let added_event = serde_json::json!({
                 "type": "response.output_item.added",
@@ -189,18 +188,31 @@ fn emit_gateway_start_events(
                 "item": item
         });
         emit_sse_json(sender, &added_event)?;
-        let in_progress_event = serde_json::json!({
-                "type": "response.web_search_call.in_progress",
-                "item_id": web_search_call.id,
-                "output_index": plan.output_index
-        });
-        emit_sse_json(sender, &in_progress_event)?;
-        let searching_event = serde_json::json!({
-                "type": "response.web_search_call.searching",
-                "item_id": web_search_call.id,
-                "output_index": plan.output_index
-        });
-        emit_sse_json(sender, &searching_event)?;
+        match output_item {
+            OutputItem::WebSearchCall(web_search_call) => {
+                let in_progress_event = serde_json::json!({
+                        "type": "response.web_search_call.in_progress",
+                        "item_id": web_search_call.id,
+                        "output_index": plan.output_index
+                });
+                emit_sse_json(sender, &in_progress_event)?;
+                let searching_event = serde_json::json!({
+                        "type": "response.web_search_call.searching",
+                        "item_id": web_search_call.id,
+                        "output_index": plan.output_index
+                });
+                emit_sse_json(sender, &searching_event)?;
+            }
+            OutputItem::McpToolCall(mcp_tool_call) => {
+                let in_progress_event = serde_json::json!({
+                        "type": "response.mcp_tool_call.in_progress",
+                        "item_id": mcp_tool_call.id,
+                        "output_index": plan.output_index
+                });
+                emit_sse_json(sender, &in_progress_event)?;
+            }
+            OutputItem::Message(_) | OutputItem::FunctionCall(_) | OutputItem::Reasoning(_) | OutputItem::Unknown => {}
+        }
     }
     Ok(())
 }
@@ -214,18 +226,26 @@ fn emit_gateway_completed_events(
         return Ok(());
     };
     for result in results {
-        let Some(OutputItem::WebSearchCall(web_search_call)) = &result.public_output else {
+        let Some(public_output) = &result.public_output else {
             continue;
         };
         let output_index = plans
             .iter()
             .find(|plan| plan.call_id == result.call.call_id)
             .map_or(0, |plan| plan.output_index);
-        let output_item = OutputItem::WebSearchCall(web_search_call.clone());
-        let item = output_item_value(&output_item)?;
+        let (event_type, item_id) = match public_output {
+            OutputItem::WebSearchCall(web_search_call) => {
+                ("response.web_search_call.completed", web_search_call.id.as_str())
+            }
+            OutputItem::McpToolCall(mcp_tool_call) => ("response.mcp_tool_call.completed", mcp_tool_call.id.as_str()),
+            OutputItem::Message(_) | OutputItem::FunctionCall(_) | OutputItem::Reasoning(_) | OutputItem::Unknown => {
+                continue;
+            }
+        };
+        let item = output_item_value(public_output)?;
         let completed_event = serde_json::json!({
-                "type": "response.web_search_call.completed",
-                "item_id": web_search_call.id,
+                "type": event_type,
+                "item_id": item_id,
                 "output_index": output_index,
                 "item": item.clone()
         });

@@ -7,7 +7,7 @@ into a YAML cassette.
 
 Wiring:
 
-  [this script] → [embedded proxy:<proxy-port>] → [OpenAI API | vLLM]
+  [this script] → [embedded proxy:<proxy-port>] → [OpenAI API | vLLM | gateway]
                    (cassette recorded here)
 
 Modes:
@@ -18,7 +18,7 @@ Modes:
   mixed       Creates a conversation; turn 1 uses conversation id, turns 2+
               switch to previous_response_id only (drops conversation id).
   responses   No conversation created. Chains turns purely via
-              previous_response_id. Supports --openai and --vllm backends.
+              previous_response_id. Supports --openai, --vllm, and --gateway backends.
 
 Usage:
     python tests/cassettes/record_cassette.py --turns 2 --no-stream --output path/to/cassette.yaml
@@ -27,6 +27,7 @@ Usage:
     python tests/cassettes/record_cassette.py --turns 3 --mode conv --branch-from 1 --branch-turn-number 2 --no-stream --output path/to/cassette.yaml
     python tests/cassettes/record_cassette.py --turns 5 --mode conv --branch-from 1 --branch-turn-number 3 --branch-from 2 --branch-turn-number 5 --no-stream --output path/to/cassette.yaml
     python tests/cassettes/record_cassette.py --turns 2 --mode responses --vllm http://localhost:8000 --model Qwen/Qwen3-30B-A3B-FP8 --max-output-tokens 1024 --no-stream --output path/to/cassette.yaml
+    python tests/cassettes/record_cassette.py --turns 1 --mode responses --gateway http://localhost:9000 --model Qwen/Qwen3-30B-A3B-FP8 --no-stream --output path/to/cassette.yaml
 """
 
 import json
@@ -680,6 +681,13 @@ def run_responses(
     help="vLLM upstream URL, e.g. http://localhost:8000 (responses mode only, no auth).",
 )
 @click.option(
+    "--gateway",
+    "gateway_url",
+    metavar="URL",
+    default=None,
+    help="agentic-api gateway URL, e.g. http://localhost:9000 (no auth).",
+)
+@click.option(
     "--tools",
     "tools_file",
     metavar="FILE",
@@ -723,6 +731,7 @@ def main(
     proxy_port: int,
     openai_url: str | None,
     vllm_url: str | None,
+    gateway_url: str | None,
     tools_file: str | None,
     tool_choice_raw: str | None,
     tool_outputs_file: str | None,
@@ -740,8 +749,9 @@ def main(
         (bf, branch_turn_number[i] if i < len(branch_turn_number) else None)
         for i, bf in enumerate(branch_from)
     ]
-    if vllm_url and openai_url:
-        raise click.UsageError("--openai and --vllm are mutually exclusive.")
+    backend_count = sum(bool(url) for url in (openai_url, vllm_url, gateway_url))
+    if backend_count > 1:
+        raise click.UsageError("--openai, --vllm, and --gateway are mutually exclusive.")
     if vllm_url and mode != "responses":
         raise click.UsageError(
             f"--vllm is only supported with --mode responses (got --mode {mode})."
@@ -772,7 +782,11 @@ def main(
             raise click.UsageError("--tool-outputs file must contain a JSON object (name -> output string).")
         click.echo(f"Tool outputs: {list(tool_outputs.keys())}")
 
-    if vllm_url:
+    if gateway_url:
+        target = gateway_url.rstrip("/")
+        headers = {}
+        backend_label = f"Gateway: {target}"
+    elif vllm_url:
         target = vllm_url.rstrip("/")
         headers: dict = {}
         backend_label = f"vLLM:   {target}"

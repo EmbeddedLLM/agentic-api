@@ -5,12 +5,13 @@ use crate::config::Config;
 use crate::error::Error;
 use crate::executor::modes::{ConversationHandler, ResponseHandler};
 use crate::storage::{ConversationStore, ResponseStore, create_pool_with_schema};
-use crate::tool::{GatewayExecutor, ToolType, WebSearchHandler};
+use crate::tool::{GatewayExecutor, McpClientPool, McpHandler, ToolType, WebSearchHandler};
 use crate::types::io::InputItem;
 use crate::types::request_response::{RequestPayload, ResponsePayload};
 
 #[derive(Clone, Default)]
 pub struct GatewayExecutors {
+    mcp: Option<Arc<dyn GatewayExecutor>>,
     web_search: Option<Arc<dyn GatewayExecutor>>,
 }
 
@@ -18,22 +19,25 @@ impl GatewayExecutors {
     #[must_use]
     pub fn from_env(client: Arc<reqwest::Client>) -> Self {
         Self {
+            mcp: Some(Arc::new(McpHandler::read_resource(Arc::new(McpClientPool::default())))),
             web_search: Some(Arc::new(WebSearchHandler::from_env(client))),
         }
     }
 
     pub fn insert(&mut self, executor: Arc<dyn GatewayExecutor>) {
         match executor.tool_type() {
+            ToolType::Mcp => self.mcp = Some(executor),
             ToolType::WebSearch => self.web_search = Some(executor),
-            other => tracing::debug!(tool_type = ?other, "gateway executor type not wired yet"),
+            other => tracing::debug!(tool_type = ?other, "gateway executor type has no executor slot"),
         }
     }
 
     #[must_use]
     pub fn get(&self, tool_type: ToolType) -> Option<Arc<dyn GatewayExecutor>> {
         match tool_type {
+            ToolType::Mcp => self.mcp.clone(),
             ToolType::WebSearch => self.web_search.clone(),
-            ToolType::Function | ToolType::Mcp | ToolType::FileSearch | ToolType::CodeInterpreter => None,
+            ToolType::Function | ToolType::FileSearch | ToolType::CodeInterpreter => None,
         }
     }
 }
@@ -41,6 +45,7 @@ impl GatewayExecutors {
 impl std::fmt::Debug for GatewayExecutors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GatewayExecutors")
+            .field("mcp", &self.mcp.is_some())
             .field("web_search", &self.web_search.is_some())
             .finish()
     }

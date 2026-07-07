@@ -14,6 +14,12 @@ futures.workspace = true
 indexmap.workspace = true
 http.workspace = true
 reqwest = { workspace = true, features = ["default-tls", "stream"] }
+rmcp = { workspace = true, features = [
+    "client",
+    "reqwest",
+    "transport-child-process",
+    "transport-streamable-http-client-reqwest",
+] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

@@ -22,9 +22,10 @@ use crate::executor::persist::persist_if_needed;
 use crate::executor::rehydrate::rehydrate_conversation;
 use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::executor::upstream::{fetch_blocking_payload, fetch_stream_payload};
-use crate::tool::ToolRegistry;
+use crate::tool::{GatewayExecutor, McpClientPool, McpHandler, ToolRegistry, ToolType};
 use crate::types::io::{ResponseUsage, ToolChoice};
 use crate::types::request_response::{RequestPayload, ResponsePayload};
+use crate::types::tools::ResponsesTool;
 use crate::utils::common::serialize_to_string;
 
 pub use crate::executor::inference::BoxStream;
@@ -61,6 +62,30 @@ fn error_sse_chunk(message: &str) -> String {
     let event = serde_json::json!({ "error": message });
     let event_json = serialize_to_string(&event).unwrap_or_else(|_| "{\"error\":\"stream error\"}".to_owned());
     format!("data: {event_json}\n\n")
+}
+
+async fn build_gateway_registry(tools: &[ResponsesTool], exec_ctx: &ExecutionContext) -> ToolRegistry {
+    let mcp_params: Vec<_> = tools
+        .iter()
+        .filter_map(|tool| match tool {
+            ResponsesTool::Mcp(param) => Some(param.clone()),
+            _ => None,
+        })
+        .collect();
+
+    let request_mcp_executor = if mcp_params.is_empty() {
+        None
+    } else {
+        let pool = Arc::new(McpClientPool::from_params(&mcp_params).await);
+        Some(Arc::new(McpHandler::read_resource(pool)) as Arc<dyn GatewayExecutor>)
+    };
+
+    ToolRegistry::build_with_handlers(tools, |tool_type| match tool_type {
+        ToolType::Mcp => request_mcp_executor
+            .clone()
+            .or_else(|| exec_ctx.gateway_executors.get(tool_type)),
+        _ => exec_ctx.gateway_executors.get(tool_type),
+    })
 }
 
 struct AbortOnDrop<T> {
@@ -102,13 +127,10 @@ async fn run_until_gateway_tools_complete(
     stream_upstream: bool,
     stream_events: Option<&mpsc::UnboundedSender<String>>,
 ) -> ExecutorResult<(ResponsePayload, RequestContext)> {
-    let registry = ctx
-        .enriched_request
-        .tools
-        .as_ref()
-        .map_or_else(ToolRegistry::default, |tools| {
-            ToolRegistry::build_with_handlers(tools, |tool_type| exec_ctx.gateway_executors.get(tool_type))
-        });
+    let registry = match ctx.enriched_request.tools.as_ref() {
+        Some(tools) => build_gateway_registry(tools, exec_ctx).await,
+        None => ToolRegistry::default(),
+    };
     let mut combined_output = Vec::new();
     let mut combined_usage = None;
 

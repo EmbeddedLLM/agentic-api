@@ -213,3 +213,26 @@ fn web_search_preview_normalizes_to_gateway_function() {
         serde_json::json!(["query"])
     );
 }
+
+#[test]
+fn mcp_read_resource_normalizes_to_gateway_function() {
+    let payload: RequestPayload = serde_json::from_value(serde_json::json!({
+        "model": "test",
+        "input": "read fixture://hello",
+        "tools": [{"type": "mcp", "name": "read_mcp_resource"}]
+    }))
+    .unwrap();
+
+    let upstream = payload.to_upstream_request(false);
+    let tools = upstream
+        .tools
+        .expect("MCP read_resource should normalize to a function tool");
+
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0].type_, "function");
+    assert_eq!(tools[0].name, "read_mcp_resource");
+    assert_eq!(
+        tools[0].parameters.as_ref().unwrap()["required"],
+        serde_json::json!(["server", "uri"])
+    );
+}

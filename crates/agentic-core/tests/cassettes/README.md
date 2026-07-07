@@ -1,11 +1,11 @@
 # Cassette Recorder
 
-`record_cassette.py` runs an embedded proxy between the script and an upstream API (OpenAI or vLLM). Every request and response is captured into a YAML cassette for use in replay tests.
+`record_cassette.py` runs an embedded proxy between the script and an upstream API (OpenAI, vLLM, or the agentic-api gateway). Every request and response is captured into a YAML cassette for use in replay tests.
 
 ## How it works
 
 ```
-[record_cassette.py] -> [proxy :7070] -> [OpenAI | vLLM]
+[record_cassette.py] -> [proxy :7070] -> [OpenAI | vLLM | gateway]
                          (cassette written here)
 ```
 
@@ -19,6 +19,9 @@ python tests/cassettes/record_cassette.py --mode responses --turns 2 --no-stream
 
 # non-interactive -- pipe prompts in (one line per turn)
 printf 'First prompt\nSecond prompt\n' | python tests/cassettes/record_cassette.py --mode responses --turns 2 --no-stream --vllm http://localhost:5050 --model Qwen/Qwen3-30B-A3B-FP8 --max-output-tokens 1024 --output out.yaml
+
+# gateway-backed cassette -- records the gateway-facing request/response
+printf 'Use web search to look up potato, then summarize in one sentence.\n' | python tests/cassettes/record_cassette.py --mode responses --turns 1 --no-stream --gateway http://localhost:9000 --model openai/gpt-oss-20b --output out.yaml
 ```
 
 The recorder scripts (`record_reasoning_cassettes.sh`, `record_tool_call_cassettes.sh`, etc.) use `printf` to feed fixed prompts per test so no manual input is needed.
@@ -27,7 +30,7 @@ The recorder scripts (`record_reasoning_cassettes.sh`, `record_tool_call_cassett
 
 | Mode | Description |
 |------|-------------|
-| `responses` | Chains turns via `previous_response_id`. Only mode supported with `--vllm`. |
+| `responses` | Chains turns via `previous_response_id`. Only mode supported with `--vllm`. Common mode for gateway-backed built-in tool cassettes. |
 | `conv` | Creates a conversation object, passes `conversation` id each turn. |
 | `isolation` | Two independent conversations (A and B) recorded into one cassette. |
 | `mixed` | Turn 1 uses `conversation` id, turns 2+ switch to `previous_response_id`. |
@@ -43,6 +46,7 @@ The recorder scripts (`record_reasoning_cassettes.sh`, `record_tool_call_cassett
 --model NAME           Model name sent in requests
 --no-store             Set store=false
 --vllm URL             vLLM upstream, e.g. http://localhost:8000 (responses mode only)
+--gateway URL          agentic-api gateway, e.g. http://localhost:9000
 --openai URL           OpenAI upstream (default https://api.openai.com)
 --tools FILE           JSON file containing a tools array (responses mode only)
 --tool-choice VALUE    "auto", "none", "required", or JSON e.g. '{"type":"function","name":"foo"}'

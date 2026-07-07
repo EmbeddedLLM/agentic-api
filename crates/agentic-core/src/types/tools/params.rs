@@ -113,14 +113,33 @@ pub struct FunctionToolParam {
     pub strict: Option<bool>,
 }
 
-/// Parameters for an MCP (Model Context Protocol) tool server.
+/// Parameters for a gateway MCP built-in tool declaration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpToolParam {
-    pub server_label: String,
-    pub server_url: String,
-    pub allowed_tools: Option<Vec<String>>,
-    /// Per-server auth headers forwarded by the gateway (e.g. `Authorization: Bearer <token>`).
+    pub name: NonEmptyToolName,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub headers: Option<HashMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env: Option<HashMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+}
+
+/// Parameters for a discovered MCP (Model Context Protocol) server tool.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpDiscoveredToolParam {
+    pub server_label: String,
+    pub tool_name: String,
+    pub exposed_name: String,
+    pub tool: rmcp::model::Tool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -227,16 +246,21 @@ mod tests {
     fn responses_tool_mcp_round_trips_with_field_values() {
         let json = serde_json::json!({
             "type": "mcp",
-            "server_label": "my_server",
-            "server_url": "http://localhost:9000",
-            "allowed_tools": ["search", "fetch"]
+            "name": "read_mcp_resource",
+            "server_label": "repo",
+            "server_url": "http://localhost:9001/mcp",
+            "headers": {"Authorization": "Bearer token"}
         });
         let tool: ResponsesTool = serde_json::from_value(json).unwrap();
         let back = serde_json::to_value(&tool).unwrap();
         assert_eq!(back["type"], "mcp");
-        assert_eq!(back["server_label"], "my_server");
+        assert_eq!(back["name"], "read_mcp_resource");
+        assert_eq!(back["server_label"], "repo");
+        assert_eq!(back["server_url"], "http://localhost:9001/mcp");
         if let ResponsesTool::Mcp(ref p) = tool {
-            assert_eq!(p.allowed_tools, Some(vec!["search".to_owned(), "fetch".to_owned()]));
+            assert_eq!(p.name.as_str(), "read_mcp_resource");
+            assert_eq!(p.server_label.as_deref(), Some("repo"));
+            assert_eq!(p.server_url.as_deref(), Some("http://localhost:9001/mcp"));
         }
     }
 
@@ -281,17 +305,24 @@ mod tests {
     }
 
     #[test]
-    fn mcp_tool_param_round_trips_with_headers() {
+    fn mcp_tool_param_round_trips_with_tool_schema() {
         let json = serde_json::json!({
-            "type": "mcp",
             "server_label": "my_server",
-            "server_url": "http://localhost:9000",
-            "headers": {"Authorization": "Bearer tok"}
+            "tool_name": "fetch",
+            "exposed_name": "my_server__fetch",
+            "tool": {
+                "name": "fetch",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"}
+                    }
+                }
+            }
         });
-        let tool: ResponsesTool = serde_json::from_value(json).unwrap();
-        assert_eq!(
-            serde_json::to_value(&tool).unwrap()["headers"]["Authorization"],
-            "Bearer tok"
-        );
+        let param: McpDiscoveredToolParam = serde_json::from_value(json).unwrap();
+        let back = serde_json::to_value(&param).unwrap();
+        assert_eq!(back["server_label"], "my_server");
+        assert_eq!(back["tool"]["inputSchema"]["properties"]["id"]["type"], "string");
     }
 }

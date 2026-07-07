@@ -8,8 +8,8 @@ pub use input::{
     InputTextContent, ResponsesInput,
 };
 pub use output::{
-    ApplyDone, FunctionToolCall, OutputItem, OutputMessage, OutputTextContent, ReasoningOutput, ReasoningTextContent,
-    WebSearchActionSearch, WebSearchCall, WebSearchCallStatus, WebSearchSource,
+    ApplyDone, FunctionToolCall, GatewayCallStatus, McpToolCall, OutputItem, OutputMessage, OutputTextContent,
+    ReasoningOutput, ReasoningTextContent, WebSearchActionSearch, WebSearchCall, WebSearchCallStatus, WebSearchSource,
 };
 pub use tools::{FunctionTool, ToolChoice};
 pub(crate) use tools::{resolve_tool_choice, resolve_tools};

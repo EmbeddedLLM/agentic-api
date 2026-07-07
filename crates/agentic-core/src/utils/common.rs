@@ -23,6 +23,15 @@ pub fn serialize_to_string<T: serde::Serialize>(value: &T) -> Result<String, ser
     serde_json::to_string(value)
 }
 
+/// Serialize any type to a `serde_json::Value`.
+///
+/// # Errors
+///
+/// Returns `serde_json::Error` if serialization fails.
+pub fn serialize_to_value<T: serde::Serialize>(value: &T) -> Result<serde_json::Value, serde_json::Error> {
+    serde_json::to_value(value)
+}
+
 /// Deserialize JSON string to any type.
 ///
 /// Strict deserialization - returns error if deserialization fails.

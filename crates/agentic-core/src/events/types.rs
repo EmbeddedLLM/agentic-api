@@ -7,6 +7,8 @@ use crate::types::io::ResponseUsage;
 pub enum SSEItemType {
     Reasoning,
     FunctionCall,
+    WebSearchCall,
+    McpToolCall,
     Message,
 }
 
@@ -16,6 +18,8 @@ impl SSEItemType {
         match self {
             Self::Reasoning => "reasoning",
             Self::FunctionCall => "function_call",
+            Self::WebSearchCall => "web_search_call",
+            Self::McpToolCall => "mcp_tool_call",
             Self::Message => "message",
         }
     }
@@ -26,6 +30,8 @@ impl From<&str> for SSEItemType {
         match s {
             "reasoning" => Self::Reasoning,
             "function_call" => Self::FunctionCall,
+            "web_search_call" => Self::WebSearchCall,
+            "mcp_tool_call" => Self::McpToolCall,
             _ => Self::Message,
         }
     }
@@ -91,6 +97,8 @@ pub enum SSEEventType {
     WebSearchCallInProgress,
     WebSearchCallSearching,
     WebSearchCallCompleted,
+    McpToolCallInProgress,
+    McpToolCallCompleted,
 
     // Catch-all for unrecognized events
     Other,
