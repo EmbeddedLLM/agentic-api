@@ -182,10 +182,7 @@ impl ResponseAccumulator {
         for line in rx {
             acc.process_sse_line(&line);
         }
-        acc.finalize_all();
-        if acc.status == ResponseStatus::InProgress {
-            acc.status = ResponseStatus::Completed;
-        }
+        acc.finish_stream();
         acc
     }
 
@@ -211,9 +208,16 @@ impl ResponseAccumulator {
         }
     }
 
-    fn process_sse_line(&mut self, line: &str) {
+    pub(crate) fn process_sse_line(&mut self, line: &str) {
         if let Some(frame) = normalize_sse_line(line) {
             self.process_event(&frame);
+        }
+    }
+
+    pub(crate) fn finish_stream(&mut self) {
+        self.finalize_all();
+        if self.status == ResponseStatus::InProgress {
+            self.status = ResponseStatus::Completed;
         }
     }
 
@@ -278,6 +282,16 @@ impl ResponseAccumulator {
             (SSEEventType::ResponseCompleted, EventPayload::Response { usage, .. }) => {
                 self.finalize_all();
                 self.status = ResponseStatus::Completed;
+                self.usage = *usage;
+            }
+            (SSEEventType::ResponseFailed, EventPayload::Response { usage, .. }) => {
+                self.finalize_all();
+                self.status = ResponseStatus::Error;
+                self.usage = *usage;
+            }
+            (SSEEventType::ResponseIncomplete, EventPayload::Response { usage, .. }) => {
+                self.finalize_all();
+                self.status = ResponseStatus::Incomplete;
                 self.usage = *usage;
             }
             _ => {}
@@ -501,6 +515,36 @@ mod tests {
         assert_eq!(acc.status, ResponseStatus::Completed);
         assert!(acc.usage.is_some());
         assert_eq!(acc.usage.unwrap().total_tokens, 15);
+    }
+
+    #[test]
+    fn test_process_event_failed_sets_error_status() {
+        let mut acc = ResponseAccumulator::new("resp_1".into(), None);
+        acc.process_event(&EventFrame {
+            event_type: SSEEventType::ResponseFailed,
+            payload: EventPayload::Response {
+                id: "resp_1".into(),
+                status: "failed".into(),
+                usage: None,
+            },
+            sequence_number: Some(4),
+        });
+        assert_eq!(acc.status, ResponseStatus::Error);
+    }
+
+    #[test]
+    fn test_process_event_incomplete_sets_incomplete_status() {
+        let mut acc = ResponseAccumulator::new("resp_1".into(), None);
+        acc.process_event(&EventFrame {
+            event_type: SSEEventType::ResponseIncomplete,
+            payload: EventPayload::Response {
+                id: "resp_1".into(),
+                status: "incomplete".into(),
+                usage: None,
+            },
+            sequence_number: Some(4),
+        });
+        assert_eq!(acc.status, ResponseStatus::Incomplete);
     }
 
     #[test]

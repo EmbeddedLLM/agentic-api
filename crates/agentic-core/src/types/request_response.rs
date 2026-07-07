@@ -1,5 +1,5 @@
 use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use super::io::{
     FunctionTool, InputItem, InputMessage, InputMessageContent, OutputItem, ResponseUsage, ResponsesInput, ToolChoice,
@@ -135,6 +135,20 @@ impl RequestPayload {
         // Treat an empty normalised list the same as no tools (skip the field entirely).
         let tools = tools.filter(|tools| !tools.is_empty());
 
+        self.to_upstream_request_with_tools(stream, tools)
+    }
+
+    /// Construct an `UpstreamRequest` with tools normalized by the caller.
+    ///
+    /// The executor uses this after building a request-scoped `ToolRegistry`,
+    /// so tool normalization can flow through the appropriate tool handlers.
+    #[must_use]
+    pub fn to_upstream_request_with_tools(
+        &self,
+        stream: bool,
+        tools: Option<Vec<FunctionTool>>,
+    ) -> UpstreamRequest<'_> {
+        let tools = tools.filter(|tools| !tools.is_empty());
         UpstreamRequest {
             model: &self.model,
             input: &self.input,
@@ -179,6 +193,25 @@ impl ResponsePayload {
     pub fn as_responses_chunk(&self) -> String {
         let json_str = serialize_to_string(self).unwrap_or_else(|_| String::new());
         format!("data: {json_str}\n\n")
+    }
+
+    #[must_use]
+    pub fn as_terminal_response_chunk(&self) -> String {
+        let event = json!({
+            "type": self.terminal_event_type(),
+            "response": self,
+        });
+        let json_str = serialize_to_string(&event).unwrap_or_else(|_| String::new());
+        format!("data: {json_str}\n\n")
+    }
+
+    fn terminal_event_type(&self) -> &'static str {
+        match self.status.as_str() {
+            "incomplete" => "response.incomplete",
+            "failed" | "error" => "response.failed",
+            "in_progress" => "response.in_progress",
+            _ => "response.completed",
+        }
     }
 }
 
@@ -256,5 +289,38 @@ mod tests {
         let items = Vec::<InputItem>::from(&input);
         assert_eq!(items.len(), 1);
         assert!(matches!(items[0], InputItem::Message(_)));
+    }
+
+    #[test]
+    fn response_payload_terminal_chunk_uses_status_specific_event_type() {
+        let mut payload = ResponsePayload {
+            id: "resp_test".to_string(),
+            object: "response".to_string(),
+            created_at: 0,
+            model: "test-model".to_string(),
+            status: "completed".to_string(),
+            output: Vec::new(),
+            usage: None,
+            incomplete_details: None,
+            error: None,
+            previous_response_id: None,
+            conversation_id: None,
+            instructions: None,
+        };
+
+        for (status, expected_type) in [
+            ("completed", "response.completed"),
+            ("incomplete", "response.incomplete"),
+            ("failed", "response.failed"),
+            ("error", "response.failed"),
+            ("in_progress", "response.in_progress"),
+        ] {
+            payload.status = status.to_string();
+            let chunk = payload.as_terminal_response_chunk();
+            let data = chunk.trim().strip_prefix("data: ").unwrap();
+            let event: Value = serde_json::from_str(data).unwrap();
+            assert_eq!(event["type"], expected_type);
+            assert_eq!(event["response"]["status"], status);
+        }
     }
 }

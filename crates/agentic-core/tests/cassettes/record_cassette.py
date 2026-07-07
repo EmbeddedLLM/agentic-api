@@ -28,6 +28,7 @@ Usage:
     python tests/cassettes/record_cassette.py --turns 5 --mode conv --branch-from 1 --branch-turn-number 3 --branch-from 2 --branch-turn-number 5 --no-stream --output path/to/cassette.yaml
     python tests/cassettes/record_cassette.py --turns 2 --mode responses --vllm http://localhost:8000 --model Qwen/Qwen3-30B-A3B-FP8 --no-stream --output path/to/cassette.yaml
     python tests/cassettes/record_cassette.py --turns 2 --mode responses --transport websocket --vllm http://localhost:3018 --model codex-compatible --output path/to/ws-cassette.yaml
+    python tests/cassettes/record_cassette.py --turns 2 --mode responses --vllm http://localhost:8000 --model Qwen/Qwen3-30B-A3B-FP8 --max-output-tokens 1024 --no-stream --output path/to/cassette.yaml
 """
 
 import base64
@@ -773,6 +774,7 @@ def run_responses(
     tools: list | None = None,
     tool_choice: Any = None,
     tool_outputs: dict[str, str] | None = None,
+    max_output_tokens: int | None = None,
 ) -> None:
     response_ids: dict[int, str] = {}
     responses: dict[int, dict] = {}
@@ -811,6 +813,8 @@ def run_responses(
             input_value = prompt
 
         body: dict = {"model": model, "input": input_value, "stream": stream, "store": store}
+        if max_output_tokens is not None:
+            body["max_output_tokens"] = max_output_tokens
         if previous_response_id and store:
             body["previous_response_id"] = previous_response_id
         _inject_tools(body, tools, tool_choice)
@@ -860,6 +864,8 @@ def run_responses(
             "store": store,
             "previous_response_id": branch_resp_id,
         }
+        if max_output_tokens is not None:
+            body["max_output_tokens"] = max_output_tokens
         _inject_tools(body, tools, tool_choice)
         _send(
             client,
@@ -973,6 +979,13 @@ def run_responses(
     "When provided, function_call_output items are automatically injected "
     "between turns (required for OpenAI Responses API).",
 )
+@click.option(
+    "--max-output-tokens",
+    type=int,
+    default=1024,
+    show_default=True,
+    help="max_output_tokens for Responses requests. Use 0 to omit the field.",
+)
 def main(
     turns: int,
     output: str,
@@ -989,6 +1002,7 @@ def main(
     tools_file: str | None,
     tool_choice_raw: str | None,
     tool_outputs_file: str | None,
+    max_output_tokens: int,
 ) -> None:
     """Interactive multi-turn cassette recorder (proxy embedded)."""
     if branch_turn_number and not branch_from:
@@ -1012,6 +1026,8 @@ def main(
         raise click.UsageError(
             f"--transport websocket is only supported with --mode responses (got --mode {mode})."
         )
+    if max_output_tokens < 0:
+        raise click.UsageError("--max-output-tokens must be >= 0.")
 
     tools: list | None = None
     if tools_file:
@@ -1056,8 +1072,12 @@ def main(
     if transport == "websocket":
         stream = True
         store = True
+    response_max_output_tokens = max_output_tokens or None
 
-    click.echo(f"Mode: {mode} | Turns: {turns} | Stream: {stream} | Transport: {transport} | Model: {model}")
+    click.echo(
+        f"Mode: {mode} | Turns: {turns} | Stream: {stream} | Transport: {transport} | Model: {model} | "
+        f"Max output tokens: {response_max_output_tokens or 'backend default'}"
+    )
     click.echo(f"Output:  {output_file}")
     click.echo(backend_label)
     if transport == "websocket":
@@ -1080,6 +1100,7 @@ def main(
                 tools,
                 tool_choice,
                 tool_outputs,
+                response_max_output_tokens,
             )
     else:
         click.echo(f"Proxy:   {proxy_url}  (requests go through here for recording)")
@@ -1110,6 +1131,7 @@ def main(
                         tools,
                         tool_choice,
                         tool_outputs,
+                        response_max_output_tokens,
                     )
                 elif mode == "store_true_then_store_false":
                     run_store_true_then_store_false(client, turns, model, stream, proxy_url)

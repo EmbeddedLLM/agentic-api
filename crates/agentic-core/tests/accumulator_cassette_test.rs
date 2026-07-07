@@ -15,6 +15,7 @@ const CASSETTE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes
 const TOOL_CALLS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/tool_calls");
 const REASONING_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/reasoning/responses");
 const CODEX_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/codex");
+const WEB_SEARCH_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/web_search");
 
 // --- Legacy event cassette format ---
 
@@ -81,6 +82,10 @@ fn load_reasoning_cassette(filename: &str) -> TurnCassette {
 
 fn load_codex_cassette(filename: &str) -> TurnCassette {
     load_turn_cassette_from(CODEX_DIR, filename)
+}
+
+fn load_web_search_cassette(filename: &str) -> TurnCassette {
+    load_turn_cassette_from(WEB_SEARCH_DIR, filename)
 }
 
 /// Extracts `data: ...` lines from raw SSE entries (which may include
@@ -767,6 +772,35 @@ fn has_reasoning(output: &[OutputItem]) -> bool {
     output.iter().any(|item| matches!(item, OutputItem::Reasoning(_)))
 }
 
+fn assert_completed_potato_web_search(output: &[OutputItem]) {
+    assert_eq!(
+        count_function_calls(output),
+        0,
+        "raw web_search function call should not leak"
+    );
+    let web_search = output
+        .iter()
+        .find_map(|item| match item {
+            OutputItem::WebSearchCall(call) => Some(call),
+            _ => None,
+        })
+        .expect("cassette output should include a web_search_call item");
+    assert_eq!(web_search.status.as_str(), "completed");
+    assert_eq!(web_search.action.query, "potato");
+    assert!(
+        web_search
+            .action
+            .sources
+            .iter()
+            .any(|source| source.url == "https://en.wikipedia.org/wiki/Potato"),
+        "recorded web_search_call should include the Wikipedia potato source"
+    );
+    assert!(
+        output.iter().any(|item| matches!(item, OutputItem::Message(_))),
+        "cassette output should include a final assistant message"
+    );
+}
+
 /// Extracts the `arguments` JSON string from the first function call in output items.
 fn get_first_fc_arguments(output: &[OutputItem]) -> String {
     output
@@ -779,6 +813,55 @@ fn get_first_fc_arguments(output: &[OutputItem]) -> String {
             }
         })
         .expect("output must contain at least one function call")
+}
+
+#[test]
+fn test_web_search_gateway_cassette_nonstreaming() {
+    let cassette = load_web_search_cassette("gpt_oss_web_search_nonstreaming.yaml");
+    assert_eq!(cassette.turns.len(), 1);
+    let body = cassette.turns[0].request.as_mapping().unwrap();
+    assert_eq!(body["body"]["tools"][0]["type"].as_str().unwrap(), "web_search_preview");
+    assert_eq!(body["body"]["max_output_tokens"].as_i64().unwrap(), 1024);
+
+    let output = process_nonstreaming_turn(&cassette, 0, "openai/gpt-oss-20b");
+    assert!(
+        has_reasoning(&output),
+        "gpt-oss web_search cassette should include reasoning"
+    );
+    assert_completed_potato_web_search(&output);
+}
+
+#[test]
+fn test_web_search_gateway_cassette_streaming() {
+    let cassette = load_web_search_cassette("gpt_oss_web_search_streaming.yaml");
+    assert_eq!(cassette.turns.len(), 1);
+    let body = cassette.turns[0].request.as_mapping().unwrap();
+    assert_eq!(body["body"]["tools"][0]["type"].as_str().unwrap(), "web_search_preview");
+    assert_eq!(body["body"]["max_output_tokens"].as_i64().unwrap(), 1024);
+
+    let data_lines = extract_data_lines(&cassette.turns[0].response.sse);
+    let events: Vec<serde_json::Value> = data_lines
+        .iter()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .filter(|data| *data != "[DONE]")
+        .filter_map(|data| serde_json::from_str(data).ok())
+        .collect();
+    let event_types: Vec<&str> = events.iter().filter_map(|event| event["type"].as_str()).collect();
+    assert!(event_types.contains(&"response.web_search_call.in_progress"));
+    assert!(event_types.contains(&"response.web_search_call.searching"));
+    assert!(event_types.contains(&"response.web_search_call.completed"));
+
+    let final_payload = events
+        .iter()
+        .find(|event| event["object"] == "response")
+        .expect("streaming web_search cassette should include final response payload");
+    let output: Vec<OutputItem> = serde_json::from_value(final_payload["output"].clone())
+        .expect("final response payload output should deserialize");
+    assert!(
+        has_reasoning(&output),
+        "gpt-oss web_search cassette should include reasoning"
+    );
+    assert_completed_potato_web_search(&output);
 }
 
 // ═══════════════════════════════════════════════════════════════════

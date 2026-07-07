@@ -341,3 +341,24 @@ fn codex_direct_vllm_flat_namespace_cassette_is_plain_function_tool() {
         );
     }
 }
+
+#[test]
+fn web_search_preview_normalizes_to_gateway_function() {
+    let payload: RequestPayload = serde_json::from_value(serde_json::json!({
+        "model": "test",
+        "input": "what changed today?",
+        "tools": [{"type": "web_search_preview"}]
+    }))
+    .unwrap();
+
+    let upstream = payload.to_upstream_request(false);
+    let tools = upstream.tools.expect("web_search should normalize to a function tool");
+
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0].type_, "function");
+    assert_eq!(tools[0].name, "web_search");
+    assert_eq!(
+        tools[0].parameters.as_ref().unwrap()["required"],
+        serde_json::json!(["query"])
+    );
+}

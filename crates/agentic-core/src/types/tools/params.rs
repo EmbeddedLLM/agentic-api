@@ -79,7 +79,12 @@ pub enum ResponsesTool {
     Function(FunctionToolParam),
     #[serde(rename = "mcp")]
     Mcp(McpToolParam),
-    #[serde(rename = "web_search_preview", alias = "web_search")]
+    #[serde(
+        rename = "web_search_preview",
+        alias = "web_search",
+        alias = "web_search_preview_2025_03_11",
+        alias = "web_search_2025_08_26"
+    )]
     WebSearch(WebSearchToolParam),
     #[serde(rename = "file_search")]
     FileSearch(FileSearchToolParam),
@@ -124,9 +129,46 @@ pub struct McpToolParam {
     pub headers: Option<HashMap<String, String>>,
 }
 
-/// Parameters for a web search tool (no required fields).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WebSearchContextSize {
+    Low,
+    Medium,
+    High,
+}
+
+impl WebSearchContextSize {
+    pub(crate) const fn default_count(self) -> u8 {
+        match self {
+            Self::Low => 3,
+            Self::Medium => 5,
+            Self::High => 10,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct WebSearchToolParam {}
+pub struct WebSearchFilters {
+    pub allowed_domains: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct WebSearchUserLocation {
+    #[serde(rename = "type")]
+    pub type_: Option<String>,
+    pub city: Option<String>,
+    pub country: Option<String>,
+    pub region: Option<String>,
+    pub timezone: Option<String>,
+}
+
+/// Parameters for a web search tool.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct WebSearchToolParam {
+    pub search_context_size: Option<WebSearchContextSize>,
+    pub filters: Option<WebSearchFilters>,
+    pub user_location: Option<WebSearchUserLocation>,
+}
 
 /// Parameters for a file search tool.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -261,11 +303,17 @@ mod tests {
     }
 
     #[test]
-    fn responses_tool_web_search_alias_deserializes_to_preview_type() {
-        let json = serde_json::json!({"type": "web_search"});
-        let tool: ResponsesTool = serde_json::from_value(json).unwrap();
-        assert!(matches!(tool, ResponsesTool::WebSearch(_)));
-        assert_eq!(serde_json::to_value(&tool).unwrap()["type"], "web_search_preview");
+    fn responses_tool_web_search_accepts_openai_aliases() {
+        for type_name in [
+            "web_search",
+            "web_search_preview",
+            "web_search_preview_2025_03_11",
+            "web_search_2025_08_26",
+        ] {
+            let json = serde_json::json!({"type": type_name});
+            let tool: ResponsesTool = serde_json::from_value(json).unwrap();
+            assert!(matches!(tool, ResponsesTool::WebSearch(_)));
+        }
     }
 
     #[test]

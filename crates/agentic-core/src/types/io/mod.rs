@@ -9,6 +9,7 @@ pub use input::{
 };
 pub use output::{
     ApplyDone, FunctionToolCall, OutputItem, OutputMessage, OutputTextContent, ReasoningOutput, ReasoningTextContent,
+    WebSearchActionSearch, WebSearchCall, WebSearchCallStatus, WebSearchSource,
 };
 pub use tools::{FunctionTool, ToolChoice};
 pub(crate) use tools::{discard_unknown_tool_values, resolve_tool_choice, resolve_tools};

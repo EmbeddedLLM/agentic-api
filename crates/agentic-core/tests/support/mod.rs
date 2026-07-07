@@ -264,7 +264,6 @@ impl TestFixture {
             resp_handler,
             client,
             server.url().to_string(),
-            None,
         ));
 
         Self { exec_ctx, server }
@@ -282,7 +281,6 @@ impl TestFixture {
             resp_handler,
             client,
             server.url().to_string(),
-            None,
         ));
 
         Self { exec_ctx, server }
@@ -392,6 +390,14 @@ pub async fn collect_stream(result: Either<ResponsePayload, BoxStream>) -> Respo
                     while stream.next().await.is_some() {}
                     return payload;
                 }
+                if let Ok(mut event) = serde_json::from_str::<serde_json::Value>(data)
+                    && event.get("type").and_then(serde_json::Value::as_str) == Some("response.completed")
+                    && let Some(response) = event.get_mut("response")
+                    && let Ok(payload) = serde_json::from_value::<ResponsePayload>(response.take())
+                {
+                    while stream.next().await.is_some() {}
+                    return payload;
+                }
             }
         }
     }
@@ -405,7 +411,10 @@ pub fn output_text(payload: &ResponsePayload) -> String {
         .iter()
         .filter_map(|item| match item {
             OutputItem::Message(msg) => Some(msg.content.iter().map(|c| c.text.as_str()).collect::<String>()),
-            OutputItem::FunctionCall(_) | OutputItem::Reasoning(_) | OutputItem::Unknown => None,
+            OutputItem::FunctionCall(_)
+            | OutputItem::WebSearchCall(_)
+            | OutputItem::Reasoning(_)
+            | OutputItem::Unknown => None,
         })
         .collect::<String>()
 }

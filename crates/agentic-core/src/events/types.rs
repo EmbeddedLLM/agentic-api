@@ -88,6 +88,7 @@ pub enum SSEEventType {
     // Built-in tool calls
     FileSearchCallSearching,
     FileSearchCallCompleted,
+    WebSearchCallInProgress,
     WebSearchCallSearching,
     WebSearchCallCompleted,
 

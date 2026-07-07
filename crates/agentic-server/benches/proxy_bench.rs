@@ -84,13 +84,13 @@ async fn spawn_gateway(config: Config) -> String {
         ResponseHandler::new(ResponseStore::disabled()),
         Arc::new(reqwest::Client::new()),
         config.llm_api_base.clone(),
-        config.openai_api_key.clone(),
     ));
     let state = AppState {
         proxy_state,
         exec_ctx,
         shutdown_token: CancellationToken::new(),
         llm_api_base: config.llm_api_base,
+        openai_api_key: config.openai_api_key,
     };
     let server_config = ServerConfig::from_env();
     let router = build_router(state, &server_config);

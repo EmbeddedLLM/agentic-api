@@ -344,11 +344,24 @@ fn test_file_search_classification() {
 
 #[test]
 fn test_web_search_classification() {
-    let line =
-        r#"data: {"type":"response.web_search_call.completed","item_id":"ws_1","output_index":0,"sequence_number":6}"#;
-    let frame = normalize_sse_line(line).unwrap();
-    assert_eq!(frame.event_type, SSEEventType::WebSearchCallCompleted);
-    assert!(matches!(frame.payload, EventPayload::Raw(_)));
+    for (line, expected) in [
+        (
+            r#"data: {"type":"response.web_search_call.in_progress","item_id":"ws_1","output_index":0,"sequence_number":4}"#,
+            SSEEventType::WebSearchCallInProgress,
+        ),
+        (
+            r#"data: {"type":"response.web_search_call.searching","item_id":"ws_1","output_index":0,"sequence_number":5}"#,
+            SSEEventType::WebSearchCallSearching,
+        ),
+        (
+            r#"data: {"type":"response.web_search_call.completed","item_id":"ws_1","output_index":0,"sequence_number":6}"#,
+            SSEEventType::WebSearchCallCompleted,
+        ),
+    ] {
+        let frame = normalize_sse_line(line).unwrap();
+        assert_eq!(frame.event_type, expected);
+        assert!(matches!(frame.payload, EventPayload::Raw(_)));
+    }
 }
 
 // --- Helpers and constants for integration tests ---

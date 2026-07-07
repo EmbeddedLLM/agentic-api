@@ -89,10 +89,7 @@ impl InOutItem {
             .filter_map(|i| match i {
                 InOutItem::Input(item) if item.is_unknown() => None,
                 InOutItem::Input(item) => Some(item),
-                InOutItem::Output(OutputItem::Message(msg)) => Some(InputItem::Message(msg.into())),
-                InOutItem::Output(OutputItem::FunctionCall(call)) => Some(InputItem::FunctionCall(call)),
-                InOutItem::Output(OutputItem::Reasoning(r)) => Some(InputItem::Reasoning(r)),
-                InOutItem::Output(OutputItem::Unknown) => None,
+                InOutItem::Output(output) => output.to_input_item(),
             })
             .collect()
     }

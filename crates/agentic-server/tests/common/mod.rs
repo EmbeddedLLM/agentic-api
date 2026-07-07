@@ -31,7 +31,6 @@ pub fn test_state(config: &Config) -> AppState {
         ResponseHandler::new(ResponseStore::disabled()),
         Arc::new(reqwest::Client::new()),
         config.llm_api_base.clone(),
-        config.openai_api_key.clone(),
     );
     exec_ctx.model_aliases.clone_from(&config.model_aliases);
     let exec_ctx = Arc::new(exec_ctx);
@@ -41,6 +40,7 @@ pub fn test_state(config: &Config) -> AppState {
         exec_ctx,
         shutdown_token: CancellationToken::new(),
         llm_api_base: config.llm_api_base.clone(),
+        openai_api_key: config.openai_api_key.clone(),
     }
 }
 

@@ -19,6 +19,7 @@ async fn build_state(config: &Config, shutdown_token: CancellationToken) -> Resu
         exec_ctx,
         shutdown_token,
         llm_api_base: config.llm_api_base.clone(),
+        openai_api_key: config.openai_api_key.clone(),
     })
 }
 

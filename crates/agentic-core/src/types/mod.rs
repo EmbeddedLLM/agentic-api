@@ -7,10 +7,11 @@ pub use io::{
     FunctionTool, FunctionToolCall, FunctionToolResultMessage, InputContent, InputImageContent, InputItem,
     InputMessage, InputMessageContent, InputTextContent, InputTokenDetails, OutputItem, OutputMessage,
     OutputTextContent, OutputTokenDetails, ReasoningOutput, ReasoningTextContent, ResponseUsage, ResponsesInput,
-    ToolChoice,
+    ToolChoice, WebSearchActionSearch, WebSearchCall, WebSearchCallStatus, WebSearchSource,
 };
 pub use request_response::{IncompleteDetails, RequestPayload, ResponsePayload, UpstreamRequest};
 pub use tools::{
     CodeInterpreterToolParam, CodexNamespaceMember, CodexNamespaceToolParam, EmptyToolNameError, FileSearchToolParam,
-    FunctionToolParam, McpToolParam, NonEmptyToolName, ResponsesTool, WebSearchToolParam,
+    FunctionToolParam, McpToolParam, NonEmptyToolName, ResponsesTool, WebSearchContextSize, WebSearchFilters,
+    WebSearchToolParam, WebSearchUserLocation,
 };

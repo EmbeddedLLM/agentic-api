@@ -10,6 +10,7 @@ use crate::types::tools::{
 };
 
 use super::handler::ToolOutput;
+use super::web_search::web_search_function_tool;
 
 impl ResponsesTool {
     /// Normalise this tool declaration to the `FunctionTool` wire format that vLLM understands.
@@ -29,10 +30,7 @@ impl ResponsesTool {
                 );
                 None
             }
-            ResponsesTool::WebSearch(_) => {
-                tracing::debug!("web_search tool skipped in normalize - handler not yet registered");
-                None
-            }
+            ResponsesTool::WebSearch(_) => Some(web_search_function_tool()),
             ResponsesTool::FileSearch(_) => {
                 tracing::debug!("file_search tool skipped in normalize - handler not yet registered");
                 None
@@ -136,46 +134,46 @@ pub fn flatten_tools_for_upstream(tools: Option<&[ResponsesTool]>) -> Option<Vec
     })
 }
 
-pub fn normalize_output_items_with_tools(output: &mut [OutputItem], tools: Option<&[ResponsesTool]>) {
+pub fn restore_output_items_with_tools(output: &mut [OutputItem], tools: Option<&[ResponsesTool]>) {
     for item in output {
         if let OutputItem::FunctionCall(call) = item {
-            normalize_function_call_with_tools(call, tools);
+            restore_function_call_with_tools(call, tools);
         }
     }
 }
 
-pub fn normalize_response_value_with_tools(value: &mut Value, tools: Option<&[ResponsesTool]>) -> bool {
+pub fn restore_response_value_with_tools(value: &mut Value, tools: Option<&[ResponsesTool]>) -> bool {
     let Some(tools) = tools else {
         return false;
     };
-    normalize_response_value_inner(value, tools)
+    restore_response_value_inner(value, tools)
 }
 
-fn normalize_response_value_inner(value: &mut Value, tools: &[ResponsesTool]) -> bool {
+fn restore_response_value_inner(value: &mut Value, tools: &[ResponsesTool]) -> bool {
     let mut changed = false;
 
     if let Some(item) = value.as_object_mut().and_then(|object| object.get_mut("item")) {
-        changed |= normalize_call_value_with_tools(item, tools);
+        changed |= restore_call_value_with_tools(item, tools);
     }
 
-    changed |= normalize_call_value_with_tools(value, tools);
+    changed |= restore_call_value_with_tools(value, tools);
 
     for key in ["response", "payload"] {
         if let Some(nested) = value.as_object_mut().and_then(|object| object.get_mut(key)) {
-            changed |= normalize_response_value_inner(nested, tools);
+            changed |= restore_response_value_inner(nested, tools);
         }
     }
 
     if let Some(Value::Array(items)) = value.as_object_mut().and_then(|object| object.get_mut("output")) {
         for item in items {
-            changed |= normalize_call_value_with_tools(item, tools);
+            changed |= restore_call_value_with_tools(item, tools);
         }
     }
 
     changed
 }
 
-fn normalize_call_value_with_tools(value: &mut Value, tools: &[ResponsesTool]) -> bool {
+fn restore_call_value_with_tools(value: &mut Value, tools: &[ResponsesTool]) -> bool {
     let Some(object) = value.as_object_mut() else {
         return false;
     };
@@ -210,7 +208,7 @@ fn normalize_call_value_with_tools(value: &mut Value, tools: &[ResponsesTool]) -
         status: MessageStatus::Completed,
     };
 
-    normalize_function_call_with_tools(&mut call, Some(tools));
+    restore_function_call_with_tools(&mut call, Some(tools));
     if call.namespace.is_none() && call.name == original_name && call.arguments == original_arguments {
         return false;
     }
@@ -225,7 +223,7 @@ fn normalize_call_value_with_tools(value: &mut Value, tools: &[ResponsesTool]) -
     true
 }
 
-fn normalize_function_call_with_tools(call: &mut FunctionToolCall, tools: Option<&[ResponsesTool]>) {
+fn restore_function_call_with_tools(call: &mut FunctionToolCall, tools: Option<&[ResponsesTool]>) {
     if call.namespace.is_some() {
         return;
     }
@@ -239,7 +237,7 @@ fn normalize_function_call_with_tools(call: &mut FunctionToolCall, tools: Option
             namespace = %namespace.name,
             member = %function.name.as_str(),
             match_kind = "namespace_member",
-            "normalized upstream namespace function call"
+            "restored upstream namespace function call"
         );
         apply_namespace_member_call(call, namespace, function);
         return;
@@ -252,7 +250,7 @@ fn normalize_function_call_with_tools(call: &mut FunctionToolCall, tools: Option
             member = %function.name.as_str(),
             match_kind = "namespace_container",
             stripped_container_arguments = true,
-            "normalized upstream namespace function call"
+            "restored upstream namespace function call"
         );
         apply_namespace_member_call(call, namespace, function);
         strip_namespace_container_arguments(&mut call.arguments);
@@ -265,7 +263,7 @@ fn normalize_function_call_with_tools(call: &mut FunctionToolCall, tools: Option
             namespace = %namespace.name,
             member = %function.name.as_str(),
             match_kind = "bare_member",
-            "normalized upstream namespace function call"
+            "restored upstream namespace function call"
         );
         apply_namespace_member_call(call, namespace, function);
     }
@@ -640,7 +638,7 @@ mod tests {
             "{\"tools\":\"opaque\",\"cmd\":\"echo namespace fixture\"}",
         )];
 
-        normalize_output_items_with_tools(&mut output, Some(&tools));
+        restore_output_items_with_tools(&mut output, Some(&tools));
 
         let OutputItem::FunctionCall(call) = &output[0] else {
             panic!("expected function call");
@@ -665,7 +663,7 @@ mod tests {
             "{\"tools\":\"legitimate\",\"cmd\":\"pwd\"}",
         )];
 
-        normalize_output_items_with_tools(&mut output, Some(&tools));
+        restore_output_items_with_tools(&mut output, Some(&tools));
 
         let OutputItem::FunctionCall(call) = &output[0] else {
             panic!("expected function call");
@@ -688,7 +686,7 @@ mod tests {
         let upstream = flatten_tools_for_upstream(Some(&tools)).expect("tools");
         let mut output = vec![completed_call("get_weather", "{\"city\":\"SF\"}")];
 
-        normalize_output_items_with_tools(&mut output, Some(&tools));
+        restore_output_items_with_tools(&mut output, Some(&tools));
 
         assert!(matches!(
             upstream.as_slice(),
@@ -714,7 +712,7 @@ mod tests {
         .unwrap();
         let mut output = vec![completed_call("mcp__agentic_fixture_echo_text", "{\"text\":\"hi\"}")];
 
-        normalize_output_items_with_tools(&mut output, Some(&tools));
+        restore_output_items_with_tools(&mut output, Some(&tools));
 
         let OutputItem::FunctionCall(call) = &output[0] else {
             panic!("expected function call");
@@ -740,7 +738,7 @@ mod tests {
         .unwrap();
         let mut output = vec![completed_call("mcp__a_b_c", "{}")];
 
-        normalize_output_items_with_tools(&mut output, Some(&tools));
+        restore_output_items_with_tools(&mut output, Some(&tools));
 
         let OutputItem::FunctionCall(call) = &output[0] else {
             panic!("expected function call");
@@ -761,7 +759,7 @@ mod tests {
         .unwrap();
         let mut output = vec![completed_call("run", "{\"cmd\":\"pwd\"}")];
 
-        normalize_output_items_with_tools(&mut output, Some(&tools));
+        restore_output_items_with_tools(&mut output, Some(&tools));
 
         let OutputItem::FunctionCall(call) = &output[0] else {
             panic!("expected function call");
@@ -790,7 +788,7 @@ mod tests {
             }
         });
 
-        assert!(normalize_response_value_with_tools(&mut value, Some(&tools)));
+        assert!(restore_response_value_with_tools(&mut value, Some(&tools)));
         assert_eq!(value["item"]["namespace"], "mcp__agentic_fixture");
         assert_eq!(value["item"]["name"], "add_numbers");
         assert_eq!(value["item"]["arguments"], "{\"numbers\":[8,0]}");

@@ -7,7 +7,7 @@ use crate::tool::{ToolRegistry, ToolType};
 use crate::types::event::MessageStatus;
 use crate::utils::uuid7_str;
 
-use super::input::{InputContent, InputMessage, InputMessageContent, InputTextContent};
+use super::input::{InputContent, InputItem, InputMessage, InputMessageContent, InputTextContent};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutputTextContent {
@@ -138,6 +138,75 @@ impl TryFrom<&EventPayload> for FunctionToolCall {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WebSearchCallStatus {
+    InProgress,
+    Completed,
+    Failed,
+}
+
+impl WebSearchCallStatus {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::InProgress => "in_progress",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSearchSource {
+    pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSearchActionSearch {
+    #[serde(rename = "type")]
+    pub type_: String,
+    pub query: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<WebSearchSource>,
+}
+
+impl WebSearchActionSearch {
+    #[must_use]
+    pub fn new(query: impl Into<String>, sources: Vec<WebSearchSource>) -> Self {
+        Self {
+            type_: "search".to_owned(),
+            query: query.into(),
+            sources,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSearchCall {
+    pub id: String,
+    pub status: WebSearchCallStatus,
+    pub action: WebSearchActionSearch,
+}
+
+impl WebSearchCall {
+    #[must_use]
+    pub fn new(
+        id: impl Into<String>,
+        status: WebSearchCallStatus,
+        query: impl Into<String>,
+        sources: Vec<WebSearchSource>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            status,
+            action: WebSearchActionSearch::new(query, sources),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReasoningTextContent {
     #[serde(rename = "type")]
@@ -251,6 +320,9 @@ impl ApplyDone for FunctionToolCall {
 pub enum OutputItem {
     Message(OutputMessage),
     FunctionCall(FunctionToolCall),
+    #[serde(rename = "web_search_call")]
+    WebSearchCall(WebSearchCall),
+    #[serde(rename = "reasoning")]
     Reasoning(ReasoningOutput),
     #[serde(other)]
     Unknown,
@@ -263,7 +335,17 @@ impl OutputItem {
             Self::FunctionCall(call) => registry
                 .lookup(&call.name)
                 .is_none_or(|entry| entry.tool_type == ToolType::Function),
-            Self::Message(_) | Self::Reasoning(_) | Self::Unknown => false,
+            Self::Message(_) | Self::WebSearchCall(_) | Self::Reasoning(_) | Self::Unknown => false,
+        }
+    }
+
+    #[must_use]
+    pub fn to_input_item(&self) -> Option<InputItem> {
+        match self {
+            Self::Message(message) => Some(InputItem::Message(message.clone().into())),
+            Self::Reasoning(reasoning) => Some(InputItem::Reasoning(reasoning.clone())),
+            Self::FunctionCall(call) => Some(InputItem::FunctionCall(call.clone())),
+            Self::WebSearchCall(_) | Self::Unknown => None,
         }
     }
 }
