@@ -387,7 +387,7 @@ fn flatten_typed_tools_with_builder(tools: &[ResponsesTool], builder: &mut Names
             ResponsesTool::Mcp(mcp) => upstream_tools.push(ResponsesTool::Mcp(mcp.clone())),
             ResponsesTool::WebSearch(web_search) => upstream_tools.push(ResponsesTool::WebSearch(web_search.clone())),
             ResponsesTool::FileSearch(file_search) => {
-                upstream_tools.push(ResponsesTool::FileSearch(file_search.clone()))
+                upstream_tools.push(ResponsesTool::FileSearch(file_search.clone()));
             }
             ResponsesTool::CodeInterpreter(code_interpreter) => {
                 upstream_tools.push(ResponsesTool::CodeInterpreter(code_interpreter.clone()));

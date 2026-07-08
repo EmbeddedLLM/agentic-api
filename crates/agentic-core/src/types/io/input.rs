@@ -28,7 +28,7 @@ pub enum InputContent {
     OutputText(InputTextContent),
     /// Reasoning step text in rehydrated history.
     ReasoningText(InputTextContent),
-    /// Any other content type - drop silently.
+    /// Any other content type — drop silently.
     #[serde(other)]
     Unknown,
 }

@@ -41,9 +41,10 @@ pub struct UpstreamRequest<'a> {
     pub stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instructions: Option<&'a str>,
-    /// Normalized tools forwarded to vLLM. Namespace tools must be flattened
-    /// before this is built; non-function/provider/client-owned tools are not
-    /// sent on the typed executor path.
+    /// Normalised tools forwarded to vLLM — always `Vec<FunctionTool>` regardless of
+    /// what tool types the client declared. Codex namespace tools are flattened
+    /// before this is built.
+    /// Skipped when empty so vLLM does not receive an empty array.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<FunctionTool>>,
     #[serde(skip_serializing_if = "is_absent_or_default_tool_choice")]
@@ -62,6 +63,9 @@ pub struct UpstreamRequest<'a> {
     pub metadata: Option<&'a Value>,
 }
 
+// serde's `skip_serializing_if` requires a `&Option<T>` receiver, so the
+// idiomatic `Option<&T>` clippy suggests does not apply here.
+#[allow(clippy::ref_option)]
 fn is_absent_or_default_tool_choice(choice: &Option<ToolChoice>) -> bool {
     choice.as_ref().is_none_or(|choice| matches!(choice, ToolChoice::Auto))
 }
@@ -69,9 +73,9 @@ fn is_absent_or_default_tool_choice(choice: &Option<ToolChoice>) -> bool {
 impl RequestPayload {
     /// Construct an `UpstreamRequest` suitable for forwarding to vLLM.
     ///
-    /// Codex namespace tools are flattened first, then each resulting tool
-    /// flows through the request-scoped registry so handler normalization stays
-    /// on the normal upstream conversion path.
+    /// All tool types are normalised to `Vec<FunctionTool>` through the
+    /// request-scoped [`ToolRegistry`]. Codex namespace tools are flattened
+    /// first so vLLM only sees `type: "function"` declarations.
     #[must_use]
     pub fn to_upstream_request(&self, stream: bool, registry: &ToolRegistry) -> UpstreamRequest<'_> {
         let default_tool_choice = ToolChoice::Auto;

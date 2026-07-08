@@ -66,11 +66,14 @@ impl std::fmt::Display for NonEmptyToolName {
     }
 }
 
-/// Responses tool params.
+// Request-side tool params  (serde-enum-representation, api-non-exhaustive)
+
+/// Wire-compatible with the existing `{"type":"function",...}` format.
 ///
-/// This is the public request/storage shape. Codex `namespace` tools are
-/// flattened inside the upstream request conversion path before handler
-/// normalization turns tools into vLLM-compatible function declarations.
+/// Marked `#[non_exhaustive]` because the Responses API adds new tool types
+/// (e.g. `computer_use_preview`). Downstream match arms must include a catch-all.
+/// Codex `namespace` tools stay in this public request/storage shape and are
+/// flattened inside the upstream request conversion path.
 #[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]

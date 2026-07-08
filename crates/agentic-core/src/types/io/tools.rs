@@ -117,10 +117,10 @@ pub(crate) fn resolve_tool_choice(
     request_choice: Option<&ToolChoice>,
     stored_choice: &ToolChoice,
     explicitly_set: bool,
-) -> Option<ToolChoice> {
-    Some(if explicitly_set {
+) -> ToolChoice {
+    if explicitly_set {
         request_choice.cloned().unwrap_or_default()
     } else {
         stored_choice.clone()
-    })
+    }
 }
