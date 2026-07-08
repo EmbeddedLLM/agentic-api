@@ -16,15 +16,15 @@ pub use storage::{
 };
 pub use tool::{
     CodexNamespaceHandler, FunctionHandler, GatewayExecutor, ToolEntry, ToolError, ToolHandler, ToolOutput,
-    ToolRegistry, ToolType, UpstreamToolConfig, WebSearchHandler,
+    ToolRegistry, ToolType, WebSearchHandler,
 };
 pub use types::{
     CodeInterpreterToolParam, CodexNamespaceMember, CodexNamespaceToolParam, EmptyToolNameError, FileSearchToolParam,
     FunctionTool, FunctionToolCall, FunctionToolParam, FunctionToolResultMessage, IncompleteDetails, InputContent,
     InputImageContent, InputItem, InputMessage, InputMessageContent, InputTextContent, InputTokenDetails, McpToolParam,
     NonEmptyToolName, OutputItem, OutputMessage, OutputTextContent, OutputTokenDetails, ReasoningOutput,
-    ReasoningTextContent, RequestPayload, RequestTool, ResponsePayload, ResponseUsage, ResponsesInput, ResponsesTool,
-    ToolChoice, UpstreamRequest, WebSearchActionSearch, WebSearchCall, WebSearchCallStatus, WebSearchContextSize,
-    WebSearchFilters, WebSearchSource, WebSearchToolParam, WebSearchUserLocation,
+    ReasoningTextContent, RequestPayload, ResponsePayload, ResponseUsage, ResponsesInput, ResponsesTool, ToolChoice,
+    UpstreamRequest, WebSearchActionSearch, WebSearchCall, WebSearchCallStatus, WebSearchContextSize, WebSearchFilters,
+    WebSearchSource, WebSearchToolParam, WebSearchUserLocation,
 };
 pub use utils::{utcnow_str, uuid7_str};

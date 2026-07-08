@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use super::super::models::Response as StorageDbResponse;
 use super::errors::StorageError;
 use crate::types::io::ToolChoice;
-use crate::types::tools::RequestTool;
+use crate::types::tools::ResponsesTool;
 use crate::utils::common::serialize_to_string;
 
 /// Response metadata with effective configuration.
@@ -15,7 +15,7 @@ use crate::utils::common::serialize_to_string;
 pub struct ResponseMetadata {
     pub model: String,
     pub previous_response_id: Option<String>,
-    pub effective_tools: Option<Vec<RequestTool>>,
+    pub effective_tools: Option<Vec<ResponsesTool>>,
     pub effective_tool_choice: ToolChoice,
     pub effective_instructions: Option<String>,
 }

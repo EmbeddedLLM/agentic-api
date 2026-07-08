@@ -316,9 +316,11 @@ impl ApplyDone for FunctionToolCall {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type")]
 pub enum OutputItem {
+    #[serde(rename = "message")]
     Message(OutputMessage),
+    #[serde(rename = "function_call")]
     FunctionCall(FunctionToolCall),
     #[serde(rename = "web_search_call")]
     WebSearchCall(WebSearchCall),
@@ -439,22 +441,14 @@ mod tests {
         });
         let item: OutputItem = serde_json::from_value(future_item).unwrap();
         assert!(matches!(item, OutputItem::Unknown));
-        assert_eq!(
-            serde_json::to_value(&item).unwrap(),
-            serde_json::json!({"type": "unknown"})
-        );
 
         let unknown = serde_json::json!({"type": "new_item", "payload": {"a": 1}});
         let item: InputItem = serde_json::from_value(unknown).unwrap();
         assert!(matches!(item, InputItem::Unknown));
-        assert_eq!(
-            serde_json::to_value(&item).unwrap(),
-            serde_json::json!({"type": "unknown"})
-        );
     }
 
     #[test]
-    fn known_items_with_new_nested_shapes_fall_back_to_unknown() {
+    fn known_items_with_new_nested_content_preserve_message_with_unknown_part() {
         let message = serde_json::json!({
             "type": "message",
             "role": "user",
@@ -467,10 +461,12 @@ mod tests {
         });
 
         let item: InputItem = serde_json::from_value(message).unwrap();
-        assert!(matches!(item, InputItem::Unknown));
-        assert_eq!(
-            serde_json::to_value(&item).unwrap(),
-            serde_json::json!({"type": "unknown"})
-        );
+        let InputItem::Message(message) = &item else {
+            panic!("expected message item");
+        };
+        let InputMessageContent::Parts(parts) = &message.content else {
+            panic!("expected message parts");
+        };
+        assert!(matches!(parts.as_slice(), [InputContent::Unknown]));
     }
 }

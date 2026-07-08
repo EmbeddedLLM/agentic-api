@@ -9,8 +9,8 @@ impl ResponsesTool {
     /// Normalise this tool declaration to the `FunctionTool` wire format that vLLM understands.
     ///
     /// `Function` variants convert directly, and `WebSearch` maps to the gateway-owned
-    /// function shim. Codex namespace tools are represented by [`crate::types::RequestTool`]
-    /// and flattened before they become `ResponsesTool` values.
+    /// function shim. Codex namespace tools are flattened before this conversion
+    /// runs in the upstream request path.
     ///
     /// Handler-less provider tools (`Mcp`, `FileSearch`, `CodeInterpreter`) plus
     /// `Unknown` return `None` and log at `debug` level. This keeps the upstream request
@@ -36,6 +36,10 @@ impl ResponsesTool {
             }
             Self::CodeInterpreter(_) => {
                 tracing::debug!("code_interpreter tool skipped in normalize - handler not yet registered");
+                None
+            }
+            Self::Namespace(p) => {
+                tracing::debug!(namespace = %p.name, "namespace tool skipped in normalize - flatten first");
                 None
             }
             Self::Unknown => {

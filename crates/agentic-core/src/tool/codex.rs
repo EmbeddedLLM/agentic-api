@@ -3,9 +3,7 @@ use std::collections::{HashMap, HashSet};
 use serde_json::{Map, Value};
 
 use crate::types::io::{FunctionTool, FunctionToolCall, OutputItem, ToolChoice};
-use crate::types::tools::{
-    CodexNamespaceMember, CodexNamespaceToolParam, NonEmptyToolName, RequestTool, ResponsesTool,
-};
+use crate::types::tools::{CodexNamespaceMember, CodexNamespaceToolParam, NonEmptyToolName, ResponsesTool};
 
 use super::handler::{ToolError, ToolHandler};
 use super::registry::ToolType;
@@ -155,9 +153,9 @@ pub struct CodexNamespaceHandler;
 
 impl CodexNamespaceHandler {
     #[must_use]
-    pub fn normalize_request_for_upstream(
+    pub fn flatten_tools_for_upstream(
         &self,
-        tools: Option<&[RequestTool]>,
+        tools: Option<&[ResponsesTool]>,
         tool_choice: &ToolChoice,
     ) -> CodexNamespaceRequestNormalization {
         let Some(tools) = tools else {
@@ -177,7 +175,7 @@ impl CodexNamespaceHandler {
         }
     }
 
-    pub fn restore_output_items(&self, output: &mut [OutputItem], tools: Option<&[RequestTool]>) {
+    pub fn restore_output_items(&self, output: &mut [OutputItem], tools: Option<&[ResponsesTool]>) {
         let Some(map) = namespace_map_from_tools(tools) else {
             return;
         };
@@ -189,7 +187,7 @@ impl CodexNamespaceHandler {
     }
 
     #[must_use]
-    pub fn restore_response_value(&self, value: &mut Value, tools: Option<&[RequestTool]>) -> bool {
+    pub fn restore_response_value(&self, value: &mut Value, tools: Option<&[ResponsesTool]>) -> bool {
         let Some(map) = namespace_map_from_tools(tools) else {
             return false;
         };
@@ -352,8 +350,8 @@ impl ToolHandler for CodexNamespaceHandler {
             tracing::warn!("normalize() called with invalid codex namespace param - validate() must be called first");
             return vec![];
         };
-        let tools = vec![RequestTool::Namespace(namespace)];
-        self.normalize_request_for_upstream(Some(&tools), &ToolChoice::Auto)
+        let tools = vec![ResponsesTool::Namespace(namespace)];
+        self.flatten_tools_for_upstream(Some(&tools), &ToolChoice::Auto)
             .tools
             .unwrap_or_default()
             .iter()
@@ -363,13 +361,13 @@ impl ToolHandler for CodexNamespaceHandler {
 }
 
 impl NamespaceMapBuilder {
-    fn with_typed_tools(mut self, tools: &[RequestTool]) -> Self {
+    fn with_typed_tools(mut self, tools: &[ResponsesTool]) -> Self {
         let _ = flatten_typed_tools_with_builder(tools, &mut self);
         self
     }
 }
 
-fn namespace_map_from_tools(tools: Option<&[RequestTool]>) -> Option<NamespaceMap> {
+fn namespace_map_from_tools(tools: Option<&[ResponsesTool]>) -> Option<NamespaceMap> {
     let tools = tools?;
     Some(
         NamespaceMapBuilder::new(typed_top_level_tool_names(tools))
@@ -378,21 +376,23 @@ fn namespace_map_from_tools(tools: Option<&[RequestTool]>) -> Option<NamespaceMa
     )
 }
 
-fn flatten_typed_tools_with_builder(tools: &[RequestTool], builder: &mut NamespaceMapBuilder) -> Vec<ResponsesTool> {
+fn flatten_typed_tools_with_builder(tools: &[ResponsesTool], builder: &mut NamespaceMapBuilder) -> Vec<ResponsesTool> {
     let mut upstream_tools = Vec::with_capacity(tools.len());
     for tool in tools {
         match tool {
-            RequestTool::Namespace(namespace) => {
+            ResponsesTool::Namespace(namespace) => {
                 flatten_typed_namespace_tool(namespace, builder, &mut upstream_tools);
             }
-            RequestTool::Function(function) => upstream_tools.push(ResponsesTool::Function(function.clone())),
-            RequestTool::Mcp(mcp) => upstream_tools.push(ResponsesTool::Mcp(mcp.clone())),
-            RequestTool::WebSearch(web_search) => upstream_tools.push(ResponsesTool::WebSearch(web_search.clone())),
-            RequestTool::FileSearch(file_search) => upstream_tools.push(ResponsesTool::FileSearch(file_search.clone())),
-            RequestTool::CodeInterpreter(code_interpreter) => {
+            ResponsesTool::Function(function) => upstream_tools.push(ResponsesTool::Function(function.clone())),
+            ResponsesTool::Mcp(mcp) => upstream_tools.push(ResponsesTool::Mcp(mcp.clone())),
+            ResponsesTool::WebSearch(web_search) => upstream_tools.push(ResponsesTool::WebSearch(web_search.clone())),
+            ResponsesTool::FileSearch(file_search) => {
+                upstream_tools.push(ResponsesTool::FileSearch(file_search.clone()))
+            }
+            ResponsesTool::CodeInterpreter(code_interpreter) => {
                 upstream_tools.push(ResponsesTool::CodeInterpreter(code_interpreter.clone()));
             }
-            RequestTool::Unknown => {}
+            ResponsesTool::Unknown => {}
         }
     }
     upstream_tools
@@ -445,17 +445,17 @@ fn flatten_typed_namespace_tool(
     }
 }
 
-fn typed_top_level_tool_names(tools: &[RequestTool]) -> HashSet<String> {
+fn typed_top_level_tool_names(tools: &[ResponsesTool]) -> HashSet<String> {
     tools
         .iter()
         .filter_map(|tool| match tool {
-            RequestTool::Function(function) => Some(function.name.as_str().to_string()),
-            RequestTool::Mcp(_)
-            | RequestTool::WebSearch(_)
-            | RequestTool::FileSearch(_)
-            | RequestTool::CodeInterpreter(_)
-            | RequestTool::Namespace(_)
-            | RequestTool::Unknown => None,
+            ResponsesTool::Function(function) => Some(function.name.as_str().to_string()),
+            ResponsesTool::Mcp(_)
+            | ResponsesTool::WebSearch(_)
+            | ResponsesTool::FileSearch(_)
+            | ResponsesTool::CodeInterpreter(_)
+            | ResponsesTool::Namespace(_)
+            | ResponsesTool::Unknown => None,
         })
         .collect()
 }
@@ -643,7 +643,7 @@ mod tests {
 
     #[test]
     fn unqualified_function_tool_choice_is_not_rewritten_to_namespace_member() {
-        let tools: Vec<RequestTool> = serde_json::from_value(serde_json::json!([
+        let tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([
             {
                 "type": "namespace",
                 "name": "mcp__shell",
@@ -656,7 +656,7 @@ mod tests {
             name: "run".to_string(),
         };
 
-        let normalized = CodexNamespaceHandler.normalize_request_for_upstream(Some(&tools), &choice);
+        let normalized = CodexNamespaceHandler.flatten_tools_for_upstream(Some(&tools), &choice);
 
         assert_eq!(
             normalized.tool_choice,
@@ -673,7 +673,7 @@ mod tests {
 
     #[test]
     fn namespaced_function_tool_choice_flattens_exact_member() {
-        let tools: Vec<RequestTool> = serde_json::from_value(serde_json::json!([
+        let tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([
             {
                 "type": "namespace",
                 "name": "mcp__shell",
@@ -693,7 +693,7 @@ mod tests {
         }))
         .unwrap();
 
-        let normalized = CodexNamespaceHandler.normalize_request_for_upstream(Some(&tools), &choice);
+        let normalized = CodexNamespaceHandler.flatten_tools_for_upstream(Some(&tools), &choice);
 
         assert_eq!(
             normalized.tool_choice,
@@ -706,7 +706,7 @@ mod tests {
 
     #[test]
     fn flatten_tools_does_not_generate_colliding_namespace_member_name() {
-        let tools: Vec<RequestTool> = serde_json::from_value(serde_json::json!([
+        let tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([
             {"type": "function", "name": "agentic_ns__mcp__shell__run"},
             {
                 "type": "namespace",
@@ -717,7 +717,7 @@ mod tests {
         .unwrap();
 
         let upstream = CodexNamespaceHandler
-            .normalize_request_for_upstream(Some(&tools), &ToolChoice::Auto)
+            .flatten_tools_for_upstream(Some(&tools), &ToolChoice::Auto)
             .tools
             .expect("tools");
         let flat_function_count = upstream
@@ -731,7 +731,7 @@ mod tests {
 
     #[test]
     fn flat_namespace_member_call_preserves_tools_argument() {
-        let tools: Vec<RequestTool> = serde_json::from_value(serde_json::json!([
+        let tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([
             {
                 "type": "namespace",
                 "name": "mcp__agentic_fixture",
@@ -756,7 +756,7 @@ mod tests {
 
     #[test]
     fn plain_function_call_round_trip() {
-        let tools: Vec<RequestTool> = serde_json::from_value(serde_json::json!([
+        let tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([
             {
                 "type": "function",
                 "name": "get_weather",
@@ -765,7 +765,7 @@ mod tests {
         ]))
         .unwrap();
         let upstream = CodexNamespaceHandler
-            .normalize_request_for_upstream(Some(&tools), &ToolChoice::Auto)
+            .flatten_tools_for_upstream(Some(&tools), &ToolChoice::Auto)
             .tools
             .expect("tools");
         let mut output = vec![completed_call("get_weather", "{\"city\":\"SF\"}")];
@@ -786,7 +786,7 @@ mod tests {
 
     #[test]
     fn response_value_normalizes_nested_function_call_item() {
-        let tools: Vec<RequestTool> = serde_json::from_value(serde_json::json!([
+        let tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([
             {
                 "type": "namespace",
                 "name": "mcp__agentic_fixture",

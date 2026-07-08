@@ -9,7 +9,7 @@ use agentic_core::storage::{ConversationStore, ResponseStore};
 use agentic_core::tool::{GatewayExecutor, WebSearchHandler};
 use agentic_core::types::io::{OutputItem, ResponsesInput, ToolChoice};
 use agentic_core::types::request_response::RequestPayload;
-use agentic_core::types::tools::RequestTool;
+use agentic_core::types::tools::ResponsesTool;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
@@ -567,7 +567,7 @@ async fn execute_runs_web_search_and_sends_tool_output_back_to_model() {
     ])
     .await;
     let exec_ctx = build_exec_ctx(llm.url(), you_url).await;
-    let web_search: RequestTool = serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).unwrap();
+    let web_search: ResponsesTool = serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).unwrap();
     let payload = RequestPayload {
         model: "test-model".to_owned(),
         input: ResponsesInput::Text("look up rust async".to_owned()),
@@ -575,8 +575,7 @@ async fn execute_runs_web_search_and_sends_tool_output_back_to_model() {
         previous_response_id: None,
         conversation_id: None,
         tools: Some(vec![web_search]),
-        tool_choice: ToolChoice::Auto,
-        tool_choice_explicitly_set: false,
+        tool_choice: None,
         stream: false,
         store: true,
         include: None,
@@ -651,7 +650,7 @@ async fn execute_relaxes_forced_tool_choice_after_web_search_result() {
     ])
     .await;
     let exec_ctx = build_exec_ctx(llm.url(), you_url).await;
-    let web_search: RequestTool = serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).unwrap();
+    let web_search: ResponsesTool = serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).unwrap();
     let payload = RequestPayload {
         model: "test-model".to_owned(),
         input: ResponsesInput::Text("look up rust async".to_owned()),
@@ -659,8 +658,7 @@ async fn execute_relaxes_forced_tool_choice_after_web_search_result() {
         previous_response_id: None,
         conversation_id: None,
         tools: Some(vec![web_search]),
-        tool_choice: ToolChoice::Required,
-        tool_choice_explicitly_set: true,
+        tool_choice: Some(ToolChoice::Required),
         stream: false,
         store: true,
         include: None,
@@ -690,8 +688,8 @@ async fn execute_returns_mixed_client_tool_calls_without_followup_model_request(
     ])
     .await;
     let exec_ctx = build_exec_ctx(llm.url(), you_url).await;
-    let web_search: RequestTool = serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).unwrap();
-    let client_function: RequestTool = serde_json::from_value(serde_json::json!({
+    let web_search: ResponsesTool = serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).unwrap();
+    let client_function: ResponsesTool = serde_json::from_value(serde_json::json!({
         "type": "function",
         "name": "get_weather",
         "parameters": {
@@ -707,8 +705,7 @@ async fn execute_returns_mixed_client_tool_calls_without_followup_model_request(
         previous_response_id: None,
         conversation_id: None,
         tools: Some(vec![web_search, client_function]),
-        tool_choice: ToolChoice::Auto,
-        tool_choice_explicitly_set: false,
+        tool_choice: None,
         stream: false,
         store: true,
         include: None,
@@ -754,8 +751,7 @@ async fn execute_returns_mixed_client_tool_calls_without_followup_model_request(
         previous_response_id: Some(response.id),
         conversation_id: None,
         tools: None,
-        tool_choice: ToolChoice::Auto,
-        tool_choice_explicitly_set: false,
+        tool_choice: None,
         stream: false,
         store: true,
         include: None,
@@ -816,7 +812,7 @@ async fn execute_accumulates_usage_across_web_search_model_rounds() {
     ])
     .await;
     let exec_ctx = build_exec_ctx(llm.url(), you_url).await;
-    let web_search: RequestTool = serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).unwrap();
+    let web_search: ResponsesTool = serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).unwrap();
     let payload = RequestPayload {
         model: "test-model".to_owned(),
         input: ResponsesInput::Text("look up rust async".to_owned()),
@@ -824,8 +820,7 @@ async fn execute_accumulates_usage_across_web_search_model_rounds() {
         previous_response_id: None,
         conversation_id: None,
         tools: Some(vec![web_search]),
-        tool_choice: ToolChoice::Auto,
-        tool_choice_explicitly_set: false,
+        tool_choice: None,
         stream: false,
         store: true,
         include: None,
@@ -859,7 +854,7 @@ async fn stream_emits_web_search_lifecycle_events_before_final_payload() {
     ])
     .await;
     let exec_ctx = build_exec_ctx(llm.url(), you_url).await;
-    let web_search: RequestTool = serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).unwrap();
+    let web_search: ResponsesTool = serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).unwrap();
     let payload = RequestPayload {
         model: "test-model".to_owned(),
         input: ResponsesInput::Text("look up rust async".to_owned()),
@@ -867,8 +862,7 @@ async fn stream_emits_web_search_lifecycle_events_before_final_payload() {
         previous_response_id: None,
         conversation_id: None,
         tools: Some(vec![web_search]),
-        tool_choice: ToolChoice::Auto,
-        tool_choice_explicitly_set: false,
+        tool_choice: None,
         stream: true,
         store: true,
         include: None,
@@ -941,7 +935,7 @@ async fn stream_hides_web_search_function_events_when_name_arrives_on_done() {
     ])
     .await;
     let exec_ctx = build_exec_ctx(llm.url(), you_url).await;
-    let web_search: RequestTool = serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).unwrap();
+    let web_search: ResponsesTool = serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).unwrap();
     let payload = RequestPayload {
         model: "test-model".to_owned(),
         input: ResponsesInput::Text("look up rust async".to_owned()),
@@ -949,8 +943,7 @@ async fn stream_hides_web_search_function_events_when_name_arrives_on_done() {
         previous_response_id: None,
         conversation_id: None,
         tools: Some(vec![web_search]),
-        tool_choice: ToolChoice::Auto,
-        tool_choice_explicitly_set: false,
+        tool_choice: None,
         stream: true,
         store: true,
         include: None,
@@ -1007,7 +1000,7 @@ async fn execute_runs_multiple_web_search_calls_concurrently() {
     ])
     .await;
     let exec_ctx = build_exec_ctx(llm.url(), you_url).await;
-    let web_search: RequestTool = serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).unwrap();
+    let web_search: ResponsesTool = serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).unwrap();
     let payload = RequestPayload {
         model: "test-model".to_owned(),
         input: ResponsesInput::Text("look up rust async and tokio streams".to_owned()),
@@ -1015,8 +1008,7 @@ async fn execute_runs_multiple_web_search_calls_concurrently() {
         previous_response_id: None,
         conversation_id: None,
         tools: Some(vec![web_search]),
-        tool_choice: ToolChoice::Auto,
-        tool_choice_explicitly_set: false,
+        tool_choice: None,
         stream: false,
         store: true,
         include: None,
@@ -1055,7 +1047,7 @@ async fn execute_feeds_web_search_execution_errors_back_to_model() {
     ])
     .await;
     let exec_ctx = build_exec_ctx(llm.url(), you_url).await;
-    let web_search: RequestTool = serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).unwrap();
+    let web_search: ResponsesTool = serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).unwrap();
     let payload = RequestPayload {
         model: "test-model".to_owned(),
         input: ResponsesInput::Text("look up rust async".to_owned()),
@@ -1063,8 +1055,7 @@ async fn execute_feeds_web_search_execution_errors_back_to_model() {
         previous_response_id: None,
         conversation_id: None,
         tools: Some(vec![web_search]),
-        tool_choice: ToolChoice::Auto,
-        tool_choice_explicitly_set: false,
+        tool_choice: None,
         stream: false,
         store: true,
         include: None,
@@ -1105,7 +1096,7 @@ async fn execute_errors_after_max_gateway_tool_rounds() {
         .collect();
     let llm = support::MockServer::start_deque(llm_responses).await;
     let exec_ctx = build_exec_ctx(llm.url(), you_url).await;
-    let web_search: RequestTool = serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).unwrap();
+    let web_search: ResponsesTool = serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).unwrap();
     let payload = RequestPayload {
         model: "test-model".to_owned(),
         input: ResponsesInput::Text("look up rust async".to_owned()),
@@ -1113,8 +1104,7 @@ async fn execute_errors_after_max_gateway_tool_rounds() {
         previous_response_id: None,
         conversation_id: None,
         tools: Some(vec![web_search]),
-        tool_choice: ToolChoice::Auto,
-        tool_choice_explicitly_set: false,
+        tool_choice: None,
         stream: false,
         store: true,
         include: None,
@@ -1147,7 +1137,7 @@ async fn execute_feeds_invalid_web_search_arguments_back_to_model() {
     ])
     .await;
     let exec_ctx = build_exec_ctx(llm.url(), you_url).await;
-    let web_search: RequestTool = serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).unwrap();
+    let web_search: ResponsesTool = serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).unwrap();
     let payload = RequestPayload {
         model: "test-model".to_owned(),
         input: ResponsesInput::Text("look up rust async".to_owned()),
@@ -1155,8 +1145,7 @@ async fn execute_feeds_invalid_web_search_arguments_back_to_model() {
         previous_response_id: None,
         conversation_id: None,
         tools: Some(vec![web_search]),
-        tool_choice: ToolChoice::Auto,
-        tool_choice_explicitly_set: false,
+        tool_choice: None,
         stream: false,
         store: true,
         include: None,
@@ -1197,7 +1186,7 @@ async fn execute_errors_when_gateway_tool_call_fanout_exceeds_limit() {
     let (you_url, mut captured_you, _you_handle) = spawn_mock_you().await;
     let llm = support::MockServer::start_deque(vec![many_web_search_function_call_response(9)]).await;
     let exec_ctx = build_exec_ctx(llm.url(), you_url).await;
-    let web_search: RequestTool = serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).unwrap();
+    let web_search: ResponsesTool = serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).unwrap();
     let payload = RequestPayload {
         model: "test-model".to_owned(),
         input: ResponsesInput::Text("look up many things".to_owned()),
@@ -1205,8 +1194,7 @@ async fn execute_errors_when_gateway_tool_call_fanout_exceeds_limit() {
         previous_response_id: None,
         conversation_id: None,
         tools: Some(vec![web_search]),
-        tool_choice: ToolChoice::Auto,
-        tool_choice_explicitly_set: false,
+        tool_choice: None,
         stream: false,
         store: true,
         include: None,
@@ -1261,8 +1249,7 @@ async fn stream_error_events_escape_error_messages() {
         previous_response_id: None,
         conversation_id: None,
         tools: None,
-        tool_choice: ToolChoice::Auto,
-        tool_choice_explicitly_set: false,
+        tool_choice: None,
         stream: true,
         store: true,
         include: None,

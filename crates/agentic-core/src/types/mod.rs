@@ -12,6 +12,6 @@ pub use io::{
 pub use request_response::{IncompleteDetails, RequestPayload, ResponsePayload, UpstreamRequest};
 pub use tools::{
     CodeInterpreterToolParam, CodexNamespaceMember, CodexNamespaceToolParam, EmptyToolNameError, FileSearchToolParam,
-    FunctionToolParam, McpToolParam, NonEmptyToolName, RequestTool, ResponsesTool, WebSearchContextSize,
-    WebSearchFilters, WebSearchToolParam, WebSearchUserLocation,
+    FunctionToolParam, McpToolParam, NonEmptyToolName, ResponsesTool, WebSearchContextSize, WebSearchFilters,
+    WebSearchToolParam, WebSearchUserLocation,
 };

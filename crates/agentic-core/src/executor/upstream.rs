@@ -14,21 +14,6 @@ use crate::tool::ToolRegistry;
 use crate::types::request_response::ResponsePayload;
 use crate::utils::common::serialize_to_string;
 
-/// Serialize a hydrated, upstream-prepared context into the vLLM request body.
-///
-/// The original request stored on the context is left untouched; namespace
-/// tools and tool choices are flattened only in this cloned upstream body.
-///
-/// # Errors
-/// Returns [`ExecutorError::JsonError`] when the upstream request body cannot be serialized.
-pub fn upstream_request_json(ctx: &RequestContext, registry: &ToolRegistry, stream: bool) -> ExecutorResult<String> {
-    let mut upstream_request = ctx.enriched_request.clone();
-    let upstream_tool_config = registry.upstream_tool_config(&ctx.enriched_request.tool_choice);
-    upstream_request.tool_choice = upstream_tool_config.tool_choice;
-    serialize_to_string(&upstream_request.to_upstream_request_with_tools(stream, upstream_tool_config.tools))
-        .map_err(ExecutorError::JsonError)
-}
-
 pub(super) async fn fetch_blocking_payload(
     ctx: &RequestContext,
     exec_ctx: &ExecutionContext,
@@ -37,7 +22,8 @@ pub(super) async fn fetch_blocking_payload(
 ) -> ExecutorResult<ResponsePayload> {
     let url = exec_ctx.responses_url();
     // Non-streaming request: stream=false -> full JSON body -> from_json.
-    let upstream_json = upstream_request_json(ctx, registry, false)?;
+    let upstream_json = serialize_to_string(&ctx.enriched_request.to_upstream_request(false, registry))
+        .map_err(ExecutorError::JsonError)?;
 
     let body = fetch_response_json(upstream_json, &url, &exec_ctx.client, auth).await?;
 
@@ -60,7 +46,8 @@ pub(super) async fn fetch_stream_payload(
     stream_events: Option<&mpsc::UnboundedSender<String>>,
 ) -> ExecutorResult<ResponsePayload> {
     let url = exec_ctx.responses_url();
-    let upstream_json = upstream_request_json(ctx, registry, true)?;
+    let upstream_json = serialize_to_string(&ctx.enriched_request.to_upstream_request(true, registry))
+        .map_err(ExecutorError::JsonError)?;
     let mut line_stream = Box::pin(call_inference(
         upstream_json,
         url,

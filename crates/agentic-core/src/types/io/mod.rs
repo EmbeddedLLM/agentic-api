@@ -12,5 +12,5 @@ pub use output::{
     WebSearchActionSearch, WebSearchCall, WebSearchCallStatus, WebSearchSource,
 };
 pub use tools::{FunctionTool, ToolChoice};
-pub(crate) use tools::{discard_unknown_tool_values, resolve_tool_choice, resolve_tools};
+pub(crate) use tools::{resolve_tool_choice, resolve_tools};
 pub use usage::{InputTokenDetails, OutputTokenDetails, ResponseUsage};

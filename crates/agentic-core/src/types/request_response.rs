@@ -1,24 +1,23 @@
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::io::{
     FunctionTool, InputItem, InputMessage, InputMessageContent, OutputItem, ResponseUsage, ResponsesInput, ToolChoice,
-    discard_unknown_tool_values,
 };
-use super::tools::RequestTool;
+use super::tools::ResponsesTool;
+use crate::tool::{CodexNamespaceHandler, ToolRegistry};
 use crate::utils::common::serialize_to_string;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RequestPayload {
     pub model: String,
     pub input: ResponsesInput,
     pub instructions: Option<String>,
     pub previous_response_id: Option<String>,
     pub conversation_id: Option<String>,
-    pub tools: Option<Vec<RequestTool>>,
-    pub tool_choice: ToolChoice,
-    #[serde(skip)]
-    pub tool_choice_explicitly_set: bool,
+    pub tools: Option<Vec<ResponsesTool>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<ToolChoice>,
     #[serde(default)]
     pub stream: bool,
     #[serde(default = "default_true")]
@@ -35,56 +34,6 @@ fn default_true() -> bool {
     true
 }
 
-impl<'de> Deserialize<'de> for RequestPayload {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        struct WireRequestPayload {
-            model: String,
-            input: ResponsesInput,
-            instructions: Option<String>,
-            previous_response_id: Option<String>,
-            conversation_id: Option<String>,
-            tools: Option<Vec<RequestTool>>,
-            tool_choice: Option<ToolChoice>,
-            #[serde(default)]
-            stream: bool,
-            #[serde(default = "default_true")]
-            store: bool,
-            include: Option<Vec<String>>,
-            temperature: Option<f64>,
-            top_p: Option<f64>,
-            max_output_tokens: Option<u32>,
-            truncation: Option<String>,
-            metadata: Option<Value>,
-        }
-
-        let wire = WireRequestPayload::deserialize(deserializer)?;
-        let tool_choice_explicitly_set = wire.tool_choice.is_some();
-        let tools = wire.tools.map(discard_unknown_tool_values);
-        Ok(Self {
-            model: wire.model,
-            input: wire.input,
-            instructions: wire.instructions,
-            previous_response_id: wire.previous_response_id,
-            conversation_id: wire.conversation_id,
-            tools,
-            tool_choice: wire.tool_choice.unwrap_or_default(),
-            tool_choice_explicitly_set,
-            stream: wire.stream,
-            store: wire.store,
-            include: wire.include,
-            temperature: wire.temperature,
-            top_p: wire.top_p,
-            max_output_tokens: wire.max_output_tokens,
-            truncation: wire.truncation,
-            metadata: wire.metadata,
-        })
-    }
-}
-
 #[derive(Debug, Serialize)]
 pub struct UpstreamRequest<'a> {
     pub model: &'a str,
@@ -97,8 +46,8 @@ pub struct UpstreamRequest<'a> {
     /// sent on the typed executor path.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<FunctionTool>>,
-    #[serde(skip_serializing_if = "is_default_tool_choice")]
-    pub tool_choice: &'a ToolChoice,
+    #[serde(skip_serializing_if = "is_absent_or_default_tool_choice")]
+    pub tool_choice: Option<ToolChoice>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include: Option<&'a Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -113,33 +62,29 @@ pub struct UpstreamRequest<'a> {
     pub metadata: Option<&'a Value>,
 }
 
-fn is_default_tool_choice(choice: &ToolChoice) -> bool {
-    matches!(choice, ToolChoice::Auto)
+fn is_absent_or_default_tool_choice(choice: &Option<ToolChoice>) -> bool {
+    choice.as_ref().is_none_or(|choice| matches!(choice, ToolChoice::Auto))
 }
 
 impl RequestPayload {
-    pub(crate) fn normalize_for_upstream(&mut self) {
-        self.input.normalize_for_upstream();
-    }
-
-    /// Construct an `UpstreamRequest` with tools normalized by the caller.
+    /// Construct an `UpstreamRequest` suitable for forwarding to vLLM.
     ///
-    /// The executor uses this after building a request-scoped `ToolRegistry`,
-    /// so tool normalization can flow through the appropriate tool handlers.
+    /// Codex namespace tools are flattened first, then each resulting tool
+    /// flows through the request-scoped registry so handler normalization stays
+    /// on the normal upstream conversion path.
     #[must_use]
-    pub fn to_upstream_request_with_tools(
-        &self,
-        stream: bool,
-        tools: Option<Vec<FunctionTool>>,
-    ) -> UpstreamRequest<'_> {
-        let tools = tools.filter(|tools| !tools.is_empty());
+    pub fn to_upstream_request(&self, stream: bool, registry: &ToolRegistry) -> UpstreamRequest<'_> {
+        let default_tool_choice = ToolChoice::Auto;
+        let request_tool_choice = self.tool_choice.as_ref().unwrap_or(&default_tool_choice);
+        let normalized = CodexNamespaceHandler.flatten_tools_for_upstream(self.tools.as_deref(), request_tool_choice);
+        let tools = registry.normalize_tools_for_upstream(normalized.tools.as_deref());
         UpstreamRequest {
             model: &self.model,
             input: &self.input,
             stream,
             instructions: self.instructions.as_deref(),
             tools,
-            tool_choice: &self.tool_choice,
+            tool_choice: Some(normalized.tool_choice),
             include: self.include.as_ref(),
             temperature: self.temperature,
             top_p: self.top_p,
@@ -216,14 +161,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn request_payload_tracks_explicit_tool_choice_presence() {
+    fn request_payload_uses_option_tool_choice_for_missing_vs_explicit() {
         let absent: RequestPayload = serde_json::from_value(serde_json::json!({
             "model": "test",
             "input": "hi"
         }))
         .unwrap();
-        assert_eq!(absent.tool_choice, ToolChoice::Auto);
-        assert!(!absent.tool_choice_explicitly_set);
+        assert_eq!(absent.tool_choice, None);
 
         let explicit: RequestPayload = serde_json::from_value(serde_json::json!({
             "model": "test",
@@ -231,32 +175,29 @@ mod tests {
             "tool_choice": "none"
         }))
         .unwrap();
-        assert_eq!(explicit.tool_choice, ToolChoice::None);
-        assert!(explicit.tool_choice_explicitly_set);
+        assert_eq!(explicit.tool_choice, Some(ToolChoice::None));
     }
 
     #[test]
-    fn normalize_for_upstream_carries_instructions_forward() {
-        let mut payload: RequestPayload = serde_json::from_value(serde_json::json!({
+    fn to_upstream_request_carries_instructions_forward() {
+        let payload: RequestPayload = serde_json::from_value(serde_json::json!({
             "model": "test",
             "instructions": "rules",
             "input": "hi"
         }))
         .unwrap();
 
-        payload.normalize_for_upstream();
-
         assert_eq!(payload.instructions.as_deref(), Some("rules"));
         assert!(matches!(&payload.input, ResponsesInput::Text(text) if text == "hi"));
 
-        let upstream = payload.to_upstream_request_with_tools(false, None);
+        let upstream = payload.to_upstream_request(false, &ToolRegistry::default());
         let value = serde_json::to_value(upstream).unwrap();
         assert_eq!(value["instructions"], "rules");
         assert_eq!(value["input"], "hi");
     }
 
     #[test]
-    fn request_payload_discards_unknown_tools_and_namespace_members() {
+    fn to_upstream_request_flattens_namespace_and_skips_unknown_tools() {
         let payload: RequestPayload = serde_json::from_value(serde_json::json!({
             "model": "test",
             "input": "hi",
@@ -274,12 +215,18 @@ mod tests {
         }))
         .unwrap();
 
-        let tools = payload.tools.expect("tools should preserve explicit presence");
-        assert_eq!(tools.len(), 1);
-        let RequestTool::Namespace(namespace) = &tools[0] else {
+        let tools = payload.tools.as_ref().expect("tools should preserve explicit presence");
+        assert_eq!(tools.len(), 2);
+        let ResponsesTool::Namespace(namespace) = &tools[0] else {
             panic!("expected namespace tool");
         };
-        assert_eq!(namespace.tools.len(), 1);
+        assert_eq!(namespace.tools.len(), 2);
+
+        let registry = ToolRegistry::build(tools);
+        let upstream = payload.to_upstream_request(false, &registry);
+        let value = serde_json::to_value(upstream).unwrap();
+        assert_eq!(value["tools"].as_array().expect("upstream tools").len(), 1);
+        assert_eq!(value["tools"][0]["name"], "agentic_ns__mcp__shell__run");
     }
 
     #[test]

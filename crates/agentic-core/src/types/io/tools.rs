@@ -1,7 +1,7 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de, ser::SerializeMap};
 use serde_json::Value;
 
-use crate::types::tools::RequestTool;
+use crate::types::tools::ResponsesTool;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionTool {
@@ -99,44 +99,28 @@ impl<'de> Deserialize<'de> for ToolChoice {
 /// set by the caller, otherwise falling back to the stored configuration.
 #[inline]
 pub(crate) fn resolve_tools(
-    request_tools: Option<&[RequestTool]>,
-    stored_tools: Option<&[RequestTool]>,
+    request_tools: Option<&[ResponsesTool]>,
+    stored_tools: Option<&[ResponsesTool]>,
     tools_explicitly_set: bool,
-) -> Option<Vec<RequestTool>> {
+) -> Option<Vec<ResponsesTool>> {
     if tools_explicitly_set {
         request_tools
     } else {
         stored_tools
     }
-    .map(|tools| discard_unknown_tool_values(tools.iter().cloned()))
-}
-
-pub(crate) fn discard_unknown_tool_values(tools: impl IntoIterator<Item = RequestTool>) -> Vec<RequestTool> {
-    tools
-        .into_iter()
-        .filter_map(|mut tool| {
-            match &mut tool {
-                RequestTool::Namespace(namespace) => {
-                    namespace.tools.retain(|member| !member.is_unknown());
-                }
-                RequestTool::Unknown => return None,
-                RequestTool::Function(_)
-                | RequestTool::Mcp(_)
-                | RequestTool::WebSearch(_)
-                | RequestTool::FileSearch(_)
-                | RequestTool::CodeInterpreter(_) => {}
-            }
-            Some(tool)
-        })
-        .collect()
+    .map(<[_]>::to_vec)
 }
 
 /// Returns the effective tool choice using the same precedence as [`resolve_tools`].
 #[inline]
 pub(crate) fn resolve_tool_choice(
-    request_choice: &ToolChoice,
+    request_choice: Option<&ToolChoice>,
     stored_choice: &ToolChoice,
     explicitly_set: bool,
-) -> ToolChoice {
-    if explicitly_set { request_choice } else { stored_choice }.clone()
+) -> Option<ToolChoice> {
+    Some(if explicitly_set {
+        request_choice.cloned().unwrap_or_default()
+    } else {
+        stored_choice.clone()
+    })
 }

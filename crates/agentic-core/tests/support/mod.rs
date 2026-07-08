@@ -22,7 +22,7 @@ use tokio::task::JoinHandle;
 
 use agentic_core::executor::{BoxStream, ConversationHandler, ExecutionContext, ResponseHandler};
 use agentic_core::storage::{ConversationStore, DbPool, ResponseStore, create_pool_with_schema};
-use agentic_core::types::io::{OutputItem, ResponsesInput, ToolChoice};
+use agentic_core::types::io::{OutputItem, ResponsesInput};
 use agentic_core::types::request_response::{RequestPayload, ResponsePayload};
 
 #[derive(Debug, Deserialize)]
@@ -356,8 +356,7 @@ pub fn make_request(
         previous_response_id,
         conversation_id,
         tools: None,
-        tool_choice: ToolChoice::Auto,
-        tool_choice_explicitly_set: false,
+        tool_choice: None,
         stream,
         store,
         include: None,

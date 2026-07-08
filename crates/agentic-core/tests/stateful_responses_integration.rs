@@ -9,7 +9,7 @@ use agentic_core::executor::execute;
 use agentic_core::executor::request::RequestContext;
 use agentic_core::types::request_response::RequestPayload;
 use agentic_core::types::tools::{FunctionToolParam, NonEmptyToolName};
-use agentic_core::{FunctionToolResultMessage, InputItem, RequestTool, ResponsesInput, ToolChoice};
+use agentic_core::{FunctionToolResultMessage, InputItem, ResponsesInput, ResponsesTool, ToolChoice};
 use either::Either;
 use futures::StreamExt;
 use serde_json::Value;
@@ -294,7 +294,7 @@ async fn test_codex_namespace_tool_shape_rehydrates_from_previous_response_metad
             "tools": [{"type": "function", "name": "run", "parameters": {"type": "object"}}]
         }
     ]);
-    let tools: Vec<RequestTool> = serde_json::from_value(tool_json.clone()).unwrap();
+    let tools: Vec<ResponsesTool> = serde_json::from_value(tool_json.clone()).unwrap();
 
     let mut first = make_request("seed", true, false, None, None);
     first.tools = Some(tools);
@@ -325,13 +325,11 @@ async fn test_previous_response_id_explicit_tool_choice_overrides_stored_choice(
         TestFixture::new_with_responses(vec![text_response("seed answer"), text_response("next answer")]).await;
 
     let mut first = make_request("seed", true, false, None, None);
-    first.tool_choice = ToolChoice::Required;
-    first.tool_choice_explicitly_set = true;
+    first.tool_choice = Some(ToolChoice::Required);
     let p1 = unwrap_blocking(execute(first, Arc::clone(&fixture.exec_ctx)).await.expect("first turn"));
 
     let mut second = make_request("next", true, false, Some(p1.id), None);
-    second.tool_choice = ToolChoice::None;
-    second.tool_choice_explicitly_set = true;
+    second.tool_choice = Some(ToolChoice::None);
     let _p2 = unwrap_blocking(
         execute(second, Arc::clone(&fixture.exec_ctx))
             .await
@@ -398,7 +396,7 @@ async fn test_previous_response_id_rehydrates_function_call_before_tool_output()
 #[tokio::test]
 async fn test_mcp_namespace_showcase_round_trip_rehydrates_calls_tools_and_outputs() {
     let tool_json = mcp_showcase_tools_json();
-    let tools: Vec<RequestTool> = serde_json::from_value(tool_json.clone()).expect("tool fixture parses");
+    let tools: Vec<ResponsesTool> = serde_json::from_value(tool_json.clone()).expect("tool fixture parses");
     let tool_call_response = MockResponse::Json(
         serde_json::json!({
             "id": "resp_mcp_showcase",
@@ -521,7 +519,7 @@ async fn test_previous_response_id_persists_inherited_tools_and_choice() {
     let fixture =
         TestFixture::new_with_responses(vec![text_response("seed answer"), text_response("follow up answer")]).await;
 
-    let tool = RequestTool::Function(FunctionToolParam {
+    let tool = ResponsesTool::Function(FunctionToolParam {
         name: NonEmptyToolName::try_from("lookup_weather").expect("valid tool name"),
         description: Some("Look up weather".to_string()),
         parameters: Some(serde_json::json!({
@@ -537,7 +535,7 @@ async fn test_previous_response_id_persists_inherited_tools_and_choice() {
 
     let mut first_request = make_request("seed", true, false, None, None);
     first_request.tools = Some(vec![tool]);
-    first_request.tool_choice = ToolChoice::Required;
+    first_request.tool_choice = Some(ToolChoice::Required);
 
     let p1 = unwrap_blocking(
         execute(first_request, Arc::clone(&fixture.exec_ctx))
@@ -547,7 +545,7 @@ async fn test_previous_response_id_persists_inherited_tools_and_choice() {
 
     let mut second_request = make_request("follow up", true, false, Some(p1.id.clone()), None);
     second_request.tools = None;
-    second_request.tool_choice = ToolChoice::Auto;
+    second_request.tool_choice = None;
 
     let p2 = unwrap_blocking(
         execute(second_request.clone(), Arc::clone(&fixture.exec_ctx))
@@ -584,7 +582,7 @@ async fn test_previous_response_id_persists_inherited_tools_and_choice() {
     let tools = stored.metadata.effective_tools.expect("expected persisted tools");
     assert_eq!(tools.len(), 1);
     match &tools[0] {
-        RequestTool::Function(p) => {
+        ResponsesTool::Function(p) => {
             assert_eq!(p.name.as_str(), "lookup_weather");
             assert_eq!(p.description.as_deref(), Some("Look up weather"));
             assert_eq!(p.strict, Some(true));

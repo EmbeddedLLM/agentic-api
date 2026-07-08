@@ -81,9 +81,9 @@ async fn from_response(ctx: &mut RequestContext, exec_ctx: &ExecutionContext) ->
         ctx.original_request.tools.is_some(),
     );
     ctx.enriched_request.tool_choice = resolve_tool_choice(
-        &ctx.original_request.tool_choice,
+        ctx.original_request.tool_choice.as_ref(),
         &stored.metadata.effective_tool_choice,
-        ctx.original_request.tool_choice_explicitly_set,
+        ctx.original_request.tool_choice.is_some(),
     );
     ctx.conversation_id = stored.conversation_id;
     Ok(())

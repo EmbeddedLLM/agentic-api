@@ -66,44 +66,15 @@ impl std::fmt::Display for NonEmptyToolName {
     }
 }
 
-/// Namespace-free Responses tool params.
+/// Responses tool params.
 ///
-/// This enum covers ordinary tool declarations that can flow through the generic
-/// tool framework. Codex `namespace` tools are accepted only by [`RequestTool`]
-/// at the request/storage boundary and flattened into `Function` variants before
-/// the typed upstream executor path.
+/// This is the public request/storage shape. Codex `namespace` tools are
+/// flattened inside the upstream request conversion path before handler
+/// normalization turns tools into vLLM-compatible function declarations.
 #[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ResponsesTool {
-    #[serde(rename = "function")]
-    Function(FunctionToolParam),
-    #[serde(rename = "mcp")]
-    Mcp(McpToolParam),
-    #[serde(
-        rename = "web_search_preview",
-        alias = "web_search",
-        alias = "web_search_preview_2025_03_11",
-        alias = "web_search_2025_08_26"
-    )]
-    WebSearch(WebSearchToolParam),
-    #[serde(rename = "file_search")]
-    FileSearch(FileSearchToolParam),
-    #[serde(rename = "code_interpreter")]
-    CodeInterpreter(CodeInterpreterToolParam),
-    #[serde(rename = "unknown", other)]
-    Unknown,
-}
-
-/// Request-side tool params.
-///
-/// This is the public request/storage shape. It intentionally includes Codex
-/// `namespace` tools so the gateway can flatten them for upstream requests and
-/// restore model calls back to the public `{ namespace, name }` form.
-#[non_exhaustive]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum RequestTool {
     #[serde(rename = "function")]
     Function(FunctionToolParam),
     #[serde(rename = "mcp")]
@@ -230,33 +201,7 @@ pub enum CodexNamespaceMember {
     Unknown,
 }
 
-impl CodexNamespaceMember {
-    #[must_use]
-    pub(crate) fn is_unknown(&self) -> bool {
-        matches!(self, Self::Unknown)
-    }
-}
-
 impl ResponsesTool {
-    #[must_use]
-    pub fn original_type(&self) -> Option<&str> {
-        match self {
-            Self::Function(_) => Some("function"),
-            Self::Mcp(_) => Some("mcp"),
-            Self::WebSearch(_) => Some("web_search_preview"),
-            Self::FileSearch(_) => Some("file_search"),
-            Self::CodeInterpreter(_) => Some("code_interpreter"),
-            Self::Unknown => None,
-        }
-    }
-
-    #[must_use]
-    pub fn to_raw_value(&self) -> Value {
-        serde_json::to_value(self).unwrap_or(Value::Null)
-    }
-}
-
-impl RequestTool {
     #[must_use]
     pub fn original_type(&self) -> Option<&str> {
         match self {
@@ -273,19 +218,6 @@ impl RequestTool {
     #[must_use]
     pub fn to_raw_value(&self) -> Value {
         serde_json::to_value(self).unwrap_or(Value::Null)
-    }
-}
-
-impl From<ResponsesTool> for RequestTool {
-    fn from(tool: ResponsesTool) -> Self {
-        match tool {
-            ResponsesTool::Function(p) => Self::Function(p),
-            ResponsesTool::Mcp(p) => Self::Mcp(p),
-            ResponsesTool::WebSearch(p) => Self::WebSearch(p),
-            ResponsesTool::FileSearch(p) => Self::FileSearch(p),
-            ResponsesTool::CodeInterpreter(p) => Self::CodeInterpreter(p),
-            ResponsesTool::Unknown => Self::Unknown,
-        }
     }
 }
 
@@ -428,10 +360,10 @@ mod tests {
             }
         ]);
 
-        let tools: Vec<RequestTool> = serde_json::from_value(tools_json).unwrap();
-        assert!(matches!(tools[0], RequestTool::Namespace(_)));
-        assert!(matches!(tools[1], RequestTool::Unknown));
-        if let RequestTool::Namespace(namespace) = &tools[0] {
+        let tools: Vec<ResponsesTool> = serde_json::from_value(tools_json).unwrap();
+        assert!(matches!(tools[0], ResponsesTool::Namespace(_)));
+        assert!(matches!(tools[1], ResponsesTool::Unknown));
+        if let ResponsesTool::Namespace(namespace) = &tools[0] {
             assert!(matches!(namespace.tools[0], CodexNamespaceMember::Function(_)));
             assert!(matches!(namespace.tools[1], CodexNamespaceMember::Unknown));
         }

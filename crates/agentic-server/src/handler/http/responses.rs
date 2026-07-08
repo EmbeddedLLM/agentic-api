@@ -10,7 +10,7 @@ use std::sync::Arc;
 use agentic_core::executor::ExecuteRequest;
 use agentic_core::proxy::{ProxyRequest, proxy_request};
 use agentic_core::types::request_response::RequestPayload;
-use agentic_core::types::tools::RequestTool;
+use agentic_core::types::tools::ResponsesTool;
 
 use super::super::common::{convert_response, executor_error_response, extract_bearer, read_and_parse, sse_response};
 use crate::app::AppState;
@@ -41,7 +41,7 @@ fn has_gateway_tools(payload: &RequestPayload) -> bool {
     payload
         .tools
         .as_ref()
-        .is_some_and(|tools| tools.iter().any(|tool| !matches!(tool, RequestTool::Function(_))))
+        .is_some_and(|tools| tools.iter().any(|tool| !matches!(tool, ResponsesTool::Function(_))))
 }
 
 pub async fn responses(State(state): State<AppState>, req: Request) -> Response {

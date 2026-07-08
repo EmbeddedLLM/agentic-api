@@ -114,7 +114,6 @@ pub fn prepare_context_for_upstream(ctx: &mut RequestContext, exec_ctx: &Executi
     let resolved_model = exec_ctx.resolve_model_alias(&original_model);
     let alias_rewritten = resolved_model != original_model;
     ctx.enriched_request.model = resolved_model;
-    ctx.enriched_request.normalize_for_upstream();
     debug!(
         response_id = %ctx.response_id,
         model_before = %original_model,
@@ -179,7 +178,7 @@ async fn run_until_gateway_tools_complete(
         }
 
         combined_output.extend(public_output);
-        ctx.enriched_request.tool_choice = ToolChoice::Auto;
+        ctx.enriched_request.tool_choice = Some(ToolChoice::Auto);
         append_output_items_to_input(&mut ctx.enriched_request.input, &current_output);
         append_gateway_calls_to_new_input(&mut ctx, &current_output, &registry);
         append_tool_outputs(

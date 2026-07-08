@@ -20,4 +20,3 @@ pub use persist::persist_response;
 pub use rehydrate::rehydrate_conversation;
 pub use request::ExecutionContext;
 pub use request::RequestContext;
-pub use upstream::upstream_request_json;
