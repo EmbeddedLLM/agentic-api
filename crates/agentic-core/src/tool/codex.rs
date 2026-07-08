@@ -32,12 +32,12 @@ struct NamespaceCallMapping {
 }
 
 #[derive(Clone, Debug, Default)]
-struct NamespacePlan {
+struct NamespaceMap {
     calls: HashMap<String, NamespaceCallMapping>,
     members: HashMap<NamespaceMemberName, String>,
 }
 
-impl NamespacePlan {
+impl NamespaceMap {
     fn mapping_for_call(&self, name: &str) -> Option<&NamespaceCallMapping> {
         self.calls.get(name)
     }
@@ -65,14 +65,14 @@ impl NamespacePlan {
 
 #[derive(Clone, Debug, Default)]
 pub struct RawCodexNamespaceNormalization {
-    plan: NamespacePlan,
+    map: NamespaceMap,
     original_tools: Option<Value>,
 }
 
 impl RawCodexNamespaceNormalization {
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.plan.calls.is_empty() && self.original_tools.is_none()
+        self.map.calls.is_empty() && self.original_tools.is_none()
     }
 
     #[cfg(test)]
@@ -82,12 +82,12 @@ impl RawCodexNamespaceNormalization {
 
     #[cfg(test)]
     pub(crate) fn contains_call(&self, upstream_name: &str) -> bool {
-        self.plan.contains_call(upstream_name)
+        self.map.contains_call(upstream_name)
     }
 
     #[cfg(test)]
     pub(crate) fn contains_namespace_call(&self, namespace: &str) -> bool {
-        self.plan.contains_namespace_call(namespace)
+        self.map.contains_namespace_call(namespace)
     }
 }
 
@@ -98,12 +98,12 @@ pub struct CodexNamespaceRequestNormalization {
 }
 
 #[derive(Default)]
-struct NamespacePlanBuilder {
+struct NamespaceMapBuilder {
     top_level_names: HashSet<String>,
-    plan: NamespacePlan,
+    map: NamespaceMap,
 }
 
-impl NamespacePlanBuilder {
+impl NamespaceMapBuilder {
     fn new(top_level_names: HashSet<String>) -> Self {
         Self {
             top_level_names,
@@ -133,13 +133,13 @@ impl NamespacePlanBuilder {
             upstream_name: flat_name.clone(),
         };
 
-        self.plan.members.insert(member, flat_name.clone());
-        self.plan.calls.insert(flat_name.clone(), mapping);
+        self.map.members.insert(member, flat_name.clone());
+        self.map.calls.insert(flat_name.clone(), mapping);
         flat_name
     }
 
-    fn finish(self) -> NamespacePlan {
-        self.plan
+    fn finish(self) -> NamespaceMap {
+        self.map
     }
 }
 
@@ -165,33 +165,33 @@ impl CodexNamespaceHandler {
             };
         };
 
-        let mut builder = NamespacePlanBuilder::new(typed_top_level_tool_names(tools));
+        let mut builder = NamespaceMapBuilder::new(typed_top_level_tool_names(tools));
         let tools = flatten_typed_tools_with_builder(tools, &mut builder);
-        let plan = builder.finish();
+        let map = builder.finish();
 
         CodexNamespaceRequestNormalization {
             tools: Some(tools),
-            tool_choice: rewrite_tool_choice_with_plan(tool_choice, &plan),
+            tool_choice: rewrite_tool_choice_with_map(tool_choice, &map),
         }
     }
 
     pub fn restore_output_items(&self, output: &mut [OutputItem], tools: Option<&[ResponsesTool]>) {
-        let Some(plan) = namespace_plan_from_tools(tools) else {
+        let Some(map) = namespace_map_from_tools(tools) else {
             return;
         };
         for item in output {
             if let OutputItem::FunctionCall(call) = item {
-                restore_function_call_with_plan(call, &plan);
+                restore_function_call_with_map(call, &map);
             }
         }
     }
 
     #[must_use]
     pub fn restore_response_value(&self, value: &mut Value, tools: Option<&[ResponsesTool]>) -> bool {
-        let Some(plan) = namespace_plan_from_tools(tools) else {
+        let Some(map) = namespace_map_from_tools(tools) else {
             return false;
         };
-        restore_response_value_with_plan(value, &plan)
+        restore_response_value_with_map(value, &map)
     }
 
     #[must_use]
@@ -205,7 +205,7 @@ impl CodexNamespaceHandler {
         };
 
         let original_tools = tools.clone();
-        let mut builder = NamespacePlanBuilder::new(raw_top_level_tool_names(tools));
+        let mut builder = NamespaceMapBuilder::new(raw_top_level_tool_names(tools));
         let mut upstream_tools = Vec::with_capacity(tools.len());
         let mut changed = false;
 
@@ -273,7 +273,7 @@ impl CodexNamespaceHandler {
         }
 
         if changed {
-            normalization.plan = builder.finish();
+            normalization.map = builder.finish();
             normalization.original_tools = Some(Value::Array(original_tools));
             *tools = upstream_tools;
         } else {
@@ -296,13 +296,13 @@ impl CodexNamespaceHandler {
         };
 
         if choice_object.get("type").and_then(Value::as_str) == Some("function") {
-            return rewrite_raw_tool_choice_function_object(choice_object, &normalization.plan);
+            return rewrite_raw_tool_choice_function_object(choice_object, &normalization.map);
         }
 
         choice_object
             .get_mut("function")
             .and_then(Value::as_object_mut)
-            .is_some_and(|function| rewrite_raw_tool_choice_function_object(function, &normalization.plan))
+            .is_some_and(|function| rewrite_raw_tool_choice_function_object(function, &normalization.map))
     }
 
     #[must_use]
@@ -312,7 +312,7 @@ impl CodexNamespaceHandler {
         normalization: &RawCodexNamespaceNormalization,
     ) -> bool {
         let mut changed = restore_raw_original_tools(value, normalization);
-        changed |= restore_response_value_with_plan(value, &normalization.plan);
+        changed |= restore_response_value_with_map(value, &normalization.map);
         changed
     }
 
@@ -360,23 +360,23 @@ impl ToolHandler for CodexNamespaceHandler {
     }
 }
 
-impl NamespacePlanBuilder {
+impl NamespaceMapBuilder {
     fn with_typed_tools(mut self, tools: &[ResponsesTool]) -> Self {
         let _ = flatten_typed_tools_with_builder(tools, &mut self);
         self
     }
 }
 
-fn namespace_plan_from_tools(tools: Option<&[ResponsesTool]>) -> Option<NamespacePlan> {
+fn namespace_map_from_tools(tools: Option<&[ResponsesTool]>) -> Option<NamespaceMap> {
     let tools = tools?;
     Some(
-        NamespacePlanBuilder::new(typed_top_level_tool_names(tools))
+        NamespaceMapBuilder::new(typed_top_level_tool_names(tools))
             .with_typed_tools(tools)
             .finish(),
     )
 }
 
-fn flatten_typed_tools_with_builder(tools: &[ResponsesTool], builder: &mut NamespacePlanBuilder) -> Vec<ResponsesTool> {
+fn flatten_typed_tools_with_builder(tools: &[ResponsesTool], builder: &mut NamespaceMapBuilder) -> Vec<ResponsesTool> {
     let mut upstream_tools = Vec::with_capacity(tools.len());
     for tool in tools {
         match tool {
@@ -396,7 +396,7 @@ fn flatten_typed_tools_with_builder(tools: &[ResponsesTool], builder: &mut Names
 
 fn flatten_typed_namespace_tool(
     namespace: &CodexNamespaceToolParam,
-    builder: &mut NamespacePlanBuilder,
+    builder: &mut NamespaceMapBuilder,
     original_tool: &ResponsesTool,
     upstream_tools: &mut Vec<ResponsesTool>,
 ) {
@@ -491,11 +491,11 @@ fn raw_function_member_names(members: &[Value]) -> Vec<String> {
         .collect()
 }
 
-fn restore_function_call_with_plan(call: &mut FunctionToolCall, plan: &NamespacePlan) -> bool {
+fn restore_function_call_with_map(call: &mut FunctionToolCall, map: &NamespaceMap) -> bool {
     if call.namespace.is_some() {
         return false;
     }
-    let Some(mapping) = plan.mapping_for_call(&call.name) else {
+    let Some(mapping) = map.mapping_for_call(&call.name) else {
         return false;
     };
     let original_name = call.name.clone();
@@ -511,14 +511,14 @@ fn restore_function_call_with_plan(call: &mut FunctionToolCall, plan: &Namespace
     true
 }
 
-fn rewrite_tool_choice_with_plan(choice: &ToolChoice, plan: &NamespacePlan) -> ToolChoice {
+fn rewrite_tool_choice_with_map(choice: &ToolChoice, map: &NamespaceMap) -> ToolChoice {
     let ToolChoice::Function { namespace, name } = choice else {
         return choice.clone();
     };
     let mapping = namespace
         .as_deref()
-        .and_then(|namespace| plan.mapping_for_member(namespace, name))
-        .or_else(|| namespace.is_none().then(|| plan.mapping_for_call(name)).flatten());
+        .and_then(|namespace| map.mapping_for_member(namespace, name))
+        .or_else(|| namespace.is_none().then(|| map.mapping_for_call(name)).flatten());
     let Some(mapping) = mapping else {
         return choice.clone();
     };
@@ -529,31 +529,31 @@ fn rewrite_tool_choice_with_plan(choice: &ToolChoice, plan: &NamespacePlan) -> T
     }
 }
 
-fn restore_response_value_with_plan(value: &mut Value, plan: &NamespacePlan) -> bool {
+fn restore_response_value_with_map(value: &mut Value, map: &NamespaceMap) -> bool {
     let mut changed = false;
 
     if let Some(item) = value.as_object_mut().and_then(|object| object.get_mut("item")) {
-        changed |= restore_call_value_with_plan(item, plan);
+        changed |= restore_call_value_with_map(item, map);
     }
 
-    changed |= restore_call_value_with_plan(value, plan);
+    changed |= restore_call_value_with_map(value, map);
 
     for key in ["response", "payload"] {
         if let Some(nested) = value.as_object_mut().and_then(|object| object.get_mut(key)) {
-            changed |= restore_response_value_with_plan(nested, plan);
+            changed |= restore_response_value_with_map(nested, map);
         }
     }
 
     if let Some(Value::Array(items)) = value.as_object_mut().and_then(|object| object.get_mut("output")) {
         for item in items {
-            changed |= restore_call_value_with_plan(item, plan);
+            changed |= restore_call_value_with_map(item, map);
         }
     }
 
     changed
 }
 
-fn restore_call_value_with_plan(value: &mut Value, plan: &NamespacePlan) -> bool {
+fn restore_call_value_with_map(value: &mut Value, map: &NamespaceMap) -> bool {
     let Some(object) = value.as_object_mut() else {
         return false;
     };
@@ -566,7 +566,7 @@ fn restore_call_value_with_plan(value: &mut Value, plan: &NamespacePlan) -> bool
     let Some(name) = object.get("name").and_then(Value::as_str) else {
         return false;
     };
-    let Some(mapping) = plan.mapping_for_call(name) else {
+    let Some(mapping) = map.mapping_for_call(name) else {
         return false;
     };
     let original_name = name.to_string();
@@ -582,18 +582,18 @@ fn restore_call_value_with_plan(value: &mut Value, plan: &NamespacePlan) -> bool
     true
 }
 
-fn rewrite_raw_tool_choice_function_object(function: &mut Map<String, Value>, plan: &NamespacePlan) -> bool {
+fn rewrite_raw_tool_choice_function_object(function: &mut Map<String, Value>, map: &NamespaceMap) -> bool {
     let explicit_namespace = function.get("namespace").and_then(Value::as_str).map(str::to_string);
     let Some(name_text) = function.get("name").and_then(Value::as_str).map(str::to_string) else {
         return false;
     };
     let mapping = explicit_namespace
         .as_deref()
-        .and_then(|namespace| plan.mapping_for_member(namespace, &name_text))
+        .and_then(|namespace| map.mapping_for_member(namespace, &name_text))
         .or_else(|| {
             explicit_namespace
                 .is_none()
-                .then(|| plan.mapping_for_call(&name_text))
+                .then(|| map.mapping_for_call(&name_text))
                 .flatten()
         });
     let Some(mapping) = mapping else {
