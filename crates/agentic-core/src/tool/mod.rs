@@ -1,6 +1,6 @@
 //! Tool framework — registry, handler trait, and normalization pipeline.
 //!
-//! Wire format types (`ResponsesTool`, param structs) live in [`crate::types::tools`].
+//! Wire format types (`RequestTool`, `ResponsesTool`, param structs) live in [`crate::types::tools`].
 //! This module owns the behavioral layer: routing, handler interface, and normalization.
 
 pub mod codex;

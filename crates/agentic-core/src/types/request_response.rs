@@ -5,7 +5,7 @@ use super::io::{
     FunctionTool, InputItem, InputMessage, InputMessageContent, OutputItem, ResponseUsage, ResponsesInput, ToolChoice,
     discard_unknown_tool_values,
 };
-use super::tools::ResponsesTool;
+use super::tools::RequestTool;
 use crate::utils::common::serialize_to_string;
 
 #[derive(Debug, Clone, Serialize)]
@@ -15,7 +15,7 @@ pub struct RequestPayload {
     pub instructions: Option<String>,
     pub previous_response_id: Option<String>,
     pub conversation_id: Option<String>,
-    pub tools: Option<Vec<ResponsesTool>>,
+    pub tools: Option<Vec<RequestTool>>,
     pub tool_choice: ToolChoice,
     #[serde(skip)]
     pub tool_choice_explicitly_set: bool,
@@ -47,7 +47,7 @@ impl<'de> Deserialize<'de> for RequestPayload {
             instructions: Option<String>,
             previous_response_id: Option<String>,
             conversation_id: Option<String>,
-            tools: Option<Vec<ResponsesTool>>,
+            tools: Option<Vec<RequestTool>>,
             tool_choice: Option<ToolChoice>,
             #[serde(default)]
             stream: bool,
@@ -276,7 +276,7 @@ mod tests {
 
         let tools = payload.tools.expect("tools should preserve explicit presence");
         assert_eq!(tools.len(), 1);
-        let ResponsesTool::Namespace(namespace) = &tools[0] else {
+        let RequestTool::Namespace(namespace) = &tools[0] else {
             panic!("expected namespace tool");
         };
         assert_eq!(namespace.tools.len(), 1);

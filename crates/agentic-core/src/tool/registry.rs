@@ -7,7 +7,7 @@ use serde_json::Value;
 use super::{CodexNamespaceHandler, FunctionHandler, GatewayExecutor, ToolError, ToolHandler, ToolOutput};
 use crate::types::io::output::FunctionToolCall;
 use crate::types::io::{FunctionTool, OutputItem, ToolChoice};
-use crate::types::tools::ResponsesTool;
+use crate::types::tools::{RequestTool, ResponsesTool};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -68,7 +68,7 @@ pub struct UpstreamToolConfig {
 #[derive(Debug, Default)]
 pub struct ToolRegistry {
     entries: HashMap<String, ToolEntry>,
-    declared_tools: Vec<ResponsesTool>,
+    declared_tools: Vec<RequestTool>,
 }
 
 impl ToolRegistry {
@@ -82,7 +82,7 @@ impl ToolRegistry {
     /// Panics if serialization of a tool param struct fails, which cannot happen
     /// for the types defined in this module (`#[derive(Serialize)]` on plain structs).
     #[must_use]
-    pub fn build(tools: &[ResponsesTool]) -> Self {
+    pub fn build(tools: &[RequestTool]) -> Self {
         Self::build_with_handlers(tools, |_| None)
     }
 
@@ -94,14 +94,14 @@ impl ToolRegistry {
     /// Panics if serialization of a tool param struct fails, which cannot happen
     /// for the types defined in this module (`#[derive(Serialize)]` on plain structs).
     pub fn build_with_handlers(
-        tools: &[ResponsesTool],
+        tools: &[RequestTool],
         mut handler_for: impl FnMut(ToolType) -> Option<Arc<dyn GatewayExecutor>>,
     ) -> Self {
         let mut entries = HashMap::with_capacity(tools.len());
 
         for tool in tools {
             match tool {
-                ResponsesTool::Function(p) => {
+                RequestTool::Function(p) => {
                     // p.name is NonEmptyToolName — empty names are impossible here
                     // (serde rejects them at deserialization time).
                     if entries
@@ -119,7 +119,7 @@ impl ToolRegistry {
                         tracing::warn!(name = %p.name, "duplicate tool name — previous definition overwritten");
                     }
                 }
-                ResponsesTool::Mcp(p) => {
+                RequestTool::Mcp(p) => {
                     // MCP tool names are discovered at request-time via `tools/list`.
                     // Without discovery, we cannot know which tool names to register —
                     // keying by server_label would cause all MCP calls to miss on lookup
@@ -131,7 +131,7 @@ impl ToolRegistry {
                         "MCP server declared but skipped in registry — tool names unknown until discovery (PR C)"
                     );
                 }
-                ResponsesTool::WebSearch(p) => {
+                RequestTool::WebSearch(p) => {
                     entries.insert(
                         "web_search".to_owned(),
                         ToolEntry {
@@ -142,7 +142,7 @@ impl ToolRegistry {
                         },
                     );
                 }
-                ResponsesTool::FileSearch(p) => {
+                RequestTool::FileSearch(p) => {
                     entries.insert(
                         "file_search".to_owned(),
                         ToolEntry {
@@ -153,7 +153,7 @@ impl ToolRegistry {
                         },
                     );
                 }
-                ResponsesTool::CodeInterpreter(p) => {
+                RequestTool::CodeInterpreter(p) => {
                     entries.insert(
                         "code_interpreter".to_owned(),
                         ToolEntry {
@@ -164,7 +164,7 @@ impl ToolRegistry {
                         },
                     );
                 }
-                ResponsesTool::Namespace(p) => {
+                RequestTool::Namespace(p) => {
                     let config = serde_json::to_value(p).expect("serialization of known struct is infallible");
                     for function in CodexNamespaceHandler.normalize(&config) {
                         let name = function.name.clone();
@@ -184,7 +184,7 @@ impl ToolRegistry {
                         }
                     }
                 }
-                ResponsesTool::Unknown => {
+                RequestTool::Unknown => {
                     tracing::debug!("unknown tool declared but skipped in registry");
                 }
             }
@@ -261,7 +261,6 @@ impl ToolRegistry {
             ResponsesTool::Mcp(_)
             | ResponsesTool::FileSearch(_)
             | ResponsesTool::CodeInterpreter(_)
-            | ResponsesTool::Namespace(_)
             | ResponsesTool::Unknown => tool.to_function_tool().into_iter().collect(),
         }
     }

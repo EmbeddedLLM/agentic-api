@@ -23,8 +23,8 @@ pub use types::{
     FunctionTool, FunctionToolCall, FunctionToolParam, FunctionToolResultMessage, IncompleteDetails, InputContent,
     InputImageContent, InputItem, InputMessage, InputMessageContent, InputTextContent, InputTokenDetails, McpToolParam,
     NonEmptyToolName, OutputItem, OutputMessage, OutputTextContent, OutputTokenDetails, ReasoningOutput,
-    ReasoningTextContent, RequestPayload, ResponsePayload, ResponseUsage, ResponsesInput, ResponsesTool, ToolChoice,
-    UpstreamRequest, WebSearchActionSearch, WebSearchCall, WebSearchCallStatus, WebSearchContextSize, WebSearchFilters,
-    WebSearchSource, WebSearchToolParam, WebSearchUserLocation,
+    ReasoningTextContent, RequestPayload, RequestTool, ResponsePayload, ResponseUsage, ResponsesInput, ResponsesTool,
+    ToolChoice, UpstreamRequest, WebSearchActionSearch, WebSearchCall, WebSearchCallStatus, WebSearchContextSize,
+    WebSearchFilters, WebSearchSource, WebSearchToolParam, WebSearchUserLocation,
 };
 pub use utils::{utcnow_str, uuid7_str};

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de, ser::SerializeMap};
 use serde_json::Value;
 
-use crate::types::tools::ResponsesTool;
+use crate::types::tools::RequestTool;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionTool {
@@ -99,10 +99,10 @@ impl<'de> Deserialize<'de> for ToolChoice {
 /// set by the caller, otherwise falling back to the stored configuration.
 #[inline]
 pub(crate) fn resolve_tools(
-    request_tools: Option<&[ResponsesTool]>,
-    stored_tools: Option<&[ResponsesTool]>,
+    request_tools: Option<&[RequestTool]>,
+    stored_tools: Option<&[RequestTool]>,
     tools_explicitly_set: bool,
-) -> Option<Vec<ResponsesTool>> {
+) -> Option<Vec<RequestTool>> {
     if tools_explicitly_set {
         request_tools
     } else {
@@ -111,20 +111,20 @@ pub(crate) fn resolve_tools(
     .map(|tools| discard_unknown_tool_values(tools.iter().cloned()))
 }
 
-pub(crate) fn discard_unknown_tool_values(tools: impl IntoIterator<Item = ResponsesTool>) -> Vec<ResponsesTool> {
+pub(crate) fn discard_unknown_tool_values(tools: impl IntoIterator<Item = RequestTool>) -> Vec<RequestTool> {
     tools
         .into_iter()
         .filter_map(|mut tool| {
             match &mut tool {
-                ResponsesTool::Namespace(namespace) => {
+                RequestTool::Namespace(namespace) => {
                     namespace.tools.retain(|member| !member.is_unknown());
                 }
-                ResponsesTool::Unknown => return None,
-                ResponsesTool::Function(_)
-                | ResponsesTool::Mcp(_)
-                | ResponsesTool::WebSearch(_)
-                | ResponsesTool::FileSearch(_)
-                | ResponsesTool::CodeInterpreter(_) => {}
+                RequestTool::Unknown => return None,
+                RequestTool::Function(_)
+                | RequestTool::Mcp(_)
+                | RequestTool::WebSearch(_)
+                | RequestTool::FileSearch(_)
+                | RequestTool::CodeInterpreter(_) => {}
             }
             Some(tool)
         })

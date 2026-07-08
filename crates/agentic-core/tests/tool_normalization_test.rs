@@ -1,7 +1,7 @@
 //! Cassette-driven validation of the tool framework wire types and normalization pipeline.
 //!
 //! Validates that real cassette request bodies — the exact JSON the gateway receives —
-//! parse correctly into `Vec<ResponsesTool>` and normalize through the full pipeline.
+//! parse correctly into `Vec<RequestTool>` and normalize through the full pipeline.
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -10,7 +10,7 @@ use agentic_core::ToolChoice;
 use agentic_core::executor::{RequestContext, upstream_request_json};
 use agentic_core::tool::{CodexNamespaceHandler, ToolRegistry, ToolType, model_visible_namespace_member_name};
 use agentic_core::types::request_response::RequestPayload;
-use agentic_core::types::tools::ResponsesTool;
+use agentic_core::types::tools::{RequestTool, ResponsesTool};
 
 const MULTI_TURN_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/tool_calls/multi_turn");
 const CODEX_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/codex");
@@ -72,7 +72,7 @@ fn request_body_from_turn(turn: &Turn) -> serde_json::Value {
     serde_json::to_value(body).expect("body to json")
 }
 
-fn parse_tools_from_turn(cassette_file: &str, turn_idx: usize, turn: &Turn) -> Vec<ResponsesTool> {
+fn parse_tools_from_turn(cassette_file: &str, turn_idx: usize, turn: &Turn) -> Vec<RequestTool> {
     let tools_val =
         tools_from_turn(turn).unwrap_or_else(|| panic!("{cassette_file} turn {turn_idx}: expected tools array"));
     serde_json::from_value(tools_val.clone())
@@ -95,14 +95,14 @@ fn upstream_request_value(payload: RequestPayload, stream: bool) -> Value {
     serde_json::from_str(&body).expect("upstream request should be JSON")
 }
 
-/// Parse `request.body.tools` from every turn of a cassette into `Vec<ResponsesTool>`.
+/// Parse `request.body.tools` from every turn of a cassette into `Vec<RequestTool>`.
 fn assert_tools_parse(cassette_file: &str) {
     let cassette = load_cassette(cassette_file);
     for (i, turn) in cassette.turns.iter().enumerate() {
         let Some(tools_val) = tools_from_turn(turn) else {
             continue;
         };
-        let tools: Vec<ResponsesTool> = serde_json::from_value(tools_val.clone())
+        let tools: Vec<RequestTool> = serde_json::from_value(tools_val.clone())
             .unwrap_or_else(|e| panic!("{cassette_file} turn {i}: tools parse failed: {e}\nJSON: {tools_val}"));
         assert!(
             !tools.is_empty(),
@@ -118,8 +118,12 @@ fn assert_tools_normalize(cassette_file: &str) {
         let Some(tools_val) = tools_from_turn(turn) else {
             continue;
         };
-        let tools: Vec<ResponsesTool> = serde_json::from_value(tools_val).expect("tools parse");
-        let normalized: Vec<_> = tools.iter().filter_map(ResponsesTool::to_function_tool).collect();
+        let tools: Vec<RequestTool> = serde_json::from_value(tools_val).expect("tools parse");
+        let flattened = CodexNamespaceHandler
+            .normalize_request_for_upstream(Some(&tools), &ToolChoice::Auto)
+            .tools
+            .unwrap_or_default();
+        let normalized: Vec<_> = flattened.iter().filter_map(ResponsesTool::to_function_tool).collect();
         for ft in &normalized {
             assert_eq!(
                 ft.type_, "function",
@@ -132,7 +136,7 @@ fn assert_tools_normalize(cassette_file: &str) {
         }
         // Every Function variant must normalize — count only Function entries
         // so the assertion holds even if future cassettes include gateway-only types.
-        let function_count = tools.iter().filter(|t| matches!(t, ResponsesTool::Function(_))).count();
+        let function_count = tools.iter().filter(|t| matches!(t, RequestTool::Function(_))).count();
         assert_eq!(
             normalized.len(),
             function_count,
@@ -150,10 +154,10 @@ fn assert_registry_lookup(cassette_file: &str) {
         let Some(tools_val) = tools_from_turn(turn) else {
             continue;
         };
-        let tools: Vec<ResponsesTool> = serde_json::from_value(tools_val).expect("tools parse");
+        let tools: Vec<RequestTool> = serde_json::from_value(tools_val).expect("tools parse");
         let registry = ToolRegistry::build(&tools);
         for tool in &tools {
-            if let ResponsesTool::Function(p) = tool {
+            if let RequestTool::Function(p) = tool {
                 let entry = registry
                     .lookup(p.name.as_str())
                     .unwrap_or_else(|| panic!("{cassette_file} turn {i}: tool '{}' not found in registry", p.name));
@@ -292,7 +296,7 @@ fn codex_namespace_cassettes_flatten_to_safe_upstream_function_name() {
                 tools.iter().any(|tool| {
                     matches!(
                         tool,
-                        ResponsesTool::Namespace(namespace)
+                        RequestTool::Namespace(namespace)
                             if namespace.name == "mcp__agentic_fixture"
                                 && namespace.tools.iter().any(|member| {
                                     matches!(
@@ -310,12 +314,6 @@ fn codex_namespace_cassettes_flatten_to_safe_upstream_function_name() {
                 .normalize_request_for_upstream(Some(&tools), &ToolChoice::Auto)
                 .tools
                 .expect("flattened tools");
-            assert!(
-                flattened
-                    .iter()
-                    .all(|tool| !matches!(tool, ResponsesTool::Namespace(_))),
-                "{filename} turn {i}: namespace tools should be flattened before upstream"
-            );
             assert!(
                 flattened.iter().any(|tool| {
                     matches!(
@@ -350,7 +348,7 @@ fn codex_direct_vllm_flat_namespace_cassette_is_plain_function_tool() {
         assert!(
             matches!(
                 &tools[0],
-                ResponsesTool::Function(function) if function.name.as_str() == expected_flat_name
+                RequestTool::Function(function) if function.name.as_str() == expected_flat_name
             ),
             "{filename} turn {i}: expected direct vLLM to see a plain function tool named {expected_flat_name}"
         );
