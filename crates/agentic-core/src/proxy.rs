@@ -562,7 +562,7 @@ mod tests {
     }
 
     #[test]
-    fn proxy_request_body_rewrites_tool_choice_for_flattened_namespace_tool() {
+    fn proxy_request_body_does_not_rewrite_unqualified_namespace_tool_choice() {
         let config = test_config();
         let body = Bytes::from_static(
             br#"{"model":"test","input":"hi","tools":[{"type":"namespace","name":"mcp__shell","tools":[{"type":"function","name":"run"}]}],"tool_choice":{"type":"function","name":"run"},"store":false}"#,
@@ -572,7 +572,7 @@ mod tests {
         let value: Value = serde_json::from_slice(&normalized.body).unwrap();
 
         assert_eq!(value["tool_choice"]["type"], "function");
-        assert_eq!(value["tool_choice"]["name"], "agentic_ns__mcp__shell__run");
+        assert_eq!(value["tool_choice"]["name"], "run");
     }
 
     #[test]
@@ -736,51 +736,6 @@ mod tests {
     }
 
     #[test]
-    fn proxy_sse_maps_underscore_namespace_member_alias() {
-        let body = Bytes::from_static(
-            br#"{"tools":[{"type":"namespace","name":"mcp__agentic_fixture","tools":[{"type":"function","name":"echo_text"}]}]}"#,
-        );
-        let normalized_request = normalize_proxy_request_body(body, &test_config());
-        let line = r#"data: {"type":"response.output_item.done","item":{"type":"function_call","name":"mcp__agentic_fixture_echo_text","call_id":"call_1","arguments":"{\"text\":\"hi\"}"}}"#;
-
-        let normalized = CodexNamespaceHandler.restore_raw_sse_line(line, &normalized_request.namespace);
-        let value: Value = serde_json::from_str(normalized.strip_prefix("data: ").unwrap()).unwrap();
-
-        assert_eq!(value["item"]["namespace"], "mcp__agentic_fixture");
-        assert_eq!(value["item"]["name"], "echo_text");
-    }
-
-    #[test]
-    fn proxy_sse_ambiguous_underscore_namespace_member_alias_is_not_normalized() {
-        let body = Bytes::from_static(
-            br#"{"tools":[{"type":"namespace","name":"mcp__a_b","tools":[{"type":"function","name":"c"}]},{"type":"namespace","name":"mcp__a","tools":[{"type":"function","name":"b_c"}]}]}"#,
-        );
-        let normalized_request = normalize_proxy_request_body(body, &test_config());
-        let line = r#"data: {"type":"response.output_item.done","item":{"type":"function_call","name":"mcp__a_b_c","call_id":"call_1","arguments":"{}"}}"#;
-
-        let normalized = CodexNamespaceHandler.restore_raw_sse_line(line, &normalized_request.namespace);
-        let value: Value = serde_json::from_str(normalized.strip_prefix("data: ").unwrap()).unwrap();
-
-        assert!(value["item"].get("namespace").is_none());
-        assert_eq!(value["item"]["name"], "mcp__a_b_c");
-    }
-
-    #[test]
-    fn proxy_sse_maps_unambiguous_bare_namespace_member() {
-        let body = Bytes::from_static(
-            br#"{"tools":[{"type":"namespace","name":"mcp__agentic_fixture","tools":[{"type":"function","name":"run"}]}]}"#,
-        );
-        let normalized_request = normalize_proxy_request_body(body, &test_config());
-        let line = r#"data: {"type":"response.output_item.done","item":{"type":"function_call","name":"run","call_id":"call_1","arguments":"{\"cmd\":\"pwd\"}"}}"#;
-
-        let normalized = CodexNamespaceHandler.restore_raw_sse_line(line, &normalized_request.namespace);
-        let value: Value = serde_json::from_str(normalized.strip_prefix("data: ").unwrap()).unwrap();
-
-        assert_eq!(value["item"]["namespace"], "mcp__agentic_fixture");
-        assert_eq!(value["item"]["name"], "run");
-    }
-
-    #[test]
     fn proxy_json_restores_original_tools_and_maps_flat_call() {
         let config = test_config();
         let body = Bytes::from_static(
@@ -798,22 +753,6 @@ mod tests {
         assert_eq!(value["tools"][0]["name"], "mcp__agentic_fixture");
         assert_eq!(value["output"][0]["namespace"], "mcp__agentic_fixture");
         assert_eq!(value["output"][0]["name"], "echo_text");
-    }
-
-    #[test]
-    fn proxy_sse_normalizes_namespace_container_call() {
-        let body = Bytes::from_static(
-            br#"{"tools":[{"type":"namespace","name":"mcp__agentic_fixture","tools":[{"type":"function","name":"run"}]}]}"#,
-        );
-        let normalized_request = normalize_proxy_request_body(body, &test_config());
-        let line = r#"data: {"type":"response.output_item.done","item":{"type":"function_call","name":"mcp__agentic_fixture","call_id":"call_1","arguments":"{\"tools\":\"opaque\",\"cmd\":\"pwd\"}"}}"#;
-
-        let normalized = CodexNamespaceHandler.restore_raw_sse_line(line, &normalized_request.namespace);
-        let value: Value = serde_json::from_str(normalized.strip_prefix("data: ").unwrap()).unwrap();
-
-        assert_eq!(value["item"]["namespace"], "mcp__agentic_fixture");
-        assert_eq!(value["item"]["name"], "run");
-        assert_eq!(value["item"]["arguments"], "{\"cmd\":\"pwd\"}");
     }
 
     #[tokio::test]

@@ -8,21 +8,15 @@ use crate::types::tools::{CodexNamespaceMember, CodexNamespaceToolParam, NonEmpt
 use super::handler::{ToolError, ToolHandler};
 use super::registry::ToolType;
 
+// Upstream Responses-compatible backends only see flat function names. Prefix
+// flattened Codex namespace members so generated names are recognizable,
+// unlikely to collide with user functions, and can be restored to
+// `{ namespace, name }` on the way back to the client.
 pub const MODEL_VISIBLE_NAMESPACE_MEMBER_PREFIX: &str = "agentic_ns__";
 
 #[must_use]
 pub fn model_visible_namespace_member_name(namespace: &str, member: &str) -> String {
     format!("{MODEL_VISIBLE_NAMESPACE_MEMBER_PREFIX}{namespace}__{member}")
-}
-
-#[must_use]
-pub fn legacy_model_visible_namespace_member_name(namespace: &str, member: &str) -> String {
-    format!("{namespace}.{member}")
-}
-
-#[must_use]
-pub fn alternate_model_visible_namespace_member_name(namespace: &str, member: &str) -> String {
-    legacy_model_visible_namespace_member_name(namespace, member).replace('.', "_")
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -35,7 +29,6 @@ struct NamespaceMemberName {
 struct NamespaceCallMapping {
     member: NamespaceMemberName,
     upstream_name: String,
-    strip_container_arguments: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -108,10 +101,6 @@ pub struct CodexNamespaceRequestNormalization {
 struct NamespacePlanBuilder {
     top_level_names: HashSet<String>,
     plan: NamespacePlan,
-    legacy_candidates: HashMap<String, Option<NamespaceCallMapping>>,
-    alternate_candidates: HashMap<String, Option<NamespaceCallMapping>>,
-    bare_candidates: HashMap<String, Option<NamespaceCallMapping>>,
-    container_candidates: HashMap<String, Option<NamespaceCallMapping>>,
 }
 
 impl NamespacePlanBuilder {
@@ -142,87 +131,16 @@ impl NamespacePlanBuilder {
         let mapping = NamespaceCallMapping {
             member: member.clone(),
             upstream_name: flat_name.clone(),
-            strip_container_arguments: false,
         };
 
         self.plan.members.insert(member, flat_name.clone());
-        self.plan.calls.insert(flat_name.clone(), mapping.clone());
-        self.record_candidate(
-            CandidateKind::Legacy,
-            legacy_model_visible_namespace_member_name(namespace_name, member_name),
-            mapping.clone(),
-        );
-        self.record_candidate(
-            CandidateKind::Alternate,
-            alternate_model_visible_namespace_member_name(namespace_name, member_name),
-            mapping.clone(),
-        );
-        self.record_candidate(CandidateKind::Bare, member_name.to_string(), mapping);
+        self.plan.calls.insert(flat_name.clone(), mapping);
         flat_name
     }
 
-    fn record_single_member_container(&mut self, namespace_name: &str, function_member_names: &[String]) {
-        let [member_name] = function_member_names else {
-            return;
-        };
-        let flat_name = model_visible_namespace_member_name(namespace_name, member_name);
-        self.record_candidate(
-            CandidateKind::Container,
-            namespace_name.to_string(),
-            NamespaceCallMapping {
-                member: NamespaceMemberName {
-                    namespace: namespace_name.to_string(),
-                    name: member_name.clone(),
-                },
-                upstream_name: flat_name,
-                strip_container_arguments: true,
-            },
-        );
-    }
-
-    fn record_candidate(&mut self, kind: CandidateKind, alias: String, mapping: NamespaceCallMapping) {
-        let candidates = match kind {
-            CandidateKind::Legacy => &mut self.legacy_candidates,
-            CandidateKind::Alternate => &mut self.alternate_candidates,
-            CandidateKind::Bare => &mut self.bare_candidates,
-            CandidateKind::Container => &mut self.container_candidates,
-        };
-        candidates
-            .entry(alias)
-            .and_modify(|candidate| *candidate = None)
-            .or_insert_with(|| Some(mapping));
-    }
-
-    fn finish(mut self) -> NamespacePlan {
-        let legacy_candidates = std::mem::take(&mut self.legacy_candidates);
-        let alternate_candidates = std::mem::take(&mut self.alternate_candidates);
-        let bare_candidates = std::mem::take(&mut self.bare_candidates);
-        let container_candidates = std::mem::take(&mut self.container_candidates);
-        self.register_unambiguous_aliases(legacy_candidates);
-        self.register_unambiguous_aliases(alternate_candidates);
-        self.register_unambiguous_aliases(bare_candidates);
-        self.register_unambiguous_aliases(container_candidates);
+    fn finish(self) -> NamespacePlan {
         self.plan
     }
-
-    fn register_unambiguous_aliases(&mut self, candidates: HashMap<String, Option<NamespaceCallMapping>>) {
-        for (alias, mapping) in candidates {
-            if self.top_level_names.contains(&alias) {
-                continue;
-            }
-            if let Some(mapping) = mapping {
-                self.plan.calls.entry(alias).or_insert(mapping);
-            }
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-enum CandidateKind {
-    Legacy,
-    Alternate,
-    Bare,
-    Container,
 }
 
 /// Handler for Codex `type: "namespace"` tools.
@@ -349,9 +267,7 @@ impl CodexNamespaceHandler {
                 changed = true;
             }
 
-            if emitted_namespace_members {
-                builder.record_single_member_container(namespace_name, &function_member_names);
-            } else {
+            if !emitted_namespace_members {
                 upstream_tools.push(tool);
             }
         }
@@ -523,9 +439,7 @@ fn flatten_typed_namespace_tool(
         emitted_members = true;
     }
 
-    if emitted_members {
-        builder.record_single_member_container(&namespace.name, &function_member_names);
-    } else {
+    if !emitted_members {
         upstream_tools.push(original_tool.clone());
     }
 }
@@ -588,14 +502,10 @@ fn restore_function_call_with_plan(call: &mut FunctionToolCall, plan: &Namespace
 
     call.namespace = Some(mapping.member.namespace.clone());
     call.name.clone_from(&mapping.member.name);
-    if mapping.strip_container_arguments {
-        strip_tools_from_arguments_string(&mut call.arguments);
-    }
     tracing::debug!(
         upstream_name = %original_name,
         namespace = %mapping.member.namespace,
         member = %mapping.member.name,
-        stripped_container_arguments = mapping.strip_container_arguments,
         "restored upstream namespace function call"
     );
     true
@@ -663,14 +573,10 @@ fn restore_call_value_with_plan(value: &mut Value, plan: &NamespacePlan) -> bool
 
     object.insert("namespace".to_string(), Value::String(mapping.member.namespace.clone()));
     object.insert("name".to_string(), Value::String(mapping.member.name.clone()));
-    if mapping.strip_container_arguments {
-        strip_tools_from_arguments_value(value);
-    }
     tracing::debug!(
         upstream_name = %original_name,
         namespace = %mapping.member.namespace,
         member = %mapping.member.name,
-        stripped_container_arguments = mapping.strip_container_arguments,
         "restored upstream namespace function call"
     );
     true
@@ -718,34 +624,6 @@ fn restore_raw_original_tools(value: &mut Value, normalization: &RawCodexNamespa
     true
 }
 
-fn strip_tools_from_arguments_string(arguments: &mut String) {
-    if let Some(stripped) = strip_tools_from_arguments_text(arguments) {
-        *arguments = stripped;
-    }
-}
-
-fn strip_tools_from_arguments_value(value: &mut Value) {
-    let Some(arguments) = value.as_object_mut().and_then(|object| object.get_mut("arguments")) else {
-        return;
-    };
-    let Some(arguments_text) = arguments.as_str() else {
-        return;
-    };
-    if let Some(stripped) = strip_tools_from_arguments_text(arguments_text) {
-        *arguments = Value::String(stripped);
-    }
-}
-
-fn strip_tools_from_arguments_text(arguments: &str) -> Option<String> {
-    let Ok(mut value) = serde_json::from_str::<Value>(arguments) else {
-        return None;
-    };
-    let object = value.as_object_mut()?;
-    object
-        .remove("tools")
-        .map(|_| serde_json::to_string(&value).unwrap_or_else(|_| arguments.to_string()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -763,7 +641,7 @@ mod tests {
     }
 
     #[test]
-    fn function_tool_choice_flattens_unambiguous_namespace_member() {
+    fn unqualified_function_tool_choice_is_not_rewritten_to_namespace_member() {
         let tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([
             {
                 "type": "namespace",
@@ -783,7 +661,7 @@ mod tests {
             normalized.tool_choice,
             ToolChoice::Function {
                 namespace: None,
-                name: "agentic_ns__mcp__shell__run".to_string()
+                name: "run".to_string()
             }
         );
         assert!(matches!(
@@ -854,33 +732,6 @@ mod tests {
     }
 
     #[test]
-    fn namespace_container_call_normalizes_to_member_call() {
-        let tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([
-            {
-                "type": "namespace",
-                "name": "mcp__agentic_fixture",
-                "tools": [
-                    {"type": "function", "name": "run", "parameters": {"type": "object"}}
-                ]
-            }
-        ]))
-        .unwrap();
-        let mut output = vec![completed_call(
-            "mcp__agentic_fixture",
-            "{\"tools\":\"opaque\",\"cmd\":\"echo namespace fixture\"}",
-        )];
-
-        CodexNamespaceHandler.restore_output_items(&mut output, Some(&tools));
-
-        let OutputItem::FunctionCall(call) = &output[0] else {
-            panic!("expected function call");
-        };
-        assert_eq!(call.namespace.as_deref(), Some("mcp__agentic_fixture"));
-        assert_eq!(call.name, "run");
-        assert_eq!(call.arguments, "{\"cmd\":\"echo namespace fixture\"}");
-    }
-
-    #[test]
     fn flat_namespace_member_call_preserves_tools_argument() {
         let tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([
             {
@@ -933,74 +784,6 @@ mod tests {
         assert!(call.namespace.is_none());
         assert_eq!(call.name, "get_weather");
         assert_eq!(call.arguments, "{\"city\":\"SF\"}");
-    }
-
-    #[test]
-    fn underscore_namespace_member_alias_normalizes_to_member_call() {
-        let tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([
-            {
-                "type": "namespace",
-                "name": "mcp__agentic_fixture",
-                "tools": [{"type": "function", "name": "echo_text"}]
-            }
-        ]))
-        .unwrap();
-        let mut output = vec![completed_call("mcp__agentic_fixture_echo_text", "{\"text\":\"hi\"}")];
-
-        CodexNamespaceHandler.restore_output_items(&mut output, Some(&tools));
-
-        let OutputItem::FunctionCall(call) = &output[0] else {
-            panic!("expected function call");
-        };
-        assert_eq!(call.namespace.as_deref(), Some("mcp__agentic_fixture"));
-        assert_eq!(call.name, "echo_text");
-    }
-
-    #[test]
-    fn ambiguous_underscore_namespace_member_alias_is_not_normalized() {
-        let tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([
-            {
-                "type": "namespace",
-                "name": "mcp__a_b",
-                "tools": [{"type": "function", "name": "c"}]
-            },
-            {
-                "type": "namespace",
-                "name": "mcp__a",
-                "tools": [{"type": "function", "name": "b_c"}]
-            }
-        ]))
-        .unwrap();
-        let mut output = vec![completed_call("mcp__a_b_c", "{}")];
-
-        CodexNamespaceHandler.restore_output_items(&mut output, Some(&tools));
-
-        let OutputItem::FunctionCall(call) = &output[0] else {
-            panic!("expected function call");
-        };
-        assert!(call.namespace.is_none());
-        assert_eq!(call.name, "mcp__a_b_c");
-    }
-
-    #[test]
-    fn unambiguous_bare_namespace_member_normalizes_to_member_call() {
-        let tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([
-            {
-                "type": "namespace",
-                "name": "mcp__agentic_fixture",
-                "tools": [{"type": "function", "name": "run"}]
-            }
-        ]))
-        .unwrap();
-        let mut output = vec![completed_call("run", "{\"cmd\":\"pwd\"}")];
-
-        CodexNamespaceHandler.restore_output_items(&mut output, Some(&tools));
-
-        let OutputItem::FunctionCall(call) = &output[0] else {
-            panic!("expected function call");
-        };
-        assert_eq!(call.namespace.as_deref(), Some("mcp__agentic_fixture"));
-        assert_eq!(call.name, "run");
     }
 
     #[test]

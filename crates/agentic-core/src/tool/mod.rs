@@ -10,10 +10,7 @@ pub mod normalize;
 pub mod registry;
 pub mod web_search;
 
-pub use codex::{
-    CodexNamespaceHandler, RawCodexNamespaceNormalization, alternate_model_visible_namespace_member_name,
-    legacy_model_visible_namespace_member_name, model_visible_namespace_member_name,
-};
+pub use codex::{CodexNamespaceHandler, RawCodexNamespaceNormalization, model_visible_namespace_member_name};
 pub use function::FunctionHandler;
 pub use handler::{GatewayExecutor, ToolError, ToolHandler, ToolOutput};
 pub use registry::{GatewayDispatchResult, ToolEntry, ToolRegistry, ToolType, UpstreamToolConfig};
