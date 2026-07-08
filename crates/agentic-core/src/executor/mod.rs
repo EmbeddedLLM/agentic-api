@@ -1,7 +1,6 @@
 //! Agentic executor.
 
 pub mod accumulator;
-pub mod dispatch;
 pub mod engine;
 pub mod error;
 pub mod inference;
@@ -10,7 +9,6 @@ pub mod persist;
 pub mod rehydrate;
 pub mod request;
 
-pub use dispatch::{LoopDecision, client_action_items, decide_client_action};
 mod gateway;
 mod upstream;
 

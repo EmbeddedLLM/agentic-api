@@ -141,127 +141,6 @@ fn is_sse_content_type(headers: &reqwest::header::HeaderMap) -> bool {
         .is_some_and(|ct| ct.to_ascii_lowercase().starts_with("text/event-stream"))
 }
 
-fn normalize_developer_roles(value: &mut Value) -> bool {
-    match value {
-        Value::Object(object) => {
-            let mut changed = false;
-            if object.get("role").and_then(Value::as_str) == Some("developer") {
-                object.insert("role".to_string(), Value::String("system".to_string()));
-                changed = true;
-            }
-            for item in object.values_mut() {
-                changed |= normalize_developer_roles(item);
-            }
-            changed
-        }
-        Value::Array(items) => {
-            let mut changed = false;
-            for item in items {
-                changed |= normalize_developer_roles(item);
-            }
-            changed
-        }
-        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => false,
-    }
-}
-
-fn is_system_role(value: &Value) -> bool {
-    value
-        .as_object()
-        .and_then(|object| object.get("role"))
-        .and_then(Value::as_str)
-        .is_some_and(|role| role == "system")
-}
-
-fn move_system_messages_to_front(value: &mut Value) -> bool {
-    let Value::Array(items) = value else {
-        return false;
-    };
-
-    let mut saw_non_system = false;
-    let mut changed = false;
-    for item in items.iter() {
-        if is_system_role(item) {
-            changed |= saw_non_system;
-        } else {
-            saw_non_system = true;
-        }
-    }
-
-    if changed {
-        items.sort_by_key(|item| !is_system_role(item));
-    }
-    changed
-}
-
-fn content_as_parts(content: Value) -> Vec<Value> {
-    match content {
-        Value::Array(parts) => parts,
-        Value::String(text) => vec![serde_json::json!({
-            "type": "input_text",
-            "text": text
-        })],
-        Value::Null => Vec::new(),
-        other => vec![other],
-    }
-}
-
-fn append_message_content(target: &mut Value, source: &Value) {
-    let Some(source_content) = source.as_object().and_then(|object| object.get("content")).cloned() else {
-        return;
-    };
-    let mut source_parts = content_as_parts(source_content);
-    if source_parts.is_empty() {
-        return;
-    }
-
-    let Some(target_object) = target.as_object_mut() else {
-        return;
-    };
-    let target_content = target_object
-        .entry("content".to_string())
-        .or_insert_with(|| Value::Array(Vec::new()));
-    if !target_content.is_array() {
-        let current = std::mem::take(target_content);
-        *target_content = Value::Array(content_as_parts(current));
-    }
-    if let Value::Array(target_parts) = target_content {
-        target_parts.append(&mut source_parts);
-    }
-}
-
-fn merge_system_messages(value: &mut Value) -> bool {
-    let Value::Array(items) = value else {
-        return false;
-    };
-
-    let Some(first_system_index) = items.iter().position(is_system_role) else {
-        return false;
-    };
-
-    let mut merged = Vec::with_capacity(items.len());
-    let mut first_system = items[first_system_index].clone();
-    let mut changed = false;
-
-    for (index, item) in items.iter().enumerate() {
-        if index == first_system_index {
-            continue;
-        }
-        if is_system_role(item) {
-            append_message_content(&mut first_system, item);
-            changed = true;
-        } else {
-            merged.push(item.clone());
-        }
-    }
-
-    if changed {
-        merged.insert(0, first_system);
-        *items = merged;
-    }
-    changed
-}
-
 #[cfg(test)]
 fn normalize_request_body(body: Bytes, config: &Config) -> Bytes {
     normalize_proxy_request_body(body, config).body
@@ -289,11 +168,6 @@ fn normalize_proxy_request_body(body: Bytes, config: &Config) -> NormalizedProxy
                 object.insert("model".to_string(), Value::String(resolved));
                 changed = true;
             }
-        }
-        if let Some(input) = object.get_mut("input") {
-            changed |= normalize_developer_roles(input);
-            changed |= move_system_messages_to_front(input);
-            changed |= merge_system_messages(input);
         }
         changed |= CodexNamespaceHandler.flatten_raw_tools_for_upstream(object, &mut namespace);
         changed |= CodexNamespaceHandler.rewrite_raw_tool_choice_for_upstream(object, &namespace);
@@ -662,34 +536,6 @@ mod tests {
     }
 
     #[test]
-    fn proxy_request_body_normalizes_developer_roles() {
-        let config = test_config();
-        let body = Bytes::from_static(
-            br#"{"model":"test","input":[{"role":"developer","content":"rules"},{"role":"user","content":"hi"}],"store":false}"#,
-        );
-
-        let rewritten = normalize_request_body(body, &config);
-        let value: Value = serde_json::from_slice(&rewritten).unwrap();
-
-        assert_eq!(value["input"][0]["role"], "system");
-        assert_eq!(value["input"][1]["role"], "user");
-    }
-
-    #[test]
-    fn proxy_request_body_moves_system_messages_to_front() {
-        let config = test_config();
-        let body = Bytes::from_static(
-            br#"{"model":"test","input":[{"role":"user","content":"hi"},{"role":"developer","content":"rules"}],"store":false}"#,
-        );
-
-        let rewritten = normalize_request_body(body, &config);
-        let value: Value = serde_json::from_slice(&rewritten).unwrap();
-
-        assert_eq!(value["input"][0]["role"], "system");
-        assert_eq!(value["input"][1]["role"], "user");
-    }
-
-    #[test]
     fn proxy_request_body_carries_instructions_forward() {
         let config = test_config();
         let body = Bytes::from_static(
@@ -714,23 +560,6 @@ mod tests {
 
         assert_eq!(value["instructions"], "rules");
         assert_eq!(value["input"], "hi");
-    }
-
-    #[test]
-    fn proxy_request_body_merges_system_messages() {
-        let config = test_config();
-        let body = Bytes::from_static(
-            br#"{"model":"test","input":[{"role":"system","content":[{"type":"input_text","text":"rules 1"}]},{"role":"system","content":[{"type":"input_text","text":"rules 2"}]},{"role":"user","content":"hi"}],"store":false}"#,
-        );
-
-        let rewritten = normalize_request_body(body, &config);
-        let value: Value = serde_json::from_slice(&rewritten).unwrap();
-
-        assert_eq!(value["input"].as_array().unwrap().len(), 2);
-        assert_eq!(value["input"][0]["role"], "system");
-        assert_eq!(value["input"][0]["content"][0]["text"], "rules 1");
-        assert_eq!(value["input"][0]["content"][1]["text"], "rules 2");
-        assert_eq!(value["input"][1]["role"], "user");
     }
 
     #[test]
