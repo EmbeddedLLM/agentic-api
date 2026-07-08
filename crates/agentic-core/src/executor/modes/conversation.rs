@@ -94,7 +94,7 @@ impl ConversationHandler {
             previous_response_id: ctx.original_request.previous_response_id,
             effective_tools: ctx.enriched_request.tools,
             effective_tool_choice: ctx.enriched_request.tool_choice,
-            effective_instructions: ctx.original_request.instructions,
+            effective_instructions: ctx.enriched_request.instructions,
         };
 
         let mut new_items = Vec::with_capacity(ctx.new_input_items.len() + output_items.len());
