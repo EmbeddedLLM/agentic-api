@@ -38,7 +38,7 @@ fn function_calls(output_items: &[OutputItem]) -> Vec<FunctionToolCall> {
 fn is_gateway_owned_call(call: &FunctionToolCall, registry: &ToolRegistry) -> bool {
     registry
         .lookup(&call.name)
-        .is_some_and(|entry| entry.tool_type != ToolType::Function)
+        .is_some_and(|entry| entry.tool_type.is_gateway_owned())
 }
 
 pub(super) fn has_client_owned_calls(output_items: &[OutputItem], registry: &ToolRegistry) -> bool {
@@ -83,7 +83,11 @@ fn gateway_public_output(
 ) -> Option<OutputItem> {
     match tool_type {
         ToolType::WebSearch => Some(crate::tool::web_search::output_item(call, output, status)),
-        ToolType::Function | ToolType::Mcp | ToolType::FileSearch | ToolType::CodeInterpreter => None,
+        ToolType::Function
+        | ToolType::CodexNamespace
+        | ToolType::Mcp
+        | ToolType::FileSearch
+        | ToolType::CodeInterpreter => None,
     }
 }
 
@@ -141,14 +145,18 @@ fn gateway_event_plans(
     for item in output_items {
         if let OutputItem::FunctionCall(call) = item
             && let Some(entry) = registry.lookup(&call.name)
-            && entry.tool_type != ToolType::Function
+            && entry.tool_type.is_gateway_owned()
         {
             plans.push(GatewayCallEventPlan {
                 call_id: call.call_id.clone(),
                 output_index: u32::try_from(output_index).unwrap_or(u32::MAX),
                 started_output: match entry.tool_type {
                     ToolType::WebSearch => Some(crate::tool::web_search::started_output_item(call)),
-                    ToolType::Function | ToolType::Mcp | ToolType::FileSearch | ToolType::CodeInterpreter => None,
+                    ToolType::Function
+                    | ToolType::CodexNamespace
+                    | ToolType::Mcp
+                    | ToolType::FileSearch
+                    | ToolType::CodeInterpreter => None,
                 },
             });
         }

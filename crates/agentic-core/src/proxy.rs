@@ -7,15 +7,11 @@ use futures::{Stream, StreamExt, TryStreamExt};
 use http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use reqwest::Client;
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
 use tracing::{debug, warn};
 
 use crate::config::{Config, resolve_model_alias};
 use crate::error::Error;
-use crate::tool::{
-    alternate_model_visible_namespace_member_name, legacy_model_visible_namespace_member_name,
-    model_visible_namespace_member_name,
-};
+use crate::tool::{CodexNamespaceHandler, RawCodexNamespaceNormalization};
 
 const HOP_BY_HOP: &[&str] = &[
     "connection",
@@ -49,34 +45,9 @@ pub enum ProxyBody {
     Stream(Pin<Box<dyn Stream<Item = Result<Bytes, std::io::Error>> + Send>>),
 }
 
-#[derive(Clone, Debug)]
-struct NamespaceMemberName {
-    namespace: String,
-    name: String,
-}
-
-#[derive(Clone, Debug)]
-struct NamespaceCallMapping {
-    member: NamespaceMemberName,
-    upstream_name: String,
-    strip_container_arguments: bool,
-}
-
-#[derive(Clone, Debug, Default)]
-struct NamespaceNormalization {
-    calls: HashMap<String, NamespaceCallMapping>,
-    original_tools: Option<Value>,
-}
-
-impl NamespaceNormalization {
-    fn is_empty(&self) -> bool {
-        self.calls.is_empty() && self.original_tools.is_none()
-    }
-}
-
 struct NormalizedProxyRequest {
     body: Bytes,
-    namespace: NamespaceNormalization,
+    namespace: RawCodexNamespaceNormalization,
 }
 
 pub struct ProxyResponse {
@@ -291,42 +262,6 @@ fn merge_system_messages(value: &mut Value) -> bool {
     changed
 }
 
-fn system_message(text: &str) -> Value {
-    serde_json::json!({
-        "type": "message",
-        "role": "system",
-        "content": [
-            {
-                "type": "input_text",
-                "text": text
-            }
-        ]
-    })
-}
-
-fn prepend_system_message(input: &mut Value, instructions: &str) {
-    match input {
-        Value::Array(items) => items.insert(0, system_message(instructions)),
-        Value::String(user_text) => {
-            let user_text = std::mem::take(user_text);
-            *input = Value::Array(vec![
-                system_message(instructions),
-                serde_json::json!({
-                    "type": "message",
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "input_text",
-                            "text": user_text
-                        }
-                    ]
-                }),
-            ]);
-        }
-        _ => {}
-    }
-}
-
 #[cfg(test)]
 fn normalize_request_body(body: Bytes, config: &Config) -> Bytes {
     normalize_proxy_request_body(body, config).body
@@ -336,12 +271,12 @@ fn normalize_proxy_request_body(body: Bytes, config: &Config) -> NormalizedProxy
     let Ok(mut value) = serde_json::from_slice::<Value>(&body) else {
         return NormalizedProxyRequest {
             body,
-            namespace: NamespaceNormalization::default(),
+            namespace: RawCodexNamespaceNormalization::default(),
         };
     };
 
     let mut changed = false;
-    let mut namespace = NamespaceNormalization::default();
+    let mut namespace = RawCodexNamespaceNormalization::default();
     if let Some(object) = value.as_object_mut() {
         if let Some(model) = object.get("model").and_then(Value::as_str) {
             let resolved = resolve_model_alias(model, &config.model_aliases);
@@ -355,29 +290,13 @@ fn normalize_proxy_request_body(body: Bytes, config: &Config) -> NormalizedProxy
                 changed = true;
             }
         }
-        let instructions = object.remove("instructions").and_then(|value| match value {
-            Value::String(instructions) if !instructions.is_empty() => Some(instructions),
-            other => {
-                object.insert("instructions".to_string(), other);
-                None
-            }
-        });
-        if let Some(instructions) = instructions {
-            if let Some(input) = object.get_mut("input") {
-                prepend_system_message(input, &instructions);
-                debug!("moved proxy request instructions into input");
-                changed = true;
-            } else {
-                object.insert("instructions".to_string(), Value::String(instructions));
-            }
-        }
         if let Some(input) = object.get_mut("input") {
             changed |= normalize_developer_roles(input);
             changed |= move_system_messages_to_front(input);
             changed |= merge_system_messages(input);
         }
-        changed |= flatten_namespace_tools_for_upstream(object, &mut namespace);
-        changed |= rewrite_tool_choice_for_upstream(object, &namespace);
+        changed |= CodexNamespaceHandler.flatten_raw_tools_for_upstream(object, &mut namespace);
+        changed |= CodexNamespaceHandler.rewrite_raw_tool_choice_for_upstream(object, &namespace);
     }
 
     if !changed {
@@ -389,366 +308,11 @@ fn normalize_proxy_request_body(body: Bytes, config: &Config) -> NormalizedProxy
     }
 }
 
-fn record_alias_candidate(
-    candidates: &mut HashMap<String, Option<NamespaceCallMapping>>,
-    alias: String,
-    mapping: NamespaceCallMapping,
-) {
-    candidates
-        .entry(alias)
-        .and_modify(|candidate| *candidate = None)
-        .or_insert_with(|| Some(mapping));
-}
-
-fn register_unambiguous_aliases(
-    normalization: &mut NamespaceNormalization,
-    candidates: HashMap<String, Option<NamespaceCallMapping>>,
-    top_level_names: &HashSet<String>,
-) {
-    for (alias, mapping) in candidates {
-        if top_level_names.contains(&alias) {
-            continue;
-        }
-        if let Some(mapping) = mapping {
-            normalization.calls.entry(alias).or_insert(mapping);
-        }
-    }
-}
-
-fn raw_top_level_tool_names(tools: &[Value]) -> HashSet<String> {
-    tools
-        .iter()
-        .filter_map(|tool| {
-            let object = tool.as_object()?;
-            if object.get("type").and_then(Value::as_str) == Some("namespace") {
-                return None;
-            }
-            object.get("name").and_then(Value::as_str).map(str::to_string)
-        })
-        .collect()
-}
-
-fn raw_namespace_has_flat_name_collision(
-    namespace_name: &str,
-    function_members: &[&Value],
-    top_level_names: &HashSet<String>,
-) -> bool {
-    function_members.iter().any(|member| {
-        member.get("name").and_then(Value::as_str).is_some_and(|member_name| {
-            top_level_names.contains(&model_visible_namespace_member_name(namespace_name, member_name))
-        })
-    })
-}
-
-fn record_single_member_namespace_container_candidate(
-    container_candidates: &mut HashMap<String, Option<NamespaceCallMapping>>,
-    namespace_name: &str,
-    function_members: &[&Value],
-) {
-    if function_members.len() != 1 {
-        return;
-    }
-    let Some(member_name) = function_members[0].get("name").and_then(Value::as_str) else {
-        return;
-    };
-    let flat_name = model_visible_namespace_member_name(namespace_name, member_name);
-    record_alias_candidate(
-        container_candidates,
-        namespace_name.to_string(),
-        NamespaceCallMapping {
-            member: NamespaceMemberName {
-                namespace: namespace_name.to_string(),
-                name: member_name.to_string(),
-            },
-            upstream_name: flat_name,
-            strip_container_arguments: true,
-        },
-    );
-}
-
-fn flatten_namespace_tools_for_upstream(
-    object: &mut serde_json::Map<String, Value>,
-    normalization: &mut NamespaceNormalization,
-) -> bool {
-    let Some(tools) = object.get_mut("tools").and_then(Value::as_array_mut) else {
-        return false;
-    };
-
-    let original_tools = tools.clone();
-    let top_level_names = raw_top_level_tool_names(tools);
-    let mut bare_member_candidates: HashMap<String, Option<NamespaceCallMapping>> = HashMap::new();
-    let mut legacy_member_candidates: HashMap<String, Option<NamespaceCallMapping>> = HashMap::new();
-    let mut alternate_member_candidates: HashMap<String, Option<NamespaceCallMapping>> = HashMap::new();
-    let mut container_candidates: HashMap<String, Option<NamespaceCallMapping>> = HashMap::new();
-    let mut upstream_tools = Vec::with_capacity(tools.len());
-    let mut changed = false;
-
-    for tool in std::mem::take(tools) {
-        let Some(tool_object) = tool.as_object() else {
-            upstream_tools.push(tool);
-            continue;
-        };
-        if tool_object.get("type").and_then(Value::as_str) != Some("namespace") {
-            upstream_tools.push(tool);
-            continue;
-        }
-        let Some(namespace_name) = tool_object.get("name").and_then(Value::as_str) else {
-            upstream_tools.push(tool);
-            continue;
-        };
-        let Some(members) = tool_object.get("tools").and_then(Value::as_array) else {
-            upstream_tools.push(tool);
-            continue;
-        };
-
-        let function_members: Vec<&Value> = members
-            .iter()
-            .filter(|member| member.get("type").and_then(Value::as_str) == Some("function"))
-            .collect();
-        if function_members.is_empty() {
-            upstream_tools.push(tool);
-            continue;
-        }
-        if raw_namespace_has_flat_name_collision(namespace_name, &function_members, &top_level_names) {
-            debug!(
-                namespace = %namespace_name,
-                "leaving raw namespace tool unflattened because a top-level tool uses a generated name"
-            );
-            upstream_tools.push(tool);
-            continue;
-        }
-
-        let mut emitted_namespace_members = false;
-        for member in &function_members {
-            let Some(member_name) = member.get("name").and_then(Value::as_str) else {
-                continue;
-            };
-            let flat_name = model_visible_namespace_member_name(namespace_name, member_name);
-            debug!(
-                namespace = %namespace_name,
-                member = %member_name,
-                upstream_name = %flat_name,
-                "flattened raw namespace tool member for upstream"
-            );
-            let mut upstream_member = (*member).clone();
-            if let Some(member_object) = upstream_member.as_object_mut() {
-                member_object.insert("name".to_string(), Value::String(flat_name.clone()));
-            }
-            upstream_tools.push(upstream_member);
-            let member = NamespaceMemberName {
-                namespace: namespace_name.to_string(),
-                name: member_name.to_string(),
-            };
-            let mapping = NamespaceCallMapping {
-                member,
-                upstream_name: flat_name.clone(),
-                strip_container_arguments: false,
-            };
-            normalization.calls.insert(flat_name.clone(), mapping.clone());
-            let legacy_name = legacy_model_visible_namespace_member_name(namespace_name, member_name);
-            record_alias_candidate(&mut legacy_member_candidates, legacy_name, mapping.clone());
-            let alternate_name = alternate_model_visible_namespace_member_name(namespace_name, member_name);
-            record_alias_candidate(&mut alternate_member_candidates, alternate_name, mapping.clone());
-            record_alias_candidate(&mut bare_member_candidates, member_name.to_string(), mapping);
-            emitted_namespace_members = true;
-            changed = true;
-        }
-
-        if !emitted_namespace_members {
-            upstream_tools.push(tool);
-            continue;
-        }
-
-        record_single_member_namespace_container_candidate(
-            &mut container_candidates,
-            namespace_name,
-            &function_members,
-        );
-    }
-
-    if changed {
-        register_unambiguous_aliases(normalization, legacy_member_candidates, &top_level_names);
-        register_unambiguous_aliases(normalization, alternate_member_candidates, &top_level_names);
-        register_unambiguous_aliases(normalization, bare_member_candidates, &top_level_names);
-        register_unambiguous_aliases(normalization, container_candidates, &top_level_names);
-        normalization.original_tools = Some(Value::Array(original_tools));
-        *tools = upstream_tools;
-    } else {
-        *tools = original_tools;
-    }
-    changed
-}
-
-fn strip_namespace_container_arguments(value: &mut Value) {
-    let Some(arguments) = value.as_object_mut().and_then(|object| object.get_mut("arguments")) else {
-        return;
-    };
-    let Some(arguments_text) = arguments.as_str() else {
-        return;
-    };
-    let Ok(mut parsed) = serde_json::from_str::<Value>(arguments_text) else {
-        return;
-    };
-    let Some(object) = parsed.as_object_mut() else {
-        return;
-    };
-    if object.remove("tools").is_some() {
-        *arguments = Value::String(serde_json::to_string(&parsed).unwrap_or_else(|_| arguments_text.to_string()));
-    }
-}
-
-fn normalize_call_object(value: &mut Value, namespace: &NamespaceNormalization) -> bool {
-    let Some(object) = value.as_object_mut() else {
-        return false;
-    };
-    if object.get("type").and_then(Value::as_str) != Some("function_call") {
-        return false;
-    }
-    let Some(name) = object.get("name").and_then(Value::as_str) else {
-        return false;
-    };
-    if object.get("namespace").and_then(Value::as_str).is_some() {
-        return false;
-    }
-    let Some(mapping) = namespace.calls.get(name) else {
-        return false;
-    };
-    let original_name = name.to_string();
-
-    object.insert("namespace".to_string(), Value::String(mapping.member.namespace.clone()));
-    object.insert("name".to_string(), Value::String(mapping.member.name.clone()));
-    if mapping.strip_container_arguments {
-        strip_namespace_container_arguments(value);
-    }
-    debug!(
-        upstream_name = %original_name,
-        namespace = %mapping.member.namespace,
-        member = %mapping.member.name,
-        stripped_container_arguments = mapping.strip_container_arguments,
-        "restored raw proxy namespace function call"
-    );
-    true
-}
-
-fn namespace_mapping_for_member<'a>(
-    normalization: &'a NamespaceNormalization,
-    namespace: &str,
-    name: &str,
-) -> Option<&'a NamespaceCallMapping> {
-    normalization
-        .calls
-        .values()
-        .find(|mapping| mapping.member.namespace == namespace && mapping.member.name == name)
-}
-
-fn rewrite_tool_choice_function_object(
-    function: &mut serde_json::Map<String, Value>,
-    normalization: &NamespaceNormalization,
-) -> bool {
-    let explicit_namespace = function.get("namespace").and_then(Value::as_str).map(str::to_string);
-    let Some(name_text) = function.get("name").and_then(Value::as_str).map(str::to_string) else {
-        return false;
-    };
-    let mapping = if let Some(namespace) = explicit_namespace.as_deref() {
-        namespace_mapping_for_member(normalization, namespace, &name_text)
-    } else {
-        normalization.calls.get(&name_text)
-    };
-    let Some(mapping) = mapping else {
-        return false;
-    };
-
-    let mut changed = mapping.upstream_name != name_text;
-    if changed {
-        function.insert("name".to_string(), Value::String(mapping.upstream_name.clone()));
-    }
-    if explicit_namespace.is_some() {
-        changed |= function.remove("namespace").is_some();
-    }
-    changed
-}
-
-fn rewrite_tool_choice_for_upstream(
-    object: &mut serde_json::Map<String, Value>,
-    normalization: &NamespaceNormalization,
-) -> bool {
-    let Some(tool_choice) = object.get_mut("tool_choice") else {
-        return false;
-    };
-    let Some(choice_object) = tool_choice.as_object_mut() else {
-        return false;
-    };
-
-    if choice_object.get("type").and_then(Value::as_str) == Some("function") {
-        return rewrite_tool_choice_function_object(choice_object, normalization);
-    }
-
-    choice_object
-        .get_mut("function")
-        .and_then(Value::as_object_mut)
-        .is_some_and(|function| rewrite_tool_choice_function_object(function, normalization))
-}
-
-fn restore_original_tools(value: &mut Value, namespace: &NamespaceNormalization) -> bool {
-    let Some(original_tools) = &namespace.original_tools else {
-        return false;
-    };
-    let Some(object) = value.as_object_mut() else {
-        return false;
-    };
-    if !object.get("tools").is_some_and(Value::is_array) {
-        return false;
-    }
-    object.insert("tools".to_string(), original_tools.clone());
-    true
-}
-
-fn normalize_response_value(value: &mut Value, namespace: &NamespaceNormalization) -> bool {
-    let mut changed = false;
-    changed |= restore_original_tools(value, namespace);
-
-    if let Some(item) = value.as_object_mut().and_then(|object| object.get_mut("item")) {
-        changed |= normalize_call_object(item, namespace);
-    }
-
-    changed |= normalize_call_object(value, namespace);
-
-    for key in ["response", "payload"] {
-        if let Some(nested) = value.as_object_mut().and_then(|object| object.get_mut(key)) {
-            changed |= normalize_response_value(nested, namespace);
-        }
-    }
-
-    if let Some(Value::Array(items)) = value.as_object_mut().and_then(|object| object.get_mut("output")) {
-        for item in items {
-            changed |= normalize_call_object(item, namespace);
-        }
-    }
-
-    changed
-}
-
-fn normalize_sse_line(line: &str, namespace: &NamespaceNormalization) -> String {
-    let Some(data) = line.strip_prefix("data: ") else {
-        return line.to_string();
-    };
-    if data == "[DONE]" {
-        return line.to_string();
-    }
-    let Ok(mut value) = serde_json::from_str::<Value>(data) else {
-        return line.to_string();
-    };
-    if !normalize_response_value(&mut value, namespace) {
-        return line.to_string();
-    }
-    serde_json::to_string(&value).map_or_else(|_| line.to_string(), |json| format!("data: {json}"))
-}
-
-fn normalize_response_body(body: Bytes, namespace: &NamespaceNormalization) -> Bytes {
+fn normalize_response_body(body: Bytes, namespace: &RawCodexNamespaceNormalization) -> Bytes {
     let Ok(mut value) = serde_json::from_slice::<Value>(&body) else {
         return body;
     };
-    if !normalize_response_value(&mut value, namespace) {
+    if !CodexNamespaceHandler.restore_raw_response_value(&mut value, namespace) {
         return body;
     }
     serde_json::to_vec(&value).map_or(body, Bytes::from)
@@ -756,7 +320,7 @@ fn normalize_response_body(body: Bytes, namespace: &NamespaceNormalization) -> B
 
 fn normalize_sse_stream(
     mut upstream: Pin<Box<dyn Stream<Item = Result<Bytes, std::io::Error>> + Send>>,
-    namespace: NamespaceNormalization,
+    namespace: RawCodexNamespaceNormalization,
 ) -> Pin<Box<dyn Stream<Item = Result<Bytes, std::io::Error>> + Send>> {
     Box::pin(stream! {
         let mut buffer = Vec::new();
@@ -781,7 +345,7 @@ fn normalize_sse_stream(
                     yield Ok(Bytes::from(line));
                     continue;
                 };
-                let normalized = normalize_sse_line(raw_line, &namespace);
+                let normalized = CodexNamespaceHandler.restore_raw_sse_line(raw_line, &namespace);
                 yield Ok(Bytes::from(format!("{normalized}\n")));
             }
         }
@@ -791,7 +355,7 @@ fn normalize_sse_stream(
                 yield Ok(Bytes::from(buffer));
                 return;
             };
-            let normalized = normalize_sse_line(raw_line, &namespace);
+            let normalized = CodexNamespaceHandler.restore_raw_sse_line(raw_line, &namespace);
             yield Ok(Bytes::from(normalized));
         }
     })
@@ -1126,7 +690,7 @@ mod tests {
     }
 
     #[test]
-    fn proxy_request_body_moves_instructions_into_input() {
+    fn proxy_request_body_carries_instructions_forward() {
         let config = test_config();
         let body = Bytes::from_static(
             br#"{"model":"test","instructions":"rules","input":[{"role":"user","content":"hi"}],"store":false}"#,
@@ -1135,25 +699,21 @@ mod tests {
         let rewritten = normalize_request_body(body, &config);
         let value: Value = serde_json::from_slice(&rewritten).unwrap();
 
-        assert!(value.get("instructions").is_none());
-        assert_eq!(value["input"][0]["role"], "system");
-        assert_eq!(value["input"][0]["content"][0]["text"], "rules");
-        assert_eq!(value["input"][1]["role"], "user");
+        assert_eq!(value["instructions"], "rules");
+        assert_eq!(value["input"][0]["role"], "user");
+        assert_eq!(value["input"][0]["content"], "hi");
     }
 
     #[test]
-    fn proxy_request_body_moves_instructions_into_string_input() {
+    fn proxy_request_body_carries_instructions_with_string_input() {
         let config = test_config();
         let body = Bytes::from_static(br#"{"model":"test","instructions":"rules","input":"hi","store":false}"#);
 
         let rewritten = normalize_request_body(body, &config);
         let value: Value = serde_json::from_slice(&rewritten).unwrap();
 
-        assert!(value.get("instructions").is_none());
-        assert_eq!(value["input"][0]["role"], "system");
-        assert_eq!(value["input"][0]["content"][0]["text"], "rules");
-        assert_eq!(value["input"][1]["role"], "user");
-        assert_eq!(value["input"][1]["content"][0]["text"], "hi");
+        assert_eq!(value["instructions"], "rules");
+        assert_eq!(value["input"], "hi");
     }
 
     #[test]
@@ -1191,12 +751,11 @@ mod tests {
             value["tools"][1]["name"],
             "agentic_ns__mcp__agentic_fixture__add_numbers"
         );
-        assert!(normalized.namespace.original_tools.is_some());
+        assert!(normalized.namespace.has_original_tools());
         assert!(
             normalized
                 .namespace
-                .calls
-                .contains_key("agentic_ns__mcp__agentic_fixture__echo_text")
+                .contains_call("agentic_ns__mcp__agentic_fixture__echo_text")
         );
     }
 
@@ -1255,7 +814,7 @@ mod tests {
         }));
         assert_eq!(value["tool_choice"]["namespace"], "mcp__shell");
         assert_eq!(value["tool_choice"]["name"], "run");
-        assert!(!normalized.namespace.calls.contains_key("agentic_ns__mcp__shell__run"));
+        assert!(!normalized.namespace.contains_call("agentic_ns__mcp__shell__run"));
     }
 
     #[test]
@@ -1319,14 +878,8 @@ mod tests {
             }));
             assert_eq!(value["tool_choice"]["namespace"], "mcp__shell");
             assert_eq!(value["tool_choice"]["name"], shell_choice);
-            assert!(
-                !normalized
-                    .namespace
-                    .calls
-                    .values()
-                    .any(|mapping| mapping.member.namespace == "mcp__shell")
-            );
-            assert!(normalized.namespace.calls.contains_key("agentic_ns__mcp__git__status"));
+            assert!(!normalized.namespace.contains_namespace_call("mcp__shell"));
+            assert!(normalized.namespace.contains_call("agentic_ns__mcp__git__status"));
         }
     }
 
@@ -1339,7 +892,7 @@ mod tests {
         let normalized_request = normalize_proxy_request_body(body, &config);
         let line = r#"data: {"type":"response.output_item.done","item":{"type":"function_call","name":"agentic_ns__mcp__agentic_fixture__echo_text","call_id":"call_1","arguments":"{\"text\":\"hi\"}"}}"#;
 
-        let normalized = normalize_sse_line(line, &normalized_request.namespace);
+        let normalized = CodexNamespaceHandler.restore_raw_sse_line(line, &normalized_request.namespace);
         let value: Value = serde_json::from_str(normalized.strip_prefix("data: ").unwrap()).unwrap();
 
         assert_eq!(value["item"]["namespace"], "mcp__agentic_fixture");
@@ -1355,7 +908,7 @@ mod tests {
         let normalized_request = normalize_proxy_request_body(body, &test_config());
         let line = r#"data: {"type":"response.output_item.done","item":{"type":"web_search_call","name":"mcp__agentic_fixture.run","status":"completed"}}"#;
 
-        let normalized = normalize_sse_line(line, &normalized_request.namespace);
+        let normalized = CodexNamespaceHandler.restore_raw_sse_line(line, &normalized_request.namespace);
         let value: Value = serde_json::from_str(normalized.strip_prefix("data: ").unwrap()).unwrap();
 
         assert!(value["item"].get("namespace").is_none());
@@ -1372,7 +925,7 @@ mod tests {
         let normalized_request = normalize_proxy_request_body(body, &config);
         let line = r#"data: {"type":"response.output_item.done","item":{"type":"function_call","name":"agentic_ns__mcp__agentic_fixture__run","call_id":"call_1","arguments":"{\"tools\":\"legitimate\",\"cmd\":\"pwd\"}"}}"#;
 
-        let normalized = normalize_sse_line(line, &normalized_request.namespace);
+        let normalized = CodexNamespaceHandler.restore_raw_sse_line(line, &normalized_request.namespace);
         let value: Value = serde_json::from_str(normalized.strip_prefix("data: ").unwrap()).unwrap();
 
         assert_eq!(value["item"]["namespace"], "mcp__agentic_fixture");
@@ -1388,7 +941,7 @@ mod tests {
         let normalized_request = normalize_proxy_request_body(body, &test_config());
         let line = r#"data: {"type":"response.output_item.done","item":{"type":"function_call","name":"mcp__agentic_fixture_echo_text","call_id":"call_1","arguments":"{\"text\":\"hi\"}"}}"#;
 
-        let normalized = normalize_sse_line(line, &normalized_request.namespace);
+        let normalized = CodexNamespaceHandler.restore_raw_sse_line(line, &normalized_request.namespace);
         let value: Value = serde_json::from_str(normalized.strip_prefix("data: ").unwrap()).unwrap();
 
         assert_eq!(value["item"]["namespace"], "mcp__agentic_fixture");
@@ -1403,7 +956,7 @@ mod tests {
         let normalized_request = normalize_proxy_request_body(body, &test_config());
         let line = r#"data: {"type":"response.output_item.done","item":{"type":"function_call","name":"mcp__a_b_c","call_id":"call_1","arguments":"{}"}}"#;
 
-        let normalized = normalize_sse_line(line, &normalized_request.namespace);
+        let normalized = CodexNamespaceHandler.restore_raw_sse_line(line, &normalized_request.namespace);
         let value: Value = serde_json::from_str(normalized.strip_prefix("data: ").unwrap()).unwrap();
 
         assert!(value["item"].get("namespace").is_none());
@@ -1418,7 +971,7 @@ mod tests {
         let normalized_request = normalize_proxy_request_body(body, &test_config());
         let line = r#"data: {"type":"response.output_item.done","item":{"type":"function_call","name":"run","call_id":"call_1","arguments":"{\"cmd\":\"pwd\"}"}}"#;
 
-        let normalized = normalize_sse_line(line, &normalized_request.namespace);
+        let normalized = CodexNamespaceHandler.restore_raw_sse_line(line, &normalized_request.namespace);
         let value: Value = serde_json::from_str(normalized.strip_prefix("data: ").unwrap()).unwrap();
 
         assert_eq!(value["item"]["namespace"], "mcp__agentic_fixture");
@@ -1453,7 +1006,7 @@ mod tests {
         let normalized_request = normalize_proxy_request_body(body, &test_config());
         let line = r#"data: {"type":"response.output_item.done","item":{"type":"function_call","name":"mcp__agentic_fixture","call_id":"call_1","arguments":"{\"tools\":\"opaque\",\"cmd\":\"pwd\"}"}}"#;
 
-        let normalized = normalize_sse_line(line, &normalized_request.namespace);
+        let normalized = CodexNamespaceHandler.restore_raw_sse_line(line, &normalized_request.namespace);
         let value: Value = serde_json::from_str(normalized.strip_prefix("data: ").unwrap()).unwrap();
 
         assert_eq!(value["item"]["namespace"], "mcp__agentic_fixture");

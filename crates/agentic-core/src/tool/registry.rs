@@ -4,18 +4,16 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{
-    FunctionHandler, GatewayExecutor, ToolError, ToolHandler, ToolOutput, flatten_tool_choice_for_upstream,
-    flatten_tools_for_upstream, restore_output_items_with_tools, restore_response_value_with_tools,
-};
+use super::{CodexNamespaceHandler, FunctionHandler, GatewayExecutor, ToolError, ToolHandler, ToolOutput};
 use crate::types::io::output::FunctionToolCall;
 use crate::types::io::{FunctionTool, OutputItem, ToolChoice};
-use crate::types::tools::{CodexNamespaceMember, ResponsesTool};
+use crate::types::tools::ResponsesTool;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolType {
     Function,
+    CodexNamespace,
     Mcp,
     /// Internal routing discriminant. Serializes as `"web_search"`.
     /// Note: the corresponding `ResponsesTool` wire tag is `"web_search_preview"`.
@@ -23,6 +21,13 @@ pub enum ToolType {
     WebSearch,
     FileSearch,
     CodeInterpreter,
+}
+
+impl ToolType {
+    #[must_use]
+    pub const fn is_gateway_owned(self) -> bool {
+        !matches!(self, Self::Function | Self::CodexNamespace)
+    }
 }
 
 /// Per-request routing entry keyed by the tool name the model will call.
@@ -50,6 +55,12 @@ impl std::fmt::Debug for ToolEntry {
 pub struct GatewayDispatchResult {
     pub tool_type: ToolType,
     pub output: Result<ToolOutput, ToolError>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpstreamToolConfig {
+    pub tools: Option<Vec<FunctionTool>>,
+    pub tool_choice: ToolChoice,
 }
 
 /// Request-scoped registry built from `RequestPayload.tools`.
@@ -154,18 +165,15 @@ impl ToolRegistry {
                     );
                 }
                 ResponsesTool::Namespace(p) => {
-                    for member in &p.tools {
-                        let CodexNamespaceMember::Function(function) = member else {
-                            continue;
-                        };
-                        let name = super::model_visible_namespace_member_name(&p.name, function.name.as_str());
+                    let config = serde_json::to_value(p).expect("serialization of known struct is infallible");
+                    for function in CodexNamespaceHandler.normalize(&config) {
+                        let name = function.name.clone();
                         if entries
                             .insert(
                                 name.clone(),
                                 ToolEntry {
-                                    tool_type: ToolType::Function,
-                                    config: serde_json::to_value(function)
-                                        .expect("serialization of known struct is infallible"),
+                                    tool_type: ToolType::CodexNamespace,
+                                    config: config.clone(),
                                     server_label: Some(p.name.clone()),
                                     handler: None,
                                 },
@@ -204,33 +212,36 @@ impl ToolRegistry {
     }
 
     #[must_use]
-    pub fn upstream_tools(&self) -> Option<Vec<FunctionTool>> {
-        let flattened =
-            flatten_tools_for_upstream((!self.declared_tools.is_empty()).then_some(self.declared_tools.as_slice()))?;
-        let tools = flattened
-            .iter()
-            .flat_map(|tool| self.normalize_tool_for_upstream(tool))
-            .collect::<Vec<_>>();
-        (!tools.is_empty()).then_some(tools)
-    }
-
-    #[must_use]
-    pub fn upstream_tool_choice(&self, choice: &ToolChoice) -> ToolChoice {
-        flatten_tool_choice_for_upstream(
-            choice,
+    pub fn upstream_tool_config(&self, choice: &ToolChoice) -> UpstreamToolConfig {
+        let normalized = CodexNamespaceHandler.normalize_request_for_upstream(
             (!self.declared_tools.is_empty()).then_some(self.declared_tools.as_slice()),
-        )
+            choice,
+        );
+        let tools = normalized
+            .tools
+            .map(|tools| {
+                tools
+                    .iter()
+                    .flat_map(|tool| self.normalize_tool_for_upstream(tool))
+                    .collect::<Vec<_>>()
+            })
+            .filter(|tools| !tools.is_empty());
+
+        UpstreamToolConfig {
+            tools,
+            tool_choice: normalized.tool_choice,
+        }
     }
 
-    pub fn restore_output_items(&self, output: &mut [OutputItem]) {
-        restore_output_items_with_tools(
+    pub fn restore_final_payload_output(&self, output: &mut [OutputItem]) {
+        CodexNamespaceHandler.restore_output_items(
             output,
             (!self.declared_tools.is_empty()).then_some(self.declared_tools.as_slice()),
         );
     }
 
-    pub fn restore_response_value(&self, value: &mut Value) -> bool {
-        restore_response_value_with_tools(
+    pub fn restore_stream_event_value(&self, value: &mut Value) -> bool {
+        CodexNamespaceHandler.restore_response_value(
             value,
             (!self.declared_tools.is_empty()).then_some(self.declared_tools.as_slice()),
         )
@@ -255,8 +266,7 @@ impl ToolRegistry {
         }
     }
 
-    /// Returns the subset of `calls` whose names map to gateway-owned tools
-    /// (i.e. everything except `ToolType::Function`).
+    /// Returns the subset of `calls` whose names map to gateway-owned tools.
     #[must_use]
     pub fn gateway_owned<'a>(&self, calls: &'a [FunctionToolCall]) -> Vec<&'a FunctionToolCall> {
         calls
@@ -264,7 +274,7 @@ impl ToolRegistry {
             .filter(|c| {
                 self.entries
                     .get(&c.name)
-                    .is_some_and(|e| e.tool_type != ToolType::Function)
+                    .is_some_and(|e| e.tool_type.is_gateway_owned())
             })
             .collect()
     }
@@ -273,11 +283,11 @@ impl ToolRegistry {
     pub fn is_gateway_owned_name(&self, name: &str) -> bool {
         self.entries
             .get(name)
-            .is_some_and(|entry| entry.tool_type != ToolType::Function)
+            .is_some_and(|entry| entry.tool_type.is_gateway_owned())
     }
 
-    /// Returns the subset of `calls` whose names map to client-owned function
-    /// tools (i.e. `ToolType::Function` or unknown names).
+    /// Returns the subset of `calls` whose names map to client-owned tools
+    /// (`Function`, Codex namespace members, or unknown names).
     #[must_use]
     pub fn client_owned<'a>(&self, calls: &'a [FunctionToolCall]) -> Vec<&'a FunctionToolCall> {
         calls
@@ -285,7 +295,7 @@ impl ToolRegistry {
             .filter(|c| {
                 self.entries
                     .get(&c.name)
-                    .is_none_or(|e| e.tool_type == ToolType::Function)
+                    .is_none_or(|e| !e.tool_type.is_gateway_owned())
             })
             .collect()
     }

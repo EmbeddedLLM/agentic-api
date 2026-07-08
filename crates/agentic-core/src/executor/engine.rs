@@ -149,7 +149,7 @@ async fn run_until_gateway_tools_complete(
         } else {
             fetch_blocking_payload(&ctx, exec_ctx, auth, &registry).await?
         };
-        registry.restore_output_items(&mut payload.output);
+        registry.restore_final_payload_output(&mut payload.output);
         accumulate_usage(&mut combined_usage, payload.usage);
         let current_output = std::mem::take(&mut payload.output);
         let has_client_owned_calls = has_client_owned_calls(&current_output, &registry);

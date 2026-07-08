@@ -119,23 +119,7 @@ fn is_default_tool_choice(choice: &ToolChoice) -> bool {
 
 impl RequestPayload {
     pub(crate) fn normalize_for_upstream(&mut self) {
-        if let Some(instructions) = self.instructions.take().filter(|instructions| !instructions.is_empty()) {
-            self.input.prepend_system_text(instructions);
-        }
         self.input.normalize_for_upstream();
-    }
-
-    /// Construct an `UpstreamRequest` suitable for forwarding to vLLM.
-    #[must_use]
-    pub fn to_upstream_request(&self, stream: bool) -> UpstreamRequest<'_> {
-        let tools: Option<Vec<FunctionTool>> = self
-            .tools
-            .as_ref()
-            .map(|tools| tools.iter().filter_map(ResponsesTool::to_function_tool).collect());
-        // Treat an empty normalised list the same as no tools (skip the field entirely).
-        let tools = tools.filter(|tools| !tools.is_empty());
-
-        self.to_upstream_request_with_tools(stream, tools)
     }
 
     /// Construct an `UpstreamRequest` with tools normalized by the caller.
@@ -249,6 +233,26 @@ mod tests {
         .unwrap();
         assert_eq!(explicit.tool_choice, ToolChoice::None);
         assert!(explicit.tool_choice_explicitly_set);
+    }
+
+    #[test]
+    fn normalize_for_upstream_carries_instructions_forward() {
+        let mut payload: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test",
+            "instructions": "rules",
+            "input": "hi"
+        }))
+        .unwrap();
+
+        payload.normalize_for_upstream();
+
+        assert_eq!(payload.instructions.as_deref(), Some("rules"));
+        assert!(matches!(&payload.input, ResponsesInput::Text(text) if text == "hi"));
+
+        let upstream = payload.to_upstream_request_with_tools(false, None);
+        let value = serde_json::to_value(upstream).unwrap();
+        assert_eq!(value["instructions"], "rules");
+        assert_eq!(value["input"], "hi");
     }
 
     #[test]

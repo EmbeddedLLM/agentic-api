@@ -15,8 +15,8 @@ pub use storage::{
     models::{Conversation as DbConversation, Item as DbItem, Response as DbResponse},
 };
 pub use tool::{
-    FunctionHandler, GatewayExecutor, ToolEntry, ToolError, ToolHandler, ToolOutput, ToolRegistry, ToolType,
-    WebSearchHandler,
+    CodexNamespaceHandler, FunctionHandler, GatewayExecutor, ToolEntry, ToolError, ToolHandler, ToolOutput,
+    ToolRegistry, ToolType, UpstreamToolConfig, WebSearchHandler,
 };
 pub use types::{
     CodeInterpreterToolParam, CodexNamespaceMember, CodexNamespaceToolParam, EmptyToolNameError, FileSearchToolParam,

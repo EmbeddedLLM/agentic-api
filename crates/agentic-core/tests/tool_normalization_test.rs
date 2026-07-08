@@ -4,8 +4,11 @@
 //! parse correctly into `Vec<ResponsesTool>` and normalize through the full pipeline.
 
 use serde::Deserialize;
+use serde_json::Value;
 
-use agentic_core::tool::{ToolRegistry, ToolType, flatten_tools_for_upstream, model_visible_namespace_member_name};
+use agentic_core::ToolChoice;
+use agentic_core::executor::{RequestContext, upstream_request_json};
+use agentic_core::tool::{CodexNamespaceHandler, ToolRegistry, ToolType, model_visible_namespace_member_name};
 use agentic_core::types::request_response::RequestPayload;
 use agentic_core::types::tools::ResponsesTool;
 
@@ -74,6 +77,22 @@ fn parse_tools_from_turn(cassette_file: &str, turn_idx: usize, turn: &Turn) -> V
         tools_from_turn(turn).unwrap_or_else(|| panic!("{cassette_file} turn {turn_idx}: expected tools array"));
     serde_json::from_value(tools_val.clone())
         .unwrap_or_else(|e| panic!("{cassette_file} turn {turn_idx}: tools parse failed: {e}\nJSON: {tools_val}"))
+}
+
+fn upstream_request_value(payload: RequestPayload, stream: bool) -> Value {
+    let registry = payload
+        .tools
+        .as_deref()
+        .map_or_else(ToolRegistry::default, ToolRegistry::build);
+    let ctx = RequestContext {
+        original_request: payload.clone(),
+        enriched_request: payload,
+        new_input_items: Vec::new(),
+        response_id: "resp_test".to_string(),
+        conversation_id: None,
+    };
+    let body = upstream_request_json(&ctx, &registry, stream).expect("serialize upstream request");
+    serde_json::from_str(&body).expect("upstream request should be JSON")
 }
 
 /// Parse `request.body.tools` from every turn of a cassette into `Vec<ResponsesTool>`.
@@ -149,8 +168,8 @@ fn assert_registry_lookup(cassette_file: &str) {
     }
 }
 
-/// Full round-trip: deserialize `request.body` → `RequestPayload` → `to_upstream_request()`
-/// → assert upstream tools only contains `FunctionTool` entries.
+/// Full round-trip: deserialize `request.body` → `RequestPayload` → `ToolRegistry`
+/// → `upstream_request_json()` → assert upstream tools only contains function entries.
 fn assert_full_roundtrip(cassette_file: &str) {
     let cassette = load_cassette(cassette_file);
     for (i, turn) in cassette.turns.iter().enumerate() {
@@ -158,15 +177,18 @@ fn assert_full_roundtrip(cassette_file: &str) {
         let json: serde_json::Value = serde_json::to_value(body).expect("body to json");
         let payload: RequestPayload = serde_json::from_value(json.clone())
             .unwrap_or_else(|e| panic!("{cassette_file} turn {i}: RequestPayload parse failed: {e}"));
-        let upstream = payload.to_upstream_request(false);
-        if let Some(tools) = &upstream.tools {
+        let upstream = upstream_request_value(payload, false);
+        if let Some(tools) = upstream.get("tools").and_then(Value::as_array) {
             for ft in tools {
                 assert_eq!(
-                    ft.type_, "function",
+                    ft.get("type").and_then(Value::as_str),
+                    Some("function"),
                     "{cassette_file} turn {i}: upstream tools must only contain FunctionTool"
                 );
                 assert!(
-                    !ft.name.is_empty(),
+                    ft.get("name")
+                        .and_then(Value::as_str)
+                        .is_some_and(|name| !name.is_empty()),
                     "{cassette_file} turn {i}: upstream tool name must not be empty"
                 );
             }
@@ -284,7 +306,10 @@ fn codex_namespace_cassettes_flatten_to_safe_upstream_function_name() {
                 "{filename} turn {i}: expected raw namespace tool"
             );
 
-            let flattened = flatten_tools_for_upstream(Some(&tools)).expect("flattened tools");
+            let flattened = CodexNamespaceHandler
+                .normalize_request_for_upstream(Some(&tools), &ToolChoice::Auto)
+                .tools
+                .expect("flattened tools");
             assert!(
                 flattened
                     .iter()
@@ -330,7 +355,10 @@ fn codex_direct_vllm_flat_namespace_cassette_is_plain_function_tool() {
             "{filename} turn {i}: expected direct vLLM to see a plain function tool named {expected_flat_name}"
         );
 
-        let flattened = flatten_tools_for_upstream(Some(&tools)).expect("flattened tools");
+        let flattened = CodexNamespaceHandler
+            .normalize_request_for_upstream(Some(&tools), &ToolChoice::Auto)
+            .tools
+            .expect("flattened tools");
         assert_eq!(flattened.len(), 1);
         assert!(
             matches!(
@@ -351,14 +379,14 @@ fn web_search_preview_normalizes_to_gateway_function() {
     }))
     .unwrap();
 
-    let upstream = payload.to_upstream_request(false);
-    let tools = upstream.tools.expect("web_search should normalize to a function tool");
+    let upstream = upstream_request_value(payload, false);
+    let tools = upstream
+        .get("tools")
+        .and_then(Value::as_array)
+        .expect("web_search should normalize to a function tool");
 
     assert_eq!(tools.len(), 1);
-    assert_eq!(tools[0].type_, "function");
-    assert_eq!(tools[0].name, "web_search");
-    assert_eq!(
-        tools[0].parameters.as_ref().unwrap()["required"],
-        serde_json::json!(["query"])
-    );
+    assert_eq!(tools[0].get("type").and_then(Value::as_str), Some("function"));
+    assert_eq!(tools[0].get("name").and_then(Value::as_str), Some("web_search"));
+    assert_eq!(tools[0]["parameters"]["required"], serde_json::json!(["query"]));
 }

@@ -116,26 +116,6 @@ pub enum ResponsesInput {
 }
 
 impl ResponsesInput {
-    pub(crate) fn prepend_system_text(&mut self, text: String) {
-        let system = InputItem::Message(InputMessage {
-            role: "system".to_string(),
-            content: InputMessageContent::Text(text),
-        });
-
-        match self {
-            Self::Text(user_text) => {
-                *self = Self::Items(vec![
-                    system,
-                    InputItem::Message(InputMessage {
-                        role: "user".to_string(),
-                        content: InputMessageContent::Text(std::mem::take(user_text)),
-                    }),
-                ]);
-            }
-            Self::Items(items) => items.insert(0, system),
-        }
-    }
-
     pub(crate) fn normalize_for_upstream(&mut self) {
         if let Self::Items(items) = self {
             items.retain(|item| !item.is_unknown());

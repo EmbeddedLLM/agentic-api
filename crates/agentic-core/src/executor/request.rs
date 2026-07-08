@@ -34,7 +34,11 @@ impl GatewayExecutors {
     pub fn get(&self, tool_type: ToolType) -> Option<Arc<dyn GatewayExecutor>> {
         match tool_type {
             ToolType::WebSearch => self.web_search.clone(),
-            ToolType::Function | ToolType::Mcp | ToolType::FileSearch | ToolType::CodeInterpreter => None,
+            ToolType::Function
+            | ToolType::CodexNamespace
+            | ToolType::Mcp
+            | ToolType::FileSearch
+            | ToolType::CodeInterpreter => None,
         }
     }
 }

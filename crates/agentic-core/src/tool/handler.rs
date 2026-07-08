@@ -3,7 +3,7 @@ use std::pin::Pin;
 
 use serde_json::Value;
 
-use crate::types::io::{FunctionTool, FunctionToolCall};
+use crate::types::io::FunctionTool;
 
 #[derive(Debug, Clone)]
 pub struct ToolOutput {
@@ -40,13 +40,6 @@ pub trait ToolHandler: Send + Sync {
     /// Normalise this tool declaration into vLLM-compatible `FunctionTool` entries.
     #[must_use]
     fn normalize(&self, param: &Value) -> Vec<FunctionTool>;
-
-    /// Restore a model-visible function call to the public API shape.
-    ///
-    /// Most tool types have identical model-visible and API-visible names. Codex
-    /// namespace restoration is implemented by the request-scoped registry because
-    /// it needs the full declared tool set to resolve ambiguity.
-    fn restore_call(&self, _call: &mut FunctionToolCall) {}
 }
 
 /// Extension of [`ToolHandler`] for tool types that are executed by the gateway.

@@ -23,8 +23,9 @@ use crate::utils::common::serialize_to_string;
 /// Returns [`ExecutorError::JsonError`] when the upstream request body cannot be serialized.
 pub fn upstream_request_json(ctx: &RequestContext, registry: &ToolRegistry, stream: bool) -> ExecutorResult<String> {
     let mut upstream_request = ctx.enriched_request.clone();
-    upstream_request.tool_choice = registry.upstream_tool_choice(&ctx.enriched_request.tool_choice);
-    serialize_to_string(&upstream_request.to_upstream_request_with_tools(stream, registry.upstream_tools()))
+    let upstream_tool_config = registry.upstream_tool_config(&ctx.enriched_request.tool_choice);
+    upstream_request.tool_choice = upstream_tool_config.tool_choice;
+    serialize_to_string(&upstream_request.to_upstream_request_with_tools(stream, upstream_tool_config.tools))
         .map_err(ExecutorError::JsonError)
 }
 
@@ -142,7 +143,7 @@ fn emit_stream_line(
 ) -> ExecutorResult<()> {
     let mut value = serde_json::from_str::<Value>(data).map_err(ExecutorError::JsonError)?;
     apply_context_response_ids(&mut value, ctx);
-    registry.restore_response_value(&mut value);
+    registry.restore_stream_event_value(&mut value);
     let event_json = serialize_to_string(&value).map_err(ExecutorError::JsonError)?;
     sender
         .send(format!("data: {event_json}\n\n"))
