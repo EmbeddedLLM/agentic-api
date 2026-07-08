@@ -133,18 +133,18 @@ async fn run_until_gateway_tools_complete(
     stream_upstream: bool,
     stream_events: Option<&mpsc::UnboundedSender<String>>,
 ) -> ExecutorResult<(ResponsePayload, RequestContext)> {
-    let registry = ctx
+    let registry: ToolRegistry = ctx
         .enriched_request
         .tools
         .as_ref()
         .map_or_else(ToolRegistry::default, |tools| {
             ToolRegistry::build_with_handlers(tools, |tool_type| exec_ctx.gateway_executors.get(tool_type))
         });
-    let mut combined_output = Vec::new();
-    let mut combined_usage = None;
+    let mut combined_output: Vec<crate::OutputItem> = Vec::new();
+    let mut combined_usage: Option<ResponseUsage> = None;
 
     for _ in 0..MAX_GATEWAY_TOOL_ROUNDS {
-        let mut payload = if stream_upstream {
+        let mut payload: ResponsePayload = if stream_upstream {
             fetch_stream_payload(&ctx, exec_ctx, auth, &registry, stream_events).await?
         } else {
             fetch_blocking_payload(&ctx, exec_ctx, auth, &registry).await?

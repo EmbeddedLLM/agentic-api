@@ -113,7 +113,7 @@ fn emit_upstream_stream_event(
     let Some(frame) = normalize_sse_line(line) else {
         return Ok(());
     };
-    if should_hide_upstream_event(&frame.event_type, &frame.payload, registry, hidden_gateway_item_ids)
+    if should_hide_upstream_event(frame.event_type, &frame.payload, registry, hidden_gateway_item_ids)
         || is_terminal_response_event(frame.event_type)
     {
         drop_pending_function_events(&frame.payload, pending_unnamed_function_events);
@@ -252,7 +252,7 @@ fn drop_pending_function_events(
 }
 
 fn should_hide_upstream_event(
-    event_type: &SSEEventType,
+    event_type: SSEEventType,
     payload: &EventPayload,
     registry: &ToolRegistry,
     hidden_gateway_item_ids: &mut HashSet<String>,
