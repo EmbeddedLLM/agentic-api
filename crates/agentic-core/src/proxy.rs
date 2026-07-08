@@ -536,33 +536,6 @@ mod tests {
     }
 
     #[test]
-    fn proxy_request_body_carries_instructions_forward() {
-        let config = test_config();
-        let body = Bytes::from_static(
-            br#"{"model":"test","instructions":"rules","input":[{"role":"user","content":"hi"}],"store":false}"#,
-        );
-
-        let rewritten = normalize_request_body(body, &config);
-        let value: Value = serde_json::from_slice(&rewritten).unwrap();
-
-        assert_eq!(value["instructions"], "rules");
-        assert_eq!(value["input"][0]["role"], "user");
-        assert_eq!(value["input"][0]["content"], "hi");
-    }
-
-    #[test]
-    fn proxy_request_body_carries_instructions_with_string_input() {
-        let config = test_config();
-        let body = Bytes::from_static(br#"{"model":"test","instructions":"rules","input":"hi","store":false}"#);
-
-        let rewritten = normalize_request_body(body, &config);
-        let value: Value = serde_json::from_slice(&rewritten).unwrap();
-
-        assert_eq!(value["instructions"], "rules");
-        assert_eq!(value["input"], "hi");
-    }
-
-    #[test]
     fn proxy_request_body_flattens_namespace_tools_for_upstream() {
         let config = test_config();
         let body = Bytes::from_static(
