@@ -12,8 +12,8 @@
 
 Post-merge status: the generic tool framework from latest `main` is now present. Codex tool wire shapes live in the
 shared `ResponsesTool` type, and namespace flatten/restore behavior lives in `tool::normalize`. The typed stateful
-executor forwards only vLLM-compatible `function` tools upstream after namespace flattening; raw `store=false` proxying
-continues to preserve raw tool declarations while applying the same compatibility rewrite.
+executor forwards only vLLM-compatible `function` tools upstream after namespace flattening. Raw `store=false` proxying
+remains transparent and is intentionally outside this PR's Codex namespace normalization scope.
 
 This PR remains an MVP compatibility slice. It lets `agentic-api` accept and preserve Codex-used Responses traffic while
 plugging the Codex-specific compatibility rules into the shared tool framework.
@@ -35,7 +35,6 @@ This PR should do only the minimum needed for Codex compatibility:
 - Preserve optional `namespace` on `function_call`.
 - Preserve `tool_search_call` and `custom_tool_call` shapes.
 - Preserve assistant tool-call items through `previous_response_id` rehydration.
-- Add model alias routing for Codex-facing model names to local vLLM models.
 - Add lightweight helper types/tests that document what #67 should formalize later.
 
 This PR should **not** build a second generic tool framework.
@@ -121,19 +120,6 @@ submits the matching tool output item, and `previous_response_id` should rebuild
 
 ---
 
-## Model Aliases
-
-Model aliases route Codex-facing model names to local vLLM models:
-
-```toml
-[model_aliases]
-codex-compatible = "qwen3-coder"
-```
-
-Alias resolution is only model routing. It must not imply approval, auto-review, or human-confirmation behavior.
-
----
-
 ## Test Plan
 
 Current PR tests should cover:
@@ -144,7 +130,6 @@ Current PR tests should cover:
 - `tool_search_call` and `custom_tool_call` remain raw-compatible.
 - Unknown input/output items remain raw JSON.
 - `previous_response_id` rehydrates assistant tool calls before tool outputs.
-- Model aliases resolve on executor and proxy paths.
 
 Post-#67 tests should prove the same behavior through the formal tool framework.
 
