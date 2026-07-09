@@ -5,7 +5,7 @@ use super::io::{
     FunctionTool, InputItem, InputMessage, InputMessageContent, OutputItem, ResponseUsage, ResponsesInput, ToolChoice,
 };
 use super::tools::ResponsesTool;
-use crate::tool::{CodexNamespaceHandler, ToolRegistry};
+use crate::tool::CodexNamespaceHandler;
 use crate::utils::common::serialize_to_string;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,22 +73,30 @@ fn is_absent_or_default_tool_choice(choice: &Option<ToolChoice>) -> bool {
 impl RequestPayload {
     /// Construct an `UpstreamRequest` suitable for forwarding to vLLM.
     ///
-    /// All tool types are normalised to `Vec<FunctionTool>` through the
-    /// request-scoped [`ToolRegistry`]. Codex namespace tools are flattened
-    /// first so vLLM only sees `type: "function"` declarations.
+    /// Codex `namespace` tools' members are first renamed to their flat,
+    /// model-visible names via [`CodexNamespaceHandler::resolve_namespace_members`].
+    /// All tool types are then normalised to `Vec<FunctionTool>` via
+    /// [`ResponsesTool::to_function_tools`]. `tool_choice` is resolved the
+    /// same way via [`CodexNamespaceHandler::resolve_tool_choice`].
     #[must_use]
-    pub fn to_upstream_request(&self, stream: bool, registry: &ToolRegistry) -> UpstreamRequest<'_> {
-        let default_tool_choice = ToolChoice::Auto;
-        let request_tool_choice = self.tool_choice.as_ref().unwrap_or(&default_tool_choice);
-        let normalized = CodexNamespaceHandler.flatten_tools_for_upstream(self.tools.as_deref(), request_tool_choice);
-        let tools = registry.normalize_tools_for_upstream(normalized.tools.as_deref());
+    pub fn to_upstream_request(&self, stream: bool) -> UpstreamRequest<'_> {
+        let renamed_tools = self
+            .tools
+            .as_deref()
+            .map(|tools| CodexNamespaceHandler.resolve_namespace_members(tools));
+        let tools: Option<Vec<FunctionTool>> = renamed_tools
+            .as_deref()
+            .map(|tools| tools.iter().flat_map(ResponsesTool::to_function_tools).collect());
+        let tools = tools.filter(|tools| !tools.is_empty());
+        let namespace_map = CodexNamespaceHandler.build_namespace_map(self.tools.as_deref());
+        let tool_choice = CodexNamespaceHandler.resolve_tool_choice(namespace_map.as_ref(), self.tool_choice.as_ref());
         UpstreamRequest {
             model: &self.model,
             input: &self.input,
             stream,
             instructions: self.instructions.as_deref(),
             tools,
-            tool_choice: Some(normalized.tool_choice),
+            tool_choice: Some(tool_choice),
             include: self.include.as_ref(),
             temperature: self.temperature,
             top_p: self.top_p,
@@ -194,7 +202,7 @@ mod tests {
         assert_eq!(payload.instructions.as_deref(), Some("rules"));
         assert!(matches!(&payload.input, ResponsesInput::Text(text) if text == "hi"));
 
-        let upstream = payload.to_upstream_request(false, &ToolRegistry::default());
+        let upstream = payload.to_upstream_request(false);
         let value = serde_json::to_value(upstream).unwrap();
         assert_eq!(value["instructions"], "rules");
         assert_eq!(value["input"], "hi");
@@ -226,8 +234,7 @@ mod tests {
         };
         assert_eq!(namespace.tools.len(), 2);
 
-        let registry = ToolRegistry::build(tools);
-        let upstream = payload.to_upstream_request(false, &registry);
+        let upstream = payload.to_upstream_request(false);
         let value = serde_json::to_value(upstream).unwrap();
         assert_eq!(value["tools"].as_array().expect("upstream tools").len(), 1);
         assert_eq!(value["tools"][0]["name"], "agentic_ns__mcp__shell__run");

@@ -146,7 +146,7 @@ async fn run_until_gateway_tools_complete(
         let mut payload: ResponsePayload = if stream_upstream {
             fetch_stream_payload(&ctx, exec_ctx, auth, &registry, stream_events).await?
         } else {
-            fetch_blocking_payload(&ctx, exec_ctx, auth, &registry).await?
+            fetch_blocking_payload(&ctx, exec_ctx, auth).await?
         };
         registry.restore_final_payload_output(&mut payload.output);
         accumulate_usage(&mut combined_usage, payload.usage);

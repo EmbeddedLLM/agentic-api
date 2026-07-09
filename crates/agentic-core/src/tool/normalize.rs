@@ -2,49 +2,52 @@ use crate::types::io::FunctionTool;
 use crate::types::io::input::FunctionToolResultMessage;
 use crate::types::tools::ResponsesTool;
 
-use super::handler::ToolOutput;
+use super::codex::CodexNamespaceHandler;
+use super::handler::{ToolHandler, ToolOutput};
 use super::web_search::web_search_function_tool;
 
 impl ResponsesTool {
     /// Normalise this tool declaration to the `FunctionTool` wire format that vLLM understands.
     ///
-    /// `Function` variants convert directly, and `WebSearch` maps to the gateway-owned
-    /// function shim. Codex namespace tools are flattened before this conversion
-    /// runs in the upstream request path.
+    /// - `Function` variants convert via [`From<&FunctionToolParam>`] for `FunctionTool`.
+    ///   Returns `None` and logs at `debug` level if the name is empty.
     ///
-    /// Handler-less provider tools (`Mcp`, `FileSearch`, `CodeInterpreter`) plus
-    /// `Unknown` return `None` and log at `debug` level. This keeps the upstream request
-    /// body as `Vec<FunctionTool>` after [`crate::tool::ToolRegistry`] has applied any
-    /// request-scoped tool handlers.
+    /// This is the entry point called by `RequestPayload::to_upstream_request()` so that
+    /// vLLM always receives a `Vec<FunctionTool>`, never a raw `ResponsesTool` enum.
+    ///
+    /// # Panics
+    ///
+    /// Panics if serializing a `CodexNamespaceToolParam` fails, which cannot happen
+    /// for the derive-generated `Serialize` impl on that struct.
     #[must_use]
-    pub fn to_function_tool(&self) -> Option<FunctionTool> {
+    pub fn to_function_tools(&self) -> Vec<FunctionTool> {
         match self {
             // name is NonEmptyToolName — empty names are rejected by serde at
             // deserialization time, so no runtime check is needed here.
-            Self::Function(p) => Some(FunctionTool::from(p)),
+            Self::Function(p) => vec![FunctionTool::from(p)],
             Self::Mcp(p) => {
                 tracing::debug!(
                     server_label = %p.server_label,
                     "MCP tool skipped in normalize - handler not yet registered"
                 );
-                None
+                vec![]
             }
-            Self::WebSearch(_) => Some(web_search_function_tool()),
+            Self::WebSearch(_) => vec![web_search_function_tool()],
             Self::FileSearch(_) => {
                 tracing::debug!("file_search tool skipped in normalize - handler not yet registered");
-                None
+                vec![]
             }
             Self::CodeInterpreter(_) => {
                 tracing::debug!("code_interpreter tool skipped in normalize - handler not yet registered");
-                None
+                vec![]
             }
             Self::Namespace(p) => {
-                tracing::debug!(namespace = %p.name, "namespace tool skipped in normalize - flatten first");
-                None
+                let param = serde_json::to_value(p).expect("serialization of known struct is infallible");
+                CodexNamespaceHandler.normalize(&param)
             }
             Self::Unknown => {
                 tracing::debug!("unknown tool skipped in normalize");
-                None
+                vec![]
             }
         }
     }

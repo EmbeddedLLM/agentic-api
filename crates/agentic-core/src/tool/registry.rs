@@ -4,10 +4,11 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{CodexNamespaceHandler, FunctionHandler, GatewayExecutor, ToolError, ToolHandler, ToolOutput};
+use super::codex::NamespaceMap;
+use super::{CodexNamespaceHandler, GatewayExecutor, ToolError, ToolOutput};
+use crate::types::io::OutputItem;
 use crate::types::io::output::FunctionToolCall;
-use crate::types::io::{FunctionTool, OutputItem};
-use crate::types::tools::ResponsesTool;
+use crate::types::tools::{CodexNamespaceMember, ResponsesTool};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -62,7 +63,10 @@ pub struct GatewayDispatchResult {
 #[derive(Debug, Default)]
 pub struct ToolRegistry {
     entries: HashMap<String, ToolEntry>,
-    declared_tools: Vec<ResponsesTool>,
+    /// Built once from the declared tools, so `restore_final_payload_output`
+    /// and `restore_stream_event_value` — the latter called once per SSE line
+    /// during streaming — don't rebuild it on every call.
+    namespace_map: Option<NamespaceMap>,
 }
 
 impl ToolRegistry {
@@ -92,8 +96,12 @@ impl ToolRegistry {
         mut handler_for: impl FnMut(ToolType) -> Option<Arc<dyn GatewayExecutor>>,
     ) -> Self {
         let mut entries = HashMap::with_capacity(tools.len());
+        // Namespace members must be keyed by the same flat, model-visible name
+        // the model will call, so resolve them first — the same pure pass used
+        // to build the upstream request.
+        let resolved_tools = CodexNamespaceHandler.resolve_namespace_members(tools);
 
-        for tool in tools {
+        for tool in &resolved_tools {
             match tool {
                 ResponsesTool::Function(p) => {
                     // p.name is NonEmptyToolName — empty names are impossible here
@@ -159,9 +167,14 @@ impl ToolRegistry {
                     );
                 }
                 ResponsesTool::Namespace(p) => {
+                    // p's members already carry their flat, model-visible names
+                    // (see the `resolve_namespace_members` call above).
                     let config = serde_json::to_value(p).expect("serialization of known struct is infallible");
-                    for function in CodexNamespaceHandler.normalize(&config) {
-                        let name = function.name.clone();
+                    for member in &p.tools {
+                        let CodexNamespaceMember::Function(function) = member else {
+                            continue;
+                        };
+                        let name = function.name.as_str().to_owned();
                         if entries
                             .insert(
                                 name.clone(),
@@ -184,10 +197,9 @@ impl ToolRegistry {
             }
         }
 
-        Self {
-            entries,
-            declared_tools: tools.to_vec(),
-        }
+        let namespace_map = CodexNamespaceHandler.build_namespace_map((!tools.is_empty()).then_some(tools));
+
+        Self { entries, namespace_map }
     }
 
     #[must_use]
@@ -205,49 +217,12 @@ impl ToolRegistry {
         self.entries.len()
     }
 
-    #[must_use]
-    pub fn normalize_tools_for_upstream(&self, tools: Option<&[ResponsesTool]>) -> Option<Vec<FunctionTool>> {
-        tools
-            .map(|tools| {
-                tools
-                    .iter()
-                    .flat_map(|tool| self.normalize_tool_for_upstream(tool))
-                    .collect::<Vec<_>>()
-            })
-            .filter(|tools| !tools.is_empty())
-    }
-
     pub fn restore_final_payload_output(&self, output: &mut [OutputItem]) {
-        CodexNamespaceHandler.restore_output_items(
-            output,
-            (!self.declared_tools.is_empty()).then_some(self.declared_tools.as_slice()),
-        );
+        CodexNamespaceHandler.restore_output_items(output, self.namespace_map.as_ref());
     }
 
     pub fn restore_stream_event_value(&self, value: &mut Value) -> bool {
-        CodexNamespaceHandler.restore_response_value(
-            value,
-            (!self.declared_tools.is_empty()).then_some(self.declared_tools.as_slice()),
-        )
-    }
-
-    fn normalize_tool_for_upstream(&self, tool: &ResponsesTool) -> Vec<FunctionTool> {
-        match tool {
-            ResponsesTool::Function(p) => {
-                let param = serde_json::to_value(p).expect("serialization of known struct is infallible");
-                FunctionHandler.normalize(&param)
-            }
-            ResponsesTool::WebSearch(_) => self
-                .entries
-                .get("web_search")
-                .and_then(|entry| entry.handler.as_ref().map(|handler| handler.normalize(&entry.config)))
-                .unwrap_or_else(|| tool.to_function_tool().into_iter().collect()),
-            ResponsesTool::Mcp(_)
-            | ResponsesTool::FileSearch(_)
-            | ResponsesTool::CodeInterpreter(_)
-            | ResponsesTool::Namespace(_)
-            | ResponsesTool::Unknown => tool.to_function_tool().into_iter().collect(),
-        }
+        CodexNamespaceHandler.restore_response_value(value, self.namespace_map.as_ref())
     }
 
     /// Returns the subset of `calls` whose names map to gateway-owned tools.

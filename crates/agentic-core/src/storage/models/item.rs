@@ -1,6 +1,5 @@
 //! Conversation history item stored in the database.
 
-use serde::de::DeserializeOwned;
 use serde_json::Value;
 use tracing::warn;
 
@@ -36,13 +35,13 @@ impl Item {
     /// Deserialize data column as `InputItem`.
     #[must_use]
     pub fn as_input(&self) -> Option<InputItem> {
-        self.deserialize_item_data()
+        deserialize_from_str_opt(&self.data)
     }
 
     /// Deserialize data column as `OutputItem`.
     #[must_use]
     pub fn as_output(&self) -> Option<OutputItem> {
-        self.deserialize_item_data()
+        deserialize_from_str_opt(&self.data)
     }
 
     /// Deserialize data column as either `InputItem` or `OutputItem`.
@@ -64,12 +63,12 @@ impl Item {
         }
 
         let output = self.as_output();
-        if output.as_ref().is_some_and(|item| !is_unknown_output(item)) {
+        if output.as_ref().is_some_and(|item| !matches!(item, OutputItem::Unknown)) {
             return output.map(InOutItem::Output);
         }
 
         let input = self.as_input();
-        if input.as_ref().is_some_and(|item| !is_unknown_input(item)) {
+        if input.as_ref().is_some_and(|item| !matches!(item, InputItem::Unknown)) {
             return input.map(InOutItem::Input);
         }
 
@@ -87,26 +86,6 @@ impl Item {
         let value = deserialize_from_str_opt::<Value>(&self.data)?;
         ItemKind::from_stored_str(value.get(STORED_ITEM_KIND_KEY)?.as_str()?)
     }
-
-    fn deserialize_item_data<T: DeserializeOwned>(&self) -> Option<T> {
-        let mut value = deserialize_from_str_opt::<Value>(&self.data)?;
-        strip_stored_item_kind(&mut value);
-        serde_json::from_value(value).ok()
-    }
-}
-
-fn strip_stored_item_kind(value: &mut Value) {
-    if let Value::Object(object) = value {
-        object.remove(STORED_ITEM_KIND_KEY);
-    }
-}
-
-fn is_unknown_input(item: &InputItem) -> bool {
-    matches!(item, InputItem::Unknown)
-}
-
-fn is_unknown_output(item: &OutputItem) -> bool {
-    matches!(item, OutputItem::Unknown)
 }
 
 /// Create items in a transaction with optional conversation context.
