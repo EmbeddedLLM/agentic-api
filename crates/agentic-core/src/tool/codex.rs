@@ -103,6 +103,8 @@ impl RawCodexNamespaceNormalization {
 struct NamespaceMapBuilder {
     top_level_names: HashSet<String>,
     map: NamespaceMap,
+    #[cfg(test)]
+    flat_name_collisions: usize,
 }
 
 impl NamespaceMapBuilder {
@@ -130,6 +132,22 @@ impl NamespaceMapBuilder {
             namespace: namespace_name.to_string(),
             name: member_name.to_string(),
         };
+        if let Some(existing) = self.map.calls.get(&flat_name) {
+            if existing.member != member {
+                #[cfg(test)]
+                {
+                    self.flat_name_collisions += 1;
+                }
+                tracing::warn!(
+                    upstream_name = %flat_name,
+                    namespace = %namespace_name,
+                    member = %member_name,
+                    existing_namespace = %existing.member.namespace,
+                    existing_member = %existing.member.name,
+                    "generated codex namespace member name collides with another namespace member"
+                );
+            }
+        }
         let mapping = NamespaceCallMapping {
             member: member.clone(),
             upstream_name: flat_name.clone(),
@@ -138,6 +156,11 @@ impl NamespaceMapBuilder {
         self.map.members.insert(member, flat_name.clone());
         self.map.calls.insert(flat_name.clone(), mapping);
         flat_name
+    }
+
+    #[cfg(test)]
+    fn flat_name_collision_count(&self) -> usize {
+        self.flat_name_collisions
     }
 
     fn finish(self) -> NamespaceMap {
@@ -750,6 +773,16 @@ mod tests {
         // the colliding flat name already used by the top-level function.
         assert_eq!(flat_function_count, 1);
         assert!(matches!(&namespace.tools[0], CodexNamespaceMember::Function(f) if f.name.as_str() == "run"));
+    }
+
+    #[test]
+    fn namespace_map_builder_detects_flat_name_collision_between_namespace_members() {
+        let mut builder = NamespaceMapBuilder::new(HashSet::new());
+
+        assert_eq!(builder.record_flat_member("a__b", "c"), "agentic_ns__a__b__c");
+        assert_eq!(builder.flat_name_collision_count(), 0);
+        assert_eq!(builder.record_flat_member("a", "b__c"), "agentic_ns__a__b__c");
+        assert_eq!(builder.flat_name_collision_count(), 1);
     }
 
     #[test]
