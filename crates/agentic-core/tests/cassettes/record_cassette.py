@@ -27,7 +27,7 @@ Usage:
     python tests/cassettes/record_cassette.py --turns 3 --mode conv --branch-from 1 --branch-turn-number 2 --no-stream --output path/to/cassette.yaml
     python tests/cassettes/record_cassette.py --turns 5 --mode conv --branch-from 1 --branch-turn-number 3 --branch-from 2 --branch-turn-number 5 --no-stream --output path/to/cassette.yaml
     python tests/cassettes/record_cassette.py --turns 2 --mode responses --vllm http://localhost:8000 --model Qwen/Qwen3-30B-A3B-FP8 --no-stream --output path/to/cassette.yaml
-    python tests/cassettes/record_cassette.py --turns 2 --mode responses --transport websocket --vllm http://localhost:3018 --model codex-compatible --output path/to/ws-cassette.yaml
+    python tests/cassettes/record_cassette.py --turns 2 --mode responses --transport websocket --vllm http://localhost:3018 --model Qwen/Qwen3.6-35B-A3B --output path/to/ws-cassette.yaml
     python tests/cassettes/record_cassette.py --turns 2 --mode responses --vllm http://localhost:8000 --model Qwen/Qwen3-30B-A3B-FP8 --max-output-tokens 1024 --no-stream --output path/to/cassette.yaml
 """
 

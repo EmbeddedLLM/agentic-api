@@ -10,7 +10,6 @@ require_env() {
 }
 
 require_env V_API_BASE
-require_env V_MODEL
 
 if [[ "$V_API_BASE" != *"://"* ]]; then
   V_API_BASE="http://${V_API_BASE}"
@@ -18,7 +17,6 @@ fi
 
 GATEWAY_HOST="${GATEWAY_HOST:-127.0.0.1}"
 GATEWAY_PORT="${GATEWAY_PORT:-3000}"
-MODEL_ALIAS="${MODEL_ALIAS:-codex-compatible}"
 DATABASE_URL="${DATABASE_URL:-sqlite://./agentic_api_codex.db}"
 SKIP_LLM_READY_CHECK="${SKIP_LLM_READY_CHECK:-true}"
 
@@ -31,7 +29,9 @@ export DATABASE_URL
 
 echo "Starting agentic-api gateway on http://${GATEWAY_HOST}:${GATEWAY_PORT}"
 echo "Upstream base: ${V_API_BASE}"
-echo "Model alias: ${MODEL_ALIAS}=${V_MODEL}"
+if [[ -n "${V_MODEL:-}" ]]; then
+  echo "Gateway-facing model: ${V_MODEL}"
+fi
 echo "Skip readiness check: ${SKIP_LLM_READY_CHECK}"
 
 ready_args=()
@@ -43,5 +43,4 @@ exec cargo run -p agentic-server -- \
   --gateway-host "$GATEWAY_HOST" \
   --gateway-port "$GATEWAY_PORT" \
   --llm-api-base "$V_API_BASE" \
-  "${ready_args[@]}" \
-  --model-alias "${MODEL_ALIAS}=${V_MODEL}"
+  "${ready_args[@]}"

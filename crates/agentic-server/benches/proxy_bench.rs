@@ -28,7 +28,6 @@ fn bench_config(llm_url: &str) -> Config {
         llm_ready_interval_s: 0.1,
         skip_llm_ready_check: false,
         db_url: None,
-        model_aliases: std::collections::HashMap::new(),
     }
 }
 

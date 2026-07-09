@@ -12,7 +12,7 @@ pub mod request;
 mod gateway;
 mod upstream;
 
-pub use engine::{BoxStream, ExecuteRequest, create_conversation, execute, prepare_context_for_upstream};
+pub use engine::{BoxStream, ExecuteRequest, create_conversation, execute};
 pub use error::{ExecutorError, ExecutorResult};
 pub use inference::call_inference;
 pub use modes::{ConversationHandler, ResponseHandler};

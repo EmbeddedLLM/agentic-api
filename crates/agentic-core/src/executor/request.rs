@@ -1,8 +1,7 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::config::{Config, resolve_model_alias};
+use crate::config::Config;
 use crate::error::Error;
 use crate::executor::modes::{ConversationHandler, ResponseHandler};
 use crate::storage::{ConversationStore, ResponseStore, create_pool_with_schema};
@@ -95,7 +94,6 @@ pub struct ExecutionContext {
     /// Maximum wait time for the next SSE chunk.  `Duration::ZERO` disables the timeout.
     /// Sourced from [`Config::streaming_chunk_timeout_s`](crate::config::Config::streaming_chunk_timeout_s).
     pub streaming_timeout: Duration,
-    pub model_aliases: HashMap<String, String>,
 }
 
 impl ExecutionContext {
@@ -126,7 +124,6 @@ impl ExecutionContext {
             gateway_executors,
             llm_base_url,
             streaming_timeout: Duration::from_secs(30),
-            model_aliases: HashMap::new(),
         }
     }
 
@@ -134,11 +131,6 @@ impl ExecutionContext {
     pub fn with_gateway_executor(mut self, executor: Arc<dyn GatewayExecutor>) -> Self {
         self.gateway_executors.insert(executor);
         self
-    }
-
-    #[must_use]
-    pub fn resolve_model_alias(&self, model: &str) -> String {
-        resolve_model_alias(model, &self.model_aliases)
     }
 
     /// Build an `ExecutionContext` directly from [`Config`](crate::config::Config).
@@ -168,7 +160,6 @@ impl ExecutionContext {
             gateway_executors,
             llm_base_url: cfg.llm_api_base.clone(),
             streaming_timeout: Duration::from_secs(30),
-            model_aliases: cfg.model_aliases.clone(),
         })
     }
 }

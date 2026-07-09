@@ -24,10 +24,10 @@ TOOLS_DIR="${TOOLS_DIR:-${BASE_DIR}/tools}"
 OUT="${OUT:-${BASE_DIR}}"
 
 GATEWAY_URL="${GATEWAY_URL:-http://127.0.0.1:3018}"
-GATEWAY_MODEL="${GATEWAY_MODEL:-codex-compatible}"
 
 VLLM_URL="${VLLM_URL:-${V_API_BASE:-}}"
 V_MODEL="${V_MODEL:-${MODEL:-Qwen/Qwen3.6-35B-A3B}}"
+GATEWAY_MODEL="${GATEWAY_MODEL:-$V_MODEL}"
 GATEWAY_CASSETTE_MODEL="${GATEWAY_CASSETTE_MODEL:-$V_MODEL}"
 
 OPENAI_URL="${OPENAI_URL:-https://api.openai.com}"
@@ -74,7 +74,7 @@ Targets:
 Environment:
   OUT                    output cassette directory, default: ${OUT}
   GATEWAY_URL            gateway base URL, default: ${GATEWAY_URL}
-  GATEWAY_MODEL          gateway-facing model alias, default: ${GATEWAY_MODEL}
+  GATEWAY_MODEL          gateway-facing model name, default: ${GATEWAY_MODEL}
   GATEWAY_CASSETTE_MODEL model name used in gateway YAML filenames, default: ${GATEWAY_CASSETTE_MODEL}
   VLLM_URL or V_API_BASE direct vLLM base URL, required for direct-vllm* and all
   V_MODEL or MODEL       direct vLLM model, default: ${V_MODEL}

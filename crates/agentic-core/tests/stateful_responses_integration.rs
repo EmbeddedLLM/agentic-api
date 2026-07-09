@@ -262,24 +262,6 @@ async fn test_previous_response_id_rehydrates_full_checkpoint_history() {
 }
 
 #[tokio::test]
-async fn test_model_alias_resolves_before_executor_upstream_request() {
-    let fixture = TestFixture::new_with_responses(vec![text_response("aliased answer")]).await;
-    let mut exec_ctx = (*fixture.exec_ctx).clone();
-    exec_ctx
-        .model_aliases
-        .insert("codex-auto-review".to_string(), "real-upstream-model".to_string());
-    let exec_ctx = Arc::new(exec_ctx);
-
-    let mut request = make_request("review this", true, false, None, None);
-    request.model = "codex-auto-review".to_string();
-    let payload = unwrap_blocking(execute(request, exec_ctx).await.expect("execute"));
-
-    assert_eq!(payload.model, "real-upstream-model");
-    let requests = fixture.request_bodies().await;
-    assert_eq!(requests[0]["model"], "real-upstream-model");
-}
-
-#[tokio::test]
 async fn test_codex_namespace_tool_shape_rehydrates_from_previous_response_metadata() {
     let fixture = TestFixture::new_with_responses(vec![
         text_response("seed answer"),

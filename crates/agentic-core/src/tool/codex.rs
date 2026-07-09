@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 use crate::types::io::{FunctionTool, FunctionToolCall, OutputItem, ToolChoice};
 use crate::types::tools::{CodexNamespaceMember, CodexNamespaceToolParam, NonEmptyToolName, ResponsesTool};
@@ -58,44 +58,6 @@ impl NamespaceMap {
         self.members
             .get(&member)
             .and_then(|upstream_name| self.calls.get(upstream_name))
-    }
-
-    #[cfg(test)]
-    fn contains_call(&self, upstream_name: &str) -> bool {
-        self.calls.contains_key(upstream_name)
-    }
-
-    #[cfg(test)]
-    fn contains_namespace_call(&self, namespace: &str) -> bool {
-        self.calls.values().any(|mapping| mapping.member.namespace == namespace)
-    }
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct RawCodexNamespaceNormalization {
-    map: NamespaceMap,
-    original_tools: Option<Value>,
-}
-
-impl RawCodexNamespaceNormalization {
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.map.calls.is_empty() && self.original_tools.is_none()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn has_original_tools(&self) -> bool {
-        self.original_tools.is_some()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn contains_call(&self, upstream_name: &str) -> bool {
-        self.map.contains_call(upstream_name)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn contains_namespace_call(&self, namespace: &str) -> bool {
-        self.map.contains_namespace_call(namespace)
     }
 }
 
@@ -248,145 +210,6 @@ impl CodexNamespaceHandler {
         };
         restore_response_value_with_map(value, map)
     }
-
-    #[must_use]
-    pub fn flatten_raw_tools_for_upstream(
-        &self,
-        object: &mut Map<String, Value>,
-        normalization: &mut RawCodexNamespaceNormalization,
-    ) -> bool {
-        let Some(tools) = object.get_mut("tools").and_then(Value::as_array_mut) else {
-            return false;
-        };
-
-        let original_tools = tools.clone();
-        let mut builder = NamespaceMapBuilder::new(raw_top_level_tool_names(tools));
-        let mut upstream_tools = Vec::with_capacity(tools.len());
-        let mut changed = false;
-
-        for tool in std::mem::take(tools) {
-            let Some(tool_object) = tool.as_object() else {
-                upstream_tools.push(tool);
-                continue;
-            };
-            if tool_object.get("type").and_then(Value::as_str) != Some("namespace") {
-                upstream_tools.push(tool);
-                continue;
-            }
-            let Some(namespace_name) = tool_object.get("name").and_then(Value::as_str) else {
-                upstream_tools.push(tool);
-                continue;
-            };
-            let Some(members) = tool_object.get("tools").and_then(Value::as_array) else {
-                upstream_tools.push(tool);
-                continue;
-            };
-
-            let function_member_names = raw_function_member_names(members);
-            if function_member_names.is_empty() {
-                upstream_tools.push(tool);
-                continue;
-            }
-            if builder
-                .namespace_has_flat_name_collision(namespace_name, function_member_names.iter().map(String::as_str))
-            {
-                tracing::debug!(
-                    namespace = %namespace_name,
-                    "leaving raw namespace tool unflattened because a top-level tool uses a generated name"
-                );
-                upstream_tools.push(tool);
-                continue;
-            }
-
-            let mut emitted_namespace_members = false;
-            for member in members
-                .iter()
-                .filter(|member| member.get("type").and_then(Value::as_str) == Some("function"))
-            {
-                let Some(member_name) = member.get("name").and_then(Value::as_str) else {
-                    continue;
-                };
-                let flat_name = builder.record_flat_member(namespace_name, member_name);
-                tracing::debug!(
-                    namespace = %namespace_name,
-                    member = %member_name,
-                    upstream_name = %flat_name,
-                    "flattened raw namespace tool member for upstream"
-                );
-                let mut upstream_member = member.clone();
-                if let Some(member_object) = upstream_member.as_object_mut() {
-                    member_object.insert("name".to_string(), Value::String(flat_name));
-                }
-                upstream_tools.push(upstream_member);
-                emitted_namespace_members = true;
-                changed = true;
-            }
-
-            if !emitted_namespace_members {
-                upstream_tools.push(tool);
-            }
-        }
-
-        if changed {
-            normalization.map = builder.finish();
-            normalization.original_tools = Some(Value::Array(original_tools));
-            *tools = upstream_tools;
-        } else {
-            *tools = original_tools;
-        }
-        changed
-    }
-
-    #[must_use]
-    pub fn rewrite_raw_tool_choice_for_upstream(
-        &self,
-        object: &mut Map<String, Value>,
-        normalization: &RawCodexNamespaceNormalization,
-    ) -> bool {
-        let Some(tool_choice) = object.get_mut("tool_choice") else {
-            return false;
-        };
-        let Some(choice_object) = tool_choice.as_object_mut() else {
-            return false;
-        };
-
-        if choice_object.get("type").and_then(Value::as_str) == Some("function") {
-            return rewrite_raw_tool_choice_function_object(choice_object, &normalization.map);
-        }
-
-        choice_object
-            .get_mut("function")
-            .and_then(Value::as_object_mut)
-            .is_some_and(|function| rewrite_raw_tool_choice_function_object(function, &normalization.map))
-    }
-
-    #[must_use]
-    pub fn restore_raw_response_value(
-        &self,
-        value: &mut Value,
-        normalization: &RawCodexNamespaceNormalization,
-    ) -> bool {
-        let mut changed = restore_raw_original_tools(value, normalization);
-        changed |= restore_response_value_with_map(value, &normalization.map);
-        changed
-    }
-
-    #[must_use]
-    pub fn restore_raw_sse_line(&self, line: &str, normalization: &RawCodexNamespaceNormalization) -> String {
-        let Some(data) = line.strip_prefix("data: ") else {
-            return line.to_string();
-        };
-        if data == "[DONE]" {
-            return line.to_string();
-        }
-        let Ok(mut value) = serde_json::from_str::<Value>(data) else {
-            return line.to_string();
-        };
-        if !self.restore_raw_response_value(&mut value, normalization) {
-            return line.to_string();
-        }
-        serde_json::to_string(&value).map_or_else(|_| line.to_string(), |json| format!("data: {json}"))
-    }
 }
 
 impl ToolHandler for CodexNamespaceHandler {
@@ -402,7 +225,7 @@ impl ToolHandler for CodexNamespaceHandler {
 
     /// Converts an already-renamed namespace's function members straight to
     /// `FunctionTool`s. Callers must rename members to their flat, model-visible
-    /// names first via [`CodexNamespaceHandler::rename_members_for_upstream`] —
+    /// names first via [`CodexNamespaceHandler::resolve_namespace_members`] —
     /// this method has no sibling-tool context to do that itself.
     fn normalize(&self, param: &Value) -> Vec<FunctionTool> {
         let Ok(namespace) = serde_json::from_value::<CodexNamespaceToolParam>(param.clone()) else {
@@ -500,19 +323,6 @@ fn typed_top_level_tool_names(tools: &[ResponsesTool]) -> HashSet<String> {
         .collect()
 }
 
-fn raw_top_level_tool_names(tools: &[Value]) -> HashSet<String> {
-    tools
-        .iter()
-        .filter_map(|tool| {
-            let object = tool.as_object()?;
-            if object.get("type").and_then(Value::as_str) == Some("namespace") {
-                return None;
-            }
-            object.get("name").and_then(Value::as_str).map(str::to_string)
-        })
-        .collect()
-}
-
 fn typed_function_member_names(namespace: &CodexNamespaceToolParam) -> Vec<String> {
     namespace
         .tools
@@ -521,14 +331,6 @@ fn typed_function_member_names(namespace: &CodexNamespaceToolParam) -> Vec<Strin
             CodexNamespaceMember::Function(function) => Some(function.name.as_str().to_string()),
             CodexNamespaceMember::Unknown => None,
         })
-        .collect()
-}
-
-fn raw_function_member_names(members: &[Value]) -> Vec<String> {
-    members
-        .iter()
-        .filter(|member| member.get("type").and_then(Value::as_str) == Some("function"))
-        .filter_map(|member| member.get("name").and_then(Value::as_str).map(str::to_string))
         .collect()
 }
 
@@ -620,48 +422,6 @@ fn restore_call_value_with_map(value: &mut Value, map: &NamespaceMap) -> bool {
         member = %mapping.member.name,
         "restored upstream namespace function call"
     );
-    true
-}
-
-fn rewrite_raw_tool_choice_function_object(function: &mut Map<String, Value>, map: &NamespaceMap) -> bool {
-    let explicit_namespace = function.get("namespace").and_then(Value::as_str).map(str::to_string);
-    let Some(name_text) = function.get("name").and_then(Value::as_str).map(str::to_string) else {
-        return false;
-    };
-    let mapping = explicit_namespace
-        .as_deref()
-        .and_then(|namespace| map.mapping_for_member(namespace, &name_text))
-        .or_else(|| {
-            explicit_namespace
-                .is_none()
-                .then(|| map.mapping_for_call(&name_text))
-                .flatten()
-        });
-    let Some(mapping) = mapping else {
-        return false;
-    };
-
-    let mut changed = mapping.upstream_name != name_text;
-    if changed {
-        function.insert("name".to_string(), Value::String(mapping.upstream_name.clone()));
-    }
-    if explicit_namespace.is_some() {
-        changed |= function.remove("namespace").is_some();
-    }
-    changed
-}
-
-fn restore_raw_original_tools(value: &mut Value, normalization: &RawCodexNamespaceNormalization) -> bool {
-    let Some(original_tools) = &normalization.original_tools else {
-        return false;
-    };
-    let Some(object) = value.as_object_mut() else {
-        return false;
-    };
-    if !object.get("tools").is_some_and(Value::is_array) {
-        return false;
-    }
-    object.insert("tools".to_string(), original_tools.clone());
     true
 }
 

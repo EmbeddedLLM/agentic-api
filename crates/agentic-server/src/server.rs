@@ -54,6 +54,17 @@ async fn serve_gateway_until_signal(state: AppState, host: &str, port: u16) -> R
     }
 }
 
+async fn wait_until_llm_ready(config: &Config) -> Result<(), Error> {
+    if config.skip_llm_ready_check {
+        info!("skipping LLM readiness check: {}", config.llm_api_base);
+        return Ok(());
+    }
+
+    wait_llm_ready(config).await?;
+    info!("LLM ready: {}", config.llm_api_base);
+    Ok(())
+}
+
 /// Start the gateway after the LLM becomes ready.
 ///
 /// # Errors
@@ -61,12 +72,7 @@ async fn serve_gateway_until_signal(state: AppState, host: &str, port: u16) -> R
 /// Returns an error if DB initialisation, LLM readiness polling, or the
 /// server binding fails.
 pub async fn run(config: Config, host: &str, port: u16) -> Result<(), Error> {
-    if config.skip_llm_ready_check {
-        info!("skipping LLM readiness check: {}", config.llm_api_base);
-    } else {
-        wait_llm_ready(&config).await?;
-        info!("LLM ready: {}", config.llm_api_base);
-    }
+    wait_until_llm_ready(&config).await?;
     let state = build_state(&config, CancellationToken::new()).await?;
     serve_gateway_until_signal(state, host, port).await
 }
@@ -87,10 +93,10 @@ pub async fn run_with_llm(config: Config, host: &str, port: u16, llm_args: Vec<S
 
     let readiness_result = if config.skip_llm_ready_check {
         info!("skipping LLM readiness check: {}", config.llm_api_base);
-        Ok(())
+        Ok(false)
     } else {
         tokio::select! {
-            ready = wait_llm_ready(&config) => ready,
+            ready = wait_llm_ready(&config) => ready.map(|()| true),
             status = child.wait() => {
                 let status = status?;
                 Err(Error::LlmProcessExited { status: status.to_string() })
@@ -99,7 +105,8 @@ pub async fn run_with_llm(config: Config, host: &str, port: u16, llm_args: Vec<S
     };
 
     match readiness_result {
-        Ok(()) => info!("LLM ready: {}", config.llm_api_base),
+        Ok(true) => info!("LLM ready: {}", config.llm_api_base),
+        Ok(false) => {}
         Err(err) => {
             let _ = child.kill().await;
             let _ = child.wait().await;

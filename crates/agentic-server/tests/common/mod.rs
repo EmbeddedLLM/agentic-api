@@ -21,18 +21,16 @@ pub fn test_config(llm_url: &str) -> Config {
         llm_ready_interval_s: 0.1,
         skip_llm_ready_check: false,
         db_url: None,
-        model_aliases: std::collections::HashMap::new(),
     }
 }
 
 pub fn test_state(config: &Config) -> AppState {
-    let mut exec_ctx = ExecutionContext::new(
+    let exec_ctx = ExecutionContext::new(
         ConversationHandler::new(ConversationStore::disabled()),
         ResponseHandler::new(ResponseStore::disabled()),
         Arc::new(reqwest::Client::new()),
         config.llm_api_base.clone(),
     );
-    exec_ctx.model_aliases.clone_from(&config.model_aliases);
     let exec_ctx = Arc::new(exec_ctx);
     let proxy_state = ProxyState::new(config.clone()).expect("proxy state");
     AppState {

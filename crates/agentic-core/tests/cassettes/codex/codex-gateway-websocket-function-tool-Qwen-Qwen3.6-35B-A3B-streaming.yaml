@@ -4,7 +4,7 @@ turns:
     body:
       input: You must call the agentic_plain_echo tool with text exactly "plain fixture"
         before answering.
-      model: codex-compatible
+      model: Qwen/Qwen3.6-35B-A3B
       store: true
       tools:
       - description: Echo text for Codex cassette recording.
@@ -407,7 +407,7 @@ turns:
       - content: Use the tool output. Return only the echo string.
         role: user
         type: message
-      model: codex-compatible
+      model: Qwen/Qwen3.6-35B-A3B
       previous_response_id: resp_019f226a-a693-7733-9a98-6f85ebf4bccd
       store: true
       tools:

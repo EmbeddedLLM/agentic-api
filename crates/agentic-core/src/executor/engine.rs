@@ -23,20 +23,13 @@ use crate::executor::rehydrate::rehydrate_conversation;
 use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::executor::upstream::{fetch_blocking_payload, fetch_stream_payload};
 use crate::tool::ToolRegistry;
-use crate::types::io::{ResponseUsage, ResponsesInput, ToolChoice};
+use crate::types::io::{ResponseUsage, ToolChoice};
 use crate::types::request_response::{RequestPayload, ResponsePayload};
 use crate::utils::common::serialize_to_string;
 
 pub use crate::executor::inference::BoxStream;
 
 const MAX_GATEWAY_TOOL_ROUNDS: usize = 10;
-
-fn responses_input_item_count(input: &ResponsesInput) -> usize {
-    match input {
-        ResponsesInput::Text(_) => 1,
-        ResponsesInput::Items(items) => items.len(),
-    }
-}
 
 fn add_usage(total: ResponseUsage, usage: ResponseUsage) -> ResponseUsage {
     ResponseUsage {
@@ -105,24 +98,6 @@ impl<T> Drop for AbortOnDrop<T> {
             self.handle.abort();
         }
     }
-}
-
-/// Apply request transformations required before sending a hydrated context
-/// to the upstream Responses endpoint.
-pub fn prepare_context_for_upstream(ctx: &mut RequestContext, exec_ctx: &ExecutionContext) {
-    let original_model = ctx.enriched_request.model.clone();
-    let resolved_model = exec_ctx.resolve_model_alias(&original_model);
-    let alias_rewritten = resolved_model != original_model;
-    ctx.enriched_request.model = resolved_model;
-    debug!(
-        response_id = %ctx.response_id,
-        model_before = %original_model,
-        model_after = %ctx.enriched_request.model,
-        alias_rewritten,
-        input_items = responses_input_item_count(&ctx.enriched_request.input),
-        tools = ctx.enriched_request.tools.as_ref().map_or(0, Vec::len),
-        "prepared responses request for upstream"
-    );
 }
 
 async fn run_until_gateway_tools_complete(
@@ -317,8 +292,7 @@ impl ExecuteRequest {
             tools = self.payload.tools.as_ref().map_or(0, Vec::len),
             "executor received responses request"
         );
-        let mut ctx = rehydrate_conversation(self.payload, &self.exec_ctx).await?;
-        prepare_context_for_upstream(&mut ctx, &self.exec_ctx);
+        let ctx = rehydrate_conversation(self.payload, &self.exec_ctx).await?;
         if ctx.original_request.stream {
             Ok(Either::Right(run_stream(ctx, self.exec_ctx, self.client_auth)))
         } else {

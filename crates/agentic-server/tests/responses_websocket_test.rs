@@ -22,7 +22,6 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use tokio_util::sync::CancellationToken;
 
-use agentic_core::config::Config;
 use agentic_core::executor::{ConversationHandler, ExecutionContext, ResponseHandler};
 use agentic_core::proxy::ProxyState;
 use agentic_core::storage::{ConversationStore, ResponseStore, create_pool_with_schema};
@@ -225,32 +224,6 @@ struct StorageBackedState {
     _db: TestDb,
 }
 
-async fn storage_backed_state_with_config(config: Config) -> StorageBackedState {
-    let db = TestDb::new();
-    let db_url = db.url();
-    let pool = create_pool_with_schema(Some(&db_url)).await.unwrap();
-
-    let client = Arc::new(reqwest::Client::new());
-    let mut exec_ctx = ExecutionContext::new(
-        ConversationHandler::new(ConversationStore::new(Arc::clone(&pool))),
-        ResponseHandler::new(ResponseStore::new(pool)),
-        Arc::clone(&client),
-        config.llm_api_base.clone(),
-    );
-    exec_ctx.model_aliases.clone_from(&config.model_aliases);
-    let exec_ctx = Arc::new(exec_ctx);
-    let proxy_state = ProxyState::new(config.clone()).expect("proxy state");
-
-    let state = AppState {
-        proxy_state,
-        exec_ctx,
-        shutdown_token: CancellationToken::new(),
-        llm_api_base: config.llm_api_base,
-        openai_api_key: config.openai_api_key,
-    };
-    StorageBackedState { state, _db: db }
-}
-
 async fn storage_backed_state(llm_url: &str) -> StorageBackedState {
     storage_backed_state_with_web_search(llm_url, None).await
 }
@@ -267,7 +240,6 @@ async fn storage_backed_state_with_web_search(llm_url: &str, web_search_base_url
         Arc::clone(&client),
         config.llm_api_base.clone(),
     );
-    exec_ctx.model_aliases.clone_from(&config.model_aliases);
     if let Some(base_url) = web_search_base_url {
         exec_ctx = exec_ctx.with_gateway_executor(Arc::new(WebSearchHandler::with_api_key(
             client,
@@ -505,36 +477,6 @@ async fn test_websocket_first_turn_forwards_incremental_events_and_final_payload
     assert_eq!(requests[0]["stream"], true);
     assert_eq!(requests[0]["input"][0]["content"], "hi");
     assert!(requests[0].get("type").is_none());
-}
-
-#[tokio::test]
-async fn test_websocket_rewrites_model_alias_before_upstream_request() {
-    let mock = MockResponsesServer::start(vec![sse_response("resp_upstream_1", "msg_upstream_1", "HELLO")]).await;
-    let mut config = test_config(&mock.url);
-    config
-        .model_aliases
-        .insert("codex-compatible".to_string(), "zai-org/GLM-5.2".to_string());
-    let fixture = storage_backed_state_with_config(config).await;
-    let (gateway_url, _gateway) = spawn_gateway(fixture.state.clone()).await;
-    let mut ws = connect_responses_ws(&gateway_url).await;
-
-    send_json(
-        &mut ws,
-        json!({
-            "type": "response.create",
-            "model": "codex-compatible",
-            "input": [{"type": "message", "role": "user", "content": "hi"}],
-            "store": true,
-            "stream": true
-        }),
-    )
-    .await;
-    let _events = recv_until_completed(&mut ws).await;
-
-    let requests = mock.request_bodies().await;
-    assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0]["model"], "zai-org/GLM-5.2");
-    assert_eq!(requests[0]["stream"], true);
 }
 
 #[tokio::test]

@@ -4,7 +4,7 @@ turns:
     body:
       input: You must call the agentic_plain_echo tool with text exactly "plain fixture"
         before answering.
-      model: codex-compatible
+      model: Qwen/Qwen3.6-35B-A3B
       store: true
       stream: true
       tools:
@@ -65,7 +65,7 @@ turns:
       - content: Use the tool output. Return only the echo string.
         role: user
         type: message
-      model: codex-compatible
+      model: Qwen/Qwen3.6-35B-A3B
       previous_response_id: resp_019f226a-8ab1-7533-b933-1ef4ee3fa207
       store: true
       stream: true

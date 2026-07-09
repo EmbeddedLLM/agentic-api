@@ -4,7 +4,7 @@ turns:
     body:
       input: You must call mcp__agentic_fixture.add_numbers with numbers [8, 0] before
         answering.
-      model: codex-compatible
+      model: Qwen/Qwen3.6-35B-A3B
       store: true
       tools:
       - description: Codex namespace fixture for cassette recording.
@@ -1503,7 +1503,7 @@ turns:
       - content: Use the tool output. Return only the sum.
         role: user
         type: message
-      model: codex-compatible
+      model: Qwen/Qwen3.6-35B-A3B
       previous_response_id: resp_019f226a-b20d-75d0-bb78-0db0d4530e41
       store: true
       tools:
