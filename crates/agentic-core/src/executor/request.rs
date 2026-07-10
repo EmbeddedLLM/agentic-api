@@ -37,7 +37,7 @@ impl GatewayExecutors {
         match tool_type {
             ToolType::Mcp => self.mcp.clone(),
             ToolType::WebSearch => self.web_search.clone(),
-            ToolType::Function | ToolType::FileSearch | ToolType::CodeInterpreter => None,
+            ToolType::Function | ToolType::CodexNamespace | ToolType::FileSearch | ToolType::CodeInterpreter => None,
         }
     }
 }

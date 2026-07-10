@@ -1,29 +1,67 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use serde_json::Value;
-
-use crate::tool::{ToolEntry, ToolHandler, ToolRegistry, ToolType};
-use crate::types::io::FunctionTool;
-use crate::types::tools::McpDiscoveredToolParam;
-use crate::utils::common::serialize_to_value;
+use crate::tool::{GatewayExecutor, ToolEntry, ToolType};
+use crate::types::tools::{McpDiscoveredToolParam, McpToolParam};
+use crate::utils::common::{serialize_to_value, serialize_to_value_or_custom_default};
 
 use super::{McpClientPool, McpHandler, READ_MCP_RESOURCE_TOOL_NAME};
 
-pub async fn build_mcp_registry(pool: Arc<McpClientPool>) -> (Vec<FunctionTool>, ToolRegistry) {
-    let mut specs = Vec::new();
-    let mut entries = Vec::new();
+/// Registers `p` for gateway dispatch: reuses an externally-supplied MCP
+/// handler when `handler_for` provides one, otherwise connects to `p`'s
+/// declared server and discovers its tools via [`build_mcp_registry`].
+pub async fn insert_mcp_entry<S: std::hash::BuildHasher>(
+    entries: &mut HashMap<String, ToolEntry, S>,
+    p: &McpToolParam,
+    handler_for: &mut impl FnMut(ToolType) -> Option<Arc<dyn GatewayExecutor>>,
+) {
+    let Some(handler) = handler_for(ToolType::Mcp) else {
+        build_mcp_registry(p, entries).await;
+        return;
+    };
+
+    serialize_to_value_or_custom_default(
+        p,
+        "MCP tool config serialization failed",
+        |config| {
+            if entries
+                .insert(
+                    p.name.as_str().to_owned(),
+                    ToolEntry {
+                        tool_type: ToolType::Mcp,
+                        config,
+                        server_label: None,
+                        handler: Some(handler),
+                    },
+                )
+                .is_some()
+            {
+                tracing::warn!(name = %p.name, "duplicate MCP tool name — previous definition overwritten");
+            }
+        },
+        (),
+    );
+}
+
+/// Connects to the MCP server declared by `param`, then registers the
+/// `read_mcp_resource` built-in and every tool the server exposes into
+/// `entries`, keyed by the name the model will call.
+pub async fn build_mcp_registry<S: std::hash::BuildHasher>(
+    param: &McpToolParam,
+    entries: &mut HashMap<String, ToolEntry, S>,
+) {
+    let pool = Arc::new(McpClientPool::from_params(std::slice::from_ref(param)).await);
 
     let read_handler = Arc::new(McpHandler::read_resource(Arc::clone(&pool)));
-    specs.extend(read_handler.normalize(&Value::Null));
-    entries.push((
+    entries.insert(
         READ_MCP_RESOURCE_TOOL_NAME.to_owned(),
         ToolEntry {
             tool_type: ToolType::Mcp,
-            config: Value::Null,
+            config: serde_json::Value::Null,
             server_label: None,
             handler: Some(read_handler),
         },
-    ));
+    );
 
     for (server_label, client) in pool.iter() {
         let tools = match client.list_tools().await {
@@ -61,18 +99,20 @@ pub async fn build_mcp_registry(pool: Arc<McpClientPool>) -> (Vec<FunctionTool>,
             };
             let handler = Arc::new(McpHandler::tool_call(Arc::clone(client)));
 
-            specs.extend(handler.normalize(&config));
-            entries.push((
-                exposed_name,
-                ToolEntry {
-                    tool_type: ToolType::Mcp,
-                    config,
-                    server_label: Some(server_label.clone()),
-                    handler: Some(handler),
-                },
-            ));
+            if entries
+                .insert(
+                    exposed_name.clone(),
+                    ToolEntry {
+                        tool_type: ToolType::Mcp,
+                        config,
+                        server_label: Some(server_label.clone()),
+                        handler: Some(handler),
+                    },
+                )
+                .is_some()
+            {
+                tracing::warn!(name = %exposed_name, "duplicate MCP tool name — previous definition overwritten");
+            }
         }
     }
-
-    (specs, ToolRegistry::with_entries(entries))
 }

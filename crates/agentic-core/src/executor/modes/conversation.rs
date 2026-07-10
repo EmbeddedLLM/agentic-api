@@ -93,7 +93,7 @@ impl ConversationHandler {
             model: ctx.enriched_request.model,
             previous_response_id: ctx.original_request.previous_response_id,
             effective_tools: ctx.enriched_request.tools,
-            effective_tool_choice: ctx.enriched_request.tool_choice,
+            effective_tool_choice: ctx.enriched_request.tool_choice.unwrap_or_default(),
             effective_instructions: ctx.enriched_request.instructions,
         };
 
@@ -117,7 +117,7 @@ impl ConversationHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::io::{ResponsesInput, ToolChoice};
+    use crate::types::io::ResponsesInput;
     use crate::types::request_response::RequestPayload;
 
     fn disabled_handler() -> ConversationHandler {
@@ -132,7 +132,7 @@ mod tests {
             previous_response_id: None,
             conversation_id: conversation_id.map(str::to_string),
             tools: None,
-            tool_choice: ToolChoice::Auto,
+            tool_choice: None,
             stream: false,
             store: true,
             include: None,

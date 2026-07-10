@@ -7,7 +7,11 @@ use serde_json::Value;
 use crate::tool::{GatewayExecutor, ToolError, ToolHandler, ToolOutput, ToolType};
 use crate::types::io::FunctionTool;
 use crate::types::io::output::{FunctionToolCall, GatewayCallStatus, McpToolCall, OutputItem};
-use crate::types::tools::McpDiscoveredToolParam;
+use crate::types::tools::{McpDiscoveredToolParam, McpToolParam};
+use crate::utils::common::{
+    deserialize_from_str, deserialize_from_str_opt, deserialize_from_value, deserialize_from_value_opt,
+    serialize_to_string,
+};
 
 use super::{McpClient, McpClientPool, READ_MCP_RESOURCE_TOOL_NAME, ReadResourceArgs, read_mcp_resource_spec};
 
@@ -15,7 +19,7 @@ use super::{McpClient, McpClientPool, READ_MCP_RESOURCE_TOOL_NAME, ReadResourceA
 pub(crate) fn output_item(call: &FunctionToolCall, output: &ToolOutput, status: GatewayCallStatus) -> OutputItem {
     let arguments = arguments_value(&call.arguments);
     let server = server_from_arguments(&arguments).unwrap_or_default();
-    let parsed_output = serde_json::from_str::<Value>(&output.output).ok();
+    let parsed_output = deserialize_from_str_opt::<Value>(&output.output);
     let error = if status == GatewayCallStatus::Failed {
         parsed_output
             .as_ref()
@@ -54,6 +58,11 @@ pub(crate) fn started_output_item(call: &FunctionToolCall) -> OutputItem {
     ))
 }
 
+/// `*Spec` variants map a declared/discovered tool's shape to its upstream
+/// `FunctionTool` form for `normalize()` — no live MCP connection involved.
+/// `ReadResource`/`ToolCall` carry a real `pool`/`client`, built by the
+/// registry once a connection exists, and are the only variants `execute()`
+/// can dispatch through.
 pub enum McpHandlerKind {
     ReadResourceSpec,
     ReadResource { pool: Arc<McpClientPool> },
@@ -93,6 +102,20 @@ impl McpHandler {
             kind: McpHandlerKind::ToolCall { client },
         }
     }
+
+    /// Spec-only handler for normalizing a `ToolEntry` config with no live
+    /// connection, picking `ReadResourceSpec` vs `ToolCallSpec` by inspecting
+    /// `param`'s shape — mirrors the split `build_mcp_registry` makes per entry.
+    #[must_use]
+    pub fn from_params(param: &Value) -> Self {
+        let is_read_resource = deserialize_from_value_opt::<McpToolParam>(param.clone())
+            .is_some_and(|declared| declared.name.as_str() == READ_MCP_RESOURCE_TOOL_NAME);
+        if is_read_resource {
+            Self::read_resource_spec_only()
+        } else {
+            Self::discovered_tool_spec_only()
+        }
+    }
 }
 
 impl ToolHandler for McpHandler {
@@ -107,13 +130,15 @@ impl ToolHandler for McpHandler {
     fn normalize(&self, param: &Value) -> Vec<FunctionTool> {
         match &self.kind {
             McpHandlerKind::ReadResourceSpec | McpHandlerKind::ReadResource { .. } => vec![read_mcp_resource_spec()],
-            McpHandlerKind::ToolCallSpec | McpHandlerKind::ToolCall { .. } => match mcp_tool_param(param) {
-                Ok(param) => vec![mcp_tool_to_function_tool(&param.exposed_name, &param.tool)],
-                Err(error) => {
-                    tracing::warn!(error = %error, "invalid MCP tool param");
-                    Vec::new()
+            McpHandlerKind::ToolCallSpec | McpHandlerKind::ToolCall { .. } => {
+                match deserialize_from_value::<McpDiscoveredToolParam>(param.clone()) {
+                    Ok(discovered) => vec![mcp_tool_to_function_tool(&discovered.exposed_name, &discovered.tool)],
+                    Err(error) => {
+                        tracing::warn!(error = %error, "invalid MCP tool param");
+                        Vec::new()
+                    }
                 }
-            },
+            }
         }
     }
 }
@@ -162,7 +187,7 @@ async fn execute_read_resource(pool: &McpClientPool, tool_name: &str, arguments:
         )));
     }
 
-    let args = serde_json::from_str::<ReadResourceArgs>(arguments)
+    let args = deserialize_from_str::<ReadResourceArgs>(arguments)
         .map_err(|error| ToolError::Execution(format!("invalid read_mcp_resource arguments: {error}")))?;
 
     let client = pool
@@ -186,7 +211,7 @@ async fn execute_tool_call(
     mcp_tool_name: &str,
     arguments: &str,
 ) -> Result<String, ToolError> {
-    let args = serde_json::from_str::<Value>(arguments).ok();
+    let args = deserialize_from_str_opt::<Value>(arguments);
 
     let result = client
         .call_tool(mcp_tool_name, args)
@@ -197,12 +222,12 @@ async fn execute_tool_call(
 }
 
 fn serialize_mcp_result(result: &impl serde::Serialize, operation: &str) -> Result<String, ToolError> {
-    serde_json::to_string(result)
+    serialize_to_string(result)
         .map_err(|error| ToolError::Execution(format!("failed to serialize {operation} result: {error}")))
 }
 
 fn mcp_tool_param(value: &Value) -> Result<McpDiscoveredToolParam, ToolError> {
-    serde_json::from_value::<McpDiscoveredToolParam>(value.clone())
+    deserialize_from_value::<McpDiscoveredToolParam>(value.clone())
         .map_err(|error| ToolError::Config(format!("invalid MCP tool config: {error}")))
 }
 
@@ -225,7 +250,7 @@ fn mcp_tool_to_function_tool(name: &str, tool: &rmcp::model::Tool) -> FunctionTo
 }
 
 fn arguments_value(arguments: &str) -> Value {
-    serde_json::from_str(arguments).unwrap_or_else(|_| Value::Object(serde_json::Map::new()))
+    deserialize_from_str_opt(arguments).unwrap_or_else(|| Value::Object(serde_json::Map::new()))
 }
 
 fn server_from_arguments(arguments: &Value) -> Option<String> {

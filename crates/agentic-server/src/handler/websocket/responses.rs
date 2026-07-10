@@ -10,7 +10,7 @@ use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
-use tracing::warn;
+use tracing::{debug, warn};
 
 use agentic_core::executor::{BoxStream, ExecuteRequest, ExecutorError};
 use agentic_core::types::request_response::RequestPayload;
@@ -29,6 +29,7 @@ pub async fn responses_ws(State(state): State<AppState>, headers: HeaderMap, ws:
 }
 
 async fn responses_ws_loop(socket: WebSocket, state: AppState, headers: HeaderMap) {
+    debug!("responses websocket session opened");
     let shutdown_token = state.shutdown_token.clone();
     let (mut sender, mut receiver) = socket.split();
 
@@ -90,6 +91,7 @@ async fn responses_ws_loop(socket: WebSocket, state: AppState, headers: HeaderMa
             }
         }
     }
+    debug!("responses websocket session closed");
 }
 
 /// Process one `response.create` message.
@@ -112,8 +114,20 @@ async fn handle_ws_text(
     }
 
     let mut payload = serde_json::from_value::<RequestPayload>(value).map_err(ExecutorError::from)?;
+    let requested_stream = payload.stream;
+    let requested_store = payload.store;
     payload.stream = true;
     payload.store = true;
+    debug!(
+        requested_stream,
+        requested_store,
+        forced_stream = payload.stream,
+        forced_store = payload.store,
+        has_previous_response_id = payload.previous_response_id.is_some(),
+        has_conversation_id = payload.conversation_id.is_some(),
+        tools = payload.tools.as_ref().map_or(0, Vec::len),
+        "accepted websocket response.create"
+    );
 
     let auth = extract_bearer(headers, state.openai_api_key.as_deref());
     let result = ExecuteRequest::new(payload, Arc::clone(&state.exec_ctx))
@@ -129,7 +143,7 @@ async fn handle_ws_text(
     stream_ws_response(sender, receiver, stream, shutdown_token, queue).await
 }
 
-/// Stream a response from the upstream LLM to the client.
+/// Stream a response from the executor to the client.
 ///
 /// Requests arriving from the client while the stream is active are pushed
 /// onto `queue` so the caller can process them in order after this returns.
@@ -156,6 +170,10 @@ async fn stream_ws_response(
                         // Client pipelined the next request while we are still streaming.
                         // Enqueue it and keep draining the current stream.
                         queue.push_back(text.to_string());
+                        debug!(
+                            queued_requests = queue.len(),
+                            "queued pipelined websocket response.create while stream is active"
+                        );
                         continue 'stream;
                     }
                     Some(Err(e)) => return Err(WsError::Receive(e.to_string())),

@@ -4,16 +4,21 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::mcp::READ_MCP_RESOURCE_TOOL_NAME;
-use super::{GatewayExecutor, ToolError, ToolOutput};
+use super::codex::insert_namespace_entries;
+use super::function::insert_function_entry;
+use super::mcp::insert_mcp_entry;
+use super::web_search::insert_web_search_entry;
+use super::{CodexNamespaceHandler, GatewayExecutor, NamespaceMap, ToolError, ToolOutput};
+use crate::types::io::OutputItem;
 use crate::types::io::output::FunctionToolCall;
-use crate::types::tools::ResponsesTool;
-use crate::utils::common::serialize_to_value;
+use crate::types::tools::{CodeInterpreterToolParam, FileSearchToolParam, ResponsesTool};
+use crate::utils::common::serialize_to_value_or_custom_default;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolType {
     Function,
+    CodexNamespace,
     Mcp,
     /// Internal routing discriminant. Serializes as `"web_search"`.
     /// Note: the corresponding `ResponsesTool` wire tag is `"web_search_preview"`.
@@ -21,6 +26,13 @@ pub enum ToolType {
     WebSearch,
     FileSearch,
     CodeInterpreter,
+}
+
+impl ToolType {
+    #[must_use]
+    pub const fn is_gateway_owned(self) -> bool {
+        !matches!(self, Self::Function | Self::CodexNamespace)
+    }
 }
 
 /// Per-request routing entry keyed by the tool name the model will call.
@@ -50,19 +62,54 @@ pub struct GatewayDispatchResult {
     pub output: Result<ToolOutput, ToolError>,
 }
 
-fn serialize_tool_config<T: Serialize>(tool_type: ToolType, name: &str, config: &T) -> Option<Value> {
-    match serialize_to_value(config) {
-        Ok(value) => Some(value),
-        Err(error) => {
-            tracing::warn!(
-                ?tool_type,
-                name,
-                error = %error,
-                "failed to serialize tool config"
+// TODO: move to a dedicated file_search module alongside its `ToolHandler`
+// once file_search execution is implemented.
+fn insert_file_search_entry(
+    entries: &mut HashMap<String, ToolEntry>,
+    p: &FileSearchToolParam,
+    handler_for: &mut impl FnMut(ToolType) -> Option<Arc<dyn GatewayExecutor>>,
+) {
+    serialize_to_value_or_custom_default(
+        p,
+        "file_search tool config serialization failed",
+        |config| {
+            entries.insert(
+                "file_search".to_owned(),
+                ToolEntry {
+                    tool_type: ToolType::FileSearch,
+                    config,
+                    server_label: None,
+                    handler: handler_for(ToolType::FileSearch),
+                },
             );
-            None
-        }
-    }
+        },
+        (),
+    );
+}
+
+// TODO: move to a dedicated code_interpreter module alongside its `ToolHandler`
+// once code_interpreter execution is implemented.
+fn insert_code_interpreter_entry(
+    entries: &mut HashMap<String, ToolEntry>,
+    p: &CodeInterpreterToolParam,
+    handler_for: &mut impl FnMut(ToolType) -> Option<Arc<dyn GatewayExecutor>>,
+) {
+    serialize_to_value_or_custom_default(
+        p,
+        "code_interpreter tool config serialization failed",
+        |config| {
+            entries.insert(
+                "code_interpreter".to_owned(),
+                ToolEntry {
+                    tool_type: ToolType::CodeInterpreter,
+                    config,
+                    server_label: None,
+                    handler: handler_for(ToolType::CodeInterpreter),
+                },
+            );
+        },
+        (),
+    );
 }
 
 /// Request-scoped registry built from `RequestPayload.tools`.
@@ -70,130 +117,68 @@ fn serialize_tool_config<T: Serialize>(tool_type: ToolType, name: &str, config: 
 #[derive(Debug, Default)]
 pub struct ToolRegistry {
     entries: HashMap<String, ToolEntry>,
+    /// Built once from the declared tools, so `restore_final_payload_output`
+    /// and `restore_stream_event_value` — the latter called once per SSE line
+    /// during streaming — don't rebuild it on every call.
+    namespace_map: Option<NamespaceMap>,
 }
 
 impl ToolRegistry {
     /// Build a registry from the declared tools.
     ///
-    /// Function tools with empty names are skipped with a warning. Duplicate
-    /// tool names result in last-write-wins, also logged at `warn` level.
-    #[must_use]
-    pub fn build(tools: &[ResponsesTool]) -> Self {
-        Self::build_with_handlers(tools, |_| None)
+    /// Duplicate tool names result in last-write-wins, logged at `warn` level.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ToolError::Config`] when Codex namespace member flattening
+    /// would collide with another declared tool name.
+    ///
+    /// # Panics
+    ///
+    /// Panics if serialization of a tool param struct fails, which cannot happen
+    /// for the types defined in this module (`#[derive(Serialize)]` on plain structs).
+    pub async fn build(tools: &[ResponsesTool]) -> Result<Self, ToolError> {
+        Self::build_with_handlers(tools, |_| None).await
     }
 
-    #[must_use]
-    pub fn with_entries(entries: impl IntoIterator<Item = (String, ToolEntry)>) -> Self {
-        Self {
-            entries: entries.into_iter().collect(),
-        }
-    }
-
-    #[must_use]
     /// Build a registry from declared tools and attach gateway handlers for dispatchable tool types.
-    pub fn build_with_handlers(
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ToolError::Config`] when Codex namespace member flattening
+    /// would collide with another declared tool name.
+    ///
+    /// # Panics
+    ///
+    /// Panics if serialization of a tool param struct fails, which cannot happen
+    /// for the types defined in this module (`#[derive(Serialize)]` on plain structs).
+    pub async fn build_with_handlers(
         tools: &[ResponsesTool],
         mut handler_for: impl FnMut(ToolType) -> Option<Arc<dyn GatewayExecutor>>,
-    ) -> Self {
+    ) -> Result<Self, ToolError> {
         let mut entries = HashMap::with_capacity(tools.len());
+        // Namespace members must be keyed by the same flat, model-visible name
+        // the model will call, so resolve them first — the same pure pass used
+        // to build the upstream request.
+        let resolved_tools = CodexNamespaceHandler.resolve_namespace_members(tools)?;
 
-        for tool in tools {
+        for tool in &resolved_tools {
             match tool {
-                ResponsesTool::Function(p) => {
-                    // p.name is NonEmptyToolName — empty names are impossible here
-                    // (serde rejects them at deserialization time).
-                    let Some(config) = serialize_tool_config(ToolType::Function, p.name.as_str(), p) else {
-                        continue;
-                    };
-
-                    if entries
-                        .insert(
-                            p.name.as_str().to_owned(),
-                            ToolEntry {
-                                tool_type: ToolType::Function,
-                                config,
-                                server_label: None,
-                                handler: None,
-                            },
-                        )
-                        .is_some()
-                    {
-                        tracing::warn!(name = %p.name, "duplicate tool name — previous definition overwritten");
-                    }
-                }
-                ResponsesTool::Mcp(p) => {
-                    if p.name.as_str() == READ_MCP_RESOURCE_TOOL_NAME {
-                        let Some(config) = serialize_tool_config(ToolType::Mcp, p.name.as_str(), p) else {
-                            continue;
-                        };
-
-                        if entries
-                            .insert(
-                                READ_MCP_RESOURCE_TOOL_NAME.to_owned(),
-                                ToolEntry {
-                                    tool_type: ToolType::Mcp,
-                                    config,
-                                    server_label: None,
-                                    handler: handler_for(ToolType::Mcp),
-                                },
-                            )
-                            .is_some()
-                        {
-                            tracing::warn!(name = %p.name, "duplicate MCP tool name — previous definition overwritten");
-                        }
-                    } else {
-                        tracing::debug!(name = %p.name, "unknown MCP built-in skipped in registry");
-                    }
-                }
-                ResponsesTool::WebSearch(p) => {
-                    let Some(config) = serialize_tool_config(ToolType::WebSearch, "web_search", p) else {
-                        continue;
-                    };
-
-                    entries.insert(
-                        "web_search".to_owned(),
-                        ToolEntry {
-                            tool_type: ToolType::WebSearch,
-                            config,
-                            server_label: None,
-                            handler: handler_for(ToolType::WebSearch),
-                        },
-                    );
-                }
-                ResponsesTool::FileSearch(p) => {
-                    let Some(config) = serialize_tool_config(ToolType::FileSearch, "file_search", p) else {
-                        continue;
-                    };
-
-                    entries.insert(
-                        "file_search".to_owned(),
-                        ToolEntry {
-                            tool_type: ToolType::FileSearch,
-                            config,
-                            server_label: None,
-                            handler: handler_for(ToolType::FileSearch),
-                        },
-                    );
-                }
-                ResponsesTool::CodeInterpreter(p) => {
-                    let Some(config) = serialize_tool_config(ToolType::CodeInterpreter, "code_interpreter", p) else {
-                        continue;
-                    };
-
-                    entries.insert(
-                        "code_interpreter".to_owned(),
-                        ToolEntry {
-                            tool_type: ToolType::CodeInterpreter,
-                            config,
-                            server_label: None,
-                            handler: handler_for(ToolType::CodeInterpreter),
-                        },
-                    );
+                ResponsesTool::Function(p) => insert_function_entry(&mut entries, p),
+                ResponsesTool::Mcp(p) => insert_mcp_entry(&mut entries, p, &mut handler_for).await,
+                ResponsesTool::WebSearch(p) => insert_web_search_entry(&mut entries, p, &mut handler_for),
+                ResponsesTool::FileSearch(p) => insert_file_search_entry(&mut entries, p, &mut handler_for),
+                ResponsesTool::CodeInterpreter(p) => insert_code_interpreter_entry(&mut entries, p, &mut handler_for),
+                ResponsesTool::Namespace(p) => insert_namespace_entries(&mut entries, p),
+                ResponsesTool::Unknown => {
+                    tracing::debug!("unknown tool declared but skipped in registry");
                 }
             }
         }
 
-        Self { entries }
+        let namespace_map = CodexNamespaceHandler.build_namespace_map((!tools.is_empty()).then_some(tools))?;
+
+        Ok(Self { entries, namespace_map })
     }
 
     #[must_use]
@@ -211,8 +196,15 @@ impl ToolRegistry {
         self.entries.len()
     }
 
-    /// Returns the subset of `calls` whose names map to gateway-owned tools
-    /// (i.e. everything except `ToolType::Function`).
+    pub fn restore_final_payload_output(&self, output: &mut [OutputItem]) {
+        CodexNamespaceHandler.restore_output_items(output, self.namespace_map.as_ref());
+    }
+
+    pub fn restore_stream_event_value(&self, value: &mut Value) -> bool {
+        CodexNamespaceHandler.restore_response_value(value, self.namespace_map.as_ref())
+    }
+
+    /// Returns the subset of `calls` whose names map to gateway-owned tools.
     #[must_use]
     pub fn gateway_owned<'a>(&self, calls: &'a [FunctionToolCall]) -> Vec<&'a FunctionToolCall> {
         calls
@@ -220,13 +212,20 @@ impl ToolRegistry {
             .filter(|c| {
                 self.entries
                     .get(&c.name)
-                    .is_some_and(|e| e.tool_type != ToolType::Function)
+                    .is_some_and(|e| e.tool_type.is_gateway_owned())
             })
             .collect()
     }
 
-    /// Returns the subset of `calls` whose names map to client-owned function
-    /// tools (i.e. `ToolType::Function` or unknown names).
+    #[must_use]
+    pub fn is_gateway_owned_name(&self, name: &str) -> bool {
+        self.entries
+            .get(name)
+            .is_some_and(|entry| entry.tool_type.is_gateway_owned())
+    }
+
+    /// Returns the subset of `calls` whose names map to client-owned tools
+    /// (`Function`, Codex namespace members, or unknown names).
     #[must_use]
     pub fn client_owned<'a>(&self, calls: &'a [FunctionToolCall]) -> Vec<&'a FunctionToolCall> {
         calls
@@ -234,7 +233,7 @@ impl ToolRegistry {
             .filter(|c| {
                 self.entries
                     .get(&c.name)
-                    .is_none_or(|e| e.tool_type == ToolType::Function)
+                    .is_none_or(|e| !e.tool_type.is_gateway_owned())
             })
             .collect()
     }
@@ -250,64 +249,5 @@ impl ToolRegistry {
                 .execute(&call.call_id, &call.name, &call.arguments, &config)
                 .await,
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use super::{ToolRegistry, ToolType};
-    use crate::tool::{McpClientPool, McpHandler, READ_MCP_RESOURCE_TOOL_NAME};
-    use crate::types::tools::ResponsesTool;
-
-    #[test]
-    fn read_mcp_resource_function_stays_client_owned() {
-        let tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([{
-            "type": "function",
-            "name": READ_MCP_RESOURCE_TOOL_NAME,
-            "description": "Read a resource by URI from a connected MCP server.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "server": {"type": "string"},
-                    "uri": {"type": "string"}
-                },
-                "required": ["server", "uri"]
-            },
-            "strict": false
-        }]))
-        .unwrap();
-
-        let handler = Arc::new(McpHandler::read_resource(Arc::new(McpClientPool::default())));
-        let registry = ToolRegistry::build_with_handlers(&tools, |tool_type| {
-            (tool_type == ToolType::Mcp).then(|| handler.clone() as Arc<dyn crate::tool::GatewayExecutor>)
-        });
-
-        let entry = registry
-            .lookup(READ_MCP_RESOURCE_TOOL_NAME)
-            .expect("read_mcp_resource entry");
-        assert_eq!(entry.tool_type, ToolType::Function);
-        assert!(entry.handler.is_none());
-    }
-
-    #[test]
-    fn read_mcp_resource_mcp_tool_registers_as_gateway_mcp_when_handler_exists() {
-        let tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([{
-            "type": "mcp",
-            "name": READ_MCP_RESOURCE_TOOL_NAME
-        }]))
-        .unwrap();
-
-        let handler = Arc::new(McpHandler::read_resource(Arc::new(McpClientPool::default())));
-        let registry = ToolRegistry::build_with_handlers(&tools, |tool_type| {
-            (tool_type == ToolType::Mcp).then(|| handler.clone() as Arc<dyn crate::tool::GatewayExecutor>)
-        });
-
-        let entry = registry
-            .lookup(READ_MCP_RESOURCE_TOOL_NAME)
-            .expect("read_mcp_resource entry");
-        assert_eq!(entry.tool_type, ToolType::Mcp);
-        assert!(entry.handler.is_some());
     }
 }

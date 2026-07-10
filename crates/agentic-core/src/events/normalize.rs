@@ -133,6 +133,7 @@ fn extract_output_item_added(json: &Value) -> EventPayload {
         item_type: SSEItemType::from(json_str(item, "type")),
         output_index: json_u32(json, "output_index"),
         name: json_str_opt(item, "name"),
+        namespace: json_str_opt(item, "namespace"),
         call_id: json_str_opt(item, "call_id"),
     }
 }

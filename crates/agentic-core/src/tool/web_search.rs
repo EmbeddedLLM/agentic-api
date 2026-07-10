@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -8,13 +9,36 @@ use serde_json::Value;
 use crate::types::io::output::{FunctionToolCall, WebSearchCall, WebSearchCallStatus, WebSearchSource};
 use crate::types::io::{FunctionTool, OutputItem};
 use crate::types::tools::{WebSearchContextSize, WebSearchToolParam};
-use crate::utils::common::serialize_to_string;
+use crate::utils::common::{serialize_to_string, serialize_to_value_or_custom_default};
 
 use super::handler::{GatewayExecutor, ToolError, ToolHandler, ToolOutput};
-use super::registry::ToolType;
+use super::registry::{ToolEntry, ToolType};
 
 const YOU_API_KEY: &str = "YOU_API_KEY";
 const YOU_API_BASE_URL: &str = "YOU_API_BASE_URL";
+
+pub(crate) fn insert_web_search_entry(
+    entries: &mut HashMap<String, ToolEntry>,
+    p: &WebSearchToolParam,
+    handler_for: &mut impl FnMut(ToolType) -> Option<Arc<dyn GatewayExecutor>>,
+) {
+    serialize_to_value_or_custom_default(
+        p,
+        "web_search tool config serialization failed",
+        |config| {
+            entries.insert(
+                "web_search".to_owned(),
+                ToolEntry {
+                    tool_type: ToolType::WebSearch,
+                    config,
+                    server_label: None,
+                    handler: handler_for(ToolType::WebSearch),
+                },
+            );
+        },
+        (),
+    );
+}
 
 #[must_use]
 pub(crate) fn web_search_function_tool() -> FunctionTool {

@@ -35,6 +35,22 @@ where
     item.transpose().map_err(ExecutorError::NetworkError)
 }
 
+fn drain_complete_utf8_lines(buffer: &mut Vec<u8>) -> Vec<String> {
+    let mut lines = Vec::new();
+    while let Some(pos) = buffer.iter().position(|byte| *byte == b'\n') {
+        let line = buffer.drain(..=pos).collect::<Vec<_>>();
+        let line_end = if pos > 0 && line.get(pos - 1) == Some(&b'\r') {
+            pos - 1
+        } else {
+            pos
+        };
+        if let Ok(line) = std::str::from_utf8(&line[..line_end]) {
+            lines.push(line.to_string());
+        }
+    }
+    lines
+}
+
 /// Build, send, and validate an HTTP POST to the LLM backend.
 ///
 /// Shared by both the blocking path (caller reads `.text()`) and the streaming
@@ -119,7 +135,7 @@ pub fn call_inference(
         };
 
         let mut bytes = resp.bytes_stream();
-        let mut buf = String::with_capacity(8192);
+        let mut buf = Vec::with_capacity(8192);
 
         loop {
             let chunk = match next_chunk(&mut bytes, chunk_timeout).await {
@@ -128,20 +144,42 @@ pub fn call_inference(
                 Err(e) => { yield Err(e); return; }
             };
 
-            match std::str::from_utf8(&chunk) {
-                Ok(s) => buf.push_str(s),
-                Err(_) => buf.push_str(&String::from_utf8_lossy(&chunk)),
-            }
+            buf.extend_from_slice(&chunk);
 
-            while let Some(pos) = buf.find('\n') {
-                let line = buf[..pos].trim_end_matches('\r');
-                match line {
+            for line in drain_complete_utf8_lines(&mut buf) {
+                match line.as_str() {
                     "data: [DONE]" => return,
-                    l if l.starts_with("data: ") => yield Ok(l.to_string()),
+                    l if l.starts_with("data: ") => yield Ok(line),
                     _ => {}
                 }
-                buf.drain(..=pos);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn utf8_line_reader_preserves_split_multibyte_characters() {
+        let snowman = "\u{2603}";
+        let line = format!(r#"data: {{"delta":"snow {snowman}"}}"#);
+        let bytes = format!("{line}\n").into_bytes();
+        let split_at = bytes
+            .windows(snowman.len())
+            .position(|window| window == snowman.as_bytes())
+            .expect("snowman bytes present")
+            + 1;
+        let mut buffer = bytes[..split_at].to_vec();
+
+        assert!(drain_complete_utf8_lines(&mut buffer).is_empty());
+
+        buffer.extend_from_slice(&bytes[split_at..]);
+        let lines = drain_complete_utf8_lines(&mut buffer);
+
+        assert!(buffer.is_empty());
+        assert_eq!(lines, vec![line]);
+        assert!(!lines[0].contains('\u{FFFD}'));
     }
 }

@@ -19,17 +19,19 @@ pub fn test_config(llm_url: &str) -> Config {
         openai_api_key: Some("test-key".to_owned()),
         llm_ready_timeout_s: 5.0,
         llm_ready_interval_s: 0.1,
+        skip_llm_ready_check: false,
         db_url: None,
     }
 }
 
 pub fn test_state(config: &Config) -> AppState {
-    let exec_ctx = Arc::new(ExecutionContext::new(
+    let exec_ctx = ExecutionContext::new(
         ConversationHandler::new(ConversationStore::disabled()),
         ResponseHandler::new(ResponseStore::disabled()),
         Arc::new(reqwest::Client::new()),
         config.llm_api_base.clone(),
-    ));
+    );
+    let exec_ctx = Arc::new(exec_ctx);
     let proxy_state = ProxyState::new(config.clone()).expect("proxy state");
     AppState {
         proxy_state,

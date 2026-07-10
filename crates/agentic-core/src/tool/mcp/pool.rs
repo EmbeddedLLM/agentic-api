@@ -5,7 +5,6 @@ use std::sync::Arc;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 
-use super::READ_MCP_RESOURCE_TOOL_NAME;
 use super::client::McpClient;
 use crate::types::tools::McpToolParam;
 
@@ -100,10 +99,6 @@ impl McpClientPool {
 }
 
 fn server_entry_from_param(param: &McpToolParam) -> Option<(String, McpServerEntry)> {
-    if param.name.as_str() != READ_MCP_RESOURCE_TOOL_NAME {
-        return None;
-    }
-
     let Some(server_label) = clean_string(param.server_label.as_deref()) else {
         tracing::debug!(name = %param.name, "MCP tool param has no server_label");
         return None;

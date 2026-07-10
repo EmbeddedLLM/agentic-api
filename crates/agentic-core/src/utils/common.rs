@@ -32,6 +32,27 @@ pub fn serialize_to_value<T: serde::Serialize>(value: &T) -> Result<serde_json::
     serde_json::to_value(value)
 }
 
+/// Serializes `value` to a `serde_json::Value` and passes it to `then`,
+/// logging `message` at `debug` level and returning `default` if
+/// serialization fails.
+///
+/// Graceful serialization - used where callers fall back to a default result
+/// rather than propagate a serialization error.
+pub fn serialize_to_value_or_custom_default<T: serde::Serialize, R>(
+    value: &T,
+    message: &str,
+    then: impl FnOnce(serde_json::Value) -> R,
+    default: R,
+) -> R {
+    match serde_json::to_value(value) {
+        Ok(config) => then(config),
+        Err(error) => {
+            tracing::debug!(error = %error, message);
+            default
+        }
+    }
+}
+
 /// Deserialize JSON string to any type.
 ///
 /// Strict deserialization - returns error if deserialization fails.

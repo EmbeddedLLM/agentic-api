@@ -19,7 +19,8 @@ use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
-const DEFAULT_TOOL_TIMEOUT: Duration = Duration::from_secs(30);
+const CONNECTION_TIMEOUT: Duration = Duration::from_secs(30);
+const TOOL_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum McpOperation {
@@ -108,14 +109,16 @@ impl McpClient {
             config = config.custom_headers(custom_headers);
         }
         let transport = StreamableHttpClientTransport::from_config(config);
-        let service = AgenticMcpClientHandler
-            .serve(transport)
+        let service = tokio::time::timeout(CONNECTION_TIMEOUT, AgenticMcpClientHandler.serve(transport))
             .await
+            .map_err(|_| McpError::Timeout {
+                operation: McpOperation::Connect,
+            })?
             .map_err(|error| McpError::Connect(Box::new(error)))?;
 
         Ok(Self {
             inner: Arc::new(service),
-            tool_timeout: DEFAULT_TOOL_TIMEOUT,
+            tool_timeout: TOOL_TIMEOUT,
         })
     }
 
@@ -174,14 +177,16 @@ impl McpClient {
             });
         }
 
-        let service = AgenticMcpClientHandler
-            .serve(transport)
+        let service = tokio::time::timeout(CONNECTION_TIMEOUT, AgenticMcpClientHandler.serve(transport))
             .await
+            .map_err(|_| McpError::Timeout {
+                operation: McpOperation::Connect,
+            })?
             .map_err(|error| McpError::Connect(Box::new(error)))?;
 
         Ok(Self {
             inner: Arc::new(service),
-            tool_timeout: DEFAULT_TOOL_TIMEOUT,
+            tool_timeout: TOOL_TIMEOUT,
         })
     }
 

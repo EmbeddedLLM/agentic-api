@@ -366,6 +366,45 @@ fn web_search_function_call_sse_response() -> support::MockResponse {
     ])
 }
 
+fn web_search_function_call_sse_response_with_name_only_on_done() -> support::MockResponse {
+    sse_response([
+        serde_json::json!({
+            "type": "response.created",
+            "response": {"id": "resp_tool_call", "status": "in_progress", "usage": null}
+        }),
+        serde_json::json!({
+            "type": "response.output_item.added",
+            "output_index": 0,
+            "item": {
+                "id": "fc_search",
+                "type": "function_call",
+                "call_id": "call_search",
+                "arguments": "",
+                "status": "in_progress"
+            }
+        }),
+        serde_json::json!({
+            "type": "response.function_call_arguments.delta",
+            "item_id": "fc_search",
+            "output_index": 0,
+            "call_id": "call_search",
+            "delta": "{\"query\":\"rust async\",\"count\":2}"
+        }),
+        serde_json::json!({
+            "type": "response.function_call_arguments.done",
+            "item_id": "fc_search",
+            "output_index": 0,
+            "call_id": "call_search",
+            "name": "web_search",
+            "arguments": "{\"query\":\"rust async\",\"count\":2}"
+        }),
+        serde_json::json!({
+            "type": "response.completed",
+            "response": {"id": "resp_tool_call", "status": "completed", "usage": null}
+        }),
+    ])
+}
+
 fn text_sse_response(text: &str) -> support::MockResponse {
     sse_response([
         serde_json::json!({
@@ -536,7 +575,7 @@ async fn execute_runs_web_search_and_sends_tool_output_back_to_model() {
         previous_response_id: None,
         conversation_id: None,
         tools: Some(vec![web_search]),
-        tool_choice: ToolChoice::Auto,
+        tool_choice: None,
         stream: false,
         store: true,
         include: None,
@@ -619,7 +658,7 @@ async fn execute_relaxes_forced_tool_choice_after_web_search_result() {
         previous_response_id: None,
         conversation_id: None,
         tools: Some(vec![web_search]),
-        tool_choice: ToolChoice::Required,
+        tool_choice: Some(ToolChoice::Required),
         stream: false,
         store: true,
         include: None,
@@ -666,7 +705,7 @@ async fn execute_returns_mixed_client_tool_calls_without_followup_model_request(
         previous_response_id: None,
         conversation_id: None,
         tools: Some(vec![web_search, client_function]),
-        tool_choice: ToolChoice::Auto,
+        tool_choice: None,
         stream: false,
         store: true,
         include: None,
@@ -712,7 +751,7 @@ async fn execute_returns_mixed_client_tool_calls_without_followup_model_request(
         previous_response_id: Some(response.id),
         conversation_id: None,
         tools: None,
-        tool_choice: ToolChoice::Auto,
+        tool_choice: None,
         stream: false,
         store: true,
         include: None,
@@ -781,7 +820,7 @@ async fn execute_accumulates_usage_across_web_search_model_rounds() {
         previous_response_id: None,
         conversation_id: None,
         tools: Some(vec![web_search]),
-        tool_choice: ToolChoice::Auto,
+        tool_choice: None,
         stream: false,
         store: true,
         include: None,
@@ -823,7 +862,7 @@ async fn stream_emits_web_search_lifecycle_events_before_final_payload() {
         previous_response_id: None,
         conversation_id: None,
         tools: Some(vec![web_search]),
-        tool_choice: ToolChoice::Auto,
+        tool_choice: None,
         stream: true,
         store: true,
         include: None,
@@ -852,6 +891,14 @@ async fn stream_emits_web_search_lifecycle_events_before_final_payload() {
         })
         .collect();
     let event_types: Vec<&str> = json_events.iter().filter_map(|event| event["type"].as_str()).collect();
+    assert!(event_types.contains(&"response.created"));
+    assert!(event_types.contains(&"response.output_text.delta"));
+    assert!(
+        !json_events
+            .iter()
+            .any(|event| event["item"]["type"] == "function_call" && event["item"]["name"] == "web_search"),
+        "internal web_search function call events should not be forwarded"
+    );
     let expected_types = [
         "response.output_item.added",
         "response.web_search_call.in_progress",
@@ -870,11 +917,76 @@ async fn stream_emits_web_search_lifecycle_events_before_final_payload() {
         last_index = index + 1;
     }
 
-    let final_payload = json_events
+    let completed_event = json_events
         .iter()
-        .find(|event| event["object"] == "response")
-        .expect("stream should include final response payload");
-    let output = final_payload["output"].as_array().unwrap();
+        .find(|event| event["type"] == "response.completed")
+        .expect("stream should include response.completed event");
+    let output = completed_event["response"]["output"].as_array().unwrap();
+    assert!(output.iter().any(|item| item["type"] == "web_search_call"));
+    assert!(output.iter().any(|item| item["type"] == "message"));
+}
+
+#[tokio::test]
+async fn stream_hides_web_search_function_events_when_name_arrives_on_done() {
+    let (you_url, mut captured_you, _you_handle) = spawn_mock_you().await;
+    let llm = support::MockServer::start_deque(vec![
+        web_search_function_call_sse_response_with_name_only_on_done(),
+        text_sse_response("Use async carefully."),
+    ])
+    .await;
+    let exec_ctx = build_exec_ctx(llm.url(), you_url).await;
+    let web_search: ResponsesTool = serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).unwrap();
+    let payload = RequestPayload {
+        model: "test-model".to_owned(),
+        input: ResponsesInput::Text("look up rust async".to_owned()),
+        instructions: None,
+        previous_response_id: None,
+        conversation_id: None,
+        tools: Some(vec![web_search]),
+        tool_choice: None,
+        stream: true,
+        store: true,
+        include: None,
+        temperature: None,
+        top_p: None,
+        max_output_tokens: Some(1024),
+        truncation: None,
+        metadata: None,
+    };
+
+    let result = ExecuteRequest::new(payload, Arc::clone(&exec_ctx)).run().await.unwrap();
+    let Either::Right(stream) = result else {
+        panic!("expected streaming response");
+    };
+    let chunks: Vec<String> = stream.collect().await;
+    captured_you.recv().await.expect("mock You.com should receive request");
+
+    let json_events: Vec<serde_json::Value> = chunks
+        .iter()
+        .filter_map(|chunk| {
+            let data = chunk.trim_end_matches('\n').strip_prefix("data: ")?;
+            if data == "[DONE]" {
+                return None;
+            }
+            serde_json::from_str(data).ok()
+        })
+        .collect();
+    assert!(
+        !json_events.iter().any(|event| {
+            event["item"]["type"] == "function_call"
+                || event["type"] == "response.function_call_arguments.delta"
+                || event["type"] == "response.function_call_arguments.done"
+        }),
+        "internal web_search function call stream events should stay hidden"
+    );
+    let event_types: Vec<&str> = json_events.iter().filter_map(|event| event["type"].as_str()).collect();
+    assert!(event_types.contains(&"response.web_search_call.in_progress"));
+    assert!(event_types.contains(&"response.web_search_call.completed"));
+    let completed_event = json_events
+        .iter()
+        .find(|event| event["type"] == "response.completed")
+        .expect("stream should include response.completed event");
+    let output = completed_event["response"]["output"].as_array().unwrap();
     assert!(output.iter().any(|item| item["type"] == "web_search_call"));
     assert!(output.iter().any(|item| item["type"] == "message"));
 }
@@ -896,7 +1008,7 @@ async fn execute_runs_multiple_web_search_calls_concurrently() {
         previous_response_id: None,
         conversation_id: None,
         tools: Some(vec![web_search]),
-        tool_choice: ToolChoice::Auto,
+        tool_choice: None,
         stream: false,
         store: true,
         include: None,
@@ -943,7 +1055,7 @@ async fn execute_feeds_web_search_execution_errors_back_to_model() {
         previous_response_id: None,
         conversation_id: None,
         tools: Some(vec![web_search]),
-        tool_choice: ToolChoice::Auto,
+        tool_choice: None,
         stream: false,
         store: true,
         include: None,
@@ -992,7 +1104,7 @@ async fn execute_errors_after_max_gateway_tool_rounds() {
         previous_response_id: None,
         conversation_id: None,
         tools: Some(vec![web_search]),
-        tool_choice: ToolChoice::Auto,
+        tool_choice: None,
         stream: false,
         store: true,
         include: None,
@@ -1033,7 +1145,7 @@ async fn execute_feeds_invalid_web_search_arguments_back_to_model() {
         previous_response_id: None,
         conversation_id: None,
         tools: Some(vec![web_search]),
-        tool_choice: ToolChoice::Auto,
+        tool_choice: None,
         stream: false,
         store: true,
         include: None,
@@ -1082,7 +1194,7 @@ async fn execute_errors_when_gateway_tool_call_fanout_exceeds_limit() {
         previous_response_id: None,
         conversation_id: None,
         tools: Some(vec![web_search]),
-        tool_choice: ToolChoice::Auto,
+        tool_choice: None,
         stream: false,
         store: true,
         include: None,
@@ -1137,7 +1249,7 @@ async fn stream_error_events_escape_error_messages() {
         previous_response_id: None,
         conversation_id: None,
         tools: None,
-        tool_choice: ToolChoice::Auto,
+        tool_choice: None,
         stream: true,
         store: true,
         include: None,
@@ -1159,6 +1271,7 @@ async fn stream_error_events_escape_error_messages() {
         .expect("stream should include error event");
     let json = error_chunk.trim().strip_prefix("data: ").unwrap();
     let parsed: serde_json::Value = serde_json::from_str(json).expect("error event should be valid JSON");
-    let error = parsed["error"].as_str().unwrap();
+    assert_eq!(parsed["type"], "error");
+    let error = parsed["error"]["message"].as_str().unwrap();
     assert!(error.contains(r#"bad \"quoted\" upstream response"#), "{error}");
 }

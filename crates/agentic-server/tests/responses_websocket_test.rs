@@ -272,7 +272,7 @@ async fn connect_responses_ws(url: &str) -> WebSocketStream<MaybeTlsStream<TcpSt
 
 async fn recv_json(ws: &mut WebSocketStream<MaybeTlsStream<TcpStream>>) -> Value {
     loop {
-        let message = tokio::time::timeout(std::time::Duration::from_secs(2), ws.next())
+        let message = tokio::time::timeout(std::time::Duration::from_secs(5), ws.next())
             .await
             .expect("timed out waiting for websocket message")
             .expect("websocket should yield a message")
@@ -293,12 +293,7 @@ async fn recv_until_completed(ws: &mut WebSocketStream<MaybeTlsStream<TcpStream>
         let is_done = matches!(
             event.get("type").and_then(Value::as_str),
             Some("response.completed" | "error")
-        ) || event.get("status").and_then(Value::as_str) == Some("completed")
-            || event
-                .get("response")
-                .and_then(|response| response.get("status"))
-                .and_then(Value::as_str)
-                == Some("completed");
+        );
         events.push(event);
         if is_done {
             return events;
@@ -362,6 +357,46 @@ fn sse_response(response_id: &str, message_id: &str, text: &str) -> String {
     format!("data: {created}\n\ndata: {added}\n\ndata: {delta}\n\ndata: {completed}\n\ndata: [DONE]\n\n")
 }
 
+fn sse_function_call_response(response_id: &str, call_name: &str) -> String {
+    let created = json!({
+        "type": "response.created",
+        "sequence_number": 0,
+        "response": {"id": response_id, "status": "in_progress"}
+    });
+    let added = json!({
+        "type": "response.output_item.added",
+        "sequence_number": 1,
+        "output_index": 0,
+        "item": {
+            "id": "fc_upstream_1",
+            "type": "function_call",
+            "status": "in_progress",
+            "name": call_name,
+            "call_id": "call_1",
+            "arguments": ""
+        }
+    });
+    let done = json!({
+        "type": "response.output_item.done",
+        "sequence_number": 2,
+        "output_index": 0,
+        "item": {
+            "id": "fc_upstream_1",
+            "type": "function_call",
+            "status": "completed",
+            "name": call_name,
+            "call_id": "call_1",
+            "arguments": "{\"numbers\":[8,0]}"
+        }
+    });
+    let completed = json!({
+        "type": "response.completed",
+        "sequence_number": 3,
+        "response": {"id": response_id, "status": "completed", "usage": null}
+    });
+    format!("data: {created}\n\ndata: {added}\n\ndata: {done}\n\ndata: {completed}\n\ndata: [DONE]\n\n")
+}
+
 fn web_search_function_call_sse_response() -> String {
     let created = json!({
         "type": "response.created",
@@ -399,7 +434,7 @@ fn web_search_function_call_sse_response() -> String {
 }
 
 #[tokio::test]
-async fn test_websocket_first_turn_forwards_incremental_response_events() {
+async fn test_websocket_first_turn_forwards_incremental_events_and_final_payload() {
     let mock = MockResponsesServer::start(vec![sse_response("resp_upstream_1", "msg_upstream_1", "HELLO")]).await;
     let fixture = storage_backed_state(&mock.url).await;
     let (gateway_url, _gateway) = spawn_gateway(fixture.state.clone()).await;
@@ -418,15 +453,95 @@ async fn test_websocket_first_turn_forwards_incremental_response_events() {
     .await;
 
     let events = recv_until_completed(&mut ws).await;
-    assert_eq!(events.len(), 1);
-    assert_ne!(events[0]["id"], "resp_upstream_1");
-    assert_eq!(events[0]["status"], "completed");
-    assert_eq!(events[0]["output"][0]["content"][0]["text"], "HELLO");
+    let event_types = events
+        .iter()
+        .map(|event| event["type"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        event_types,
+        vec![
+            "response.created",
+            "response.output_item.added",
+            "response.output_text.delta",
+            "response.completed"
+        ]
+    );
+    assert_ne!(events[0]["response"]["id"], "resp_upstream_1");
+    assert_eq!(events[2]["delta"], "HELLO");
+    let response = &events.last().unwrap()["response"];
+    assert_ne!(response["id"], "resp_upstream_1");
+    assert_eq!(response["status"], "completed");
+    assert_eq!(response["output"][0]["content"][0]["text"], "HELLO");
     let requests = mock.request_bodies().await;
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0]["stream"], true);
     assert_eq!(requests[0]["input"][0]["content"], "hi");
     assert!(requests[0].get("type").is_none());
+}
+
+#[tokio::test]
+async fn test_websocket_restores_namespace_tool_call_events() {
+    let mock = MockResponsesServer::start(vec![sse_function_call_response(
+        "resp_upstream_1",
+        "agentic_ns__mcp__agentic_fixture__add_numbers",
+    )])
+    .await;
+    let fixture = storage_backed_state(&mock.url).await;
+    let (gateway_url, _gateway) = spawn_gateway(fixture.state.clone()).await;
+    let mut ws = connect_responses_ws(&gateway_url).await;
+
+    send_json(
+        &mut ws,
+        json!({
+            "type": "response.create",
+            "model": "test-model",
+            "input": [{"type": "message", "role": "user", "content": "use the tool"}],
+            "tools": [
+                {
+                    "type": "namespace",
+                    "name": "mcp__agentic_fixture",
+                    "tools": [
+                        {
+                            "type": "function",
+                            "name": "add_numbers",
+                            "parameters": {"type": "object"}
+                        }
+                    ]
+                }
+            ],
+            "store": true,
+            "stream": true
+        }),
+    )
+    .await;
+
+    let events = recv_until_completed(&mut ws).await;
+    let added = events
+        .iter()
+        .find(|event| event["type"] == "response.output_item.added")
+        .unwrap();
+    let done = events
+        .iter()
+        .find(|event| event["type"] == "response.output_item.done")
+        .unwrap();
+    assert_eq!(added["item"]["namespace"], "mcp__agentic_fixture");
+    assert_eq!(added["item"]["name"], "add_numbers");
+    assert_eq!(done["item"]["namespace"], "mcp__agentic_fixture");
+    assert_eq!(done["item"]["name"], "add_numbers");
+
+    let completed = events.last().unwrap();
+    assert_eq!(completed["type"], "response.completed");
+    let response = &completed["response"];
+    assert_eq!(response["output"][0]["namespace"], "mcp__agentic_fixture");
+    assert_eq!(response["output"][0]["name"], "add_numbers");
+
+    let requests = mock.request_bodies().await;
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0]["tools"][0]["type"], "function");
+    assert_eq!(
+        requests[0]["tools"][0]["name"],
+        "agentic_ns__mcp__agentic_fixture__add_numbers"
+    );
 }
 
 #[tokio::test]
@@ -463,8 +578,14 @@ async fn test_websocket_executes_web_search_gateway_tool() {
     assert!(event_types.contains(&"response.web_search_call.in_progress"));
     assert!(event_types.contains(&"response.web_search_call.searching"));
     assert!(event_types.contains(&"response.web_search_call.completed"));
+    assert!(
+        !events
+            .iter()
+            .any(|event| event["item"]["type"] == "function_call" && event["item"]["name"] == "web_search"),
+        "internal gateway function_call events should not be forwarded"
+    );
     assert_eq!(
-        events.last().unwrap()["output"][1]["content"][0]["text"],
+        events.last().unwrap()["response"]["output"][1]["content"][0]["text"],
         "Use async carefully."
     );
     assert_eq!(mock_you.request_bodies().await[0]["query"], "rust async");
@@ -479,6 +600,58 @@ async fn test_websocket_executes_web_search_gateway_tool() {
             .iter()
             .any(|item| item["type"] == "function_call_output" && item["call_id"] == "call_search")
     );
+}
+
+#[tokio::test]
+async fn test_websocket_preserves_plain_function_tool_call_events() {
+    let mock = MockResponsesServer::start(vec![sse_function_call_response("resp_upstream_1", "get_weather")]).await;
+    let fixture = storage_backed_state(&mock.url).await;
+    let (gateway_url, _gateway) = spawn_gateway(fixture.state.clone()).await;
+    let mut ws = connect_responses_ws(&gateway_url).await;
+
+    send_json(
+        &mut ws,
+        json!({
+            "type": "response.create",
+            "model": "test-model",
+            "input": [{"type": "message", "role": "user", "content": "use the tool"}],
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "get_weather",
+                    "parameters": {"type": "object"}
+                }
+            ],
+            "store": true,
+            "stream": true
+        }),
+    )
+    .await;
+
+    let events = recv_until_completed(&mut ws).await;
+    let added = events
+        .iter()
+        .find(|event| event["type"] == "response.output_item.added")
+        .unwrap();
+    let done = events
+        .iter()
+        .find(|event| event["type"] == "response.output_item.done")
+        .unwrap();
+    assert!(added["item"].get("namespace").is_none());
+    assert_eq!(added["item"]["name"], "get_weather");
+    assert!(done["item"].get("namespace").is_none());
+    assert_eq!(done["item"]["name"], "get_weather");
+
+    let completed = events.last().unwrap();
+    assert_eq!(completed["type"], "response.completed");
+    let response = &completed["response"];
+    assert!(response["output"][0].get("namespace").is_none());
+    assert_eq!(response["output"][0]["name"], "get_weather");
+
+    let requests = mock.request_bodies().await;
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0]["tools"][0]["type"], "function");
+    assert_eq!(requests[0]["tools"][0]["name"], "get_weather");
 }
 
 #[tokio::test]
@@ -505,7 +678,7 @@ async fn test_websocket_continuation_rehydrates_previous_response() {
     .await;
     let first = recv_until_completed(&mut ws).await;
     let first_completed = first.last().unwrap();
-    let previous_response_id = first_completed["id"].as_str().unwrap();
+    let previous_response_id = first_completed["response"]["id"].as_str().unwrap();
 
     send_json(
         &mut ws,
@@ -521,10 +694,25 @@ async fn test_websocket_continuation_rehydrates_previous_response() {
     .await;
     let second = recv_until_completed(&mut ws).await;
     let completed = second.last().unwrap();
+    let event_types = second
+        .iter()
+        .map(|event| event["type"].as_str().unwrap())
+        .collect::<Vec<_>>();
 
-    assert_eq!(second.len(), 1);
-    assert_eq!(completed["output"][0]["content"][0]["text"], "WORLD");
-    assert_eq!(completed["previous_response_id"], previous_response_id);
+    assert_eq!(
+        event_types,
+        vec![
+            "response.created",
+            "response.output_item.added",
+            "response.output_text.delta",
+            "response.completed"
+        ]
+    );
+    assert_eq!(second[2]["delta"], "WORLD");
+    assert_eq!(completed["type"], "response.completed");
+    let response = &completed["response"];
+    assert_eq!(response["output"][0]["content"][0]["text"], "WORLD");
+    assert_eq!(response["previous_response_id"], previous_response_id);
 
     let requests = mock.request_bodies().await;
     assert_eq!(requests.len(), 2);

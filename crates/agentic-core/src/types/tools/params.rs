@@ -69,20 +69,19 @@ impl std::fmt::Display for NonEmptyToolName {
 // Request-side tool params  (serde-enum-representation, api-non-exhaustive)
 
 /// Wire-compatible with the existing `{"type":"function",...}` format.
-/// Replaces the `pub type ResponsesTool = FunctionTool` alias in `io/tools.rs`.
 ///
 /// Marked `#[non_exhaustive]` because the Responses API adds new tool types
 /// (e.g. `computer_use_preview`). Downstream match arms must include a catch-all.
+/// Codex `namespace` tools stay in this public request/storage shape and are
+/// flattened inside the upstream request conversion path.
 #[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ResponsesTool {
     #[serde(rename = "function")]
     Function(FunctionToolParam),
-
     #[serde(rename = "mcp")]
     Mcp(McpToolParam),
-
     #[serde(
         rename = "web_search_preview",
         alias = "web_search",
@@ -90,12 +89,14 @@ pub enum ResponsesTool {
         alias = "web_search_2025_08_26"
     )]
     WebSearch(WebSearchToolParam),
-
     #[serde(rename = "file_search")]
     FileSearch(FileSearchToolParam),
-
     #[serde(rename = "code_interpreter")]
     CodeInterpreter(CodeInterpreterToolParam),
+    #[serde(rename = "namespace")]
+    Namespace(CodexNamespaceToolParam),
+    #[serde(rename = "unknown", other)]
+    Unknown,
 }
 
 /// Parameters for a user-defined function tool.
@@ -108,9 +109,17 @@ pub enum ResponsesTool {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionToolParam {
     pub name: NonEmptyToolName,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub parameters: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub strict: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub defer_loading: Option<bool>,
+    #[serde(default)]
+    #[serde(flatten)]
+    pub extra: HashMap<String, Value>,
 }
 
 /// Parameters for a gateway MCP built-in tool declaration.
@@ -185,7 +194,46 @@ pub struct FileSearchToolParam {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CodeInterpreterToolParam {}
 
-// Tests
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodexNamespaceToolParam {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub tools: Vec<CodexNamespaceMember>,
+    #[serde(default)]
+    #[serde(flatten)]
+    pub extra: HashMap<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum CodexNamespaceMember {
+    #[serde(rename = "function")]
+    Function(FunctionToolParam),
+    #[serde(rename = "unknown", other)]
+    Unknown,
+}
+
+impl ResponsesTool {
+    #[must_use]
+    pub fn original_type(&self) -> Option<&str> {
+        match self {
+            Self::Function(_) => Some("function"),
+            Self::Mcp(_) => Some("mcp"),
+            Self::WebSearch(_) => Some("web_search_preview"),
+            Self::FileSearch(_) => Some("file_search"),
+            Self::CodeInterpreter(_) => Some("code_interpreter"),
+            Self::Namespace(_) => Some("namespace"),
+            Self::Unknown => None,
+        }
+    }
+
+    #[must_use]
+    pub fn to_raw_value(&self) -> Value {
+        serde_json::to_value(self).unwrap_or(Value::Null)
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -222,7 +270,8 @@ mod tests {
             "type": "function",
             "name": "get_weather",
             "description": "Get weather for a city",
-            "parameters": {"type": "object", "properties": {"city": {"type": "string"}}}
+            "parameters": {"type": "object", "properties": {"city": {"type": "string"}}},
+            "x-extra": "kept"
         });
         let tool: ResponsesTool = serde_json::from_value(json).unwrap();
         assert!(matches!(tool, ResponsesTool::Function(_)));
@@ -232,6 +281,7 @@ mod tests {
         let back = serde_json::to_value(&tool).unwrap();
         assert_eq!(back["type"], "function");
         assert_eq!(back["name"], "get_weather");
+        assert_eq!(back["x-extra"], "kept");
     }
 
     #[test]
@@ -316,5 +366,37 @@ mod tests {
         let back = serde_json::to_value(&param).unwrap();
         assert_eq!(back["server_label"], "my_server");
         assert_eq!(back["tool"]["inputSchema"]["properties"]["id"]["type"], "string");
+    }
+
+    #[test]
+    fn codex_namespace_tool_shape_round_trips_and_unknowns_are_minimal() {
+        let tools_json = serde_json::json!([
+            {
+                "type": "namespace",
+                "name": "mcp__shell",
+                "tools": [
+                    {"type": "function", "name": "run", "parameters": {"type": "object"}},
+                    {"type": "future_member", "opaque": true}
+                ],
+                "x-extra": "kept"
+            },
+            {
+                "type": "future_tool",
+                "opaque": true
+            }
+        ]);
+
+        let tools: Vec<ResponsesTool> = serde_json::from_value(tools_json).unwrap();
+        assert!(matches!(tools[0], ResponsesTool::Namespace(_)));
+        assert!(matches!(tools[1], ResponsesTool::Unknown));
+        if let ResponsesTool::Namespace(namespace) = &tools[0] {
+            assert!(matches!(namespace.tools[0], CodexNamespaceMember::Function(_)));
+            assert!(matches!(namespace.tools[1], CodexNamespaceMember::Unknown));
+        }
+
+        let serialized = serde_json::to_value(&tools).unwrap();
+        assert_eq!(serialized[0]["tools"][0]["type"], "function");
+        assert_eq!(serialized[0]["tools"][1], serde_json::json!({"type": "unknown"}));
+        assert_eq!(serialized[1], serde_json::json!({"type": "unknown"}));
     }
 }

@@ -8,4 +8,4 @@ pub use client::{McpClient, McpError, McpOperation};
 pub use handler::{McpHandler, McpHandlerKind};
 pub use pool::{McpClientPool, McpServerEntry};
 pub use read_resource::{READ_MCP_RESOURCE_TOOL_NAME, ReadResourceArgs, read_mcp_resource_spec};
-pub use registry::build_mcp_registry;
+pub use registry::{build_mcp_registry, insert_mcp_entry};

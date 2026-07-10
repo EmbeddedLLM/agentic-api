@@ -22,7 +22,7 @@ use tokio::task::JoinHandle;
 
 use agentic_core::executor::{BoxStream, ConversationHandler, ExecutionContext, ResponseHandler};
 use agentic_core::storage::{ConversationStore, DbPool, ResponseStore, create_pool_with_schema};
-use agentic_core::types::io::{OutputItem, ResponsesInput, ToolChoice};
+use agentic_core::types::io::{OutputItem, ResponsesInput};
 use agentic_core::types::request_response::{RequestPayload, ResponsePayload};
 
 #[derive(Debug, Deserialize)]
@@ -360,7 +360,7 @@ pub fn make_request(
         previous_response_id,
         conversation_id,
         tools: None,
-        tool_choice: ToolChoice::Auto,
+        tool_choice: None,
         stream,
         store,
         include: None,
@@ -390,6 +390,14 @@ pub async fn collect_stream(result: Either<ResponsePayload, BoxStream>) -> Respo
         if let Some(data) = chunk.trim_end_matches('\n').strip_prefix("data: ") {
             if data != "[DONE]" {
                 if let Ok(payload) = serde_json::from_str::<ResponsePayload>(data) {
+                    while stream.next().await.is_some() {}
+                    return payload;
+                }
+                if let Ok(mut event) = serde_json::from_str::<serde_json::Value>(data)
+                    && event.get("type").and_then(serde_json::Value::as_str) == Some("response.completed")
+                    && let Some(response) = event.get_mut("response")
+                    && let Ok(payload) = serde_json::from_value::<ResponsePayload>(response.take())
+                {
                     while stream.next().await.is_some() {}
                     return payload;
                 }
