@@ -38,10 +38,11 @@ async fn execute_responses(state: &AppState, parts: Parts, payload: RequestPaylo
 }
 
 fn has_gateway_tools(payload: &RequestPayload) -> bool {
-    payload
-        .tools
-        .as_ref()
-        .is_some_and(|tools| tools.iter().any(|tool| !matches!(tool, ResponsesTool::Function(_))))
+    payload.tools.as_ref().is_some_and(|tools| {
+        tools
+            .iter()
+            .any(|tool| !matches!(tool, ResponsesTool::Function(_) | ResponsesTool::Namespace(_)))
+    })
 }
 
 pub async fn responses(State(state): State<AppState>, req: Request) -> Response {

@@ -61,6 +61,34 @@ async fn spawn_mock_vllm_json_capture() -> (String, Arc<Mutex<Vec<serde_json::Va
     (format!("http://{addr}"), requests, handle)
 }
 
+async fn spawn_mock_vllm_namespace_response()
+-> (String, Arc<Mutex<Vec<serde_json::Value>>>, tokio::task::JoinHandle<()>) {
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let route_requests = Arc::clone(&requests);
+    let app = Router::new().route(
+        "/v1/responses",
+        post(move |body: Bytes| {
+            let route_requests = Arc::clone(&route_requests);
+            async move {
+                let body = serde_json::from_slice::<serde_json::Value>(&body).unwrap();
+                route_requests.lock().await.push(body);
+                axum::response::Response::builder()
+                    .status(200)
+                    .header("Content-Type", "application/json")
+                    .body(axum::body::Body::from(
+                        r#"{"id":"mock_id","object":"response","status":"completed","model":"test","tools":[{"type":"function","name":"agentic_ns__mcp__shell__run"}],"output":[{"type":"function_call","call_id":"call_1","name":"agentic_ns__mcp__shell__run","arguments":"{}"}],"created_at":0}"#,
+                    ))
+                    .unwrap()
+                    .into_response()
+            }
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (format!("http://{addr}"), requests, handle)
+}
+
 /// Spawn a mock vLLM that returns an SSE stream.
 async fn spawn_mock_vllm_sse() -> (String, tokio::task::JoinHandle<()>) {
     let app = Router::new().route(
@@ -100,6 +128,101 @@ async fn test_store_false_proxies_json_to_vllm() {
     assert_eq!(resp.status(), 200);
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["id"], "mock_id");
+}
+
+#[tokio::test]
+async fn test_store_false_proxy_flattens_and_restores_namespace_tools() {
+    let (llm_url, requests, _h1) = spawn_mock_vllm_namespace_response().await;
+    let (gw_url, _h2) = spawn_gateway(test_state(&test_config(&llm_url))).await;
+
+    let response = reqwest::Client::new()
+        .post(format!("{gw_url}/v1/responses"))
+        .json(&serde_json::json!({
+            "model": "test",
+            "input": "run pwd",
+            "tools": [{
+                "type": "namespace",
+                "name": "mcp__shell",
+                "tools": [{"type": "function", "name": "run", "parameters": {"type": "object"}}]
+            }],
+            "tool_choice": {"type": "function", "namespace": "mcp__shell", "name": "run"},
+            "store": false,
+            "stream": false
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), 200);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["tools"][0]["type"], "namespace");
+    assert_eq!(body["tools"][0]["name"], "mcp__shell");
+    assert_eq!(body["output"][0]["namespace"], "mcp__shell");
+    assert_eq!(body["output"][0]["name"], "run");
+
+    let requests = requests.lock().await;
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0]["tools"][0]["type"], "function");
+    assert_eq!(requests[0]["tools"][0]["name"], "agentic_ns__mcp__shell__run");
+    assert_eq!(requests[0]["tool_choice"]["name"], "agentic_ns__mcp__shell__run");
+    assert!(requests[0]["tool_choice"].get("namespace").is_none());
+}
+
+#[tokio::test]
+async fn test_store_false_proxy_rejects_namespace_flat_name_collisions() {
+    let (llm_url, requests, _h1) = spawn_mock_vllm_json_capture().await;
+    let (gw_url, _h2) = spawn_gateway(test_state(&test_config(&llm_url))).await;
+
+    let collision_payloads = [
+        serde_json::json!({
+            "model": "test",
+            "input": "hi",
+            "store": false,
+            "tools": [
+                {"type": "function", "name": "agentic_ns__mcp__shell__run"},
+                {
+                    "type": "namespace",
+                    "name": "mcp__shell",
+                    "tools": [{"type": "function", "name": "run"}]
+                }
+            ]
+        }),
+        serde_json::json!({
+            "model": "test",
+            "input": "hi",
+            "store": false,
+            "tools": [
+                {
+                    "type": "namespace",
+                    "name": "a__b",
+                    "tools": [{"type": "function", "name": "c"}]
+                },
+                {
+                    "type": "namespace",
+                    "name": "a",
+                    "tools": [{"type": "function", "name": "b__c"}]
+                }
+            ]
+        }),
+    ];
+
+    for payload in collision_payloads {
+        let response = reqwest::Client::new()
+            .post(format!("{gw_url}/v1/responses"))
+            .json(&payload)
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body: serde_json::Value = response.json().await.unwrap();
+        assert_eq!(body["error"]["code"], "invalid_request_error");
+    }
+
+    assert!(
+        requests.lock().await.is_empty(),
+        "invalid requests must not reach upstream"
+    );
 }
 
 #[tokio::test]

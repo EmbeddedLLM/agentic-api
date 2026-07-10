@@ -548,6 +548,86 @@ fn test_reasoning_cassette_gpt_oss_streaming() {
 // === Codex integration cassettes ===
 
 #[test]
+fn test_codex_gateway_proxy_http_function_cassette_preserves_function_call() {
+    let filename = "codex-gateway-proxy-http-function-tool-Qwen-Qwen3.6-35B-A3B-streaming.yaml";
+    let cassette = load_codex_cassette(filename);
+    assert_eq!(
+        cassette.turns.len(),
+        1,
+        "{filename} should be a stateless one-turn recording"
+    );
+
+    let request = turn_request_body(&cassette.turns[0]);
+    assert_eq!(request.get("store"), Some(&serde_json::Value::Bool(false)));
+    assert!(request.get("previous_response_id").is_none());
+
+    let output = process_completed_response_object_from_sse(&cassette, 0, "Qwen/Qwen3.6-35B-A3B");
+    let call = first_function_call(&output);
+    assert_eq!(call.namespace, None);
+    assert_eq!(call.name, "agentic_plain_echo");
+    assert_eq!(call.status, MessageStatus::Completed);
+
+    let data_lines = extract_data_lines(&cassette.turns[0].response.sse);
+    assert!(
+        data_lines.iter().any(|line| {
+            let Some(response) = response_body_from_data_line(line) else {
+                return false;
+            };
+            response
+                .get("tools")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|tools| {
+                    tools.iter().any(|tool| {
+                        tool.get("type").and_then(serde_json::Value::as_str) == Some("function")
+                            && tool.get("name").and_then(serde_json::Value::as_str) == Some("agentic_plain_echo")
+                    })
+                })
+        }),
+        "{filename} must preserve function tools in streamed response envelopes"
+    );
+}
+
+#[test]
+fn test_codex_gateway_proxy_http_cassette_restores_namespace_tools_and_calls() {
+    let filename = "codex-gateway-proxy-http-namespace-tool-Qwen-Qwen3.6-35B-A3B-streaming.yaml";
+    let cassette = load_codex_cassette(filename);
+    assert_eq!(
+        cassette.turns.len(),
+        1,
+        "{filename} should be a stateless one-turn recording"
+    );
+
+    let request = turn_request_body(&cassette.turns[0]);
+    assert_eq!(request.get("store"), Some(&serde_json::Value::Bool(false)));
+    assert!(request.get("previous_response_id").is_none());
+
+    let output = process_completed_response_object_from_sse(&cassette, 0, "Qwen/Qwen3.6-35B-A3B");
+    let call = first_function_call(&output);
+    assert_eq!(call.namespace.as_deref(), Some("mcp__agentic_fixture"));
+    assert_eq!(call.name, "add_numbers");
+    assert_eq!(call.status, MessageStatus::Completed);
+
+    let data_lines = extract_data_lines(&cassette.turns[0].response.sse);
+    assert!(
+        data_lines.iter().any(|line| {
+            let Some(response) = response_body_from_data_line(line) else {
+                return false;
+            };
+            response
+                .get("tools")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|tools| {
+                    tools.iter().any(|tool| {
+                        tool.get("type").and_then(serde_json::Value::as_str) == Some("namespace")
+                            && tool.get("name").and_then(serde_json::Value::as_str) == Some("mcp__agentic_fixture")
+                    })
+                })
+        }),
+        "{filename} must restore namespace tools in streamed response envelopes"
+    );
+}
+
+#[test]
 fn test_codex_gateway_http_cassettes_parse_completed_response_objects() {
     let cases = [
         (

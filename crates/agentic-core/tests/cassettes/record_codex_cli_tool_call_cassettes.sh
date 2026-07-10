@@ -7,6 +7,7 @@ set -euo pipefail
 #
 # Default matrix:
 #   - gateway HTTP/SSE: function + Codex namespace tools
+#   - gateway raw proxy HTTP/SSE: function + Codex namespace tools with store=false
 #   - gateway WebSocket: function + Codex namespace tools
 #   - direct vLLM HTTP/SSE: function + flattened namespace function
 #   - direct OpenAI HTTPS/SSE: function + Codex namespace tools
@@ -60,6 +61,7 @@ Targets:
   all                  all cassettes used by Codex cassette tests
   gateway              gateway-http + gateway-ws
   gateway-http         gateway HTTP/SSE function + namespace
+  gateway-proxy-http   gateway raw proxy HTTP/SSE function + namespace, store=false
   gateway-ws           gateway WebSocket function + namespace
   direct-vllm          same as direct-vllm-http
   direct-vllm-http     direct vLLM HTTP/SSE function + flattened namespace
@@ -81,7 +83,7 @@ Environment:
   OPENAI_URL             OpenAI base URL, default: ${OPENAI_URL}
   OPENAI_MODEL           OpenAI model, default: ${OPENAI_MODEL}
   OPENAI_API_KEY         required for openai* targets
-  TOOL_TURNS             1 or 2, default: ${TOOL_TURNS}
+  TOOL_TURNS             1 or 2 for stateful recordings, default: ${TOOL_TURNS}
   PROXY_PORT_BASE        first embedded recorder proxy port, default: ${PROXY_PORT_BASE}
 USAGE
 }
@@ -116,10 +118,11 @@ alloc_proxy_port() {
 }
 
 emit_prompts() {
-  local first_prompt="$1"
-  local second_prompt="$2"
+  local turns="$1"
+  local first_prompt="$2"
+  local second_prompt="$3"
 
-  case "$TOOL_TURNS" in
+  case "$turns" in
     1)
       printf '%s\n' "$first_prompt"
       ;;
@@ -143,6 +146,8 @@ run_recording() {
   local tools_file="$7"
   local first_prompt="$8"
   local second_prompt="$9"
+  local turns="${10:-$TOOL_TURNS}"
+  local store="${11:-true}"
 
   require_file "$RECORDER"
   require_file "$tools_file"
@@ -152,6 +157,10 @@ run_recording() {
   local output_path="${OUT%/}/${output_name}"
   local proxy_port
   proxy_port="$(alloc_proxy_port)"
+  local store_args=()
+  if [[ "$store" == "false" ]]; then
+    store_args+=(--no-store)
+  fi
 
   echo
   echo "==> ${label}"
@@ -159,13 +168,15 @@ run_recording() {
   echo "    target: ${backend_url}"
   echo "    model:  ${model}"
   echo "    wire:   ${transport}"
+  echo "    store:  ${store}"
 
-  emit_prompts "$first_prompt" "$second_prompt" |
+  emit_prompts "$turns" "$first_prompt" "$second_prompt" |
     "$PYTHON" "$RECORDER" \
-      --turns "$TOOL_TURNS" \
+      --turns "$turns" \
       --mode responses \
       --transport "$transport" \
       --stream \
+      "${store_args[@]}" \
       --proxy-port "$proxy_port" \
       "$backend_flag" "$backend_url" \
       --model "$model" \
@@ -196,6 +207,34 @@ record_gateway_http() {
     "$NAMESPACE_TOOL" \
     'You must call mcp__agentic_fixture.add_numbers with numbers [8, 0] before answering.' \
     'Use the tool output. Return only the sum.'
+}
+
+record_gateway_proxy_http() {
+  run_recording \
+    "gateway raw proxy HTTP/SSE function tool" \
+    "codex-gateway-proxy-http-function-tool-${GATEWAY_MODEL_SLUG}-streaming.yaml" \
+    "http" \
+    "--vllm" \
+    "$GATEWAY_URL" \
+    "$GATEWAY_MODEL" \
+    "$FUNCTION_TOOL" \
+    'You must call the agentic_plain_echo tool with text exactly "plain fixture" before answering.' \
+    '' \
+    1 \
+    false
+
+  run_recording \
+    "gateway raw proxy HTTP/SSE namespace tool" \
+    "codex-gateway-proxy-http-namespace-tool-${GATEWAY_MODEL_SLUG}-streaming.yaml" \
+    "http" \
+    "--vllm" \
+    "$GATEWAY_URL" \
+    "$GATEWAY_MODEL" \
+    "$NAMESPACE_TOOL" \
+    'You must call mcp__agentic_fixture.add_numbers with numbers [8, 0] before answering.' \
+    '' \
+    1 \
+    false
 }
 
 record_gateway_ws() {
@@ -342,6 +381,7 @@ case "$TARGET" in
     require_openai_key
     require_direct_vllm_url
     record_gateway_http
+    record_gateway_proxy_http
     record_gateway_ws
     record_direct_vllm_http
     record_openai_https
@@ -351,10 +391,14 @@ case "$TARGET" in
     ;;
   gateway)
     record_gateway_http
+    record_gateway_proxy_http
     record_gateway_ws
     ;;
   gateway-http)
     record_gateway_http
+    ;;
+  gateway-proxy-http)
+    record_gateway_proxy_http
     ;;
   gateway-ws)
     record_gateway_ws
@@ -381,6 +425,7 @@ case "$TARGET" in
     require_openai_key
     require_direct_vllm_url
     record_gateway_http
+    record_gateway_proxy_http
     record_gateway_ws
     record_direct_vllm_http
     record_direct_vllm_ws

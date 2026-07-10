@@ -14,12 +14,18 @@ use agentic_core::utils::common::serialize_to_string;
 
 const MULTI_TURN_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/tool_calls/multi_turn");
 const CODEX_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/codex");
+const CODEX_PROXY_HTTP_FUNCTION_CASSETTE: &str =
+    "codex-gateway-proxy-http-function-tool-Qwen-Qwen3.6-35B-A3B-streaming.yaml";
+const CODEX_PROXY_HTTP_NAMESPACE_CASSETTE: &str =
+    "codex-gateway-proxy-http-namespace-tool-Qwen-Qwen3.6-35B-A3B-streaming.yaml";
 
 const CODEX_CASSETTES: &[&str] = &[
     "codex-direct-vllm-http-flat-namespace-tool-Qwen-Qwen3.6-35B-A3B-streaming.yaml",
     "codex-direct-vllm-http-function-tool-Qwen-Qwen3.6-35B-A3B-streaming.yaml",
     "codex-gateway-http-function-tool-Qwen-Qwen3.6-35B-A3B-streaming.yaml",
     "codex-gateway-http-namespace-tool-Qwen-Qwen3.6-35B-A3B-streaming.yaml",
+    CODEX_PROXY_HTTP_FUNCTION_CASSETTE,
+    CODEX_PROXY_HTTP_NAMESPACE_CASSETTE,
     "codex-gateway-websocket-function-tool-Qwen-Qwen3.6-35B-A3B-streaming.yaml",
     "codex-gateway-websocket-namespace-tool-Qwen-Qwen3.6-35B-A3B-streaming.yaml",
     "codex-openai-https-function-tool-gpt-4o-streaming.yaml",
@@ -30,6 +36,7 @@ const CODEX_CASSETTES: &[&str] = &[
 
 const CODEX_NAMESPACE_CASSETTES: &[&str] = &[
     "codex-gateway-http-namespace-tool-Qwen-Qwen3.6-35B-A3B-streaming.yaml",
+    CODEX_PROXY_HTTP_NAMESPACE_CASSETTE,
     "codex-gateway-websocket-namespace-tool-Qwen-Qwen3.6-35B-A3B-streaming.yaml",
     "codex-openai-https-namespace-tool-gpt-4o-streaming.yaml",
     "codex-openai-websocket-namespace-tool-gpt-4o-streaming.yaml",
@@ -275,7 +282,19 @@ fn roundtrip_parallel() {
 fn codex_request_payloads_parse_all_recorded_shapes() {
     for filename in CODEX_CASSETTES {
         let cassette = load_codex_cassette(filename);
-        assert_eq!(cassette.turns.len(), 2, "{filename} should have two turns");
+        let expected_turns = if matches!(
+            *filename,
+            CODEX_PROXY_HTTP_FUNCTION_CASSETTE | CODEX_PROXY_HTTP_NAMESPACE_CASSETTE
+        ) {
+            1
+        } else {
+            2
+        };
+        assert_eq!(
+            cassette.turns.len(),
+            expected_turns,
+            "{filename} has an unexpected turn count"
+        );
 
         for (i, turn) in cassette.turns.iter().enumerate() {
             let json = request_body_from_turn(turn);
@@ -292,6 +311,25 @@ fn codex_request_payloads_parse_all_recorded_shapes() {
                 );
             }
         }
+    }
+}
+
+#[test]
+fn codex_proxy_http_cassettes_are_stateless() {
+    for filename in [CODEX_PROXY_HTTP_FUNCTION_CASSETTE, CODEX_PROXY_HTTP_NAMESPACE_CASSETTE] {
+        let cassette = load_codex_cassette(filename);
+        assert_eq!(
+            cassette.turns.len(),
+            1,
+            "{filename} must not create a continuation turn"
+        );
+
+        let body = request_body_from_turn(&cassette.turns[0]);
+        assert_eq!(body.get("store"), Some(&Value::Bool(false)));
+        assert!(
+            body.get("previous_response_id").is_none(),
+            "{filename} must not carry executor continuation state"
+        );
     }
 }
 
