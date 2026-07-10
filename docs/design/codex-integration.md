@@ -40,7 +40,8 @@ The integration supports both the typed stateful executor path and the stateless
 - WebSocket Responses execution uses the same typed executor path and restores namespace tool-call events before sending
   them to clients.
 - Stateless HTTP proxying flattens raw namespace tools and a namespaced `tool_choice` before forwarding to vLLM. It
-  retains the original `tools` declaration and restores it, plus any flat function calls, in JSON and SSE responses.
+  retains the original `tools` declaration and restores it, plus echoed tool choices and flat function calls, in JSON
+  and SSE responses.
 
 ## HTTP Execution Paths
 
@@ -53,7 +54,8 @@ The HTTP Responses handler chooses one path per request:
 
 The proxy is intentionally narrower than the executor: it does not create gateway response IDs, rehydrate history,
 persist responses, or execute tools. It preserves the upstream response except for the namespace conversion needed to
-make the request vLLM-compatible. When restoration changes a response body, it removes the upstream `Content-Length`.
+make the request vLLM-compatible. For streaming responses, restoration happens after a complete SSE event has arrived.
+When restoration changes a response body, it removes upstream representation headers that no longer describe the body.
 
 WebSocket Responses requests always use the typed executor path because that protocol forces a stored streaming
 response.

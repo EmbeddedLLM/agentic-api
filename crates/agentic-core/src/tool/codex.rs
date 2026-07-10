@@ -376,21 +376,19 @@ impl CodexNamespaceHandler {
         changed
     }
 
+    /// Restore a complete JSON SSE data payload, without its `data:` framing.
+    ///
+    /// SSE permits JSON to span multiple `data:` lines. The proxy joins those
+    /// lines before calling this helper, then reapplies the original framing.
     #[must_use]
-    pub(crate) fn restore_raw_sse_line(line: &str, normalization: &RawCodexNamespaceNormalization) -> String {
-        let Some(data) = line.strip_prefix("data: ") else {
-            return line.to_string();
-        };
-        if data == "[DONE]" {
-            return line.to_string();
-        }
+    pub(crate) fn restore_raw_sse_data(data: &str, normalization: &RawCodexNamespaceNormalization) -> Option<String> {
         let Ok(mut value) = serde_json::from_str::<Value>(data) else {
-            return line.to_string();
+            return None;
         };
         if !Self::restore_raw_response_value(&mut value, normalization) {
-            return line.to_string();
+            return None;
         }
-        serde_json::to_string(&value).map_or_else(|_| line.to_string(), |json| format!("data: {json}"))
+        serde_json::to_string(&value).ok()
     }
 }
 
@@ -607,6 +605,10 @@ fn restore_response_value_with_map(value: &mut Value, map: &NamespaceMap) -> boo
 
     changed |= restore_call_value_with_map(value, map);
 
+    if let Some(tool_choice) = value.as_object_mut().and_then(|object| object.get_mut("tool_choice")) {
+        changed |= restore_raw_tool_choice_value_with_map(tool_choice, map);
+    }
+
     for key in ["response", "payload"] {
         if let Some(nested) = value.as_object_mut().and_then(|object| object.get_mut(key)) {
             changed |= restore_response_value_with_map(nested, map);
@@ -648,6 +650,37 @@ fn restore_call_value_with_map(value: &mut Value, map: &NamespaceMap) -> bool {
         member = %mapping.member.name,
         "restored upstream namespace function call"
     );
+    true
+}
+
+fn restore_raw_tool_choice_value_with_map(value: &mut Value, map: &NamespaceMap) -> bool {
+    let Some(choice) = value.as_object_mut() else {
+        return false;
+    };
+
+    if choice.get("type").and_then(Value::as_str) == Some("function") && choice.contains_key("name") {
+        return restore_raw_tool_choice_function_object(choice, map);
+    }
+
+    choice
+        .get_mut("function")
+        .and_then(Value::as_object_mut)
+        .is_some_and(|function| restore_raw_tool_choice_function_object(function, map))
+}
+
+fn restore_raw_tool_choice_function_object(function: &mut Map<String, Value>, map: &NamespaceMap) -> bool {
+    if function.get("namespace").and_then(Value::as_str).is_some() {
+        return false;
+    }
+    let Some(name) = function.get("name").and_then(Value::as_str) else {
+        return false;
+    };
+    let Some(mapping) = map.mapping_for_call(name) else {
+        return false;
+    };
+
+    function.insert("namespace".to_string(), Value::String(mapping.member.namespace.clone()));
+    function.insert("name".to_string(), Value::String(mapping.member.name.clone()));
     true
 }
 

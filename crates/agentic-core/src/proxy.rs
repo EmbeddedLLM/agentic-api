@@ -27,6 +27,18 @@ const HOP_BY_HOP: &[&str] = &[
 
 const REQUEST_DROP_EXTRA: &[&str] = &["host", "content-length"];
 
+// These describe the upstream representation's bytes. Namespace restoration
+// changes those bytes before they reach the client.
+const MODIFIED_REPRESENTATION_HEADERS: &[&str] = &[
+    "accept-ranges",
+    "content-length",
+    "content-md5",
+    "content-range",
+    "digest",
+    "etag",
+    "last-modified",
+];
+
 fn is_hop_by_hop(name: &str) -> bool {
     HOP_BY_HOP.iter().any(|h| h.eq_ignore_ascii_case(name))
 }
@@ -195,31 +207,112 @@ fn normalize_sse_stream(
             };
             buffer.extend_from_slice(&chunk);
 
-            while let Some(pos) = buffer.iter().position(|byte| *byte == b'\n') {
-                let line = buffer.drain(..=pos).collect::<Vec<_>>();
-                let line_end = if pos > 0 && line.get(pos - 1) == Some(&b'\r') {
-                    pos - 1
-                } else {
-                    pos
-                };
-                let Ok(raw_line) = std::str::from_utf8(&line[..line_end]) else {
-                    yield Ok(Bytes::from(line));
-                    continue;
-                };
-                let normalized = CodexNamespaceHandler::restore_raw_sse_line(raw_line, &namespace);
-                yield Ok(Bytes::from(format!("{normalized}\n")));
+            while let Some(event_end) = complete_sse_event_end(&buffer) {
+                let event = buffer.drain(..event_end).collect::<Vec<_>>();
+                yield Ok(normalize_sse_event(event, &namespace));
             }
         }
 
         if !buffer.is_empty() {
-            let Ok(raw_line) = std::str::from_utf8(&buffer) else {
-                yield Ok(Bytes::from(buffer));
-                return;
-            };
-            let normalized = CodexNamespaceHandler::restore_raw_sse_line(raw_line, &namespace);
-            yield Ok(Bytes::from(normalized));
+            // An unterminated event is forwarded exactly as received. It is
+            // not valid to parse until the SSE blank-line event boundary.
+            yield Ok(Bytes::from(buffer));
         }
     })
+}
+
+fn complete_sse_event_end(bytes: &[u8]) -> Option<usize> {
+    let mut line_start = 0;
+    while let Some((content_end, next_line_start)) = next_sse_line(bytes, line_start) {
+        if content_end == line_start {
+            return Some(next_line_start);
+        }
+        line_start = next_line_start;
+    }
+    None
+}
+
+fn next_sse_line(bytes: &[u8], line_start: usize) -> Option<(usize, usize)> {
+    let mut index = line_start;
+    while let Some(byte) = bytes.get(index) {
+        match byte {
+            b'\n' => {
+                let content_end = if index > line_start && bytes[index - 1] == b'\r' {
+                    index - 1
+                } else {
+                    index
+                };
+                return Some((content_end, index + 1));
+            }
+            b'\r' => {
+                let next_line_start = if bytes.get(index + 1) == Some(&b'\n') {
+                    index + 2
+                } else {
+                    index + 1
+                };
+                return Some((index, next_line_start));
+            }
+            _ => index += 1,
+        }
+    }
+    None
+}
+
+fn normalize_sse_event(event: Vec<u8>, namespace: &RawCodexNamespaceNormalization) -> Bytes {
+    let mut data = String::new();
+    let mut first_data = None;
+    let mut lines = Vec::new();
+    let mut line_start = 0;
+
+    while line_start < event.len() {
+        let Some((content_end, next_line_start)) = next_sse_line(&event, line_start) else {
+            return Bytes::from(event);
+        };
+        let line = &event[line_start..content_end];
+        let data_value = line
+            .strip_prefix(b"data:")
+            .map(|value| value.strip_prefix(b" ").unwrap_or(value));
+        if let Some(value) = data_value {
+            let Ok(value) = std::str::from_utf8(value) else {
+                return Bytes::from(event);
+            };
+            if !data.is_empty() {
+                data.push('\n');
+            }
+            data.push_str(value);
+            first_data.get_or_insert((lines.len(), line.starts_with(b"data: ")));
+        }
+        lines.push((line_start, content_end, next_line_start));
+        line_start = next_line_start;
+    }
+
+    let Some((first_data_index, has_space)) = first_data else {
+        return Bytes::from(event);
+    };
+    let Some(restored_data) = CodexNamespaceHandler::restore_raw_sse_data(&data, namespace) else {
+        return Bytes::from(event);
+    };
+
+    let mut normalized = Vec::with_capacity(event.len());
+    for (index, (start, content_end, next_line_start)) in lines.iter().enumerate() {
+        if index == first_data_index {
+            normalized.extend_from_slice(b"data:");
+            if has_space {
+                normalized.push(b' ');
+            }
+            normalized.extend_from_slice(restored_data.as_bytes());
+            normalized.extend_from_slice(&event[*content_end..*next_line_start]);
+        } else if !event[*start..*content_end].starts_with(b"data:") {
+            normalized.extend_from_slice(&event[*start..*next_line_start]);
+        }
+    }
+    Bytes::from(normalized)
+}
+
+fn remove_modified_representation_headers(headers: &mut HeaderMap) {
+    for header in MODIFIED_REPRESENTATION_HEADERS {
+        headers.remove(*header);
+    }
 }
 
 #[must_use]
@@ -344,9 +437,7 @@ pub async fn proxy_request(request: ProxyRequest, state: &ProxyState) -> ProxyRe
     );
     let mut response_headers = filter_response_headers(llm_resp.headers());
     if !namespace.is_empty() {
-        // Restoring flattened names and the original `tools` declaration can
-        // change the body length, so the upstream value is no longer valid.
-        response_headers.remove("content-length");
+        remove_modified_representation_headers(&mut response_headers);
     }
 
     if response_is_sse {
@@ -549,7 +640,7 @@ mod tests {
         );
         let normalized_request = normalize_proxy_request_body(request).expect("valid raw namespace tools");
         let upstream = Bytes::from_static(
-            br#"{"tools":[{"type":"function","name":"agentic_ns__mcp__shell__run"}],"output":[{"type":"function_call","name":"agentic_ns__mcp__shell__run"}]}"#,
+            br#"{"tools":[{"type":"function","name":"agentic_ns__mcp__shell__run"}],"tool_choice":{"type":"function","name":"agentic_ns__mcp__shell__run"},"output":[{"type":"function_call","name":"agentic_ns__mcp__shell__run"}]}"#,
         );
 
         let restored = normalize_response_body(upstream, &normalized_request.namespace);
@@ -559,23 +650,27 @@ mod tests {
         assert_eq!(value["tools"][0]["name"], "mcp__shell");
         assert_eq!(value["output"][0]["namespace"], "mcp__shell");
         assert_eq!(value["output"][0]["name"], "run");
+        assert_eq!(value["tool_choice"]["namespace"], "mcp__shell");
+        assert_eq!(value["tool_choice"]["name"], "run");
     }
 
     #[test]
-    fn raw_proxy_restores_tools_in_nested_sse_response() {
+    fn raw_proxy_restores_tools_and_tool_choice_in_nested_sse_response() {
         let request = Bytes::from_static(
             br#"{"tools":[{"type":"namespace","name":"mcp__shell","tools":[{"type":"function","name":"run"}]}]}"#,
         );
         let normalized_request = normalize_proxy_request_body(request).expect("valid raw namespace tools");
-        let line = r#"data: {"type":"response.completed","response":{"tools":[{"type":"function","name":"agentic_ns__mcp__shell__run"}],"output":[{"type":"function_call","name":"agentic_ns__mcp__shell__run"}]}}"#;
+        let data = r#"{"type":"response.completed","response":{"tools":[{"type":"function","name":"agentic_ns__mcp__shell__run"}],"tool_choice":{"type":"function","name":"agentic_ns__mcp__shell__run"},"output":[{"type":"function_call","name":"agentic_ns__mcp__shell__run"}]}}"#;
 
-        let restored = CodexNamespaceHandler::restore_raw_sse_line(line, &normalized_request.namespace);
-        let value: Value = serde_json::from_str(restored.strip_prefix("data: ").unwrap()).unwrap();
+        let restored = CodexNamespaceHandler::restore_raw_sse_data(data, &normalized_request.namespace).unwrap();
+        let value: Value = serde_json::from_str(&restored).unwrap();
 
         assert_eq!(value["response"]["tools"][0]["type"], "namespace");
         assert_eq!(value["response"]["tools"][0]["name"], "mcp__shell");
         assert_eq!(value["response"]["output"][0]["namespace"], "mcp__shell");
         assert_eq!(value["response"]["output"][0]["name"], "run");
+        assert_eq!(value["response"]["tool_choice"]["namespace"], "mcp__shell");
+        assert_eq!(value["response"]["tool_choice"]["name"], "run");
     }
 
     #[tokio::test]
@@ -587,7 +682,7 @@ mod tests {
         let snowman = "\u{2603}";
         let line = format!(
             r#"data: {{"type":"response.output_item.done","item":{{"type":"function_call","name":"agentic_ns__mcp__shell__run","arguments":"{{\"text\":\"{snowman}\"}}"}}}}"#
-        ) + "\n";
+        ) + "\n\n";
         let bytes = line.as_bytes();
         let split_at = bytes
             .windows(snowman.len())
@@ -600,7 +695,7 @@ mod tests {
         ];
         let mut stream = normalize_sse_stream(Box::pin(futures::stream::iter(chunks)), normalized_request.namespace);
 
-        let output = stream.next().await.expect("normalized line").expect("stream ok");
+        let output = stream.next().await.expect("normalized event").expect("stream ok");
         assert!(stream.next().await.is_none());
         let text = String::from_utf8(output.to_vec()).expect("normalized line is utf8");
         assert!(!text.contains('\u{FFFD}'));
@@ -608,6 +703,91 @@ mod tests {
         let value: Value = serde_json::from_str(text.trim().strip_prefix("data: ").unwrap()).unwrap();
         assert_eq!(value["item"]["namespace"], "mcp__shell");
         assert_eq!(value["item"]["name"], "run");
+    }
+
+    #[tokio::test]
+    async fn raw_proxy_sse_restores_multiline_data_without_post_colon_space() {
+        let request = Bytes::from_static(
+            br#"{"tools":[{"type":"namespace","name":"mcp__shell","tools":[{"type":"function","name":"run"}]}]}"#,
+        );
+        let normalized_request = normalize_proxy_request_body(request).expect("valid raw namespace tools");
+        let event = concat!(
+            "event: response.completed\r\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"tool_choice\":{\"type\":\"function\",\r\n",
+            "data:\"name\":\"agentic_ns__mcp__shell__run\"}}}\r\n",
+            "\r\n"
+        );
+        let mut stream = normalize_sse_stream(
+            Box::pin(futures::stream::iter(vec![Ok(Bytes::from_static(event.as_bytes()))])),
+            normalized_request.namespace,
+        );
+
+        let output = stream.next().await.expect("normalized event").expect("stream ok");
+        assert!(stream.next().await.is_none());
+        let text = String::from_utf8(output.to_vec()).expect("normalized event is utf8");
+        assert!(text.starts_with("event: response.completed\r\ndata: "));
+        assert!(text.ends_with("\r\n\r\n"));
+        let data = text
+            .lines()
+            .find_map(|line| line.strip_prefix("data: "))
+            .expect("restored data line");
+        let value: Value = serde_json::from_str(data).unwrap();
+        assert_eq!(value["response"]["tool_choice"]["namespace"], "mcp__shell");
+        assert_eq!(value["response"]["tool_choice"]["name"], "run");
+    }
+
+    #[tokio::test]
+    async fn raw_proxy_sse_restores_cr_delimited_events() {
+        let request = Bytes::from_static(
+            br#"{"tools":[{"type":"namespace","name":"mcp__shell","tools":[{"type":"function","name":"run"}]}]}"#,
+        );
+        let normalized_request = normalize_proxy_request_body(request).expect("valid raw namespace tools");
+        let event = Bytes::from_static(
+            b"data:{\"type\":\"response.output_item.done\",\"item\":{\"type\":\"function_call\",\"name\":\"agentic_ns__mcp__shell__run\"}}\r\r",
+        );
+        let mut stream = normalize_sse_stream(
+            Box::pin(futures::stream::iter(vec![Ok(event)])),
+            normalized_request.namespace,
+        );
+
+        let output = stream.next().await.expect("normalized event").expect("stream ok");
+        assert!(stream.next().await.is_none());
+        let text = String::from_utf8(output.to_vec()).expect("normalized event is utf8");
+        assert!(text.starts_with("data:{"));
+        assert!(text.ends_with("\r\r"));
+        let value: Value = serde_json::from_str(text.trim().strip_prefix("data:").unwrap()).unwrap();
+        assert_eq!(value["item"]["namespace"], "mcp__shell");
+        assert_eq!(value["item"]["name"], "run");
+    }
+
+    #[tokio::test]
+    async fn raw_proxy_sse_passes_through_non_json_events_unchanged() {
+        let event = Bytes::from_static(b"event: ping\r\ndata: keepalive\r\n\r\n");
+        let mut stream = normalize_sse_stream(
+            Box::pin(futures::stream::iter(vec![Ok(event.clone())])),
+            RawCodexNamespaceNormalization::default(),
+        );
+
+        assert_eq!(stream.next().await.expect("event").expect("stream ok"), event);
+        assert!(stream.next().await.is_none());
+    }
+
+    #[test]
+    fn modified_namespace_response_drops_representation_headers() {
+        let mut headers = HeaderMap::new();
+        for header in MODIFIED_REPRESENTATION_HEADERS {
+            headers.insert(*header, HeaderValue::from_static("stale"));
+        }
+        headers.insert("cache-control", HeaderValue::from_static("private, max-age=60"));
+        headers.insert("x-request-id", HeaderValue::from_static("request_1"));
+
+        remove_modified_representation_headers(&mut headers);
+
+        for header in MODIFIED_REPRESENTATION_HEADERS {
+            assert!(!headers.contains_key(*header), "{header} must be removed");
+        }
+        assert!(headers.contains_key("cache-control"));
+        assert!(headers.contains_key("x-request-id"));
     }
 
     #[test]
