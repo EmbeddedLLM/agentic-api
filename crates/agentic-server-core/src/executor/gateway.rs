@@ -485,15 +485,13 @@ mod tests {
         assert!(matches!(decision, LoopDecision::Done));
     }
 
-    // --- Per-call timeout ---------------------------------------------------
-
     use std::pin::Pin;
     use std::sync::Arc;
 
     use serde_json::Value;
 
     use super::execute_gateway_call_with_timeout;
-    use crate::tool::{GatewayExecutor, ToolError, ToolHandler, ToolOutput, ToolRegistry, ToolType};
+    use crate::tool::{GatewayExecutor, GatewayExecutors, ToolError, ToolHandler, ToolOutput, ToolRegistry, ToolType};
     use crate::types::io::OutputItem;
     use crate::types::io::tools::FunctionTool;
     use crate::types::tools::ResponsesTool;
@@ -548,12 +546,11 @@ mod tests {
     async fn hung_gateway_call_times_out_into_error_output() {
         let web_search: ResponsesTool =
             serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).expect("web_search tool param");
-        let registry = ToolRegistry::build_with_handlers(&[web_search], |tool_type| match tool_type {
-            ToolType::WebSearch => Some(Arc::new(SlowExecutor) as Arc<dyn GatewayExecutor>),
-            _ => None,
-        })
-        .await
-        .expect("registry builds");
+        let mut executors = GatewayExecutors::default();
+        executors.insert(Arc::new(SlowExecutor));
+        let registry = ToolRegistry::build_with_handlers(&[web_search], &executors)
+            .await
+            .expect("registry builds");
 
         // 1ms budget vs a 50ms tool → the timeout fires. Must return (not hang):
         // the stuck call becomes an error output the loop can feed back.
@@ -587,7 +584,7 @@ mod tests {
         // not fail the whole request.
         let web_search: ResponsesTool =
             serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).expect("web_search tool param");
-        let registry = ToolRegistry::build_with_handlers(&[web_search], |_tool_type| None)
+        let registry = ToolRegistry::build_with_handlers(&[web_search], &GatewayExecutors::default())
             .await
             .expect("registry builds");
 

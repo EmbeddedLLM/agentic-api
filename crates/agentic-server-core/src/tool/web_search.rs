@@ -20,7 +20,7 @@ const YOU_API_BASE_URL: &str = "YOU_API_BASE_URL";
 pub(crate) fn insert_web_search_entry(
     entries: &mut HashMap<String, ToolEntry>,
     p: &WebSearchToolParam,
-    handler_for: &mut impl FnMut(ToolType) -> Option<Arc<dyn GatewayExecutor>>,
+    handler: Option<Arc<dyn GatewayExecutor>>,
 ) {
     serialize_to_value_or_custom_default(
         p,
@@ -32,7 +32,7 @@ pub(crate) fn insert_web_search_entry(
                     tool_type: ToolType::WebSearch,
                     config,
                     server_label: None,
-                    handler: handler_for(ToolType::WebSearch),
+                    handler,
                 },
             );
         },

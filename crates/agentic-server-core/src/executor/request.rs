@@ -5,51 +5,9 @@ use crate::config::Config;
 use crate::error::Error;
 use crate::executor::modes::{ConversationHandler, ResponseHandler};
 use crate::storage::{ConversationStore, ResponseStore, create_pool_with_schema_and_sqlite_config};
-use crate::tool::{GatewayExecutor, ToolType, WebSearchHandler};
+use crate::tool::{GatewayExecutor, GatewayExecutors};
 use crate::types::io::InputItem;
 use crate::types::request_response::{RequestPayload, ResponsePayload};
-
-#[derive(Clone, Default)]
-pub struct GatewayExecutors {
-    mcp: Option<Arc<dyn GatewayExecutor>>,
-    web_search: Option<Arc<dyn GatewayExecutor>>,
-}
-
-impl GatewayExecutors {
-    #[must_use]
-    pub fn from_env(client: Arc<reqwest::Client>) -> Self {
-        Self {
-            mcp: None,
-            web_search: Some(Arc::new(WebSearchHandler::from_env(client))),
-        }
-    }
-
-    pub fn insert(&mut self, executor: Arc<dyn GatewayExecutor>) {
-        match executor.tool_type() {
-            ToolType::Mcp => self.mcp = Some(executor),
-            ToolType::WebSearch => self.web_search = Some(executor),
-            other => tracing::debug!(tool_type = ?other, "gateway executor type has no executor slot"),
-        }
-    }
-
-    #[must_use]
-    pub fn get(&self, tool_type: ToolType) -> Option<Arc<dyn GatewayExecutor>> {
-        match tool_type {
-            ToolType::Mcp => self.mcp.clone(),
-            ToolType::WebSearch => self.web_search.clone(),
-            ToolType::Function | ToolType::CodexNamespace | ToolType::FileSearch | ToolType::CodeInterpreter => None,
-        }
-    }
-}
-
-impl std::fmt::Debug for GatewayExecutors {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GatewayExecutors")
-            .field("mcp", &self.mcp.is_some())
-            .field("web_search", &self.web_search.is_some())
-            .finish()
-    }
-}
 
 /// Context built by `rehydrate_conversation`, threaded through the execute pipeline.
 #[derive(Debug)]
@@ -162,21 +120,5 @@ impl ExecutionContext {
             llm_base_url: cfg.llm_api_base.clone(),
             streaming_timeout: Duration::from_secs(30),
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use super::GatewayExecutors;
-    use crate::tool::ToolType;
-
-    #[test]
-    fn from_env_does_not_install_request_scoped_mcp_executor() {
-        let executors = GatewayExecutors::from_env(Arc::new(reqwest::Client::new()));
-
-        assert!(executors.get(ToolType::Mcp).is_none());
-        assert!(executors.get(ToolType::WebSearch).is_some());
     }
 }

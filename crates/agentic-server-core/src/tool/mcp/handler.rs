@@ -58,75 +58,196 @@ pub(crate) fn started_output_item(call: &FunctionToolCall) -> OutputItem {
     ))
 }
 
-/// `*Spec` variants map a declared/discovered tool's shape to its upstream
-/// `FunctionTool` form for `normalize()` — no live MCP connection involved.
-/// `ReadResource`/`ToolCall` carry a real `pool`/`client`, built by the
-/// registry once a connection exists, and are the only variants `execute()`
-/// can dispatch through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum McpSpec {
+    Resources,
+    Tool,
+}
+
+impl McpSpec {
+    #[must_use]
+    pub fn from_param_name(name: &str) -> Self {
+        if name == READ_MCP_RESOURCE_TOOL_NAME {
+            Self::Resources
+        } else {
+            Self::Tool
+        }
+    }
+}
+
+/// Maps the model-facing MCP spec shape to the resource needed to execute it.
 pub enum McpHandlerKind {
-    ReadResourceSpec,
-    ReadResource { pool: Arc<McpClientPool> },
-    ToolCallSpec,
-    ToolCall { client: Arc<McpClient> },
+    ReadResource {
+        spec: McpSpec,
+        resource: Option<Arc<McpClientPool>>,
+    },
+    ToolCall {
+        spec: McpSpec,
+        client: Option<Arc<McpClient>>,
+    },
 }
 
 pub struct McpHandler {
     kind: McpHandlerKind,
 }
 
+#[derive(Debug, Default)]
+pub struct McpHandlerFactory;
+
+pub struct McpDiscoveredHandler {
+    pub param: McpDiscoveredToolParam,
+    pub handler: Arc<McpHandler>,
+}
+
+impl McpHandlerFactory {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self
+    }
+
+    pub async fn from_params(&self, param: &McpToolParam) -> Option<McpHandler> {
+        let resource = Arc::new(McpClientPool::from_params(std::slice::from_ref(param)).await);
+        match McpSpec::from_param_name(param.name.as_str()) {
+            McpSpec::Resources => Some(self.read_resource(resource)),
+            McpSpec::Tool => resource.client_for_param(param).map(|client| self.tool_call(client)),
+        }
+    }
+
+    #[must_use]
+    pub const fn read_resource_spec(&self) -> McpSpec {
+        McpSpec::Resources
+    }
+
+    #[must_use]
+    pub const fn tool_call_spec(&self) -> McpSpec {
+        McpSpec::Tool
+    }
+
+    #[must_use]
+    pub fn read_resource(&self, resource: Arc<McpClientPool>) -> McpHandler {
+        McpHandler::with_kind(McpHandlerKind::ReadResource {
+            spec: self.read_resource_spec(),
+            resource: Some(resource),
+        })
+    }
+
+    #[must_use]
+    pub fn tool_call(&self, client: Arc<McpClient>) -> McpHandler {
+        McpHandler::with_kind(McpHandlerKind::ToolCall {
+            spec: self.tool_call_spec(),
+            client: Some(client),
+        })
+    }
+}
+
+impl ToolHandler for McpHandlerFactory {
+    fn tool_type(&self) -> ToolType {
+        ToolType::Mcp
+    }
+
+    fn validate(&self, _param: &Value) -> Result<(), ToolError> {
+        Ok(())
+    }
+
+    fn normalize(&self, param: &Value) -> Vec<FunctionTool> {
+        McpHandler::spec_from_param(param).normalize(param)
+    }
+}
+
 impl McpHandler {
     #[must_use]
-    pub fn read_resource_spec_only() -> Self {
-        Self {
-            kind: McpHandlerKind::ReadResourceSpec,
+    pub fn with_kind(kind: McpHandlerKind) -> Self {
+        Self { kind }
+    }
+
+    #[must_use]
+    pub const fn spec(&self) -> McpSpec {
+        match &self.kind {
+            McpHandlerKind::ReadResource { spec, .. } | McpHandlerKind::ToolCall { spec, .. } => *spec,
         }
+    }
+
+    #[must_use]
+    pub fn read_resource_spec_only() -> Self {
+        Self::with_kind(McpHandlerKind::ReadResource {
+            spec: McpSpec::Resources,
+            resource: None,
+        })
     }
 
     #[must_use]
     pub fn read_resource(pool: Arc<McpClientPool>) -> Self {
-        Self {
-            kind: McpHandlerKind::ReadResource { pool },
-        }
-    }
-
-    pub async fn from_params(params: &[McpToolParam]) -> Self {
-        let pool = Arc::new(McpClientPool::from_params(params).await);
-        Self::read_resource(pool)
-    }
-
-    #[must_use]
-    pub fn pool(&self) -> Option<Arc<McpClientPool>> {
-        match &self.kind {
-            McpHandlerKind::ReadResource { pool } => Some(Arc::clone(pool)),
-            McpHandlerKind::ReadResourceSpec | McpHandlerKind::ToolCallSpec | McpHandlerKind::ToolCall { .. } => None,
-        }
+        Self::with_kind(McpHandlerKind::ReadResource {
+            spec: McpSpec::Resources,
+            resource: Some(pool),
+        })
     }
 
     #[must_use]
     pub fn discovered_tool_spec_only() -> Self {
-        Self {
-            kind: McpHandlerKind::ToolCallSpec,
-        }
+        Self::with_kind(McpHandlerKind::ToolCall {
+            spec: McpSpec::Tool,
+            client: None,
+        })
     }
 
     #[must_use]
     pub fn tool_call(client: Arc<McpClient>) -> Self {
-        Self {
-            kind: McpHandlerKind::ToolCall { client },
+        Self::with_kind(McpHandlerKind::ToolCall {
+            spec: McpSpec::Tool,
+            client: Some(client),
+        })
+    }
+
+    pub async fn discovered_tool_handlers(&self, factory: &McpHandlerFactory) -> Vec<McpDiscoveredHandler> {
+        let McpHandlerKind::ReadResource {
+            resource: Some(pool), ..
+        } = &self.kind
+        else {
+            return Vec::new();
+        };
+
+        let mut discovered_handlers = Vec::new();
+        for (server_label, client) in pool.iter() {
+            let tools = match client.list_tools().await {
+                Ok(tools) => tools,
+                Err(error) => {
+                    tracing::warn!(
+                        server_label = %server_label,
+                        error = %error,
+                        "failed to list MCP tools"
+                    );
+                    continue;
+                }
+            };
+
+            for tool in tools {
+                let tool_name = tool.name.to_string();
+                let exposed_name = format!("{server_label}__{tool_name}");
+                discovered_handlers.push(McpDiscoveredHandler {
+                    param: McpDiscoveredToolParam {
+                        server_label: server_label.clone(),
+                        tool_name,
+                        exposed_name,
+                        tool,
+                    },
+                    handler: Arc::new(factory.tool_call(Arc::clone(client))),
+                });
+            }
         }
+
+        discovered_handlers
     }
 
     /// Spec-only handler for normalizing a `ToolEntry` config with no live
-    /// connection, picking `ReadResourceSpec` vs `ToolCallSpec` by inspecting
-    /// `param`'s shape — mirrors the split `build_mcp_registry` makes per entry.
+    /// connection, picking resource vs tool-call shape by inspecting `param`.
     #[must_use]
     pub fn spec_from_param(param: &Value) -> Self {
-        let is_read_resource = deserialize_from_value_opt::<McpToolParam>(param.clone())
-            .is_some_and(|declared| declared.name.as_str() == READ_MCP_RESOURCE_TOOL_NAME);
-        if is_read_resource {
-            Self::read_resource_spec_only()
-        } else {
-            Self::discovered_tool_spec_only()
+        match deserialize_from_value_opt::<McpToolParam>(param.clone()).map_or(McpSpec::Tool, |declared| {
+            McpSpec::from_param_name(declared.name.as_str())
+        }) {
+            McpSpec::Resources => Self::read_resource_spec_only(),
+            McpSpec::Tool => Self::discovered_tool_spec_only(),
         }
     }
 }
@@ -142,15 +263,28 @@ impl ToolHandler for McpHandler {
 
     fn normalize(&self, param: &Value) -> Vec<FunctionTool> {
         match &self.kind {
-            McpHandlerKind::ReadResourceSpec | McpHandlerKind::ReadResource { .. } => vec![read_mcp_resource_spec()],
-            McpHandlerKind::ToolCallSpec | McpHandlerKind::ToolCall { .. } => {
-                match deserialize_from_value::<McpDiscoveredToolParam>(param.clone()) {
-                    Ok(discovered) => vec![mcp_tool_to_function_tool(&discovered.exposed_name, &discovered.tool)],
-                    Err(error) => {
-                        tracing::warn!(error = %error, "invalid MCP tool param");
-                        Vec::new()
-                    }
+            McpHandlerKind::ReadResource {
+                spec: McpSpec::Resources,
+                ..
+            } => vec![read_mcp_resource_spec()],
+            McpHandlerKind::ToolCall {
+                spec: McpSpec::Tool, ..
+            } => match deserialize_from_value::<McpDiscoveredToolParam>(param.clone()) {
+                Ok(discovered) => vec![mcp_tool_to_function_tool(&discovered.exposed_name, &discovered.tool)],
+                Err(error) => {
+                    tracing::warn!(error = %error, "invalid MCP tool param");
+                    Vec::new()
                 }
+            },
+            McpHandlerKind::ReadResource {
+                spec: McpSpec::Tool, ..
+            }
+            | McpHandlerKind::ToolCall {
+                spec: McpSpec::Resources,
+                ..
+            } => {
+                tracing::warn!("invalid MCP handler kind/spec pairing");
+                Vec::new()
             }
         }
     }
@@ -160,29 +294,30 @@ impl GatewayExecutor for McpHandler {
     fn execute(
         &self,
         call_id: &str,
-        tool_name: &str,
+        _tool_name: &str,
         arguments: &str,
         config: &Value,
     ) -> Pin<Box<dyn Future<Output = Result<ToolOutput, ToolError>> + Send + '_>> {
         let call_id = call_id.to_owned();
-        let tool_name = tool_name.to_owned();
         let arguments = arguments.to_owned();
         let config = config.clone();
 
         Box::pin(async move {
             let output = match &self.kind {
-                McpHandlerKind::ReadResourceSpec => {
-                    return Err(ToolError::Config(
-                        "read_mcp_resource spec-only handler cannot execute tools".to_owned(),
-                    ));
+                McpHandlerKind::ReadResource { resource, .. } => {
+                    let Some(pool) = resource else {
+                        return Err(ToolError::Config(
+                            "read_mcp_resource spec-only handler cannot execute tools".to_owned(),
+                        ));
+                    };
+                    execute_read_resource(pool, &arguments).await?
                 }
-                McpHandlerKind::ToolCallSpec => {
-                    return Err(ToolError::Config(
-                        "MCP tool spec-only handler cannot execute tools".to_owned(),
-                    ));
-                }
-                McpHandlerKind::ReadResource { pool } => execute_read_resource(pool, &tool_name, &arguments).await?,
-                McpHandlerKind::ToolCall { client } => {
+                McpHandlerKind::ToolCall { client, .. } => {
+                    let Some(client) = client else {
+                        return Err(ToolError::Config(
+                            "MCP tool spec-only handler cannot execute tools".to_owned(),
+                        ));
+                    };
                     let param = mcp_tool_param(&config)?;
                     execute_tool_call(client, &param.server_label, &param.tool_name, &arguments).await?
                 }
@@ -193,13 +328,7 @@ impl GatewayExecutor for McpHandler {
     }
 }
 
-async fn execute_read_resource(pool: &McpClientPool, tool_name: &str, arguments: &str) -> Result<String, ToolError> {
-    if tool_name != READ_MCP_RESOURCE_TOOL_NAME {
-        return Err(ToolError::Config(format!(
-            "read_mcp_resource handler cannot execute tool '{tool_name}'"
-        )));
-    }
-
+async fn execute_read_resource(pool: &McpClientPool, arguments: &str) -> Result<String, ToolError> {
     let args = deserialize_from_str::<ReadResourceArgs>(arguments)
         .map_err(|error| ToolError::Execution(format!("invalid read_mcp_resource arguments: {error}")))?;
 

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::codex::insert_namespace_entries;
+use super::executors::GatewayExecutors;
 use super::function::insert_function_entry;
 use super::mcp::insert_mcp_entry;
 use super::web_search::insert_web_search_entry;
@@ -67,7 +68,7 @@ pub struct GatewayDispatchResult {
 fn insert_file_search_entry(
     entries: &mut HashMap<String, ToolEntry>,
     p: &FileSearchToolParam,
-    handler_for: &mut impl FnMut(ToolType) -> Option<Arc<dyn GatewayExecutor>>,
+    handler: Option<Arc<dyn GatewayExecutor>>,
 ) {
     serialize_to_value_or_custom_default(
         p,
@@ -79,7 +80,7 @@ fn insert_file_search_entry(
                     tool_type: ToolType::FileSearch,
                     config,
                     server_label: None,
-                    handler: handler_for(ToolType::FileSearch),
+                    handler,
                 },
             );
         },
@@ -92,7 +93,7 @@ fn insert_file_search_entry(
 fn insert_code_interpreter_entry(
     entries: &mut HashMap<String, ToolEntry>,
     p: &CodeInterpreterToolParam,
-    handler_for: &mut impl FnMut(ToolType) -> Option<Arc<dyn GatewayExecutor>>,
+    handler: Option<Arc<dyn GatewayExecutor>>,
 ) {
     serialize_to_value_or_custom_default(
         p,
@@ -104,7 +105,7 @@ fn insert_code_interpreter_entry(
                     tool_type: ToolType::CodeInterpreter,
                     config,
                     server_label: None,
-                    handler: handler_for(ToolType::CodeInterpreter),
+                    handler,
                 },
             );
         },
@@ -124,23 +125,6 @@ pub struct ToolRegistry {
 }
 
 impl ToolRegistry {
-    /// Build a registry from the declared tools.
-    ///
-    /// Duplicate tool names result in last-write-wins, logged at `warn` level.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ToolError::Config`] when Codex namespace member flattening
-    /// would collide with another declared tool name.
-    ///
-    /// # Panics
-    ///
-    /// Panics if serialization of a tool param struct fails, which cannot happen
-    /// for the types defined in this module (`#[derive(Serialize)]` on plain structs).
-    pub async fn build(tools: &[ResponsesTool]) -> Result<Self, ToolError> {
-        Self::build_with_handlers(tools, |_| None).await
-    }
-
     /// Build a registry from declared tools and attach gateway handlers for dispatchable tool types.
     ///
     /// # Errors
@@ -152,10 +136,7 @@ impl ToolRegistry {
     ///
     /// Panics if serialization of a tool param struct fails, which cannot happen
     /// for the types defined in this module (`#[derive(Serialize)]` on plain structs).
-    pub async fn build_with_handlers(
-        tools: &[ResponsesTool],
-        mut handler_for: impl FnMut(ToolType) -> Option<Arc<dyn GatewayExecutor>>,
-    ) -> Result<Self, ToolError> {
+    pub async fn build_with_handlers(tools: &[ResponsesTool], executors: &GatewayExecutors) -> Result<Self, ToolError> {
         let mut entries = HashMap::with_capacity(tools.len());
         // Namespace members must be keyed by the same flat, model-visible name
         // the model will call, so resolve them first — the same pure pass used
@@ -165,10 +146,15 @@ impl ToolRegistry {
         for tool in &resolved_tools {
             match tool {
                 ResponsesTool::Function(p) => insert_function_entry(&mut entries, p),
-                ResponsesTool::Mcp(p) => insert_mcp_entry(&mut entries, p).await,
-                ResponsesTool::WebSearch(p) => insert_web_search_entry(&mut entries, p, &mut handler_for),
-                ResponsesTool::FileSearch(p) => insert_file_search_entry(&mut entries, p, &mut handler_for),
-                ResponsesTool::CodeInterpreter(p) => insert_code_interpreter_entry(&mut entries, p, &mut handler_for),
+                ResponsesTool::Mcp(p) => {
+                    let handler = executors.mcp_handler(p).await;
+                    insert_mcp_entry(&mut entries, p, handler).await;
+                }
+                ResponsesTool::WebSearch(p) => {
+                    insert_web_search_entry(&mut entries, p, executors.web_search_handler());
+                }
+                ResponsesTool::FileSearch(p) => insert_file_search_entry(&mut entries, p, None),
+                ResponsesTool::CodeInterpreter(p) => insert_code_interpreter_entry(&mut entries, p, None),
                 ResponsesTool::Namespace(p) => insert_namespace_entries(&mut entries, p),
                 ResponsesTool::Unknown => {
                     tracing::debug!("unknown tool declared but skipped in registry");

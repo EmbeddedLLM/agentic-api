@@ -7,13 +7,16 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use agentic_core::executor::RequestContext;
-use agentic_core::tool::{CodexNamespaceHandler, ToolRegistry, ToolType, model_visible_namespace_member_name};
+use agentic_core::tool::{
+    CodexNamespaceHandler, GatewayExecutors, ToolRegistry, ToolType, model_visible_namespace_member_name,
+};
 use agentic_core::types::request_response::RequestPayload;
 use agentic_core::types::tools::ResponsesTool;
 use agentic_core::utils::common::serialize_to_string;
 
 const MULTI_TURN_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/tool_calls/multi_turn");
 const CODEX_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/codex");
+const MCP_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/mcp");
 
 const CODEX_CASSETTES: &[&str] = &[
     "codex-direct-vllm-http-flat-namespace-tool-Qwen-Qwen3.6-35B-A3B-streaming.yaml",
@@ -59,6 +62,10 @@ fn load_cassette(filename: &str) -> TurnCassette {
 
 fn load_codex_cassette(filename: &str) -> TurnCassette {
     load_cassette_from(CODEX_DIR, filename)
+}
+
+fn load_mcp_cassette(filename: &str) -> TurnCassette {
+    load_cassette_from(MCP_DIR, filename)
 }
 
 fn tools_from_turn(turn: &Turn) -> Option<serde_json::Value> {
@@ -157,7 +164,7 @@ fn assert_tools_normalize(cassette_file: &str) {
     }
 }
 
-/// For every turn that has tools, verify `ToolRegistry::build` produces correct entries.
+/// For every turn that has tools, verify registry construction produces correct entries.
 async fn assert_registry_lookup(cassette_file: &str) {
     let cassette = load_cassette(cassette_file);
     for (i, turn) in cassette.turns.iter().enumerate() {
@@ -165,7 +172,7 @@ async fn assert_registry_lookup(cassette_file: &str) {
             continue;
         };
         let tools: Vec<ResponsesTool> = serde_json::from_value(tools_val).expect("tools parse");
-        let registry = ToolRegistry::build(&tools)
+        let registry = ToolRegistry::build_with_handlers(&tools, &GatewayExecutors::default())
             .await
             .unwrap_or_else(|err| panic!("{cassette_file} turn {i}: registry failed: {err}"));
         for tool in &tools {
@@ -403,21 +410,34 @@ fn web_search_preview_normalizes_to_gateway_function() {
 
 #[test]
 fn mcp_read_resource_normalizes_to_gateway_function() {
-    let payload: RequestPayload = serde_json::from_value(serde_json::json!({
-        "model": "test",
-        "input": "read fixture://hello",
-        "tools": [{"type": "mcp", "name": "read_mcp_resource"}]
-    }))
-    .unwrap();
+    for filename in ["mcp-read-resource-Qwen-Qwen3-30B-A3B-FP8-nonstreaming.yaml"] {
+        let cassette = load_mcp_cassette(filename);
+        for (i, turn) in cassette.turns.iter().enumerate() {
+            let json = request_body_from_turn(turn);
+            let payload: RequestPayload = serde_json::from_value(json)
+                .unwrap_or_else(|e| panic!("{filename} turn {i}: RequestPayload parse failed: {e}"));
 
-    let upstream = upstream_request_value(payload, false);
-    let tools = upstream
-        .get("tools")
-        .and_then(Value::as_array)
-        .expect("MCP read_resource should normalize to a function tool");
+            let upstream = upstream_request_value(payload, false);
+            let tools = upstream.get("tools").and_then(Value::as_array).unwrap_or_else(|| {
+                panic!("{filename} turn {i}: MCP read_resource should normalize to a function tool")
+            });
 
-    assert_eq!(tools.len(), 1);
-    assert_eq!(tools[0].get("type").and_then(Value::as_str), Some("function"));
-    assert_eq!(tools[0].get("name").and_then(Value::as_str), Some("read_mcp_resource"));
-    assert_eq!(tools[0]["parameters"]["required"], serde_json::json!(["server", "uri"]));
+            assert_eq!(tools.len(), 1, "{filename} turn {i}: expected one normalized tool");
+            assert_eq!(
+                tools[0].get("type").and_then(Value::as_str),
+                Some("function"),
+                "{filename} turn {i}: normalized type must be 'function'"
+            );
+            assert_eq!(
+                tools[0].get("name").and_then(Value::as_str),
+                Some("read_mcp_resource"),
+                "{filename} turn {i}: normalized name must be read_mcp_resource"
+            );
+            assert_eq!(
+                tools[0]["parameters"]["required"],
+                serde_json::json!(["server", "uri"]),
+                "{filename} turn {i}: normalized parameters must require server and uri"
+            );
+        }
+    }
 }

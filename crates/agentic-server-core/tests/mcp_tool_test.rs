@@ -5,7 +5,7 @@ mod support;
 
 const MCP_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/mcp");
 const READ_RESOURCE_URI: &str =
-    "repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml";
+    "repo://crates/agentic-server-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml";
 
 fn load_mcp_cassette(filename: &str) -> support::Cassette {
     let path = format!("{MCP_DIR}/{filename}");
@@ -73,7 +73,8 @@ fn process_streaming_turn(cassette: &support::Cassette, turn_idx: usize, model: 
         .filter_map(|line| line.strip_prefix("data: "))
         .filter(|data| *data != "[DONE]")
         .filter_map(|data| serde_json::from_str::<serde_json::Value>(data).ok())
-        .find(|event| event["status"].as_str() == Some("completed") && event["output"].is_array())
+        .filter_map(|event| event.get("response").cloned())
+        .find(|response| response["status"].as_str() == Some("completed") && response["output"].is_array())
         .unwrap_or_else(|| panic!("turn {} must include a completed final response payload", turn_idx + 1));
     let final_payload = serde_json::to_string(&final_payload).unwrap();
     let acc = ResponseAccumulator::from_json(&final_payload, None).unwrap();
@@ -164,7 +165,8 @@ fn read_mcp_resource_cassette_streaming_success_events() {
     assert!(
         events
             .iter()
-            .any(|event| event["status"].as_str() == Some("completed") && event["output"].is_array()),
+            .filter_map(|event| event.get("response"))
+            .any(|response| response["status"].as_str() == Some("completed") && response["output"].is_array()),
         "streaming MCP cassette should include a completed final response payload"
     );
 

@@ -27,47 +27,40 @@ turns:
   response:
     body:
       conversation_id: null
-      created_at: 1783924821
+      created_at: 1783946281
       error: null
-      id: resp_019f5a34-7555-7f90-9869-4e1b1a652046
+      id: resp_019f5b7b-f09c-7a12-b058-340ddb161614
       incomplete_details: null
       instructions: null
       model: Qwen/Qwen3-30B-A3B-FP8
       object: response
       output:
       - content:
-        - text: "\nOkay, the user wants me to call the read_mcp_resource function\
-            \ with the server label \"repo\" and the URI \"repo://crates/agentic-server-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml\"\
-            . Then, I need to summarize the YAML file in 2-3 sentences and mention\
-            \ that I used the read_mcp_resource tool.\n\nFirst, I should make sure\
-            \ I understand the function parameters. The function requires \"server\"\
-            \ and \"uri\". The server is \"repo\", and the URI is given. I need to\
-            \ structure the tool call correctly. The URI seems to be a specific path\
-            \ within the server. \n\nWait, the URI starts with \"repo://\", which\
-            \ might be a custom scheme. But the function's parameters just take the\
-            \ URI as a string, so I should pass it exactly as provided. No need to\
-            \ modify it. \n\nOnce the function is called, it will retrieve the resource.\
-            \ The user mentioned that the resource is a YAML file named \"gpt_oss_web_search_nonstreaming.yaml\"\
-            . The summary should be concise. I need to check if the YAML contains\
-            \ specific data, but since I can't actually read it, I'll have to assume\
-            \ it's a test cassette for a web search. \n\nThe summary should mention\
-            \ that the cassette is related to a non-streaming web search using GPT-OSS.\
-            \ Also, I need to note that the data was retrieved using the read_mcp_resource\
-            \ tool. \n\nI should structure the response by first making the tool call,\
-            \ then providing the summary. Make sure the summary is 2-3 sentences and\
-            \ includes the mention of the tool. Let me double-check the parameters\
-            \ to ensure there are no typos. Server is \"repo\", URI is the full path.\
-            \ Alright, that's all.\n"
+        - text: "\nOkay, the user wants me to use the read_mcp_resource function.\
+            \ The server label is repo, and the URI is repo://crates/agentic-server-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml.\
+            \ I need to call that function once with those parameters. Then, I have\
+            \ to summarize the YAML file in 2-3 sentences and mention that I used\
+            \ the read_mcp_resource tool.\n\nFirst, I'll make sure the function call\
+            \ is correct. The parameters are server and uri, both required. The URI\
+            \ provided looks like a valid MCP URI. I'll structure the tool_call JSON\
+            \ accordingly. \n\nOnce I get the resource, I'll need to read the content\
+            \ of the YAML file. Since I can't actually access the file, I'll have\
+            \ to imagine the content. The filename suggests it's a test cassette for\
+            \ a web search, maybe containing test data or configurations. The summary\
+            \ should mention that it's a test cassette related to GPT-OSS web search,\
+            \ non-streaming, and note the use of the tool. I'll keep it concise, two\
+            \ sentences max. Let me check if I covered all parts: function call, summary,\
+            \ and mention of the tool. Yep, that's all there.\n"
           type: reasoning_text
         encrypted_content: null
-        id: rs_a3904158020fa9b9
+        id: rs_91a572e20a4d1b38
         status: null
         summary: []
         type: reasoning
       - arguments:
           server: repo
           uri: repo://crates/agentic-server-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml
-        id: mcp_9d35d4c5eaa01eb8
+        id: mcp_9c84671beab873c1
         result:
           contents:
           - mimeType: text/plain
@@ -126,7 +119,7 @@ turns:
       - arguments:
           server: repo
           uri: repo://crates/agentic-server-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml
-        id: mcp_b7ffa88cefd8ebfa
+        id: mcp_93091b9676273f08
         result:
           contents:
           - mimeType: text/plain
@@ -185,31 +178,25 @@ turns:
       - content:
         - text: '
 
-            Okay, let''s see. The user asked me to summarize the gpt_oss_web_search_nonstreaming.yaml
-            cassette. From the tool response, I can see the contents of the YAML file.
-            The file seems to be a test cassette for a web search operation. The request
-            part includes a query to look up "potato" and summarize it in one sentence.
-            The response includes a detailed process where the system calls a web
-            search, retrieves information from sources like Wikipedia and other potato-related
-            websites, and then generates a summary.
+            Okay, let me process this. The user asked to summarize the gpt_oss_web_search_nonstreaming.yaml
+            cassette. From the tool response, the YAML content shows a test scenario
+            where a web search is performed for "potato". The response includes a
+            summary from Wikipedia, which defines the potato as a starchy tuber native
+            to the Americas, part of the Solanum tuberosum species, and a staple food
+            globally. The tool call was made using read_mcp_resource with the specified
+            server and URI. I need to mention that the summary was derived from the
+            cassette and note the use of the tool.
 
 
-            The summary provided in the response is: "Potato (Solanum tuberosum) is
-            a starchy, underground tuber native to the Americas that has been domesticated
-            for thousands of years and is today a staple food in many cultures worldwide."
-            So, the key points here are the origin of the potato, its classification
-            as a tuber, domestication history, and its status as a staple food.
-
-
-            I need to mention that this summary was generated using the read_mcp_resource
-            tool. The user also specified to keep it concise, 2-3 sentences. Let me
-            structure that. First, state the summary, then mention the tool used.
-            Make sure it''s clear and to the point.
+            I should start by stating the summary of the potato definition, then mention
+            that it was obtained via the read_mcp_resource function. Keep it concise,
+            two sentences. Let me check if I included all required elements. Yes,
+            the summary and the tool mention are there. Alright, that should do it.
 
             '
           type: reasoning_text
         encrypted_content: null
-        id: rs_a95fc40050698b19
+        id: rs_82d3a0484758d4fd
         status: null
         summary: []
         type: reasoning
@@ -218,28 +205,26 @@ turns:
           text: '
 
 
-            The `gpt_oss_web_search_nonstreaming.yaml` cassette demonstrates a web
-            search workflow for querying "potato" and generating a concise summary.
-            The process involves retrieving information from sources like Wikipedia
-            and potato nutrition sites, then producing a summary defining the potato
-            as a starchy tuber native to the Americas, domesticated for thousands
-            of years, and a global staple food. This result was obtained using the
-            `read_mcp_resource` tool.'
+            The `gpt_oss_web_search_nonstreaming.yaml` cassette demonstrates a test
+            scenario where a web search for "potato" retrieves a summary defining
+            it as a starchy tuber native to the Americas, part of *Solanum tuberosum*,
+            and a global staple food. This result was obtained using the `read_mcp_resource`
+            tool to access the MCP server.'
           type: output_text
-        id: msg_8567b8c8f188eada
+        id: msg_8c68d5d6c3fabbb3
         role: assistant
         status: completed
         type: message
       previous_response_id: null
       status: completed
       usage:
-        input_tokens: 2920
+        input_tokens: 2809
         input_tokens_details:
-          cached_tokens: 944
-        output_tokens: 822
+          cached_tokens: 832
+        output_tokens: 635
         output_tokens_details:
-          reasoning_tokens: 617
-        total_tokens: 3742
+          reasoning_tokens: 441
+        total_tokens: 3444
     headers:
       content-type: application/json
     status_code: 200

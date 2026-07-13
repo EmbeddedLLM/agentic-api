@@ -108,9 +108,7 @@ async fn run_until_gateway_tools_complete(
     stream_events: Option<&mpsc::UnboundedSender<String>>,
 ) -> ExecutorResult<(ResponsePayload, RequestContext)> {
     let registry: ToolRegistry = match ctx.enriched_request.tools.as_ref() {
-        Some(tools) => {
-            ToolRegistry::build_with_handlers(tools, |tool_type| exec_ctx.gateway_executors.get(tool_type)).await?
-        }
+        Some(tools) => ToolRegistry::build_with_handlers(tools, &exec_ctx.gateway_executors).await?,
         None => ToolRegistry::default(),
     };
     let mut combined_output: Vec<crate::OutputItem> = Vec::new();
