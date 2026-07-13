@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::GatewayExecutor;
-use super::mcp::McpHandlerFactory;
+use super::mcp::{McpClientPool, McpHandler, McpHandlerFactory};
 use super::registry::ToolType;
 use super::web_search::WebSearchHandler;
 use crate::types::tools::McpToolParam;
@@ -52,6 +52,15 @@ impl GatewayExecutors {
             .await
             .map(|handler| Arc::new(handler) as Arc<dyn GatewayExecutor>)
     }
+
+    pub async fn mcp_read_resource_handler(&self, params: &[McpToolParam]) -> Option<Arc<dyn GatewayExecutor>> {
+        if let Some(handler) = self.mcp.clone() {
+            return Some(handler);
+        }
+
+        let pool = Arc::new(McpClientPool::from_params(params).await);
+        Some(Arc::new(McpHandler::read_resource(pool)))
+    }
 }
 
 impl std::fmt::Debug for GatewayExecutors {
@@ -68,13 +77,14 @@ mod tests {
     use std::sync::Arc;
 
     use super::GatewayExecutors;
+    use crate::tool::mcp::READ_MCP_RESOURCE_TOOL_NAME;
     use crate::types::tools::McpToolParam;
 
     #[tokio::test]
     async fn from_env_builds_request_scoped_mcp_handler_from_params() {
         let executors = GatewayExecutors::from_env(Arc::new(reqwest::Client::new()));
         let param: McpToolParam = serde_json::from_value(serde_json::json!({
-            "name": "read_mcp_resource",
+            "name": READ_MCP_RESOURCE_TOOL_NAME,
             "server_label": "missing"
         }))
         .expect("mcp tool param");

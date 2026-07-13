@@ -115,6 +115,26 @@ pub fn deserialize_from_value<T: serde::de::DeserializeOwned>(
     serde_json::from_value(value)
 }
 
+/// Deserializes a `serde_json::Value` and passes it to `then`, logging
+/// `message` at `debug` level and returning `default` if deserialization fails.
+///
+/// Graceful deserialization - used where callers fall back to a default result
+/// rather than propagate a deserialization error.
+pub fn deserialize_from_value_or_custom_default<T: serde::de::DeserializeOwned, R>(
+    value: serde_json::Value,
+    message: &str,
+    then: impl FnOnce(T) -> R,
+    default: R,
+) -> R {
+    match serde_json::from_value(value) {
+        Ok(value) => then(value),
+        Err(error) => {
+            tracing::debug!(error = %error, message);
+            default
+        }
+    }
+}
+
 /// Deserialize a `serde_json::Value` into `T`, returning `None` on type mismatch.
 #[must_use]
 pub fn deserialize_from_value_opt<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> Option<T> {

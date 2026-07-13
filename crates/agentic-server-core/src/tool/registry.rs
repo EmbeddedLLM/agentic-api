@@ -7,7 +7,7 @@ use serde_json::Value;
 use super::codex::insert_namespace_entries;
 use super::executors::GatewayExecutors;
 use super::function::insert_function_entry;
-use super::mcp::insert_mcp_entry;
+use super::mcp::{insert_mcp_entry, maybe_mcp_function};
 use super::web_search::insert_web_search_entry;
 use super::{CodexNamespaceHandler, GatewayExecutor, NamespaceMap, ToolError, ToolOutput};
 use crate::types::io::OutputItem;
@@ -145,7 +145,15 @@ impl ToolRegistry {
 
         for tool in &resolved_tools {
             match tool {
-                ResponsesTool::Function(p) => insert_function_entry(&mut entries, p),
+                ResponsesTool::Function(p) => match maybe_mcp_function(p) {
+                    Some(mcp_params) if !mcp_params.is_empty() => {
+                        let handler = executors.mcp_read_resource_handler(&mcp_params).await;
+                        for declaration_param in &mcp_params {
+                            insert_mcp_entry(&mut entries, declaration_param, handler.clone()).await;
+                        }
+                    }
+                    _ => insert_function_entry(&mut entries, p),
+                },
                 ResponsesTool::Mcp(p) => {
                     let handler = executors.mcp_handler(p).await;
                     insert_mcp_entry(&mut entries, p, handler).await;

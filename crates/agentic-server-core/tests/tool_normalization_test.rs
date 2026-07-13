@@ -430,8 +430,8 @@ fn mcp_read_resource_normalizes_to_gateway_function() {
             );
             assert_eq!(
                 tools[0].get("name").and_then(Value::as_str),
-                Some("read_mcp_resource"),
-                "{filename} turn {i}: normalized name must be read_mcp_resource"
+                Some(agentic_core::tool::READ_MCP_RESOURCE_TOOL_NAME),
+                "{filename} turn {i}: normalized name must be READ_MCP_RESOURCE_TOOL_NAME"
             );
             assert_eq!(
                 tools[0]["parameters"]["required"],
