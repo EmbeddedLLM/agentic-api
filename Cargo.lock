@@ -3,7 +3,39 @@
 version = 4
 
 [[package]]
-name = "agentic-core"
+name = "agentic-praxis"
+version = "0.1.0"
+dependencies = [
+ "agentic-server-core",
+]
+
+[[package]]
+name = "agentic-server"
+version = "0.1.0"
+dependencies = [
+ "agentic-server-core",
+ "axum",
+ "bytes",
+ "clap",
+ "criterion",
+ "either",
+ "futures",
+ "http",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tokio-tungstenite",
+ "tokio-util",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "agentic-server-core"
 version = "0.1.0"
 dependencies = [
  "async-stream",
@@ -25,38 +57,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
- "uuid",
-]
-
-[[package]]
-name = "agentic-praxis"
-version = "0.1.0"
-dependencies = [
- "agentic-core",
-]
-
-[[package]]
-name = "agentic-server"
-version = "0.1.0"
-dependencies = [
- "agentic-core",
- "axum",
- "bytes",
- "clap",
- "criterion",
- "either",
- "futures",
- "http",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "tokio-tungstenite",
- "tokio-util",
- "tower-http",
- "tracing",
- "tracing-subscriber",
  "uuid",
 ]
 

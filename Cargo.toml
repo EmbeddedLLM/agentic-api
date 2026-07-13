@@ -16,7 +16,7 @@ all = { level = "deny", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 
 [workspace.dependencies]
-agentic-core = { path = "crates/agentic-core" }
+agentic-core = { package = "agentic-server-core", path = "crates/agentic-server-core", version = "0.1.0" }
 async-stream = "0.3"
 axum = { version = "0.8", features = ["ws"] }
 either = "1"
