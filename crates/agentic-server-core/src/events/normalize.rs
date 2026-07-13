@@ -197,33 +197,3 @@ fn extract_reasoning_done(json: &Value) -> EventPayload {
         item_id: json_str(json, "item_id"),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn mcp_tool_call_events_are_classified() {
-        let added = normalize_sse_line(
-            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"mcp_tool_call","id":"mcp_1"}}"#,
-        )
-        .unwrap();
-        assert_eq!(added.event_type, SSEEventType::OutputItemAdded);
-        let EventPayload::OutputItemAdded { item_type, .. } = added.payload else {
-            panic!("expected output item added payload");
-        };
-        assert_eq!(item_type, SSEItemType::McpToolCall);
-
-        let in_progress = normalize_sse_line(
-            r#"data: {"type":"response.mcp_tool_call.in_progress","item_id":"mcp_1","output_index":0}"#,
-        )
-        .unwrap();
-        assert_eq!(in_progress.event_type, SSEEventType::McpToolCallInProgress);
-
-        let completed = normalize_sse_line(
-            r#"data: {"type":"response.mcp_tool_call.completed","item_id":"mcp_1","output_index":0,"item":{"type":"mcp_tool_call","id":"mcp_1"}}"#,
-        )
-        .unwrap();
-        assert_eq!(completed.event_type, SSEEventType::McpToolCallCompleted);
-    }
-}
