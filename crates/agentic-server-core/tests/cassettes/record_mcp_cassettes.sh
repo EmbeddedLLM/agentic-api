@@ -15,8 +15,8 @@
 #     repository, so it can serve the repo-relative MCP_RESOURCE_URI below.
 #
 # Usage:
-#   bash crates/agentic-core/tests/cassettes/record_mcp_cassettes.sh
-#   MCP_SERVER_URL=http://localhost:9001/mcp GATEWAY_URL=http://localhost:9000 MODEL=Qwen/Qwen3-30B-A3B-FP8 bash crates/agentic-core/tests/cassettes/record_mcp_cassettes.sh
+#   bash crates/agentic-server-core/tests/cassettes/record_mcp_cassettes.sh
+#   MCP_SERVER_URL=http://localhost:8000/mcp GATEWAY_URL=http://localhost:9000 MODEL=Qwen/Qwen3-30B-A3B-FP8 bash crates/agentic-server-core/tests/cassettes/record_mcp_cassettes.sh
 
 set -euo pipefail
 
@@ -28,8 +28,8 @@ GATEWAY_URL="${GATEWAY_URL:-http://localhost:9000}"
 MODEL="${MODEL:-Qwen/Qwen3-30B-A3B-FP8}"
 MODEL_SLUG="$(echo "$MODEL" | tr '/: ' '---')"
 MCP_SERVER_LABEL="${MCP_SERVER_LABEL:-repo}"
-MCP_SERVER_URL="${MCP_SERVER_URL:-}"
-MCP_RESOURCE_URI="${MCP_RESOURCE_URI:-repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml}"
+MCP_SERVER_URL="${MCP_SERVER_URL:-http://localhost:8000/mcp}"
+MCP_RESOURCE_URI="${MCP_RESOURCE_URI:-repo://crates/agentic-server-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml}"
 NONSTREAMING_OUTPUT="$BASE_DIR/mcp-read-resource-${MODEL_SLUG}-nonstreaming.yaml"
 STREAMING_OUTPUT="$BASE_DIR/mcp-read-resource-${MODEL_SLUG}-streaming.yaml"
 REPO_PLACEHOLDER="<AGENTIC_API_REPO>"

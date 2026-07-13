@@ -5,7 +5,7 @@ use crate::config::Config;
 use crate::error::Error;
 use crate::executor::modes::{ConversationHandler, ResponseHandler};
 use crate::storage::{ConversationStore, ResponseStore, create_pool_with_schema_and_sqlite_config};
-use crate::tool::{GatewayExecutor, McpClientPool, McpHandler, ToolType, WebSearchHandler};
+use crate::tool::{GatewayExecutor, ToolType, WebSearchHandler};
 use crate::types::io::InputItem;
 use crate::types::request_response::{RequestPayload, ResponsePayload};
 
@@ -19,7 +19,7 @@ impl GatewayExecutors {
     #[must_use]
     pub fn from_env(client: Arc<reqwest::Client>) -> Self {
         Self {
-            mcp: Some(Arc::new(McpHandler::read_resource(Arc::new(McpClientPool::default())))),
+            mcp: None,
             web_search: Some(Arc::new(WebSearchHandler::from_env(client))),
         }
     }
@@ -162,5 +162,21 @@ impl ExecutionContext {
             llm_base_url: cfg.llm_api_base.clone(),
             streaming_timeout: Duration::from_secs(30),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::GatewayExecutors;
+    use crate::tool::ToolType;
+
+    #[test]
+    fn from_env_does_not_install_request_scoped_mcp_executor() {
+        let executors = GatewayExecutors::from_env(Arc::new(reqwest::Client::new()));
+
+        assert!(executors.get(ToolType::Mcp).is_none());
+        assert!(executors.get(ToolType::WebSearch).is_some());
     }
 }

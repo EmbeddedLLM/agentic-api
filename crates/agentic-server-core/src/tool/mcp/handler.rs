@@ -89,6 +89,19 @@ impl McpHandler {
         }
     }
 
+    pub async fn from_params(params: &[McpToolParam]) -> Self {
+        let pool = Arc::new(McpClientPool::from_params(params).await);
+        Self::read_resource(pool)
+    }
+
+    #[must_use]
+    pub fn pool(&self) -> Option<Arc<McpClientPool>> {
+        match &self.kind {
+            McpHandlerKind::ReadResource { pool } => Some(Arc::clone(pool)),
+            McpHandlerKind::ReadResourceSpec | McpHandlerKind::ToolCallSpec | McpHandlerKind::ToolCall { .. } => None,
+        }
+    }
+
     #[must_use]
     pub fn discovered_tool_spec_only() -> Self {
         Self {
@@ -107,7 +120,7 @@ impl McpHandler {
     /// connection, picking `ReadResourceSpec` vs `ToolCallSpec` by inspecting
     /// `param`'s shape — mirrors the split `build_mcp_registry` makes per entry.
     #[must_use]
-    pub fn from_params(param: &Value) -> Self {
+    pub fn spec_from_param(param: &Value) -> Self {
         let is_read_resource = deserialize_from_value_opt::<McpToolParam>(param.clone())
             .is_some_and(|declared| declared.name.as_str() == READ_MCP_RESOURCE_TOOL_NAME);
         if is_read_resource {

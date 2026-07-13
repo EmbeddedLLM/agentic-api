@@ -165,7 +165,7 @@ impl ToolRegistry {
         for tool in &resolved_tools {
             match tool {
                 ResponsesTool::Function(p) => insert_function_entry(&mut entries, p),
-                ResponsesTool::Mcp(p) => insert_mcp_entry(&mut entries, p, &mut handler_for).await,
+                ResponsesTool::Mcp(p) => insert_mcp_entry(&mut entries, p).await,
                 ResponsesTool::WebSearch(p) => insert_web_search_entry(&mut entries, p, &mut handler_for),
                 ResponsesTool::FileSearch(p) => insert_file_search_entry(&mut entries, p, &mut handler_for),
                 ResponsesTool::CodeInterpreter(p) => insert_code_interpreter_entry(&mut entries, p, &mut handler_for),

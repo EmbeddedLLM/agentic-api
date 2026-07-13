@@ -32,6 +32,16 @@ fn has_reasoning(output: &[OutputItem]) -> bool {
     output.iter().any(|item| matches!(item, OutputItem::Reasoning(_)))
 }
 
+fn assert_loopback_mcp_url(value: &str) {
+    let url = reqwest::Url::parse(value).expect("server_url should be a valid URL");
+    assert_eq!(url.scheme(), "http");
+    assert_eq!(url.path(), "/mcp");
+    assert!(
+        matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "::1")),
+        "server_url should point at a loopback MCP server, got {value}"
+    );
+}
+
 fn process_nonstreaming_turn(cassette: &support::Cassette, turn_idx: usize, model: &str) -> Vec<OutputItem> {
     let body = cassette.turns[turn_idx]
         .response
@@ -112,7 +122,7 @@ fn read_mcp_resource_cassette_nonstreaming() {
     assert_eq!(tool["type"].as_str().unwrap(), "mcp");
     assert_eq!(tool["name"].as_str().unwrap(), "read_mcp_resource");
     assert_eq!(tool["server_label"].as_str().unwrap(), "repo");
-    assert_eq!(tool["server_url"].as_str().unwrap(), "http://127.0.0.1:8000/mcp");
+    assert_loopback_mcp_url(tool["server_url"].as_str().unwrap());
     assert_eq!(body.tool_choice.as_ref().unwrap().as_str().unwrap(), "required");
 
     let output = process_nonstreaming_turn(&cassette, 0, "Qwen/Qwen3-30B-A3B-FP8");

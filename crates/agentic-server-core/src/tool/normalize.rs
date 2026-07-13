@@ -35,7 +35,7 @@ impl ResponsesTool {
             Self::Mcp(p) => serialize_to_value_or_custom_default(
                 p,
                 "MCP tool config serialization failed",
-                |param| McpHandler::from_params(&param).normalize(&param),
+                |param| McpHandler::spec_from_param(&param).normalize(&param),
                 vec![],
             ),
             Self::WebSearch(_) => vec![web_search_function_tool()],

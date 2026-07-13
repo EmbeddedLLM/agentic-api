@@ -4,7 +4,7 @@ turns:
     body:
       input: 'You have one MCP resource tool available: read_mcp_resource. The MCP
         server label is repo. Call read_mcp_resource exactly once with server repo
-        and uri repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml.
+        and uri repo://crates/agentic-server-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml.
         Then summarize the gpt_oss_web_search_nonstreaming.yaml cassette in 2-3 sentences
         and mention that read_mcp_resource was used.'
       max_output_tokens: 1024
@@ -15,7 +15,7 @@ turns:
       tools:
       - name: read_mcp_resource
         server_label: repo
-        server_url: http://127.0.0.1:8000/mcp
+        server_url: http://localhost:8000/mcp
         type: mcp
     headers:
       accept: '*/*'
@@ -27,37 +27,47 @@ turns:
   response:
     body:
       conversation_id: null
-      created_at: 1783433134
+      created_at: 1783924821
       error: null
-      id: resp_019f3ce5-f5ce-7e22-9d15-2edcccb2e571
+      id: resp_019f5a34-7555-7f90-9869-4e1b1a652046
       incomplete_details: null
       instructions: null
       model: Qwen/Qwen3-30B-A3B-FP8
       object: response
       output:
       - content:
-        - text: '
-
-            Okay, the user wants me to use the read_mcp_resource function. The server
-            label is repo, and the URI they provided is repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml.
-            I need to call that function exactly once with those parameters. Once
-            I get the data from the resource, I have to summarize the YAML cassette
-            in 2-3 sentences and mention that I used the read_mcp_resource tool. Let
-            me make sure I structure the tool call correctly in JSON within the specified
-            XML tags. I should double-check the parameters to ensure they''re correct.
-            Alright, that''s all. Let''s proceed.
-
-            '
+        - text: "\nOkay, the user wants me to call the read_mcp_resource function\
+            \ with the server label \"repo\" and the URI \"repo://crates/agentic-server-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml\"\
+            . Then, I need to summarize the YAML file in 2-3 sentences and mention\
+            \ that I used the read_mcp_resource tool.\n\nFirst, I should make sure\
+            \ I understand the function parameters. The function requires \"server\"\
+            \ and \"uri\". The server is \"repo\", and the URI is given. I need to\
+            \ structure the tool call correctly. The URI seems to be a specific path\
+            \ within the server. \n\nWait, the URI starts with \"repo://\", which\
+            \ might be a custom scheme. But the function's parameters just take the\
+            \ URI as a string, so I should pass it exactly as provided. No need to\
+            \ modify it. \n\nOnce the function is called, it will retrieve the resource.\
+            \ The user mentioned that the resource is a YAML file named \"gpt_oss_web_search_nonstreaming.yaml\"\
+            . The summary should be concise. I need to check if the YAML contains\
+            \ specific data, but since I can't actually read it, I'll have to assume\
+            \ it's a test cassette for a web search. \n\nThe summary should mention\
+            \ that the cassette is related to a non-streaming web search using GPT-OSS.\
+            \ Also, I need to note that the data was retrieved using the read_mcp_resource\
+            \ tool. \n\nI should structure the response by first making the tool call,\
+            \ then providing the summary. Make sure the summary is 2-3 sentences and\
+            \ includes the mention of the tool. Let me double-check the parameters\
+            \ to ensure there are no typos. Server is \"repo\", URI is the full path.\
+            \ Alright, that's all.\n"
           type: reasoning_text
         encrypted_content: null
-        id: rs_af4fabb1ecc5fd63
+        id: rs_a3904158020fa9b9
         status: null
         summary: []
         type: reasoning
       - arguments:
           server: repo
-          uri: repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml
-        id: mcp_b147ecb63fdbafac
+          uri: repo://crates/agentic-server-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml
+        id: mcp_9d35d4c5eaa01eb8
         result:
           contents:
           - mimeType: text/plain
@@ -108,7 +118,66 @@ turns:
               \   cached_tokens: 352\n        output_tokens: 204\n        output_tokens_details:\n\
               \          reasoning_tokens: 135\n        total_tokens: 2489\n    headers:\n\
               \      content-type: application/json\n    status_code: 200\n"
-            uri: repo://crates/agentic-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml
+            uri: repo://crates/agentic-server-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml
+        server: repo
+        status: completed
+        tool: read_mcp_resource
+        type: mcp_tool_call
+      - arguments:
+          server: repo
+          uri: repo://crates/agentic-server-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml
+        id: mcp_b7ffa88cefd8ebfa
+        result:
+          contents:
+          - mimeType: text/plain
+            text: "turns:\n- filename: t1\n  request:\n    body:\n      input: Use\
+              \ web search to look up potato, then summarize in one sentence.\n  \
+              \    max_output_tokens: 1024\n      model: openai/gpt-oss-20b\n    \
+              \  store: true\n      stream: false\n      tool_choice: auto\n     \
+              \ tools:\n      - type: web_search_preview\n    headers:\n      accept:\
+              \ '*/*'\n      content-type: application/json\n      user-agent: python-httpx/0.28.1\n\
+              \    method: POST\n    path: /v1/responses\n    query_params: {}\n \
+              \ response:\n    body:\n      conversation_id: null\n      created_at:\
+              \ 1783307879\n      error: null\n      id: resp_019f356e-aacf-7ea3-87c6-075c2fcc1eb2\n\
+              \      incomplete_details: null\n      instructions: null\n      model:\
+              \ openai/gpt-oss-20b\n      object: response\n      output:\n      -\
+              \ content:\n        - text: 'User: \"Use web search to look up potato,\
+              \ then summarize in one sentence.\"\n            We need to call web_search.\
+              \ Use search query \"potato\". Provide let''s\n            say count=5.\
+              \ Ask for news? Might not need. We just want general info.\n       \
+              \     Probably get definition. Use general web search. Use appropriate\
+              \ countries.\n            Use English. Use default. Ok.'\n         \
+              \ type: reasoning_text\n        encrypted_content: null\n        id:\
+              \ rs_8c5223df3fb54ba8\n        status: null\n        summary: []\n \
+              \       type: reasoning\n      - action:\n          query: potato\n\
+              \          sources:\n          - title: Potato - Wikipedia\n       \
+              \     url: https://en.wikipedia.org/wiki/Potato\n          - title:\
+              \ Potatoes | Potato Nutrition | Types of Potatoes | Recipes\n      \
+              \      url: https://potatogoodness.com/\n          - title: Potato Facts\n\
+              \            url: https://www.idahopotatomuseum.com/potato-facts/\n\
+              \          - title: Idaho Potato Commission\n            url: https://idahopotato.com/\n\
+              \          - title: Home of U.S. Potato Farmers | Potatoes USA\n   \
+              \         url: https://potatoesusa.com/\n          type: search\n  \
+              \      id: ws_b67561c650733812\n        status: completed\n        type:\
+              \ web_search_call\n      - content:\n        - text: 'We have a summary\
+              \ from Wikipedia. Enough.\n\n\n            Now produce one sentence\
+              \ summary: \"Potato is a starchy tuberous vegetable\n            native\
+              \ to the Americas, cultivated from Solanum tuberosum, and is a staple\n\
+              \            food worldwide.\" Provide brief.'\n          type: reasoning_text\n\
+              \        encrypted_content: null\n        id: rs_9d6b942ea84e3e00\n\
+              \        status: null\n        summary: []\n        type: reasoning\n\
+              \      - content:\n        - annotations: []\n          text: Potato\
+              \ (Solanum tuberosum) is a starchy, underground tuber native\n     \
+              \       to the Americas that has been domesticated for thousands of\
+              \ years and\n            is today a staple food in many cultures worldwide.\n\
+              \          type: output_text\n        id: msg_a8af96caf08bdc00\n   \
+              \     role: assistant\n        status: completed\n        type: message\n\
+              \      previous_response_id: null\n      status: completed\n      usage:\n\
+              \        input_tokens: 2285\n        input_tokens_details:\n       \
+              \   cached_tokens: 352\n        output_tokens: 204\n        output_tokens_details:\n\
+              \          reasoning_tokens: 135\n        total_tokens: 2489\n    headers:\n\
+              \      content-type: application/json\n    status_code: 200\n"
+            uri: repo://crates/agentic-server-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml
         server: repo
         status: completed
         tool: read_mcp_resource
@@ -116,25 +185,31 @@ turns:
       - content:
         - text: '
 
-            Okay, let''s see. The user asked to summarize the gpt_oss_web_search_nonstreaming.yaml
-            cassette. The tool response has a lot of data, but I need to focus on
-            the key parts. The YAML file seems to be a test cassette for a web search
-            operation. The request part shows a query about potatoes, and the response
-            includes a summary from Wikipedia. The main points are the potato''s origin,
-            classification, and its role as a staple food.
+            Okay, let''s see. The user asked me to summarize the gpt_oss_web_search_nonstreaming.yaml
+            cassette. From the tool response, I can see the contents of the YAML file.
+            The file seems to be a test cassette for a web search operation. The request
+            part includes a query to look up "potato" and summarize it in one sentence.
+            The response includes a detailed process where the system calls a web
+            search, retrieves information from sources like Wikipedia and other potato-related
+            websites, and then generates a summary.
 
 
-            I need to mention that the summary was derived from the cassette and note
-            that the read_mcp_resource was used. Let me check the tool call again
-            to make sure I didn''t miss anything. The URI and server are correct.
-            The summary should be concise, 2-3 sentences. Also, ensure that the mention
-            of the tool is included as instructed. Alright, putting it all together
-            now.
+            The summary provided in the response is: "Potato (Solanum tuberosum) is
+            a starchy, underground tuber native to the Americas that has been domesticated
+            for thousands of years and is today a staple food in many cultures worldwide."
+            So, the key points here are the origin of the potato, its classification
+            as a tuber, domestication history, and its status as a staple food.
+
+
+            I need to mention that this summary was generated using the read_mcp_resource
+            tool. The user also specified to keep it concise, 2-3 sentences. Let me
+            structure that. First, state the summary, then mention the tool used.
+            Make sure it''s clear and to the point.
 
             '
           type: reasoning_text
         encrypted_content: null
-        id: rs_ba1c154a6d1cf650
+        id: rs_a95fc40050698b19
         status: null
         summary: []
         type: reasoning
@@ -143,28 +218,28 @@ turns:
           text: '
 
 
-            The `gpt_oss_web_search_nonstreaming.yaml` cassette captures a web search
-            interaction where the query "potato" was processed to retrieve information,
-            resulting in a summary of the potato''s origin as a starchy tuberous vegetable
-            native to the Americas. The response includes structured data from the
-            search, such as Wikipedia and other agricultural resources, and concludes
-            with a concise definition of the potato. This analysis was derived using
-            the `read_mcp_resource` tool.'
+            The `gpt_oss_web_search_nonstreaming.yaml` cassette demonstrates a web
+            search workflow for querying "potato" and generating a concise summary.
+            The process involves retrieving information from sources like Wikipedia
+            and potato nutrition sites, then producing a summary defining the potato
+            as a starchy tuber native to the Americas, domesticated for thousands
+            of years, and a global staple food. This result was obtained using the
+            `read_mcp_resource` tool.'
           type: output_text
-        id: msg_8ef4aad0f8c44ca1
+        id: msg_8567b8c8f188eada
         role: assistant
         status: completed
         type: message
       previous_response_id: null
       status: completed
       usage:
-        input_tokens: 1712
+        input_tokens: 2920
         input_tokens_details:
-          cached_tokens: 720
-        output_tokens: 474
+          cached_tokens: 944
+        output_tokens: 822
         output_tokens_details:
-          reasoning_tokens: 314
-        total_tokens: 2186
+          reasoning_tokens: 617
+        total_tokens: 3742
     headers:
       content-type: application/json
     status_code: 200
