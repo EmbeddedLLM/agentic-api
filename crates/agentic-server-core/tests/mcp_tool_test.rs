@@ -173,3 +173,110 @@ fn read_mcp_resource_cassette_streaming_success_events() {
     let output = process_streaming_turn(&cassette, 0, "Qwen/Qwen3-30B-A3B-FP8");
     assert_completed_read_mcp_resource(&output);
 }
+
+/// Asserts the cassette's `read_mcp_resource` call failed with an error
+/// message containing `expected_error_fragment`, and that the request still
+/// completes (the failure is fed back to the model, not surfaced as a
+/// whole-request error).
+fn assert_failed_read_mcp_resource(output: &[OutputItem], expected_error_fragment: &str) {
+    assert_eq!(
+        count_function_calls(output),
+        0,
+        "raw read_mcp_resource function call should not leak"
+    );
+    let mcp_call = output
+        .iter()
+        .find_map(|item| match item {
+            OutputItem::McpToolCall(call) => Some(call),
+            _ => None,
+        })
+        .expect("cassette output should include a mcp_tool_call item");
+    assert_eq!(mcp_call.status.as_str(), "failed");
+    assert_eq!(mcp_call.server, "repo");
+    assert_eq!(mcp_call.tool, "read_mcp_resource");
+    assert!(
+        mcp_call.result.is_none(),
+        "a failed mcp_tool_call should not carry a result"
+    );
+    let error = mcp_call
+        .error
+        .as_deref()
+        .expect("failed mcp_tool_call should carry an error message");
+    assert!(
+        error.contains(expected_error_fragment),
+        "expected error to contain '{expected_error_fragment}', got: {error}"
+    );
+    assert!(
+        output.iter().any(|item| matches!(item, OutputItem::Message(_))),
+        "cassette output should still include a final assistant message reporting the failure"
+    );
+}
+
+/// Loads a single-turn streaming MCP cassette, asserts its SSE stream is a
+/// well-formed failed-tool-call loop (not a whole-request error), and
+/// returns the finalized output for failure-specific assertions.
+fn load_and_process_failed_streaming_cassette(filename: &str) -> Vec<OutputItem> {
+    let cassette = load_mcp_cassette(filename);
+    assert_eq!(cassette.turns.len(), 1);
+    let body = &cassette.turns[0].request.body;
+    assert_eq!(body.tools[0]["type"].as_str().unwrap(), "mcp");
+
+    let sse = cassette.turns[0]
+        .response
+        .sse
+        .as_ref()
+        .expect("streaming cassette should include SSE events");
+    let data_lines = extract_data_lines(sse);
+    let events: Vec<serde_json::Value> = data_lines
+        .iter()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .filter(|data| *data != "[DONE]")
+        .filter_map(|data| serde_json::from_str(data).ok())
+        .collect();
+    let event_types: Vec<&str> = events.iter().filter_map(|event| event["type"].as_str()).collect();
+    assert!(
+        !event_types.contains(&"response.error") && !event_types.contains(&"response.failed"),
+        "a failed tool call must not surface as a whole-request error"
+    );
+    assert!(event_types.contains(&"response.mcp_tool_call.in_progress"));
+    assert!(event_types.contains(&"response.mcp_tool_call.completed"));
+    assert!(
+        events
+            .iter()
+            .filter_map(|event| event.get("response"))
+            .any(|response| response["status"].as_str() == Some("completed") && response["output"].is_array()),
+        "streaming MCP cassette should include a completed final response payload"
+    );
+
+    process_streaming_turn(&cassette, 0, "Qwen/Qwen3-30B-A3B-FP8")
+}
+
+/// Unhappy path: `server_url` fails the gateway's SSRF host allowlist, so no
+/// connection is ever attempted.
+#[test]
+fn read_mcp_resource_cassette_unreachable_server() {
+    let output = load_and_process_failed_streaming_cassette(
+        "mcp-read-resource-unreachable-server-Qwen-Qwen3-30B-A3B-FP8-streaming.yaml",
+    );
+    assert_failed_read_mcp_resource(&output, "unknown MCP server");
+}
+
+/// Unhappy path: `server_url` is loopback (passes the allowlist) but nothing
+/// is listening, so the gateway's connection attempt itself fails.
+#[test]
+fn read_mcp_resource_cassette_connection_refused() {
+    let output = load_and_process_failed_streaming_cassette(
+        "mcp-read-resource-connection-refused-Qwen-Qwen3-30B-A3B-FP8-streaming.yaml",
+    );
+    assert_failed_read_mcp_resource(&output, "failed to connect");
+}
+
+/// Unhappy path: the MCP server connects fine but `resources/read` fails
+/// because the requested URI does not exist.
+#[test]
+fn read_mcp_resource_cassette_missing_resource() {
+    let output = load_and_process_failed_streaming_cassette(
+        "mcp-read-resource-missing-resource-Qwen-Qwen3-30B-A3B-FP8-streaming.yaml",
+    );
+    assert_failed_read_mcp_resource(&output, "resources/read failed");
+}
