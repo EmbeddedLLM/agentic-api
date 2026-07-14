@@ -8,6 +8,9 @@ use serde::{Deserialize, Serialize};
 use super::client::McpClient;
 use crate::types::tools::McpToolParam;
 
+// Hostnames configured here are a trust boundary: validation compares the
+// hostname string but does not pin its DNS resolution to the transport. Only
+// add names whose DNS records are controlled by a trusted administrator.
 const MCP_ALLOWED_HOSTS_ENV: &str = "AGENTIC_MCP_ALLOWED_HOSTS";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

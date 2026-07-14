@@ -14,6 +14,20 @@ This design uses [`rmcp`](https://github.com/modelcontextprotocol/rust-sdk) as t
    - **stdio MCP server** (`connect_stdio`): a locally spawned process (command + args) the gateway connects to over stdin/stdout. Users wire up their own MCP server process and the gateway talks to it via rmcp's `TokioChildProcess` transport.
    - **calculator** (reference example from [rust-sdk Tools](https://github.com/modelcontextprotocol/rust-sdk#tools)): simplest possible `#[tool]` server, useful as a template.
 
+### HTTP server allowlist security
+
+Request-provided MCP server URLs allow loopback hosts by default. Additional
+hostnames can be allowed with the comma-separated `AGENTIC_MCP_ALLOWED_HOSTS`
+environment variable.
+
+Treat every hostname added to `AGENTIC_MCP_ALLOWED_HOSTS` as fully trusted. The
+allowlist validates the hostname text, while the HTTP transport performs DNS
+resolution later and does not pin the resolved IP address. Consequently, this
+setting is not an IP-level SSRF boundary and is unsafe for hostnames whose DNS
+records could be changed by an untrusted party (including through DNS
+rebinding). Only add hostnames whose DNS configuration is controlled by a
+trusted administrator.
+
 ### First built-in tool: `read_mcp_resource`
 
 The first built-in is `read_mcp_resource`, mirroring codex's [`ReadMcpResourceHandler`](https://github.com/openai/codex/blob/main/codex-rs/core/src/tools/handlers/mcp_resource/read_mcp_resource.rs). Given a `server` label and a `uri`, it calls `resources/read` on the named MCP server and returns the content to the model. It is registered once in `ToolRegistry`; the model selects the target server at call time via the `server` argument. This mirrors how codex registers `read_mcp_resource` as a fixed tool regardless of how many MCP servers are connected.
