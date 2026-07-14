@@ -14,11 +14,11 @@ This repository is Rust-first under the `vllm-project` GitHub organization.
 
 ```
 .
-├── src/              # Rust source code
-├── Cargo.toml        # Rust package manifest
-├── rustfmt.toml      # Rust formatter config
-├── clippy.toml       # Clippy linter config
-└── docs/             # Documentation (MkDocs)
+├── crates/agentic-server/       # Axum binary, transport handlers, and configuration
+├── crates/agentic-server-core/  # Protocol types, execution, tools, and persistence
+├── crates/agentic-praxis/       # Praxis integration
+├── Cargo.toml                    # Workspace manifest and shared dependencies/lints
+└── docs/                         # Documentation (MkDocs)
 ```
 
 ## Setup
@@ -35,6 +35,9 @@ cargo build
 ```bash
 cargo test
 ```
+
+- Before adding or updating replay cassettes, read `crates/agentic-server-core/tests/cassettes/README.md` and use its
+  recorder workflow and existing scenario scripts; do not hand-author captured request/response YAML.
 
 ## Linting and Formatting
 
@@ -67,6 +70,34 @@ uv run mkdocs serve
 - `unsafe` code is forbidden (`unsafe_code = "forbid"` in `Cargo.toml`).
 - Clippy `all` lints are denied; `pedantic` lints are warnings.
 - Minimum supported Rust version (MSRV): 1.85.
+
+### `agentic-server-core` boundaries
+
+- `types/` owns wire/domain data; `events/` parses and normalizes upstream events; `tool/` owns tool discovery,
+  routing, and execution; `executor/` orchestrates requests across inference, tools, and persistence; `storage/` owns
+  database models and operations; `utils/` contains genuinely shared, domain-neutral helpers.
+- Respect this dependency direction: handlers call core APIs; executor coordinates `events`, `tool`, and `storage`;
+  those modules share contracts through `types`. Do not introduce transport concerns into core types or business logic.
+- In `src/` code, reuse `utils::common` for JSON serialization/deserialization and fallback behavior. Do not call
+  `serde_json` directly when an existing strict, optional, or defaulting helper expresses the required policy; add a
+  focused helper there when the policy is reused. Direct `serde_json` use is fine in tests, fixtures, and cassette
+  tooling. Keep Serde wire-format attributes on the owning type.
+
+## Rust Best Practices
+
+- Prefer borrowing (`&T`, `&str`, `&[T]`) and avoid `.clone()` unless ownership or lifetime requirements make it
+  necessary. Move values when ownership is transferred; use `Arc` only for genuinely shared thread-safe state, and
+  keep required clones explicit and close to task spawn.
+- Return `Result` for recoverable failures and propagate with `?`. Use typed `thiserror` errors in library/core code,
+  preserve sources during conversion, add useful boundary context, and avoid `unwrap`/`expect` in production paths
+  except for documented, impossible invariants.
+- Never hold a `Mutex`/`RwLock` guard across `.await`. Use Tokio async I/O, `spawn_blocking` for blocking or CPU-heavy
+  work, bounded channels for backpressure, and `try_join!` for independent fallible work. Spawned tasks must have clear
+  cancellation, shutdown, and join/error handling.
+- Encode invariants with enums, newtypes, `Option`, and validated constructors. Prefer exhaustive matches and safe
+  conversions (`From`/`TryFrom`) over stringly typed state, unchecked casts, or panics.
+- Avoid speculative optimization: minimize allocations in hot paths with borrowing, slices, `Bytes`, and known
+  capacities, then validate non-obvious optimizations with measurements. `unsafe` remains forbidden.
 
 ## Commits
 
