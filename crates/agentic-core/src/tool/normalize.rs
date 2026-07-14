@@ -45,6 +45,10 @@ impl ResponsesTool {
                 let param = serde_json::to_value(p).expect("serialization of known struct is infallible");
                 CodexNamespaceHandler.normalize(&param)
             }
+            Self::Custom(p) => {
+                tracing::debug!(name = %p.name, "custom tool retained for native upstream forwarding");
+                vec![]
+            }
             Self::Unknown => {
                 tracing::debug!("unknown tool skipped in normalize");
                 vec![]

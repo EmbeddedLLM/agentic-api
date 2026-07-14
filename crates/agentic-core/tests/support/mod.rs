@@ -411,6 +411,7 @@ pub fn output_text(payload: &ResponsePayload) -> String {
         .filter_map(|item| match item {
             OutputItem::Message(msg) => Some(msg.content.iter().map(|c| c.text.as_str()).collect::<String>()),
             OutputItem::FunctionCall(_)
+            | OutputItem::CustomToolCall(_)
             | OutputItem::WebSearchCall(_)
             | OutputItem::Reasoning(_)
             | OutputItem::Unknown => None,

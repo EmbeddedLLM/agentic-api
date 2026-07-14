@@ -198,6 +198,9 @@ impl ToolRegistry {
                         }
                     }
                 }
+                ResponsesTool::Custom(p) => {
+                    tracing::debug!(name = %p.name, "client-owned custom tool skipped in function registry");
+                }
                 ResponsesTool::Unknown => {
                     tracing::debug!("unknown tool declared but skipped in registry");
                 }

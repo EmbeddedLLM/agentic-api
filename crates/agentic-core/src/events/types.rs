@@ -7,6 +7,7 @@ use crate::types::io::ResponseUsage;
 pub enum SSEItemType {
     Reasoning,
     FunctionCall,
+    CustomToolCall,
     Message,
 }
 
@@ -16,6 +17,7 @@ impl SSEItemType {
         match self {
             Self::Reasoning => "reasoning",
             Self::FunctionCall => "function_call",
+            Self::CustomToolCall => "custom_tool_call",
             Self::Message => "message",
         }
     }
@@ -26,6 +28,7 @@ impl From<&str> for SSEItemType {
         match s {
             "reasoning" => Self::Reasoning,
             "function_call" => Self::FunctionCall,
+            "custom_tool_call" => Self::CustomToolCall,
             _ => Self::Message,
         }
     }
@@ -76,6 +79,8 @@ pub enum SSEEventType {
     // Function calls
     FunctionCallArgumentsDelta,
     FunctionCallArgumentsDone,
+    CustomToolCallInputDelta,
+    CustomToolCallInputDone,
 
     // Reasoning
     ReasoningTextDelta,
@@ -155,6 +160,20 @@ pub enum EventPayload {
         call_id: Option<String>,
         item_id: String,
         name: String,
+        output_index: u32,
+    },
+
+    /// `response.custom_tool_call_input.delta`
+    CustomToolCallInputDelta {
+        delta: String,
+        item_id: String,
+        output_index: u32,
+    },
+
+    /// `response.custom_tool_call_input.done`
+    CustomToolCallInputDone {
+        input: String,
+        item_id: String,
         output_index: u32,
     },
 

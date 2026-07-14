@@ -3,7 +3,7 @@ use serde_json::Value;
 
 use crate::events::EventPayload;
 use crate::executor::error::ExecutorError;
-use crate::tool::{ToolRegistry, ToolType};
+use crate::tool::ToolRegistry;
 use crate::types::event::MessageStatus;
 use crate::utils::uuid7_str;
 
@@ -96,6 +96,23 @@ pub struct FunctionToolCall {
     pub status: MessageStatus,
 }
 
+/// A freeform custom tool invocation.
+///
+/// `input` is opaque text and must not be parsed as function-call JSON.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomToolCall {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub call_id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub input: String,
+}
+
 fn default_completed_status() -> MessageStatus {
     MessageStatus::Completed
 }
@@ -134,6 +151,31 @@ impl TryFrom<&EventPayload> for FunctionToolCall {
             namespace: namespace.clone(),
             arguments: String::new(),
             status: MessageStatus::InProgress,
+        })
+    }
+}
+
+impl TryFrom<&EventPayload> for CustomToolCall {
+    type Error = ExecutorError;
+
+    fn try_from(payload: &EventPayload) -> Result<Self, Self::Error> {
+        let EventPayload::OutputItemAdded {
+            item_id, call_id, name, ..
+        } = payload
+        else {
+            return Err(ExecutorError::ParseError("expected OutputItemAdded payload".into()));
+        };
+        let id = if item_id.is_empty() {
+            uuid7_str("ctc_")
+        } else {
+            item_id.clone()
+        };
+        Ok(Self {
+            id,
+            status: Some("in_progress".to_owned()),
+            call_id: call_id.as_deref().unwrap_or_default().to_owned(),
+            name: name.as_deref().unwrap_or_default().to_owned(),
+            input: String::new(),
         })
     }
 }
@@ -315,6 +357,20 @@ impl ApplyDone for FunctionToolCall {
     }
 }
 
+impl ApplyDone for CustomToolCall {
+    fn apply_done(&mut self, payload: &EventPayload, buffer: &mut String) {
+        let EventPayload::CustomToolCallInputDone { input, .. } = payload else {
+            return;
+        };
+        self.input = if input.is_empty() {
+            std::mem::take(buffer)
+        } else {
+            buffer.clear();
+            input.clone()
+        };
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum OutputItem {
@@ -322,6 +378,8 @@ pub enum OutputItem {
     Message(OutputMessage),
     #[serde(rename = "function_call")]
     FunctionCall(FunctionToolCall),
+    #[serde(rename = "custom_tool_call")]
+    CustomToolCall(CustomToolCall),
     #[serde(rename = "web_search_call")]
     WebSearchCall(WebSearchCall),
     #[serde(rename = "reasoning")]
@@ -336,7 +394,8 @@ impl OutputItem {
         match self {
             Self::FunctionCall(call) => registry
                 .lookup(&call.name)
-                .is_none_or(|entry| entry.tool_type == ToolType::Function),
+                .is_none_or(|entry| !entry.tool_type.is_gateway_owned()),
+            Self::CustomToolCall(_) => true,
             Self::Message(_) | Self::WebSearchCall(_) | Self::Reasoning(_) | Self::Unknown => false,
         }
     }
@@ -347,6 +406,7 @@ impl OutputItem {
             Self::Message(message) => Some(InputItem::Message(message.clone().into())),
             Self::Reasoning(reasoning) => Some(InputItem::Reasoning(reasoning.clone())),
             Self::FunctionCall(call) => Some(InputItem::FunctionCall(call.clone())),
+            Self::CustomToolCall(call) => Some(InputItem::CustomToolCall(call.clone())),
             Self::WebSearchCall(_) | Self::Unknown => None,
         }
     }
@@ -356,6 +416,26 @@ impl OutputItem {
 mod tests {
     use super::*;
     use crate::types::io::InputItem;
+
+    #[test]
+    fn custom_tool_call_preserves_freeform_input_and_requires_client_action() {
+        let item: OutputItem = serde_json::from_value(serde_json::json!({
+            "id": "ctc_1",
+            "type": "custom_tool_call",
+            "status": "completed",
+            "call_id": "call_1",
+            "name": "apply_patch",
+            "input": "*** Begin Patch\n*** End Patch"
+        }))
+        .unwrap();
+
+        assert!(item.requires_client_action(&ToolRegistry::default()));
+        let Some(InputItem::CustomToolCall(call)) = item.to_input_item() else {
+            panic!("custom call should rehydrate as input");
+        };
+        assert_eq!(call.name, "apply_patch");
+        assert_eq!(call.input, "*** Begin Patch\n*** End Patch");
+    }
 
     #[test]
     fn reasoning_output_round_trips_through_serde() {

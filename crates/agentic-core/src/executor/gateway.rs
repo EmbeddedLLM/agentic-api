@@ -42,8 +42,7 @@ fn is_gateway_owned_call(call: &FunctionToolCall, registry: &ToolRegistry) -> bo
 }
 
 pub(super) fn has_client_owned_calls(output_items: &[OutputItem], registry: &ToolRegistry) -> bool {
-    let calls = function_calls(output_items);
-    !registry.client_owned(&calls).is_empty()
+    output_items.iter().any(|item| item.requires_client_action(registry))
 }
 
 fn execution_error_output(call: &FunctionToolCall, message: &str) -> ExecutorResult<ToolOutput> {

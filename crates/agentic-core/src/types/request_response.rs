@@ -1,9 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use super::io::{
-    FunctionTool, InputItem, InputMessage, InputMessageContent, OutputItem, ResponseUsage, ResponsesInput, ToolChoice,
-};
+use super::io::{InputItem, InputMessage, InputMessageContent, OutputItem, ResponseUsage, ResponsesInput, ToolChoice};
 use super::tools::ResponsesTool;
 use crate::tool::{CodexNamespaceHandler, ToolError};
 use crate::utils::common::serialize_to_string;
@@ -41,12 +39,12 @@ pub struct UpstreamRequest<'a> {
     pub stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instructions: Option<&'a str>,
-    /// Normalised tools forwarded to vLLM — always `Vec<FunctionTool>` regardless of
-    /// what tool types the client declared. Codex namespace tools are flattened
-    /// before this is built.
+    /// Tools forwarded to vLLM. Namespace members are flattened to ordinary
+    /// function declarations; native custom declarations retain their freeform
+    /// wire shape.
     /// Skipped when empty so vLLM does not receive an empty array.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tools: Option<Vec<FunctionTool>>,
+    pub tools: Option<Vec<Value>>,
     #[serde(skip_serializing_if = "is_absent_or_default_tool_choice")]
     pub tool_choice: Option<ToolChoice>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -75,9 +73,10 @@ impl RequestPayload {
     ///
     /// Codex `namespace` tools' members are first renamed to their flat,
     /// model-visible names via [`CodexNamespaceHandler::resolve_namespace_members`].
-    /// All tool types are then normalised to `Vec<FunctionTool>` via
-    /// [`ResponsesTool::to_function_tools`]. `tool_choice` is resolved the
-    /// same way via [`CodexNamespaceHandler::resolve_tool_choice`].
+    /// Namespace and gateway tools are then normalized to function declarations.
+    /// Native custom tools are forwarded unchanged because their calls are not
+    /// function calls. `tool_choice` is resolved the same way via
+    /// [`CodexNamespaceHandler::resolve_tool_choice`].
     ///
     /// # Errors
     ///
@@ -90,9 +89,9 @@ impl RequestPayload {
             .as_deref()
             .map(|tools| CodexNamespaceHandler.resolve_namespace_members(tools))
             .transpose()?;
-        let tools: Option<Vec<FunctionTool>> = renamed_tools
+        let tools: Option<Vec<Value>> = renamed_tools
             .as_deref()
-            .map(|tools| tools.iter().flat_map(ResponsesTool::to_function_tools).collect());
+            .map(|tools| tools.iter().flat_map(upstream_tool_values).collect());
         let tools = tools.filter(|tools| !tools.is_empty());
         let namespace_map = CodexNamespaceHandler.build_namespace_map(self.tools.as_deref())?;
         let tool_choice = CodexNamespaceHandler.resolve_tool_choice(namespace_map.as_ref(), self.tool_choice.as_ref());
@@ -111,6 +110,22 @@ impl RequestPayload {
             metadata: self.metadata.as_ref(),
         })
     }
+}
+
+fn upstream_tool_values(tool: &ResponsesTool) -> Vec<Value> {
+    if let ResponsesTool::Custom(custom) = tool {
+        tracing::debug!(
+            name = %custom.name,
+            has_format = custom.format.is_some(),
+            "forwarding native custom tool declaration upstream"
+        );
+        return vec![tool.to_raw_value()];
+    }
+
+    tool.to_function_tools()
+        .into_iter()
+        .map(|tool| serde_json::to_value(tool).expect("serialization of known struct is infallible"))
+        .collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -136,6 +151,18 @@ pub struct ResponsePayload {
 }
 
 impl ResponsePayload {
+    #[must_use]
+    pub fn as_created_response_chunk(&self) -> String {
+        let mut response = self.clone();
+        "in_progress".clone_into(&mut response.status);
+        let event = json!({
+            "type": "response.created",
+            "response": response,
+        });
+        let json_str = serialize_to_string(&event).unwrap_or_else(|_| String::new());
+        format!("data: {json_str}\n\n")
+    }
+
     #[must_use]
     pub fn as_responses_chunk(&self) -> String {
         let json_str = serialize_to_string(self).unwrap_or_else(|_| String::new());
@@ -270,6 +297,30 @@ mod tests {
     }
 
     #[test]
+    fn to_upstream_request_preserves_native_custom_tool_shape() {
+        let payload: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test",
+            "input": "hi",
+            "tools": [{
+                "type": "custom",
+                "name": "apply_patch",
+                "description": "Apply a patch.",
+                "format": {
+                    "type": "grammar",
+                    "syntax": "lark",
+                    "definition": "start: patch"
+                }
+            }]
+        }))
+        .unwrap();
+
+        let upstream = serde_json::to_value(payload.to_upstream_request(false).unwrap()).unwrap();
+        assert_eq!(upstream["tools"][0]["type"], "custom");
+        assert_eq!(upstream["tools"][0]["name"], "apply_patch");
+        assert_eq!(upstream["tools"][0]["format"]["definition"], "start: patch");
+    }
+
+    #[test]
     fn responses_input_discards_unknown_items_when_converted_for_storage() {
         let input: ResponsesInput = serde_json::from_value(serde_json::json!([
             {"type": "message", "role": "user", "content": "hi"},
@@ -313,5 +364,30 @@ mod tests {
             assert_eq!(event["type"], expected_type);
             assert_eq!(event["response"]["status"], status);
         }
+    }
+
+    #[test]
+    fn response_payload_created_chunk_uses_in_progress_status() {
+        let payload = ResponsePayload {
+            id: "resp_test".to_string(),
+            object: "response".to_string(),
+            created_at: 0,
+            model: "test-model".to_string(),
+            status: "completed".to_string(),
+            output: Vec::new(),
+            usage: None,
+            incomplete_details: None,
+            error: None,
+            previous_response_id: None,
+            conversation_id: None,
+            instructions: None,
+        };
+
+        let chunk = payload.as_created_response_chunk();
+        let data = chunk.trim().strip_prefix("data: ").unwrap();
+        let event: Value = serde_json::from_str(data).unwrap();
+        assert_eq!(event["type"], "response.created");
+        assert_eq!(event["response"]["id"], "resp_test");
+        assert_eq!(event["response"]["status"], "in_progress");
     }
 }

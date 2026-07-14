@@ -113,6 +113,9 @@ async fn handle_ws_text(
         return Err(WsError::UnexpectedType);
     }
 
+    // `generate` is a WebSocket transport control used by Codex startup
+    // prewarming. It is intentionally not part of the HTTP upstream payload.
+    let is_prewarm = value.get("generate").and_then(Value::as_bool) == Some(false);
     let mut payload = serde_json::from_value::<RequestPayload>(value).map_err(ExecutorError::from)?;
     let requested_stream = payload.stream;
     let requested_store = payload.store;
@@ -123,6 +126,7 @@ async fn handle_ws_text(
         requested_store,
         forced_stream = payload.stream,
         forced_store = payload.store,
+        is_prewarm,
         has_previous_response_id = payload.previous_response_id.is_some(),
         has_conversation_id = payload.conversation_id.is_some(),
         tools = payload.tools.as_ref().map_or(0, Vec::len),
@@ -130,10 +134,12 @@ async fn handle_ws_text(
     );
 
     let auth = extract_bearer(headers, state.openai_api_key.as_deref());
-    let result = ExecuteRequest::new(payload, Arc::clone(&state.exec_ctx))
-        .with_auth(auth)
-        .run()
-        .await?;
+    let request = ExecuteRequest::new(payload, Arc::clone(&state.exec_ctx)).with_auth(auth);
+    let result = if is_prewarm {
+        request.run_without_inference().await?
+    } else {
+        request.run().await?
+    };
     let Either::Right(stream) = result else {
         return Err(WsError::Executor(ExecutorError::InvalidRequest(
             "websocket response.create must produce a stream".to_owned(),
