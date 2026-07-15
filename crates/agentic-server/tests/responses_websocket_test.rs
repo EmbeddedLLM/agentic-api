@@ -480,6 +480,57 @@ async fn test_websocket_first_turn_forwards_incremental_events_and_final_payload
 }
 
 #[tokio::test]
+async fn test_websocket_empty_establishment_is_local_and_reusable() {
+    let mock = MockResponsesServer::start(vec![sse_response("resp_upstream_1", "msg_upstream_1", "HELLO")]).await;
+    let fixture = storage_backed_state(&mock.url).await;
+    let (gateway_url, _gateway) = spawn_gateway(fixture.state.clone()).await;
+    let mut ws = connect_responses_ws(&gateway_url).await;
+
+    send_json(
+        &mut ws,
+        json!({
+            "type": "response.create",
+            "model": "test-model",
+            "input": [],
+            "store": false,
+            "stream": true
+        }),
+    )
+    .await;
+
+    let warmup = recv_until_completed(&mut ws).await;
+    assert_eq!(warmup.len(), 2);
+    assert_eq!(warmup[0]["type"], "response.created");
+    assert_eq!(warmup[1]["type"], "response.completed");
+    assert_eq!(warmup[0]["response"]["id"], warmup[1]["response"]["id"]);
+    assert_eq!(warmup[1]["response"]["output"], json!([]));
+    assert_eq!(warmup[1]["response"]["usage"]["total_tokens"], 0);
+    assert!(mock.request_bodies().await.is_empty());
+
+    let warmup_id = warmup[1]["response"]["id"].as_str().unwrap();
+    send_json(
+        &mut ws,
+        json!({
+            "type": "response.create",
+            "model": "test-model",
+            "previous_response_id": warmup_id,
+            "input": [{"type": "message", "role": "user", "content": "hello"}],
+            "store": false,
+            "stream": true
+        }),
+    )
+    .await;
+
+    let response = recv_until_completed(&mut ws).await;
+    assert_eq!(response.last().unwrap()["response"]["previous_response_id"], warmup_id);
+    let requests = mock.request_bodies().await;
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0]["input"].as_array().unwrap().len(), 1);
+    assert_eq!(requests[0]["input"][0]["role"], "user");
+    assert_eq!(requests[0]["input"][0]["content"], "hello");
+}
+
+#[tokio::test]
 async fn test_websocket_restores_namespace_tool_call_events() {
     let mock = MockResponsesServer::start(vec![sse_function_call_response(
         "resp_upstream_1",

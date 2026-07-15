@@ -12,8 +12,10 @@ use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
-use agentic_core::executor::{BoxStream, ExecuteRequest, ExecutorError};
+use agentic_core::executor::{BoxStream, ExecuteRequest, ExecutorError, RequestContext, rehydrate_conversation};
 use agentic_core::types::request_response::RequestPayload;
+use agentic_core::utils::common::utcnow_str;
+use agentic_core::{ResponseUsage, ResponsesInput};
 
 use super::super::common::{MAX_BODY_SIZE, extract_bearer};
 use super::error::WsError;
@@ -129,6 +131,11 @@ async fn handle_ws_text(
         "accepted websocket response.create"
     );
 
+    if is_initial_empty_input(&payload) {
+        debug!("handling empty websocket establishment locally");
+        return complete_websocket_establishment(sender, state, payload).await;
+    }
+
     let auth = extract_bearer(headers, state.openai_api_key.as_deref());
     let result = ExecuteRequest::new(payload, Arc::clone(&state.exec_ctx))
         .with_auth(auth)
@@ -141,6 +148,63 @@ async fn handle_ws_text(
     };
 
     stream_ws_response(sender, receiver, stream, shutdown_token, queue).await
+}
+
+fn is_initial_empty_input(payload: &RequestPayload) -> bool {
+    payload.previous_response_id.is_none()
+        && payload.conversation_id.is_none()
+        && matches!(&payload.input, ResponsesInput::Items(items) if items.is_empty())
+}
+
+async fn complete_websocket_establishment(
+    sender: &mut WsSender,
+    state: &AppState,
+    payload: RequestPayload,
+) -> Result<(), WsError> {
+    let ctx = rehydrate_conversation(payload, &state.exec_ctx).await?;
+    let created_at = utcnow_str();
+    let created_event = empty_response_event(&ctx, created_at, "response.created", "in_progress", 0, None);
+    let completed_event = empty_response_event(
+        &ctx,
+        created_at,
+        "response.completed",
+        "completed",
+        1,
+        Some(ResponseUsage::default()),
+    );
+
+    state.exec_ctx.resp_handler.execute_turn(ctx, Vec::new()).await?;
+
+    send_ws_json(sender, created_event).await?;
+    send_ws_json(sender, completed_event).await
+}
+
+fn empty_response_event(
+    ctx: &RequestContext,
+    created_at: i64,
+    event_type: &str,
+    status: &str,
+    sequence_number: u32,
+    usage: Option<ResponseUsage>,
+) -> Value {
+    serde_json::json!({
+        "type": event_type,
+        "sequence_number": sequence_number,
+        "response": {
+            "id": &ctx.response_id,
+            "object": "response",
+            "created_at": created_at,
+            "model": &ctx.enriched_request.model,
+            "status": status,
+            "output": [],
+            "usage": usage,
+            "incomplete_details": null,
+            "error": null,
+            "previous_response_id": &ctx.original_request.previous_response_id,
+            "conversation_id": &ctx.conversation_id,
+            "instructions": &ctx.enriched_request.instructions,
+        },
+    })
 }
 
 /// Stream a response from the executor to the client.
