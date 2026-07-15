@@ -25,7 +25,7 @@ use crate::executor::upstream::{fetch_blocking_payload, fetch_stream_payload};
 use crate::tool::ToolRegistry;
 use crate::types::io::{OutputItem, ResponseUsage, ToolChoice};
 use crate::types::request_response::{IncompleteDetails, RequestPayload, ResponsePayload};
-use crate::utils::common::{serialize_to_string, utcnow_str};
+use crate::utils::common::serialize_to_string;
 
 pub use crate::executor::inference::BoxStream;
 
@@ -220,53 +220,6 @@ async fn run_blocking(
     Ok(payload)
 }
 
-fn no_generate_payload(ctx: &RequestContext) -> ResponsePayload {
-    ResponsePayload {
-        id: ctx.response_id.clone(),
-        object: "response".to_owned(),
-        created_at: utcnow_str(),
-        model: ctx.enriched_request.model.clone(),
-        status: "completed".to_owned(),
-        output: Vec::new(),
-        usage: None,
-        incomplete_details: None,
-        error: None,
-        previous_response_id: ctx.original_request.previous_response_id.clone(),
-        conversation_id: ctx.conversation_id.clone(),
-        instructions: ctx.enriched_request.instructions.clone(),
-    }
-}
-
-async fn run_no_generate(ctx: RequestContext, exec_ctx: &ExecutionContext) -> ExecutorResult<ResponsePayload> {
-    let payload = no_generate_payload(&ctx);
-    persist_if_needed(
-        payload.clone(),
-        ctx,
-        exec_ctx.conv_handler.clone(),
-        exec_ctx.resp_handler.clone(),
-    )
-    .await?;
-    Ok(payload)
-}
-
-fn run_no_generate_stream(ctx: RequestContext, exec_ctx: Arc<ExecutionContext>) -> BoxStream {
-    Box::pin(stream! {
-        match run_no_generate(ctx, exec_ctx.as_ref()).await {
-            Ok(payload) => {
-                // Persist the synthetic checkpoint before exposing its ID. Codex
-                // immediately reuses it as `previous_response_id` on the first turn.
-                yield payload.as_created_response_chunk();
-                yield payload.as_terminal_response_chunk();
-                yield DONE_MARKER.to_string();
-            }
-            Err(e) => {
-                yield error_sse_chunk(&e.to_string());
-                yield DONE_MARKER.to_string();
-            }
-        }
-    })
-}
-
 fn run_stream(ctx: RequestContext, exec_ctx: Arc<ExecutionContext>, auth: Option<String>) -> BoxStream {
     Box::pin(stream! {
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
@@ -388,23 +341,6 @@ impl ExecuteRequest {
             Ok(Either::Left(
                 run_blocking(ctx, &self.exec_ctx, self.client_auth.as_deref()).await?,
             ))
-        }
-    }
-
-    /// Complete a WebSocket `generate: false` startup request without model inference.
-    ///
-    /// The completed response is persisted so Codex can use its ID as
-    /// `previous_response_id` while sending only incremental input on the first turn.
-    ///
-    /// # Errors
-    /// Returns [`ExecutorError`] if request rehydration or persistence fails.
-    pub async fn run_without_inference(self) -> ExecutorResult<Either<ResponsePayload, BoxStream>> {
-        let ctx = rehydrate_conversation(self.payload, &self.exec_ctx).await?;
-        debug!(response_id = %ctx.response_id, "completing websocket prewarm without model inference");
-        if ctx.original_request.stream {
-            Ok(Either::Right(run_no_generate_stream(ctx, self.exec_ctx)))
-        } else {
-            Ok(Either::Left(run_no_generate(ctx, self.exec_ctx.as_ref()).await?))
         }
     }
 }
