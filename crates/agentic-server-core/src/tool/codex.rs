@@ -13,30 +13,10 @@ use super::registry::{ToolEntry, ToolType};
 // unlikely to collide with user functions, and can be restored to
 // `{ namespace, name }` on the way back to the client.
 pub const MODEL_VISIBLE_NAMESPACE_MEMBER_PREFIX: &str = "agentic_ns__";
-pub const MAX_MODEL_VISIBLE_TOOL_NAME_LEN: usize = 64;
-
-const HASHED_NAMESPACE_MEMBER_SUFFIX_LEN: usize = 18;
-
-fn stable_name_hash(value: &str) -> u64 {
-    const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
-    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
-
-    value.bytes().fold(FNV_OFFSET_BASIS, |hash, byte| {
-        (hash ^ u64::from(byte)).wrapping_mul(FNV_PRIME)
-    })
-}
 
 #[must_use]
 pub fn model_visible_namespace_member_name(namespace: &str, member: &str) -> String {
-    let full_name = format!("{MODEL_VISIBLE_NAMESPACE_MEMBER_PREFIX}{namespace}__{member}");
-    if full_name.chars().count() <= MAX_MODEL_VISIBLE_TOOL_NAME_LEN {
-        return full_name;
-    }
-
-    let hash = stable_name_hash(&full_name);
-    let readable_len = MAX_MODEL_VISIBLE_TOOL_NAME_LEN - HASHED_NAMESPACE_MEMBER_SUFFIX_LEN;
-    let readable_prefix = full_name.chars().take(readable_len).collect::<String>();
-    format!("{readable_prefix}__{hash:016x}")
+    format!("{MODEL_VISIBLE_NAMESPACE_MEMBER_PREFIX}{namespace}__{member}")
 }
 
 /// Registers one `ToolEntry` per `Function` member of `p`, keyed by the

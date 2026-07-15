@@ -56,10 +56,6 @@ The model-visible namespace member format is:
 agentic_ns__{namespace}__{member}
 ```
 
-Names at or below the upstream 64-character function-name limit retain that exact form. Longer generated names keep a
-readable prefix and replace the tail with a deterministic 16-hex fingerprint, producing exactly 64 characters. The
-request-scoped namespace map records the result, so restoration never depends on parsing either form.
-
 For example, Codex can send:
 
 ```json
@@ -187,14 +183,6 @@ cargo test -p agentic-server --test responses_websocket_test \
   test_websocket_custom_tool_round_trip_and_continuation -- --nocapture
 ```
 
-Also run the regression for the 64-character upstream function-name limit. It reproduces a long Codex app namespace
-member, verifies the flattened name is bounded, and restores streaming and final calls to the original namespace shape:
-
-```bash
-cargo test -p agentic-server --test responses_websocket_test \
-  test_websocket_bounds_and_restores_long_namespace_tool_name -- --nocapture
-```
-
 The following live smoke test additionally measures whether the configured model selects the custom tool correctly.
 Start the gateway in one terminal:
 
@@ -308,12 +296,6 @@ model-catalog refresh still attached the saved OpenAI/ChatGPT bearer credential 
 preserves client authorization headers by design, so the upstream rejected that incidental credential. The isolated
 `CODEX_HOME` above avoids the credential path for this smoke test. Do not copy or forward the credential shown in the
 diagnostic, and rotate it if it was reusable.
-
-In the reproduced 0.144.3 run, the default Codex request contained 23 top-level tools whose namespace groups expanded to
-hundreds of upstream function declarations. The original namespace expansion produced names longer than the provider's
-64-character function-name limit, causing an HTTP 422 before inference. The gateway now deterministically bounds those
-generated names while retaining the request-scoped reverse map. Disabling apps reduces the catalog but is no longer
-required merely to avoid this name-length failure.
 
 ---
 
