@@ -12,10 +12,10 @@ use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
+use agentic_core::ResponseUsage;
 use agentic_core::executor::{BoxStream, ExecuteRequest, ExecutorError, RequestContext, rehydrate_conversation};
 use agentic_core::types::request_response::RequestPayload;
 use agentic_core::utils::common::utcnow_str;
-use agentic_core::{ResponseUsage, ResponsesInput};
 
 use super::super::common::{MAX_BODY_SIZE, extract_bearer};
 use super::error::WsError;
@@ -115,6 +115,7 @@ async fn handle_ws_text(
         return Err(WsError::UnexpectedType);
     }
 
+    let generate = value.get("generate").and_then(Value::as_bool);
     let mut payload = serde_json::from_value::<RequestPayload>(value).map_err(ExecutorError::from)?;
     let requested_stream = payload.stream;
     let requested_store = payload.store;
@@ -127,13 +128,14 @@ async fn handle_ws_text(
         forced_store = payload.store,
         has_previous_response_id = payload.previous_response_id.is_some(),
         has_conversation_id = payload.conversation_id.is_some(),
+        ?generate,
         tools = payload.tools.as_ref().map_or(0, Vec::len),
         "accepted websocket response.create"
     );
 
-    if is_initial_empty_input(&payload) {
-        debug!("handling empty websocket establishment locally");
-        return complete_websocket_establishment(sender, state, payload).await;
+    if generate == Some(false) {
+        debug!("handling non-generating websocket request locally");
+        return complete_without_inference(sender, state, payload).await;
     }
 
     let auth = extract_bearer(headers, state.openai_api_key.as_deref());
@@ -150,13 +152,7 @@ async fn handle_ws_text(
     stream_ws_response(sender, receiver, stream, shutdown_token, queue).await
 }
 
-fn is_initial_empty_input(payload: &RequestPayload) -> bool {
-    payload.previous_response_id.is_none()
-        && payload.conversation_id.is_none()
-        && matches!(&payload.input, ResponsesInput::Items(items) if items.is_empty())
-}
-
-async fn complete_websocket_establishment(
+async fn complete_without_inference(
     sender: &mut WsSender,
     state: &AppState,
     payload: RequestPayload,

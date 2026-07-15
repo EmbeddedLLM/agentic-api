@@ -480,7 +480,7 @@ async fn test_websocket_first_turn_forwards_incremental_events_and_final_payload
 }
 
 #[tokio::test]
-async fn test_websocket_empty_establishment_is_local_and_reusable() {
+async fn test_websocket_generate_false_is_local_and_reusable() {
     let mock = MockResponsesServer::start(vec![sse_response("resp_upstream_1", "msg_upstream_1", "HELLO")]).await;
     let fixture = storage_backed_state(&mock.url).await;
     let (gateway_url, _gateway) = spawn_gateway(fixture.state.clone()).await;
@@ -492,6 +492,7 @@ async fn test_websocket_empty_establishment_is_local_and_reusable() {
             "type": "response.create",
             "model": "test-model",
             "input": [],
+            "generate": false,
             "store": false,
             "stream": true
         }),
@@ -528,6 +529,35 @@ async fn test_websocket_empty_establishment_is_local_and_reusable() {
     assert_eq!(requests[0]["input"].as_array().unwrap().len(), 1);
     assert_eq!(requests[0]["input"][0]["role"], "user");
     assert_eq!(requests[0]["input"][0]["content"], "hello");
+}
+
+#[tokio::test]
+async fn test_websocket_empty_input_without_generate_reaches_upstream() {
+    let mock = MockResponsesServer::start(vec![sse_response("resp_upstream_1", "msg_upstream_1", "HELLO")]).await;
+    let fixture = storage_backed_state(&mock.url).await;
+    let (gateway_url, _gateway) = spawn_gateway(fixture.state.clone()).await;
+    let mut ws = connect_responses_ws(&gateway_url).await;
+
+    send_json(
+        &mut ws,
+        json!({
+            "type": "response.create",
+            "model": "test-model",
+            "input": [],
+            "store": false,
+            "stream": true
+        }),
+    )
+    .await;
+
+    let response = recv_until_completed(&mut ws).await;
+    assert_eq!(
+        response.last().unwrap()["response"]["output"][0]["content"][0]["text"],
+        "HELLO"
+    );
+    let requests = mock.request_bodies().await;
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0]["input"], json!([]));
 }
 
 #[tokio::test]
