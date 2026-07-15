@@ -7,7 +7,7 @@ use http::StatusCode;
 use tracing::warn;
 
 use agentic_core::executor::{BoxStream, ExecutorError};
-use agentic_core::proxy::{ProxyBody, ProxyResponse, error_response};
+use agentic_core::proxy::{ProxyAuth, ProxyBody, ProxyResponse, error_response_for_auth};
 use agentic_core::types::request_response::RequestPayload;
 
 pub(super) const MAX_BODY_SIZE: usize = 10 * 1024 * 1024;
@@ -40,11 +40,16 @@ pub fn executor_error_response(err: ExecutorError) -> Response {
 }
 
 pub(super) async fn read_bytes(body: Body) -> Result<Bytes, Response> {
+    read_bytes_with_auth(body, ProxyAuth::OpenAiBearer).await
+}
+
+pub(super) async fn read_bytes_with_auth(body: Body, auth: ProxyAuth) -> Result<Bytes, Response> {
     axum::body::to_bytes(body, MAX_BODY_SIZE).await.map_err(|_| {
-        convert_response(error_response(
+        convert_response(error_response_for_auth(
             StatusCode::PAYLOAD_TOO_LARGE,
             "body_too_large",
             "request body too large",
+            auth,
         ))
     })
 }

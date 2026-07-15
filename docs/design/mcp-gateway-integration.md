@@ -1,6 +1,6 @@
 # MCP Gateway Integration
 
-Target: `crates/agentic-core/`
+Target: `crates/agentic-server-core/`
 Reference: [mcp handlers](https://github.com/openai/codex/tree/main/codex-rs/core/src/tools/handlers), [rmcp-client](https://github.com/openai/codex/tree/main/codex-rs/rmcp-client), [turn.rs](https://github.com/openai/codex/blob/main/codex-rs/core/src/session/turn.rs), [rust-sdk README](https://github.com/modelcontextprotocol/rust-sdk#readme)
 
 ---
@@ -13,6 +13,20 @@ This design uses [`rmcp`](https://github.com/modelcontextprotocol/rust-sdk) as t
 2. **MCP Tools** ([rust-sdk `#[tool]` macro](https://github.com/modelcontextprotocol/rust-sdk#tools)): for standalone MCP server tools that expose computation or actions. The `#[tool]` macro auto-generates the JSON schema, validation, and MCP wire format for a server that agentic-api connects to via `McpClientPool`. Examples:
    - **stdio MCP server** (`connect_stdio`): a locally spawned process (command + args) the gateway connects to over stdin/stdout. Users wire up their own MCP server process and the gateway talks to it via rmcp's `TokioChildProcess` transport.
    - **calculator** (reference example from [rust-sdk Tools](https://github.com/modelcontextprotocol/rust-sdk#tools)): simplest possible `#[tool]` server, useful as a template.
+
+### HTTP server allowlist security
+
+Request-provided MCP server URLs allow loopback hosts by default. Additional
+hostnames can be allowed with the comma-separated `AGENTIC_MCP_ALLOWED_HOSTS`
+environment variable.
+
+Treat every hostname added to `AGENTIC_MCP_ALLOWED_HOSTS` as fully trusted. The
+allowlist validates the hostname text, while the HTTP transport performs DNS
+resolution later and does not pin the resolved IP address. Consequently, this
+setting is not an IP-level SSRF boundary and is unsafe for hostnames whose DNS
+records could be changed by an untrusted party (including through DNS
+rebinding). Only add hostnames whose DNS configuration is controlled by a
+trusted administrator.
 
 ### First built-in tool: `read_mcp_resource`
 

@@ -9,7 +9,7 @@ use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use agentic_core::executor::ExecutionContext;
 use agentic_core::proxy::ProxyState;
 
-use crate::handler::{conversations, health, models, ready, responses, responses_ws};
+use crate::handler::{conversations, count_tokens, health, messages, models, ready, responses, responses_ws};
 
 /// Server-level configuration read from environment variables.
 pub struct ServerConfig {
@@ -75,6 +75,8 @@ pub fn build_router(state: AppState, server_config: &ServerConfig) -> Router {
         .route("/ready", get(ready))
         .route("/v1/conversations", post(conversations))
         .route("/v1/models", get(models))
+        .route("/v1/messages", post(messages))
+        .route("/v1/messages/count_tokens", post(count_tokens))
         .route("/v1/responses", post(responses).get(responses_ws))
         .layer(server_config.cors_layer())
         .with_state(state)

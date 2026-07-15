@@ -1,0 +1,3536 @@
+turns:
+- filename: t1
+  request:
+    body:
+      input: 'You have one MCP resource tool available: read_mcp_resource. The MCP
+        server label is repo. Call read_mcp_resource exactly once with server repo
+        and uri repo://crates/agentic-server-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml.
+        If the call fails, report the error you received in one sentence.'
+      max_output_tokens: 1024
+      model: Qwen/Qwen3-30B-A3B-FP8
+      store: true
+      stream: true
+      tool_choice: required
+      tools:
+      - name: read_mcp_resource
+        server_label: repo
+        server_url: http://127.0.0.1:1/mcp
+        type: mcp
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    headers:
+      content-type: text/event-stream; charset=utf-8
+    sse:
+    - 'data: {"response":{"background":false,"created_at":1783949051,"frequency_penalty":0.0,"id":"resp_019f5ba6-4619-7e91-9bc6-23172bc36bc0","incomplete_details":null,"input_messages":null,"instructions":null,"kv_transfer_params":null,"max_output_tokens":1024,"max_tool_calls":null,"metadata":null,"model":"Qwen/Qwen3-30B-A3B-FP8","object":"response","output":[],"output_messages":null,"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","temperature":0.6,"text":{"format":{"description":null,"name":"tool_calling_response","schema":{"items":{"anyOf":[{"properties":{"name":{"enum":["read_mcp_resource"],"type":"string"},"parameters":{"additionalProperties":false,"properties":{"server":{"description":"The
+      server_label to read from.","type":"string"},"uri":{"description":"The resource
+      URI to read.","type":"string"}},"required":["server","uri"],"type":"object"}},"required":["name","parameters"]}],"type":"object"},"minItems":1,"type":"array"},"strict":true,"type":"json_schema"},"verbosity":null},"tool_choice":"required","tools":[{"defer_loading":null,"description":"Read
+      a resource by URI from a connected MCP server.","name":"read_mcp_resource","parameters":{"additionalProperties":false,"properties":{"server":{"description":"The
+      server_label to read from.","type":"string"},"uri":{"description":"The resource
+      URI to read.","type":"string"}},"required":["server","uri"],"type":"object"},"strict":false,"type":"function"}],"top_logprobs":null,"top_p":0.95,"truncation":"disabled","usage":null,"user":null},"sequence_number":0,"type":"response.created"}
+
+      '
+    - '
+
+      '
+    - 'data: {"response":{"background":false,"created_at":1783949051,"frequency_penalty":0.0,"id":"resp_019f5ba6-4619-7e91-9bc6-23172bc36bc0","incomplete_details":null,"input_messages":null,"instructions":null,"kv_transfer_params":null,"max_output_tokens":1024,"max_tool_calls":null,"metadata":null,"model":"Qwen/Qwen3-30B-A3B-FP8","object":"response","output":[],"output_messages":null,"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","temperature":0.6,"text":{"format":{"description":null,"name":"tool_calling_response","schema":{"items":{"anyOf":[{"properties":{"name":{"enum":["read_mcp_resource"],"type":"string"},"parameters":{"additionalProperties":false,"properties":{"server":{"description":"The
+      server_label to read from.","type":"string"},"uri":{"description":"The resource
+      URI to read.","type":"string"}},"required":["server","uri"],"type":"object"}},"required":["name","parameters"]}],"type":"object"},"minItems":1,"type":"array"},"strict":true,"type":"json_schema"},"verbosity":null},"tool_choice":"required","tools":[{"defer_loading":null,"description":"Read
+      a resource by URI from a connected MCP server.","name":"read_mcp_resource","parameters":{"additionalProperties":false,"properties":{"server":{"description":"The
+      server_label to read from.","type":"string"},"uri":{"description":"The resource
+      URI to read.","type":"string"}},"required":["server","uri"],"type":"object"},"strict":false,"type":"function"}],"top_logprobs":null,"top_p":0.95,"truncation":"disabled","usage":null,"user":null},"sequence_number":1,"type":"response.in_progress"}
+
+      '
+    - '
+
+      '
+    - 'data: {"item":{"content":null,"encrypted_content":null,"id":"9d5cb45e2e12beba","status":"in_progress","summary":[],"type":"reasoning"},"output_index":0,"sequence_number":2,"type":"response.output_item.added"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"item_id":"9d5cb45e2e12beba","output_index":0,"part":{"text":"","type":"reasoning_text"},"sequence_number":3,"type":"response.reasoning_part.added"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"\n","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":4,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"Okay","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":5,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":",","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":6,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" let","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":7,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" me","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":8,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" try","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":9,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" to","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":10,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" figure","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":11,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" out","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":12,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" how","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":13,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" to","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":14,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" handle","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":15,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" this","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":16,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" user","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":17,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"''s","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":18,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" request","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":19,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":20,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" They","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":21,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" mentioned","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":22,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" that","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":23,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" I","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":24,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" have","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":25,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" access","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":26,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" to","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":27,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":28,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" read","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":29,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"_m","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":30,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"cp","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":31,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"_resource","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":32,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" function","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":33,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":",","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":34,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" which","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":35,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" is","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":36,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" used","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":37,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" to","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":38,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" read","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":39,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" a","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":40,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" resource","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":41,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" by","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":42,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" URI","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":43,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" from","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":44,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" an","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":45,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" MCP","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":46,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" server","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":47,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":48,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" The","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":49,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" server","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":50,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" label","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":51,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" is","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":52,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" given","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":53,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" as","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":54,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" \"","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":55,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"repo","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":56,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"\",","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":57,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" and","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":58,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":59,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" URI","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":60,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" they","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":61,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" want","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":62,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" me","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":63,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" to","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":64,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" use","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":65,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" is","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":66,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" \"","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":67,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"repo","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":68,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"://","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":69,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"cr","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":70,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"ates","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":71,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"/ag","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":72,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"entic","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":73,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"-server","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":74,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"-core","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":75,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"/tests","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":76,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"/c","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":77,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"asset","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":78,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"tes","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":79,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"/web","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":80,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"_search","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":81,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"/g","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":82,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"pt","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":83,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"_","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":84,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"oss","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":85,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"_web","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":86,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"_search","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":87,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"_non","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":88,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"stream","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":89,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"ing","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":90,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".yaml","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":91,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"\".","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":92,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" \n\n","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":93,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"First","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":94,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":",","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":95,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" I","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":96,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" need","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":97,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" to","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":98,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" make","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":99,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" sure","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":100,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" I","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":101,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" understand","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":102,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":103,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" parameters","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":104,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" required","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":105,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" for","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":106,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":107,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" function","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":108,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":109,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" The","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":110,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" function","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":111,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" requires","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":112,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" both","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":113,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" \"","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":114,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"server","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":115,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"\"","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":116,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" and","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":117,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" \"","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":118,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"uri","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":119,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"\"","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":120,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" parameters","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":121,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":122,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" The","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":123,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" user","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":124,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" specified","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":125,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":126,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" server","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":127,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" as","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":128,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" \"","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":129,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"repo","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":130,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"\"","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":131,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" and","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":132,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":133,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" URI","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":134,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" as","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":135,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" that","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":136,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" long","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":137,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" path","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":138,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":139,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" So","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":140,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" I","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":141,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" should","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":142,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" structure","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":143,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":144,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" function","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":145,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" call","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":146,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" with","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":147,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" those","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":148,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" exact","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":149,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" values","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":150,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".\n\n","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":151,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"Wait","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":152,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":",","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":153,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":154,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" URI","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":155,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" starts","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":156,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" with","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":157,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" \"","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":158,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"repo","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":159,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"://","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":160,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"\",","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":161,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" which","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":162,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" might","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":163,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" be","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":164,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" a","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":165,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" specific","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":166,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" format","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":167,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":168,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" server","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":169,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" expects","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":170,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":171,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" I","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":172,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" need","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":173,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" to","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":174,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" pass","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":175,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" that","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":176,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" URI","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":177,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" as","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":178,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"-is","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":179,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":180,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" The","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":181,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" user","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":182,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" also","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":183,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" said","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":184,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" to","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":185,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" call","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":186,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":187,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" function","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":188,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" exactly","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":189,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" once","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":190,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":191,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" So","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":192,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" I","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":193,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" shouldn","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":194,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"''t","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":195,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" do","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":196,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" anything","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":197,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" else","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":198,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" but","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":199,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" make","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":200,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" that","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":201,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" single","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":202,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" call","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":203,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".\n\n","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":204,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"The","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":205,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" user","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":206,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" mentioned","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":207,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" that","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":208,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" if","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":209,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":210,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" call","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":211,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" fails","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":212,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":",","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":213,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" I","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":214,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" should","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":215,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" report","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":216,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":217,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" error","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":218,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" in","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":219,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" one","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":220,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" sentence","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":221,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":222,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" But","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":223,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" since","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":224,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" I","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":225,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"''m","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":226,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" just","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":227,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" sim","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":228,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"ulating","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":229,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":230,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" process","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":231,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":",","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":232,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" I","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":233,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" don","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":234,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"''t","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":235,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" actually","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":236,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" have","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":237,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":238,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" capability","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":239,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" to","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":240,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" make","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":241,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":242,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" call","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":243,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":244,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" However","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":245,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":",","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":246,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" in","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":247,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" a","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":248,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" real","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":249,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" scenario","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":250,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":",","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":251,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" I","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":252,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" would","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":253,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" need","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":254,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" to","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":255,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" handle","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":256,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" any","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":257,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" exceptions","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":258,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" or","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":259,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" errors","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":260,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" that","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":261,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" might","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":262,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" occur","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":263,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" during","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":264,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":265,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" HTTP","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":266,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" request","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":267,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":268,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" But","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":269,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" for","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":270,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" this","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":271,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" task","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":272,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":",","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":273,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" I","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":274,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" just","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":275,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" need","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":276,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" to","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":277,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" generate","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":278,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":279,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" correct","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":280,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" tool","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":281,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" call","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":282,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".\n\n","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":283,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"So","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":284,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":285,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" correct","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":286,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" JSON","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":287,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" object","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":288,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" should","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":289,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" have","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":290,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":291,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" name","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":292,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" \"","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":293,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"read","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":294,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"_m","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":295,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"cp","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":296,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"_resource","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":297,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"\"","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":298,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" and","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":299,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":300,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" arguments","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":301,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" with","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":302,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" server","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":303,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" \"","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":304,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"repo","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":305,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"\"","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":306,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" and","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":307,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" uri","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":308,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" \"","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":309,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"repo","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":310,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"://","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":311,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"cr","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":312,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"ates","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":313,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"/ag","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":314,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"entic","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":315,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"-server","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":316,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"-core","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":317,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"/tests","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":318,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"/c","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":319,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"asset","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":320,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"tes","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":321,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"/web","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":322,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"_search","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":323,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"/g","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":324,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"pt","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":325,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"_","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":326,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"oss","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":327,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"_web","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":328,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"_search","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":329,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"_non","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":330,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"stream","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":331,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"ing","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":332,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".yaml","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":333,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"\".","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":334,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" I","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":335,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" need","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":336,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" to","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":337,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" make","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":338,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" sure","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":339,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" there","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":340,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" are","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":341,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" no","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":342,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" ty","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":343,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"pos","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":344,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" in","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":345,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":346,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" JSON","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":347,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" structure","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":348,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":349,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" Also","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":350,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":",","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":351,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" check","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":352,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" that","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":353,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":354,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" parameters","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":355,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" are","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":356,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" required","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":357,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" and","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":358,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" that","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":359,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":360,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" server","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":361,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" and","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":362,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" uri","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":363,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" are","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":364,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" correctly","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":365,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" formatted","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":366,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".\n\n","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":367,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"I","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":368,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" think","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":369,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" that","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":370,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"''s","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":371,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" all","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":372,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":373,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" Just","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":374,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" need","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":375,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" to","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":376,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" output","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":377,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":378,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" tool","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":379,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"_call","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":380,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" XML","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":381,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" with","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":382,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":383,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" correct","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":384,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" JSON","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":385,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" inside","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":386,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".\n","item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":387,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"item_id":"9d5cb45e2e12beba","output_index":0,"sequence_number":388,"text":"\nOkay,
+      let me try to figure out how to handle this user''s request. They mentioned
+      that I have access to the read_mcp_resource function, which is used to read
+      a resource by URI from an MCP server. The server label is given as \"repo\",
+      and the URI they want me to use is \"repo://crates/agentic-server-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml\".
+      \n\nFirst, I need to make sure I understand the parameters required for the
+      function. The function requires both \"server\" and \"uri\" parameters. The
+      user specified the server as \"repo\" and the URI as that long path. So I should
+      structure the function call with those exact values.\n\nWait, the URI starts
+      with \"repo://\", which might be a specific format the server expects. I need
+      to pass that URI as-is. The user also said to call the function exactly once.
+      So I shouldn''t do anything else but make that single call.\n\nThe user mentioned
+      that if the call fails, I should report the error in one sentence. But since
+      I''m just simulating the process, I don''t actually have the capability to make
+      the call. However, in a real scenario, I would need to handle any exceptions
+      or errors that might occur during the HTTP request. But for this task, I just
+      need to generate the correct tool call.\n\nSo the correct JSON object should
+      have the name \"read_mcp_resource\" and the arguments with server \"repo\" and
+      uri \"repo://crates/agentic-server-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml\".
+      I need to make sure there are no typos in the JSON structure. Also, check that
+      the parameters are required and that the server and uri are correctly formatted.\n\nI
+      think that''s all. Just need to output the tool_call XML with the correct JSON
+      inside.\n","type":"response.reasoning_text.done"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"item_id":"9d5cb45e2e12beba","output_index":0,"part":{"text":"\nOkay,
+      let me try to figure out how to handle this user''s request. They mentioned
+      that I have access to the read_mcp_resource function, which is used to read
+      a resource by URI from an MCP server. The server label is given as \"repo\",
+      and the URI they want me to use is \"repo://crates/agentic-server-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml\".
+      \n\nFirst, I need to make sure I understand the parameters required for the
+      function. The function requires both \"server\" and \"uri\" parameters. The
+      user specified the server as \"repo\" and the URI as that long path. So I should
+      structure the function call with those exact values.\n\nWait, the URI starts
+      with \"repo://\", which might be a specific format the server expects. I need
+      to pass that URI as-is. The user also said to call the function exactly once.
+      So I shouldn''t do anything else but make that single call.\n\nThe user mentioned
+      that if the call fails, I should report the error in one sentence. But since
+      I''m just simulating the process, I don''t actually have the capability to make
+      the call. However, in a real scenario, I would need to handle any exceptions
+      or errors that might occur during the HTTP request. But for this task, I just
+      need to generate the correct tool call.\n\nSo the correct JSON object should
+      have the name \"read_mcp_resource\" and the arguments with server \"repo\" and
+      uri \"repo://crates/agentic-server-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml\".
+      I need to make sure there are no typos in the JSON structure. Also, check that
+      the parameters are required and that the server and uri are correctly formatted.\n\nI
+      think that''s all. Just need to output the tool_call XML with the correct JSON
+      inside.\n","type":"reasoning_text"},"sequence_number":389,"type":"response.reasoning_part.done"}
+
+      '
+    - '
+
+      '
+    - 'data: {"item":{"content":[{"text":"\nOkay, let me try to figure out how to
+      handle this user''s request. They mentioned that I have access to the read_mcp_resource
+      function, which is used to read a resource by URI from an MCP server. The server
+      label is given as \"repo\", and the URI they want me to use is \"repo://crates/agentic-server-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml\".
+      \n\nFirst, I need to make sure I understand the parameters required for the
+      function. The function requires both \"server\" and \"uri\" parameters. The
+      user specified the server as \"repo\" and the URI as that long path. So I should
+      structure the function call with those exact values.\n\nWait, the URI starts
+      with \"repo://\", which might be a specific format the server expects. I need
+      to pass that URI as-is. The user also said to call the function exactly once.
+      So I shouldn''t do anything else but make that single call.\n\nThe user mentioned
+      that if the call fails, I should report the error in one sentence. But since
+      I''m just simulating the process, I don''t actually have the capability to make
+      the call. However, in a real scenario, I would need to handle any exceptions
+      or errors that might occur during the HTTP request. But for this task, I just
+      need to generate the correct tool call.\n\nSo the correct JSON object should
+      have the name \"read_mcp_resource\" and the arguments with server \"repo\" and
+      uri \"repo://crates/agentic-server-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml\".
+      I need to make sure there are no typos in the JSON structure. Also, check that
+      the parameters are required and that the server and uri are correctly formatted.\n\nI
+      think that''s all. Just need to output the tool_call XML with the correct JSON
+      inside.\n","type":"reasoning_text"}],"encrypted_content":null,"id":"9d5cb45e2e12beba","status":"completed","summary":[],"type":"reasoning"},"output_index":0,"sequence_number":390,"type":"response.output_item.done"}
+
+      '
+    - '
+
+      '
+    - 'data: {"item":{"arguments":{"server":"repo","uri":"repo://crates/agentic-server-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml"},"id":"mcp_8957973f0e080557","server":"repo","status":"in_progress","tool":"read_mcp_resource","type":"mcp_tool_call"},"output_index":1,"type":"response.output_item.added"}
+
+      '
+    - '
+
+      '
+    - 'data: {"item_id":"mcp_8957973f0e080557","output_index":1,"type":"response.mcp_tool_call.in_progress"}
+
+      '
+    - '
+
+      '
+    - 'data: {"item":{"arguments":{"server":"repo","uri":"repo://crates/agentic-server-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml"},"error":"MCP
+      server ''repo'' failed to connect: failed to connect to MCP server","id":"mcp_8957973f0e080557","server":"repo","status":"failed","tool":"read_mcp_resource","type":"mcp_tool_call"},"item_id":"mcp_8957973f0e080557","output_index":1,"type":"response.mcp_tool_call.completed"}
+
+      '
+    - '
+
+      '
+    - 'data: {"item":{"arguments":{"server":"repo","uri":"repo://crates/agentic-server-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml"},"error":"MCP
+      server ''repo'' failed to connect: failed to connect to MCP server","id":"mcp_8957973f0e080557","server":"repo","status":"failed","tool":"read_mcp_resource","type":"mcp_tool_call"},"output_index":1,"type":"response.output_item.done"}
+
+      '
+    - '
+
+      '
+    - 'data: {"response":{"background":false,"created_at":1783949054,"frequency_penalty":0.0,"id":"resp_019f5ba6-4619-7e91-9bc6-23172bc36bc0","incomplete_details":null,"input_messages":null,"instructions":null,"kv_transfer_params":null,"max_output_tokens":1024,"max_tool_calls":null,"metadata":null,"model":"Qwen/Qwen3-30B-A3B-FP8","object":"response","output":[],"output_messages":null,"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","temperature":0.6,"text":null,"tool_choice":"auto","tools":[{"defer_loading":null,"description":"Read
+      a resource by URI from a connected MCP server.","name":"read_mcp_resource","parameters":{"additionalProperties":false,"properties":{"server":{"description":"The
+      server_label to read from.","type":"string"},"uri":{"description":"The resource
+      URI to read.","type":"string"}},"required":["server","uri"],"type":"object"},"strict":false,"type":"function"}],"top_logprobs":null,"top_p":0.95,"truncation":"disabled","usage":null,"user":null},"sequence_number":0,"type":"response.created"}
+
+      '
+    - '
+
+      '
+    - 'data: {"response":{"background":false,"created_at":1783949054,"frequency_penalty":0.0,"id":"resp_019f5ba6-4619-7e91-9bc6-23172bc36bc0","incomplete_details":null,"input_messages":null,"instructions":null,"kv_transfer_params":null,"max_output_tokens":1024,"max_tool_calls":null,"metadata":null,"model":"Qwen/Qwen3-30B-A3B-FP8","object":"response","output":[],"output_messages":null,"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","temperature":0.6,"text":null,"tool_choice":"auto","tools":[{"defer_loading":null,"description":"Read
+      a resource by URI from a connected MCP server.","name":"read_mcp_resource","parameters":{"additionalProperties":false,"properties":{"server":{"description":"The
+      server_label to read from.","type":"string"},"uri":{"description":"The resource
+      URI to read.","type":"string"}},"required":["server","uri"],"type":"object"},"strict":false,"type":"function"}],"top_logprobs":null,"top_p":0.95,"truncation":"disabled","usage":null,"user":null},"sequence_number":1,"type":"response.in_progress"}
+
+      '
+    - '
+
+      '
+    - 'data: {"item":{"content":[],"id":"bbd5c621572c64ef","phase":null,"role":"assistant","status":"in_progress","type":"message"},"output_index":0,"sequence_number":2,"type":"response.output_item.added"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"item_id":"bbd5c621572c64ef","output_index":0,"part":{"annotations":[],"logprobs":[],"text":"","type":"output_text"},"sequence_number":3,"type":"response.content_part.added"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"<think>","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":4,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"\n","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":5,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"Okay","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":6,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":",","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":7,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":8,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" user","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":9,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" asked","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":10,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" me","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":11,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" to","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":12,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" call","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":13,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":14,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" read","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":15,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"_m","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":16,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"cp","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":17,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"_resource","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":18,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" function","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":19,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" with","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":20,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" specific","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":21,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" parameters","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":22,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":23,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" I","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":24,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" generated","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":25,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":26,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" tool","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":27,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" call","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":28,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" correctly","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":29,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":",","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":30,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" but","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":31,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":32,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" response","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":33,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" indicates","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":34,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" a","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":35,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" failure","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":36,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":37,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" The","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":38,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" error","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":39,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" message","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":40,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" says","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":41,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":42,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" MCP","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":43,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" server","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":44,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" ''","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":45,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"repo","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":46,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"''","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":47,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" failed","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":48,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" to","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":49,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" connect","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":50,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":51,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" I","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":52,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" need","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":53,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" to","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":54,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" report","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":55,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" this","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":56,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" error","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":57,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" in","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":58,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" one","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":59,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" sentence","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":60,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" as","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":61,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" instructed","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":62,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".\n\n","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":63,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"I","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":64,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" should","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":65,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" check","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":66,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" if","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":67,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" there","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":68,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"''s","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":69,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" any","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":70,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" additional","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":71,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" information","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":72,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" needed","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":73,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":",","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":74,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" but","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":75,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":76,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" user","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":77,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" specified","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":78,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" to","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":79,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" report","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":80,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":81,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" error","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":82,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" received","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":83,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":84,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" The","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":85,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" error","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":86,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" message","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":87,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" from","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":88,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":89,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" tool","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":90,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" response","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":91,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" is","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":92,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" clear","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":93,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":":","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":94,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" \"","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":95,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"M","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":96,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"CP","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":97,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" server","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":98,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" ''","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":99,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"repo","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":100,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"''","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":101,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" failed","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":102,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" to","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":103,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" connect","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":104,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":":","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":105,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" failed","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":106,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" to","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":107,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" connect","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":108,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" to","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":109,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" MCP","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":110,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" server","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":111,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"\".","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":112,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" I","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":113,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" should","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":114,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" present","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":115,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" this","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":116,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" exactly","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":117,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" as","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":118,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" it","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":119,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" is","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":120,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":",","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":121,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" without","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":122,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" adding","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":123,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" anything","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":124,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" else","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":125,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":126,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" Make","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":127,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" sure","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":128,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" it","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":129,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"''s","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":130,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" a","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":131,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" single","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":132,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" sentence","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":133,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":134,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" Alright","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":135,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":",","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":136,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" that","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":137,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"''s","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":138,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" straightforward","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":139,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".\n","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":140,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"</think>","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":141,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"\n\n","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":142,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"The","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":143,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" MCP","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":144,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" server","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":145,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" ''","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":146,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"repo","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":147,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"''","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":148,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" failed","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":149,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" to","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":150,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" connect","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":151,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":":","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":152,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" failed","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":153,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" to","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":154,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" connect","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":155,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" to","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":156,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" MCP","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":157,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" server","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":158,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".","item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":159,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"item_id":"bbd5c621572c64ef","logprobs":[],"output_index":0,"sequence_number":160,"text":"<think>\nOkay,
+      the user asked me to call the read_mcp_resource function with specific parameters.
+      I generated the tool call correctly, but the response indicates a failure. The
+      error message says the MCP server ''repo'' failed to connect. I need to report
+      this error in one sentence as instructed.\n\nI should check if there''s any
+      additional information needed, but the user specified to report the error received.
+      The error message from the tool response is clear: \"MCP server ''repo'' failed
+      to connect: failed to connect to MCP server\". I should present this exactly
+      as it is, without adding anything else. Make sure it''s a single sentence. Alright,
+      that''s straightforward.\n</think>\n\nThe MCP server ''repo'' failed to connect:
+      failed to connect to MCP server.","type":"response.output_text.done"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"item_id":"bbd5c621572c64ef","output_index":0,"part":{"annotations":[],"logprobs":null,"text":"<think>\nOkay,
+      the user asked me to call the read_mcp_resource function with specific parameters.
+      I generated the tool call correctly, but the response indicates a failure. The
+      error message says the MCP server ''repo'' failed to connect. I need to report
+      this error in one sentence as instructed.\n\nI should check if there''s any
+      additional information needed, but the user specified to report the error received.
+      The error message from the tool response is clear: \"MCP server ''repo'' failed
+      to connect: failed to connect to MCP server\". I should present this exactly
+      as it is, without adding anything else. Make sure it''s a single sentence. Alright,
+      that''s straightforward.\n</think>\n\nThe MCP server ''repo'' failed to connect:
+      failed to connect to MCP server.","type":"output_text"},"sequence_number":161,"type":"response.content_part.done"}
+
+      '
+    - '
+
+      '
+    - 'data: {"item":{"content":[{"annotations":[],"logprobs":null,"text":"<think>\nOkay,
+      the user asked me to call the read_mcp_resource function with specific parameters.
+      I generated the tool call correctly, but the response indicates a failure. The
+      error message says the MCP server ''repo'' failed to connect. I need to report
+      this error in one sentence as instructed.\n\nI should check if there''s any
+      additional information needed, but the user specified to report the error received.
+      The error message from the tool response is clear: \"MCP server ''repo'' failed
+      to connect: failed to connect to MCP server\". I should present this exactly
+      as it is, without adding anything else. Make sure it''s a single sentence. Alright,
+      that''s straightforward.\n</think>\n\nThe MCP server ''repo'' failed to connect:
+      failed to connect to MCP server.","type":"output_text"}],"id":"bbd5c621572c64ef","phase":null,"role":"assistant","status":"completed","summary":[],"type":"message"},"output_index":0,"sequence_number":162,"type":"response.output_item.done"}
+
+      '
+    - '
+
+      '
+    - 'data: {"response":{"conversation_id":null,"created_at":1783949055,"error":null,"id":"resp_019f5ba6-4619-7e91-9bc6-23172bc36bc0","incomplete_details":null,"instructions":null,"model":"Qwen/Qwen3-30B-A3B-FP8","object":"response","output":[{"content":[{"text":"\nOkay,
+      let me try to figure out how to handle this user''s request. They mentioned
+      that I have access to the read_mcp_resource function, which is used to read
+      a resource by URI from an MCP server. The server label is given as \"repo\",
+      and the URI they want me to use is \"repo://crates/agentic-server-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml\".
+      \n\nFirst, I need to make sure I understand the parameters required for the
+      function. The function requires both \"server\" and \"uri\" parameters. The
+      user specified the server as \"repo\" and the URI as that long path. So I should
+      structure the function call with those exact values.\n\nWait, the URI starts
+      with \"repo://\", which might be a specific format the server expects. I need
+      to pass that URI as-is. The user also said to call the function exactly once.
+      So I shouldn''t do anything else but make that single call.\n\nThe user mentioned
+      that if the call fails, I should report the error in one sentence. But since
+      I''m just simulating the process, I don''t actually have the capability to make
+      the call. However, in a real scenario, I would need to handle any exceptions
+      or errors that might occur during the HTTP request. But for this task, I just
+      need to generate the correct tool call.\n\nSo the correct JSON object should
+      have the name \"read_mcp_resource\" and the arguments with server \"repo\" and
+      uri \"repo://crates/agentic-server-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml\".
+      I need to make sure there are no typos in the JSON structure. Also, check that
+      the parameters are required and that the server and uri are correctly formatted.\n\nI
+      think that''s all. Just need to output the tool_call XML with the correct JSON
+      inside.\n","type":"reasoning_text"}],"encrypted_content":null,"id":"9d5cb45e2e12beba","status":null,"summary":[],"type":"reasoning"},{"arguments":{"server":"repo","uri":"repo://crates/agentic-server-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml"},"error":"MCP
+      server ''repo'' failed to connect: failed to connect to MCP server","id":"mcp_8957973f0e080557","server":"repo","status":"failed","tool":"read_mcp_resource","type":"mcp_tool_call"},{"content":[{"annotations":[],"text":"<think>\nOkay,
+      the user asked me to call the read_mcp_resource function with specific parameters.
+      I generated the tool call correctly, but the response indicates a failure. The
+      error message says the MCP server ''repo'' failed to connect. I need to report
+      this error in one sentence as instructed.\n\nI should check if there''s any
+      additional information needed, but the user specified to report the error received.
+      The error message from the tool response is clear: \"MCP server ''repo'' failed
+      to connect: failed to connect to MCP server\". I should present this exactly
+      as it is, without adding anything else. Make sure it''s a single sentence. Alright,
+      that''s straightforward.\n</think>\n\nThe MCP server ''repo'' failed to connect:
+      failed to connect to MCP server.","type":"output_text"}],"id":"bbd5c621572c64ef","role":"assistant","status":"completed","type":"message"}],"previous_response_id":null,"status":"completed","usage":{"input_tokens":1028,"input_tokens_details":{"cached_tokens":928},"output_tokens":593,"output_tokens_details":{"reasoning_tokens":520},"total_tokens":1621}},"type":"response.completed"}
+
+      '
+    - '
+
+      '
+    - 'data: [DONE]
+
+      '
+    - '
+
+      '
+    status_code: 200
