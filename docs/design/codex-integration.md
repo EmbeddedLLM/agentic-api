@@ -147,7 +147,7 @@ For response items:
 | Response item | Behavior |
 |---------------|----------|
 | `function_call` | Preserve optional `namespace`; restore flat namespace calls before returning to Codex. |
-| `custom_tool_call` | Preserve raw `input`; return it to Codex for local execution. | 
+| `custom_tool_call` | Preserve raw `input`; return it to Codex for local execution. |
 | `web_search_call` | Gateway-owned result from the web-search executor. |
 | `mcp_tool_call` | Gateway-owned MCP execution result, including server/tool identity, arguments, status, and result or error. |
 | Unknown output item | Recognized as an unknown unit variant on the typed path; opaque fields are not preserved or executed. |
