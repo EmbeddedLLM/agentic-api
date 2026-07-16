@@ -240,7 +240,7 @@ impl ResponseAccumulator {
         let Some(data) = line.strip_prefix("data: ") else {
             return;
         };
-        let Ok(mut event) = serde_json::from_str::<serde_json::Value>(data) else {
+        let Ok(mut event) = deserialize_from_str::<serde_json::Value>(data) else {
             return;
         };
         let Some(response) = event.get_mut("response") else {
@@ -372,7 +372,8 @@ impl ResponseAccumulator {
     }
 
     fn complete_custom_tool_call(&mut self, item_id: &str, raw_item: &serde_json::Value) {
-        let Ok(OutputItem::CustomToolCall(mut call)) = serde_json::from_value::<OutputItem>(raw_item.clone()) else {
+        let Some(OutputItem::CustomToolCall(mut call)) = deserialize_from_value_opt::<OutputItem>(raw_item.clone())
+        else {
             return;
         };
 

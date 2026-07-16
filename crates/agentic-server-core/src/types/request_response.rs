@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use super::io::{InputItem, InputMessage, InputMessageContent, OutputItem, ResponseUsage, ResponsesInput, ToolChoice};
 use super::tools::ResponsesTool;
 use crate::tool::{CodexNamespaceHandler, ToolError};
-use crate::utils::common::serialize_to_string;
+use crate::utils::common::{serialize_to_string, serialize_to_value};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RequestPayload {
@@ -124,7 +124,7 @@ fn upstream_tool_values(tool: &ResponsesTool) -> Vec<Value> {
 
     tool.to_function_tools()
         .into_iter()
-        .map(|tool| serde_json::to_value(tool).expect("serialization of known struct is infallible"))
+        .map(|tool| serialize_to_value(&tool).expect("serialization of known struct is infallible"))
         .collect()
 }
 
@@ -301,6 +301,10 @@ mod tests {
         let payload: RequestPayload = serde_json::from_value(serde_json::json!({
             "model": "test",
             "input": "hi",
+            "tool_choice": {
+                "type": "custom",
+                "name": "apply_patch"
+            },
             "tools": [{
                 "type": "custom",
                 "name": "apply_patch",
@@ -318,6 +322,8 @@ mod tests {
         assert_eq!(upstream["tools"][0]["type"], "custom");
         assert_eq!(upstream["tools"][0]["name"], "apply_patch");
         assert_eq!(upstream["tools"][0]["format"]["definition"], "start: patch");
+        assert_eq!(upstream["tool_choice"]["type"], "custom");
+        assert_eq!(upstream["tool_choice"]["name"], "apply_patch");
     }
 
     #[test]

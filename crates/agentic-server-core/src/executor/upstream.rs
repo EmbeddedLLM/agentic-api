@@ -12,7 +12,7 @@ use crate::executor::inference::{call_inference, fetch_response_json};
 use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::tool::ToolRegistry;
 use crate::types::request_response::ResponsePayload;
-use crate::utils::common::serialize_to_string;
+use crate::utils::common::{deserialize_from_str, serialize_to_string};
 
 pub(super) async fn fetch_blocking_payload(
     ctx: &RequestContext,
@@ -93,7 +93,7 @@ fn log_upstream_failure(line: &str, gateway_response_id: &str) {
     let Some(data) = line.strip_prefix("data: ") else {
         return;
     };
-    let Ok(event) = serde_json::from_str::<Value>(data) else {
+    let Ok(event) = deserialize_from_str::<Value>(data) else {
         return;
     };
     let response = &event["response"];

@@ -10,17 +10,21 @@ use super::mcp::McpHandler;
 use super::web_search::web_search_function_tool;
 
 impl ResponsesTool {
-    /// Normalise this tool declaration to the `FunctionTool` wire format that vLLM understands.
+    /// Normalise function-like tool declarations to the `FunctionTool` wire format that vLLM understands.
     ///
     /// - `Function` variants convert via [`From<&FunctionToolParam>`] for `FunctionTool`.
-    ///   Returns `None` and logs at `debug` level if the name is empty.
+    ///   Returns an empty list and logs at `debug` level if the name is empty.
     /// - `Mcp` variants convert gateway MCP built-ins to the function specs
     ///   vLLM can call.
+    /// - `Custom` variants return no function tools because
+    ///   `RequestPayload::to_upstream_request()` forwards their native
+    ///   Responses declarations separately.
     /// - Unimplemented variants (`FileSearch`, `CodeInterpreter`) return
-    ///   `None` and emit a `tracing::debug!`.
+    ///   an empty list and emit a `tracing::debug!`.
     ///
-    /// This is the entry point called by `RequestPayload::to_upstream_request()` so that
-    /// vLLM always receives a `Vec<FunctionTool>`, never a raw `ResponsesTool` enum.
+    /// `RequestPayload::to_upstream_request()` uses this conversion for
+    /// function-like tools while preserving native custom declarations in its
+    /// heterogeneous upstream tool list.
     #[must_use]
     pub fn to_function_tools(&self) -> Vec<FunctionTool> {
         match self {
