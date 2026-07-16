@@ -72,9 +72,7 @@ impl InFlight {
                 if item.input.is_empty() {
                     item.input = input;
                 }
-                if item.status.as_deref().is_none_or(|status| status == "in_progress") {
-                    item.status = Some("completed".to_owned());
-                }
+                item.status = Some(MessageStatus::Completed);
                 output.push(OutputItem::CustomToolCall(item));
             }
         }
@@ -1246,6 +1244,6 @@ mod tests {
         assert_eq!(call.call_id, "call_1");
         assert_eq!(call.name, "apply_patch");
         assert_eq!(call.input, "*** Begin Patch");
-        assert_eq!(call.status.as_deref(), Some("completed"));
+        assert_eq!(call.status, Some(MessageStatus::Completed));
     }
 }

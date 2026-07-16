@@ -104,7 +104,7 @@ pub struct CustomToolCall {
     #[serde(default)]
     pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub status: Option<String>,
+    pub status: Option<MessageStatus>,
     #[serde(default)]
     pub call_id: String,
     #[serde(default)]
@@ -172,7 +172,7 @@ impl TryFrom<&EventPayload> for CustomToolCall {
         };
         Ok(Self {
             id,
-            status: Some("in_progress".to_owned()),
+            status: Some(MessageStatus::InProgress),
             call_id: call_id.as_deref().unwrap_or_default().to_owned(),
             name: name.as_deref().unwrap_or_default().to_owned(),
             input: String::new(),
@@ -472,11 +472,31 @@ mod tests {
         .unwrap();
 
         assert!(item.requires_client_action(&ToolRegistry::default()));
+        let OutputItem::CustomToolCall(call) = &item else {
+            panic!("expected custom tool call");
+        };
+        assert_eq!(call.status, Some(MessageStatus::Completed));
+
         let Some(InputItem::CustomToolCall(call)) = item.to_input_item() else {
             panic!("custom call should rehydrate as input");
         };
         assert_eq!(call.name, "apply_patch");
         assert_eq!(call.input, "*** Begin Patch\n*** End Patch");
+    }
+
+    #[test]
+    fn custom_tool_call_status_remains_optional_on_the_wire() {
+        let call: CustomToolCall = serde_json::from_value(serde_json::json!({
+            "id": "ctc_1",
+            "call_id": "call_1",
+            "name": "apply_patch",
+            "input": "patch"
+        }))
+        .unwrap();
+
+        assert_eq!(call.status, None);
+        let serialized = serde_json::to_value(call).unwrap();
+        assert!(serialized.get("status").is_none());
     }
 
     #[test]

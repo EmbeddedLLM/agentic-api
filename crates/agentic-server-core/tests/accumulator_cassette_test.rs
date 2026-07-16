@@ -644,7 +644,7 @@ fn test_codex_custom_tool_cassettes_preserve_raw_input() {
         let call = first_custom_tool_call(&output);
         assert_eq!(call.name, "agentic_raw_echo", "{label} custom tool name");
         assert_eq!(call.input, "CUSTOM_CASSETTE_OK", "{label} raw custom input");
-        assert_eq!(call.status.as_deref(), Some("completed"), "{label} custom status");
+        assert_eq!(call.status, Some(MessageStatus::Completed), "{label} custom status");
         assert!(!call.call_id.is_empty(), "{label} call_id must be populated");
     }
 }

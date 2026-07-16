@@ -3,8 +3,6 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::utils::common::serialize_to_value_or_custom_default;
-
 /// Error returned when a tool name is empty.
 ///
 /// Kept in `types/` so the wire-shape module stays self-contained and does
@@ -251,16 +249,6 @@ impl ResponsesTool {
             Self::Custom(_) => Some("custom"),
             Self::Unknown => None,
         }
-    }
-
-    #[must_use]
-    pub fn to_raw_value(&self) -> Value {
-        serialize_to_value_or_custom_default(
-            self,
-            "responses tool serialization failed",
-            std::convert::identity,
-            Value::Null,
-        )
     }
 }
 

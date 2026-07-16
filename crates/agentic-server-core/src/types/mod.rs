@@ -10,7 +10,7 @@ pub use io::{
     ReasoningTextContent, ResponseUsage, ResponsesInput, ToolChoice, WebSearchActionSearch, WebSearchCall,
     WebSearchCallStatus, WebSearchSource,
 };
-pub use request_response::{IncompleteDetails, RequestPayload, ResponsePayload, UpstreamRequest};
+pub use request_response::{IncompleteDetails, RequestPayload, ResponsePayload, UpstreamRequest, UpstreamTool};
 pub use tools::{
     CodeInterpreterToolParam, CodexNamespaceMember, CodexNamespaceToolParam, CustomToolParam, EmptyToolNameError,
     FileSearchToolParam, FunctionToolParam, McpToolParam, NonEmptyToolName, ResponsesTool, WebSearchContextSize,
