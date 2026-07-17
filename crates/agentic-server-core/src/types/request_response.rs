@@ -28,6 +28,8 @@ pub struct RequestPayload {
     pub max_output_tokens: Option<u32>,
     pub truncation: Option<String>,
     pub metadata: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_salt: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -61,6 +63,8 @@ pub struct UpstreamRequest<'a> {
     pub truncation: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<&'a Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_salt: Option<&'a str>,
 }
 
 /// A tool declaration supported by the upstream Responses endpoint.
@@ -147,6 +151,7 @@ impl RequestPayload {
             max_output_tokens: self.max_output_tokens,
             truncation: self.truncation.as_deref(),
             metadata: self.metadata.as_ref(),
+            cache_salt: self.cache_salt.as_deref(),
         })
     }
 }
@@ -245,6 +250,21 @@ impl From<&ResponsesInput> for Vec<InputItem> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn request_payload_forwards_cache_salt_upstream() {
+        let payload: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test-model",
+            "input": "hello",
+            "cache_salt": "tenant-a"
+        }))
+        .expect("request should deserialize");
+
+        let upstream = serde_json::to_value(payload.to_upstream_request(false).expect("request should normalize"))
+            .expect("upstream request should serialize");
+
+        assert_eq!(upstream["cache_salt"], "tenant-a");
+    }
 
     #[test]
     fn request_payload_uses_option_tool_choice_for_missing_vs_explicit() {

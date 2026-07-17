@@ -120,6 +120,7 @@ mod tests {
             max_output_tokens: None,
             truncation: None,
             metadata: None,
+            cache_salt: None,
         };
         RequestContext {
             enriched_request: req.clone(),
