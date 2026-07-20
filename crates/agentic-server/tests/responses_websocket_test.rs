@@ -25,7 +25,7 @@ use tokio_util::sync::CancellationToken;
 use agentic_core::executor::{ConversationHandler, ExecutionContext, ResponseHandler};
 use agentic_core::proxy::ProxyState;
 use agentic_core::storage::{ConversationStore, ResponseStore, create_pool_with_schema};
-use agentic_core::tool::WebSearchHandler;
+use agentic_core::tool::{WebSearchHandler, model_visible_namespace_member_name};
 use agentic_server::app::{AppState, WebSocketTracker};
 
 use common::{spawn_gateway, test_config};
@@ -821,6 +821,65 @@ async fn test_websocket_restores_namespace_tool_call_events() {
         requests[0]["tools"][0]["name"],
         "agentic_ns__mcp__agentic_fixture__add_numbers"
     );
+}
+
+#[tokio::test]
+async fn test_websocket_bounds_and_restores_long_namespace_tool_name() {
+    let namespace = "mcp__codex_apps__github";
+    let member = "_remove_reaction_from_pr_review_comment";
+    let upstream_name = model_visible_namespace_member_name(namespace, member);
+    let mock = MockResponsesServer::start(vec![sse_function_call_response(
+        "resp_upstream_long_namespace",
+        &upstream_name,
+    )])
+    .await;
+    let fixture = storage_backed_state(&mock.url).await;
+    let (gateway_url, _gateway) = spawn_gateway(fixture.state.clone()).await;
+    let mut ws = connect_responses_ws(&gateway_url).await;
+
+    send_json(
+        &mut ws,
+        json!({
+            "type": "response.create",
+            "model": "test-model",
+            "input": "use the long namespace tool",
+            "tools": [{
+                "type": "namespace",
+                "name": namespace,
+                "tools": [{
+                    "type": "function",
+                    "name": member,
+                    "parameters": {"type": "object"}
+                }]
+            }],
+            "store": true,
+            "stream": true
+        }),
+    )
+    .await;
+
+    let events = recv_until_completed(&mut ws).await;
+    let added = events
+        .iter()
+        .find(|event| event["type"] == "response.output_item.added")
+        .unwrap();
+    let done = events
+        .iter()
+        .find(|event| event["type"] == "response.output_item.done")
+        .unwrap();
+    assert_eq!(added["item"]["namespace"], namespace);
+    assert_eq!(added["item"]["name"], member);
+    assert_eq!(done["item"]["namespace"], namespace);
+    assert_eq!(done["item"]["name"], member);
+
+    let completed = events.last().unwrap();
+    assert_eq!(completed["response"]["output"][0]["namespace"], namespace);
+    assert_eq!(completed["response"]["output"][0]["name"], member);
+
+    let requests = mock.request_bodies().await;
+    let forwarded_name = requests[0]["tools"][0]["name"].as_str().unwrap();
+    assert_eq!(forwarded_name, upstream_name);
+    assert_eq!(forwarded_name.chars().count(), 64);
 }
 
 #[tokio::test]

@@ -56,6 +56,10 @@ The model-visible namespace member format is:
 agentic_ns__{namespace}__{member}
 ```
 
+Names at or below the upstream 64-character function-name limit retain that exact form. Longer generated names keep a
+readable prefix and replace the tail with a deterministic 16-hex fingerprint, producing exactly 64 characters. The
+request-scoped namespace map records the result, so restoration never depends on parsing either form.
+
 For example, Codex can send:
 
 ```json

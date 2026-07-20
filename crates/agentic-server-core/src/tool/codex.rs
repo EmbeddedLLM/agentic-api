@@ -13,10 +13,30 @@ use super::registry::{ToolEntry, ToolType};
 // unlikely to collide with user functions, and can be restored to
 // `{ namespace, name }` on the way back to the client.
 pub const MODEL_VISIBLE_NAMESPACE_MEMBER_PREFIX: &str = "agentic_ns__";
+pub const MAX_MODEL_VISIBLE_TOOL_NAME_LEN: usize = 64;
+
+const HASHED_NAMESPACE_MEMBER_SUFFIX_LEN: usize = 18;
+
+fn stable_name_hash(value: &str) -> u64 {
+    const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+    value.bytes().fold(FNV_OFFSET_BASIS, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(FNV_PRIME)
+    })
+}
 
 #[must_use]
 pub fn model_visible_namespace_member_name(namespace: &str, member: &str) -> String {
-    format!("{MODEL_VISIBLE_NAMESPACE_MEMBER_PREFIX}{namespace}__{member}")
+    let full_name = format!("{MODEL_VISIBLE_NAMESPACE_MEMBER_PREFIX}{namespace}__{member}");
+    if full_name.chars().count() <= MAX_MODEL_VISIBLE_TOOL_NAME_LEN {
+        return full_name;
+    }
+
+    let hash = stable_name_hash(&full_name);
+    let readable_len = MAX_MODEL_VISIBLE_TOOL_NAME_LEN - HASHED_NAMESPACE_MEMBER_SUFFIX_LEN;
+    let readable_prefix = full_name.chars().take(readable_len).collect::<String>();
+    format!("{readable_prefix}__{hash:016x}")
 }
 
 /// Registers one `ToolEntry` per `Function` member of `p`, keyed by the
@@ -585,6 +605,106 @@ mod tests {
                 name: NonEmptyToolName::try_from("agentic_ns__mcp__git__run").unwrap()
             }
         );
+    }
+
+    #[test]
+    fn long_namespace_member_name_is_stable_and_within_upstream_limit() {
+        let namespace = "mcp__codex_apps__github";
+        let member = "_remove_reaction_from_pr_review_comment";
+
+        let shortened = model_visible_namespace_member_name(namespace, member);
+
+        assert_eq!(shortened.chars().count(), MAX_MODEL_VISIBLE_TOOL_NAME_LEN);
+        assert_eq!(
+            shortened,
+            "agentic_ns__mcp__codex_apps__github___remove_r__2e989f39f22daf41"
+        );
+        assert_eq!(shortened, model_visible_namespace_member_name(namespace, member));
+        assert_ne!(
+            shortened,
+            model_visible_namespace_member_name(namespace, "_remove_reaction_from_issue_comment")
+        );
+    }
+
+    #[test]
+    fn namespace_member_name_preserves_exact_limit_and_shortens_next_character() {
+        let namespace = "n";
+        let fixed_len = MODEL_VISIBLE_NAMESPACE_MEMBER_PREFIX.chars().count() + namespace.chars().count() + 2;
+        let member_at_limit = "m".repeat(MAX_MODEL_VISIBLE_TOOL_NAME_LEN - fixed_len);
+        let full_name_at_limit = format!("{MODEL_VISIBLE_NAMESPACE_MEMBER_PREFIX}{namespace}__{member_at_limit}");
+
+        assert_eq!(full_name_at_limit.chars().count(), MAX_MODEL_VISIBLE_TOOL_NAME_LEN);
+        assert_eq!(
+            model_visible_namespace_member_name(namespace, &member_at_limit),
+            full_name_at_limit
+        );
+
+        let member_over_limit = format!("{member_at_limit}m");
+        let shortened = model_visible_namespace_member_name(namespace, &member_over_limit);
+        assert_eq!(shortened.chars().count(), MAX_MODEL_VISIBLE_TOOL_NAME_LEN);
+        assert_ne!(
+            shortened,
+            format!("{MODEL_VISIBLE_NAMESPACE_MEMBER_PREFIX}{namespace}__{member_over_limit}")
+        );
+    }
+
+    #[test]
+    fn long_unicode_namespace_member_name_stays_valid_utf8() {
+        let namespace = "工具箱";
+        let member = "工具".repeat(30);
+
+        let shortened = model_visible_namespace_member_name(namespace, &member);
+
+        assert_eq!(shortened.chars().count(), MAX_MODEL_VISIBLE_TOOL_NAME_LEN);
+        assert!(shortened.starts_with("agentic_ns__工具箱__"));
+    }
+
+    #[test]
+    fn long_namespace_member_round_trips_through_shortened_name() {
+        let namespace = "mcp__codex_apps__github";
+        let member = "_remove_reaction_from_pr_review_comment";
+        let tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([
+            {
+                "type": "namespace",
+                "name": namespace,
+                "tools": [{"type": "function", "name": member}]
+            }
+        ]))
+        .unwrap();
+        let upstream_name = model_visible_namespace_member_name(namespace, member);
+        let mut output = vec![completed_call(&upstream_name, "{}")];
+
+        let resolved = CodexNamespaceHandler
+            .resolve_namespace_members(&tools)
+            .expect("valid namespace members");
+        assert!(matches!(
+            resolved.as_slice(),
+            [ResponsesTool::Namespace(namespace)]
+                if matches!(&namespace.tools[0], CodexNamespaceMember::Function(function)
+                    if function.name.as_str() == upstream_name)
+        ));
+
+        let map = CodexNamespaceHandler
+            .build_namespace_map(Some(&tools))
+            .expect("valid namespace map");
+        let choice = ToolChoice::Function {
+            namespace: Some(namespace.to_string()),
+            name: NonEmptyToolName::try_from(member).unwrap(),
+        };
+        assert_eq!(
+            CodexNamespaceHandler.resolve_tool_choice(map.as_ref(), Some(&choice)),
+            ToolChoice::Function {
+                namespace: None,
+                name: NonEmptyToolName::try_from(upstream_name).unwrap(),
+            }
+        );
+        CodexNamespaceHandler.restore_output_items(&mut output, map.as_ref());
+
+        let OutputItem::FunctionCall(call) = &output[0] else {
+            panic!("expected function call");
+        };
+        assert_eq!(call.namespace.as_deref(), Some(namespace));
+        assert_eq!(call.name, member);
     }
 
     #[test]
