@@ -79,27 +79,6 @@ struct NamespaceCallMapping {
     upstream_name: String,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum TopLevelRegistryToolKind {
-    Function,
-    Mcp,
-    WebSearch,
-    FileSearch,
-    CodeInterpreter,
-}
-
-impl TopLevelRegistryToolKind {
-    const fn description(self) -> &'static str {
-        match self {
-            Self::Function => "function tool",
-            Self::Mcp => "MCP tool",
-            Self::WebSearch => "web search tool",
-            Self::FileSearch => "file search tool",
-            Self::CodeInterpreter => "code interpreter tool",
-        }
-    }
-}
-
 /// A pre-built, reusable namespace rename map, computed once per request from
 /// the declared tools via [`CodexNamespaceHandler::build_namespace_map`].
 ///
@@ -132,12 +111,12 @@ impl NamespaceMap {
 
 #[derive(Default)]
 struct NamespaceMapBuilder {
-    top_level_registry_keys: HashMap<String, TopLevelRegistryToolKind>,
+    top_level_registry_keys: HashMap<String, ToolType>,
     map: NamespaceMap,
 }
 
 impl NamespaceMapBuilder {
-    fn new(top_level_registry_keys: HashMap<String, TopLevelRegistryToolKind>) -> Self {
+    fn new(top_level_registry_keys: HashMap<String, ToolType>) -> Self {
         Self {
             top_level_registry_keys,
             ..Self::default()
@@ -418,20 +397,19 @@ fn rename_namespace_members(
     })
 }
 
-fn typed_top_level_registry_keys(tools: &[ResponsesTool]) -> HashMap<String, TopLevelRegistryToolKind> {
+fn typed_top_level_registry_keys(tools: &[ResponsesTool]) -> HashMap<String, ToolType> {
     tools
         .iter()
-        .filter_map(|tool| match tool {
-            ResponsesTool::Function(function) => {
-                Some((function.name.as_str().to_owned(), TopLevelRegistryToolKind::Function))
-            }
-            ResponsesTool::Mcp(mcp) => Some((mcp.name.as_str().to_owned(), TopLevelRegistryToolKind::Mcp)),
-            ResponsesTool::WebSearch(_) => Some(("web_search".to_owned(), TopLevelRegistryToolKind::WebSearch)),
-            ResponsesTool::FileSearch(_) => Some(("file_search".to_owned(), TopLevelRegistryToolKind::FileSearch)),
-            ResponsesTool::CodeInterpreter(_) => {
-                Some(("code_interpreter".to_owned(), TopLevelRegistryToolKind::CodeInterpreter))
-            }
-            ResponsesTool::Namespace(_) | ResponsesTool::Custom(_) | ResponsesTool::Unknown => None,
+        .filter_map(|tool| {
+            let registry_key = match tool {
+                ResponsesTool::Function(function) => function.name.as_str().to_owned(),
+                ResponsesTool::Mcp(mcp) => mcp.name.as_str().to_owned(),
+                ResponsesTool::WebSearch(_) => "web_search".to_owned(),
+                ResponsesTool::FileSearch(_) => "file_search".to_owned(),
+                ResponsesTool::CodeInterpreter(_) => "code_interpreter".to_owned(),
+                ResponsesTool::Namespace(_) | ResponsesTool::Custom(_) | ResponsesTool::Unknown => return None,
+            };
+            tool.tool_type().map(|tool_type| (registry_key, tool_type))
         })
         .collect()
 }
