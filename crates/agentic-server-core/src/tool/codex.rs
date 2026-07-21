@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use serde_json::Value;
 
@@ -79,6 +79,27 @@ struct NamespaceCallMapping {
     upstream_name: String,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TopLevelRegistryToolKind {
+    Function,
+    Mcp,
+    WebSearch,
+    FileSearch,
+    CodeInterpreter,
+}
+
+impl TopLevelRegistryToolKind {
+    const fn description(self) -> &'static str {
+        match self {
+            Self::Function => "function tool",
+            Self::Mcp => "MCP tool",
+            Self::WebSearch => "web search tool",
+            Self::FileSearch => "file search tool",
+            Self::CodeInterpreter => "code interpreter tool",
+        }
+    }
+}
+
 /// A pre-built, reusable namespace rename map, computed once per request from
 /// the declared tools via [`CodexNamespaceHandler::build_namespace_map`].
 ///
@@ -111,14 +132,14 @@ impl NamespaceMap {
 
 #[derive(Default)]
 struct NamespaceMapBuilder {
-    top_level_names: HashSet<String>,
+    top_level_registry_keys: HashMap<String, TopLevelRegistryToolKind>,
     map: NamespaceMap,
 }
 
 impl NamespaceMapBuilder {
-    fn new(top_level_names: HashSet<String>) -> Self {
+    fn new(top_level_registry_keys: HashMap<String, TopLevelRegistryToolKind>) -> Self {
         Self {
-            top_level_names,
+            top_level_registry_keys,
             ..Self::default()
         }
     }
@@ -129,9 +150,10 @@ impl NamespaceMapBuilder {
         member_name: &str,
     ) -> Result<String, ToolError> {
         let flat_name = model_visible_namespace_member_name(namespace_name, member_name);
-        if self.top_level_names.contains(&flat_name) {
+        if let Some(tool_kind) = self.top_level_registry_keys.get(&flat_name) {
             return Err(ToolError::Config(format!(
-                "codex namespace member {namespace_name}.{member_name} collides with top-level function {flat_name}"
+                "codex namespace member {namespace_name}.{member_name} generates name {flat_name}, which collides with a declared {}",
+                tool_kind.description()
             )));
         }
         if let Some(existing) = self.map.calls.get(&flat_name) {
@@ -197,7 +219,7 @@ pub struct CodexNamespaceHandler;
 impl CodexNamespaceHandler {
     /// Rewrites every `Namespace` tool's function members to their flat,
     /// model-visible names (see [`model_visible_namespace_member_name`]),
-    /// given real collision detection against sibling top-level tool names.
+    /// with collision detection against sibling function-call registry keys.
     ///
     /// Tools stay `ResponsesTool::Namespace` — only the nested members'
     /// `name` fields change — so [`ResponsesTool::to_function_tools`] and
@@ -210,10 +232,10 @@ impl CodexNamespaceHandler {
     /// # Errors
     ///
     /// Returns [`ToolError::Config`] when a generated namespace member name
-    /// collides with a top-level function tool or with another namespace
-    /// member.
+    /// collides with another declared function-call tool or with another
+    /// namespace member.
     pub fn resolve_namespace_members(&self, tools: &[ResponsesTool]) -> Result<Vec<ResponsesTool>, ToolError> {
-        let mut builder = NamespaceMapBuilder::new(typed_top_level_tool_names(tools));
+        let mut builder = NamespaceMapBuilder::new(typed_top_level_registry_keys(tools));
         tools
             .iter()
             .map(|tool| match tool {
@@ -231,8 +253,8 @@ impl CodexNamespaceHandler {
     /// # Errors
     ///
     /// Returns [`ToolError::Config`] when a generated namespace member name
-    /// collides with a top-level function tool or with another namespace
-    /// member.
+    /// collides with another declared function-call tool or with another
+    /// namespace member.
     pub fn build_namespace_map(&self, tools: Option<&[ResponsesTool]>) -> Result<Option<NamespaceMap>, ToolError> {
         namespace_map_from_tools(tools)
     }
@@ -247,13 +269,13 @@ impl CodexNamespaceHandler {
     /// # Errors
     ///
     /// Returns [`ToolError::Config`] when a generated namespace member name
-    /// collides with a top-level function tool or with another namespace
-    /// member.
+    /// collides with another declared function-call tool or with another
+    /// namespace member.
     pub fn validate_namespace_collisions(&self, tools: Option<&[ResponsesTool]>) -> Result<(), ToolError> {
         let Some(tools) = tools else {
             return Ok(());
         };
-        let mut builder = NamespaceMapBuilder::new(typed_top_level_tool_names(tools));
+        let mut builder = NamespaceMapBuilder::new(typed_top_level_registry_keys(tools));
         for tool in tools {
             let ResponsesTool::Namespace(namespace) = tool else {
                 continue;
@@ -338,7 +360,7 @@ fn namespace_map_from_tools(tools: Option<&[ResponsesTool]>) -> Result<Option<Na
     let Some(tools) = tools else {
         return Ok(None);
     };
-    let mut builder = NamespaceMapBuilder::new(typed_top_level_tool_names(tools));
+    let mut builder = NamespaceMapBuilder::new(typed_top_level_registry_keys(tools));
     for tool in tools {
         if let ResponsesTool::Namespace(namespace) = tool {
             let _ = rename_namespace_members(namespace, &mut builder)?;
@@ -354,7 +376,8 @@ fn namespace_map_from_tools(tools: Option<&[ResponsesTool]>) -> Result<Option<Na
 /// # Errors
 ///
 /// Returns [`ToolError::Config`] when a generated namespace member name
-/// collides with a top-level function tool or with another namespace member.
+/// collides with another declared function-call tool or with another namespace
+/// member.
 fn rename_namespace_members(
     namespace: &CodexNamespaceToolParam,
     builder: &mut NamespaceMapBuilder,
@@ -395,18 +418,20 @@ fn rename_namespace_members(
     })
 }
 
-fn typed_top_level_tool_names(tools: &[ResponsesTool]) -> HashSet<String> {
+fn typed_top_level_registry_keys(tools: &[ResponsesTool]) -> HashMap<String, TopLevelRegistryToolKind> {
     tools
         .iter()
         .filter_map(|tool| match tool {
-            ResponsesTool::Function(function) => Some(function.name.as_str().to_string()),
-            ResponsesTool::Mcp(_)
-            | ResponsesTool::WebSearch(_)
-            | ResponsesTool::FileSearch(_)
-            | ResponsesTool::CodeInterpreter(_)
-            | ResponsesTool::Namespace(_)
-            | ResponsesTool::Custom(_)
-            | ResponsesTool::Unknown => None,
+            ResponsesTool::Function(function) => {
+                Some((function.name.as_str().to_owned(), TopLevelRegistryToolKind::Function))
+            }
+            ResponsesTool::Mcp(mcp) => Some((mcp.name.as_str().to_owned(), TopLevelRegistryToolKind::Mcp)),
+            ResponsesTool::WebSearch(_) => Some(("web_search".to_owned(), TopLevelRegistryToolKind::WebSearch)),
+            ResponsesTool::FileSearch(_) => Some(("file_search".to_owned(), TopLevelRegistryToolKind::FileSearch)),
+            ResponsesTool::CodeInterpreter(_) => {
+                Some(("code_interpreter".to_owned(), TopLevelRegistryToolKind::CodeInterpreter))
+            }
+            ResponsesTool::Namespace(_) | ResponsesTool::Custom(_) | ResponsesTool::Unknown => None,
         })
         .collect()
 }
@@ -723,7 +748,7 @@ mod tests {
             .validate_namespace_collisions(Some(&tools))
             .unwrap_err();
 
-        assert!(err.to_string().contains("collides with top-level function"));
+        assert!(err.to_string().contains("collides with a declared function tool"));
     }
 
     #[test]
@@ -740,7 +765,32 @@ mod tests {
 
         let err = CodexNamespaceHandler.resolve_namespace_members(&tools).unwrap_err();
 
-        assert!(err.to_string().contains("collides with top-level function"));
+        assert!(err.to_string().contains("collides with a declared function tool"));
+    }
+
+    #[test]
+    fn resolve_namespace_members_rejects_shortened_name_collision_with_later_mcp_tool() {
+        let namespace = "mcp__codex_apps__github";
+        let member = "_remove_reaction_from_pr_review_comment";
+        let shortened_name = model_visible_namespace_member_name(namespace, member);
+        let tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([
+            {
+                "type": "namespace",
+                "name": namespace,
+                "tools": [{"type": "function", "name": member}]
+            },
+            {
+                "type": "mcp",
+                "name": shortened_name,
+                "server_label": "fixture",
+                "server_url": "http://127.0.0.1:1/mcp"
+            }
+        ]))
+        .unwrap();
+
+        let err = CodexNamespaceHandler.resolve_namespace_members(&tools).unwrap_err();
+
+        assert!(err.to_string().contains("collides with a declared MCP tool"));
     }
 
     #[test]
@@ -770,7 +820,7 @@ mod tests {
     #[cfg(debug_assertions)]
     #[should_panic(expected = "namespace collisions must be validated before recording namespace members")]
     fn namespace_map_builder_debug_asserts_when_member_collision_validation_is_skipped() {
-        let mut builder = NamespaceMapBuilder::new(HashSet::new());
+        let mut builder = NamespaceMapBuilder::new(HashMap::new());
 
         assert_eq!(
             builder.record_flat_member_with_flat_name("a__b", "c", "agentic_ns__a__b__c".to_owned()),
