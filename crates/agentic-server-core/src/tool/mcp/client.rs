@@ -10,7 +10,7 @@ use rmcp::ClientHandler;
 use rmcp::ServiceExt;
 use rmcp::model::{
     CallToolRequestParams, CallToolResult, ClientCapabilities, ClientInfo, ClientRequest, Implementation,
-    InitializeRequestParams, ProtocolVersion, ReadResourceRequestParams, ReadResourceResult, ServerResult, Tool,
+    InitializeRequestParams, ProtocolVersion, ServerResult, Tool,
 };
 use rmcp::service::{ClientInitializeError, PeerRequestOptions, RoleClient, RunningService, ServiceError};
 use rmcp::transport::StreamableHttpClientTransport;
@@ -29,7 +29,6 @@ pub enum McpOperation {
     Connect,
     ListTools,
     CallTool,
-    ReadResource,
 }
 
 impl fmt::Display for McpOperation {
@@ -38,7 +37,6 @@ impl fmt::Display for McpOperation {
             Self::Connect => f.write_str("connect"),
             Self::ListTools => f.write_str("tools/list"),
             Self::CallTool => f.write_str("tools/call"),
-            Self::ReadResource => f.write_str("resources/read"),
         }
     }
 }
@@ -276,27 +274,6 @@ impl McpClient {
                 operation: McpOperation::CallTool,
             }),
         }
-    }
-
-    /// Reads a resource by URI from the connected MCP server.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`McpError::Timeout`] if `resources/read` exceeds the configured timeout.
-    /// Returns [`McpError::Operation`] if the server rejects or fails the request.
-    pub async fn read_resource(&self, uri: &str) -> Result<ReadResourceResult, McpError> {
-        tokio::time::timeout(
-            self.tool_timeout,
-            self.inner.read_resource(ReadResourceRequestParams::new(uri.to_owned())),
-        )
-        .await
-        .map_err(|_| McpError::Timeout {
-            operation: McpOperation::ReadResource,
-        })?
-        .map_err(|source| McpError::Operation {
-            operation: McpOperation::ReadResource,
-            source,
-        })
     }
 }
 

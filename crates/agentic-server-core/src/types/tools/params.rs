@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 /// Error returned when a tool name is empty.
@@ -144,15 +144,63 @@ pub struct CustomToolParam {
 }
 
 /// Parameters for a gateway MCP built-in tool declaration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct McpToolParam {
-    pub name: NonEmptyToolName,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub server_label: Option<String>,
+    pub server_label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connector_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub headers: Option<HashMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authorization: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed_tools: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub require_approval: Option<String>,
+    /// Request-scoped `tools/list` results used by MCP normalization. The
+    /// custom `Deserialize` implementation rejects this internal field on the
+    /// public request wire.
+    #[serde(rename = "_agentic_discovered_tools", default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) discovered_tools: Vec<McpDiscoveredToolParam>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct McpToolParamWire {
+    server_label: String,
+    #[serde(default)]
+    server_url: Option<String>,
+    #[serde(default)]
+    connector_id: Option<String>,
+    #[serde(default)]
+    headers: Option<HashMap<String, String>>,
+    #[serde(default)]
+    authorization: Option<String>,
+    #[serde(default)]
+    allowed_tools: Option<Vec<String>>,
+    #[serde(default)]
+    require_approval: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for McpToolParam {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = McpToolParamWire::deserialize(deserializer)?;
+        Ok(Self {
+            server_label: wire.server_label,
+            server_url: wire.server_url,
+            connector_id: wire.connector_id,
+            headers: wire.headers,
+            authorization: wire.authorization,
+            allowed_tools: wire.allowed_tools,
+            require_approval: wire.require_approval,
+            discovered_tools: Vec::new(),
+        })
+    }
 }
 
 /// Parameters for a discovered MCP (Model Context Protocol) server tool.
@@ -160,7 +208,7 @@ pub struct McpToolParam {
 pub struct McpDiscoveredToolParam {
     pub server_label: String,
     pub tool_name: String,
-    pub exposed_name: String,
+    pub internal_name: String,
     pub tool: rmcp::model::Tool,
 }
 
@@ -305,22 +353,34 @@ mod tests {
     fn responses_tool_mcp_round_trips_with_field_values() {
         let json = serde_json::json!({
             "type": "mcp",
-            "name": "read_mcp_resource",
             "server_label": "repo",
             "server_url": "http://localhost:9001/mcp",
-            "headers": {"Authorization": "Bearer token"}
+            "headers": {"X-Request-ID": "request-1"},
+            "authorization": "token",
+            "allowed_tools": ["read_file"],
+            "require_approval": "never"
         });
         let tool: ResponsesTool = serde_json::from_value(json).unwrap();
         let back = serde_json::to_value(&tool).unwrap();
         assert_eq!(back["type"], "mcp");
-        assert_eq!(back["name"], "read_mcp_resource");
         assert_eq!(back["server_label"], "repo");
         assert_eq!(back["server_url"], "http://localhost:9001/mcp");
         if let ResponsesTool::Mcp(ref p) = tool {
-            assert_eq!(p.name.as_str(), "read_mcp_resource");
-            assert_eq!(p.server_label.as_deref(), Some("repo"));
+            assert_eq!(p.server_label, "repo");
             assert_eq!(p.server_url.as_deref(), Some("http://localhost:9001/mcp"));
         }
+    }
+
+    #[test]
+    fn responses_tool_mcp_rejects_function_name() {
+        let result = serde_json::from_value::<ResponsesTool>(serde_json::json!({
+            "type": "mcp",
+            "name": "increment",
+            "server_label": "repo",
+            "server_url": "http://localhost:9001/mcp"
+        }));
+
+        assert!(result.is_err());
     }
 
     #[test]
@@ -368,7 +428,7 @@ mod tests {
         let json = serde_json::json!({
             "server_label": "my_server",
             "tool_name": "fetch",
-            "exposed_name": "my_server__fetch",
+            "internal_name": "mcp__my_server__fetch",
             "tool": {
                 "name": "fetch",
                 "inputSchema": {

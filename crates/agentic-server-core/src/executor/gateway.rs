@@ -129,7 +129,10 @@ async fn execute_gateway_call_with_timeout(
 ) -> ExecutorResult<GatewayCallResult> {
     // Resolve the tool type up front so a timeout (which yields no dispatch
     // result) can still shape the correct public output.
-    let Some(tool_type) = registry.lookup(&call.name).map(|entry| entry.tool_type) else {
+    let Some((tool_type, config)) = registry
+        .lookup(&call.name)
+        .map(|entry| (entry.tool_type, entry.config.clone()))
+    else {
         return Err(ExecutorError::InvalidRequest(format!(
             "gateway tool '{}' was not dispatchable",
             call.name
@@ -171,7 +174,7 @@ async fn execute_gateway_call_with_timeout(
             (execution_error_output(&call, &message)?, GatewayCallStatus::Failed)
         }
     };
-    let public_output = gateway_public_output(dispatch.tool_type, &call, &output, status);
+    let public_output = gateway_public_output(dispatch.tool_type, &call, &output, status, &config);
     Ok(GatewayCallResult {
         call,
         input_item: InputItem::FunctionCallOutput(output.into()),
@@ -184,10 +187,11 @@ fn gateway_public_output(
     call: &FunctionToolCall,
     output: &ToolOutput,
     status: GatewayCallStatus,
+    config: &serde_json::Value,
 ) -> Option<OutputItem> {
     match tool_type {
         ToolType::WebSearch => Some(crate::tool::web_search::output_item(call, output, status)),
-        ToolType::Mcp => Some(crate::tool::mcp::handler::output_item(call, output, status)),
+        ToolType::Mcp => Some(crate::tool::mcp::handler::output_item(call, output, status, config)),
         ToolType::Function | ToolType::CodexNamespace | ToolType::FileSearch | ToolType::CodeInterpreter => None,
     }
 }
@@ -251,7 +255,7 @@ fn gateway_event_plans(
                 output_index: u32::try_from(output_index).unwrap_or(u32::MAX),
                 started_output: match entry.tool_type {
                     ToolType::WebSearch => Some(crate::tool::web_search::started_output_item(call)),
-                    ToolType::Mcp => Some(crate::tool::mcp::handler::started_output_item(call)),
+                    ToolType::Mcp => Some(crate::tool::mcp::handler::started_output_item(call, &entry.config)),
                     ToolType::Function
                     | ToolType::CodexNamespace
                     | ToolType::FileSearch
@@ -553,7 +557,8 @@ mod tests {
             serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).expect("web_search tool param");
         let mut executors = GatewayExecutors::default();
         executors.insert(Arc::new(SlowExecutor));
-        let registry = ToolRegistry::build_with_handlers(&[web_search], &executors)
+        let mut tools = [web_search];
+        let registry = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
             .await
             .expect("registry builds");
 
@@ -589,7 +594,9 @@ mod tests {
         // not fail the whole request.
         let web_search: ResponsesTool =
             serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).expect("web_search tool param");
-        let registry = ToolRegistry::build_with_handlers(&[web_search], &GatewayExecutors::default())
+        let mut tools = [web_search];
+        let mut executors = GatewayExecutors::default();
+        let registry = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
             .await
             .expect("registry builds");
 
