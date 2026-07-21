@@ -9,7 +9,7 @@ pub enum SSEItemType {
     FunctionCall,
     CustomToolCall,
     WebSearchCall,
-    McpToolCall,
+    McpCall,
     Message,
 }
 
@@ -21,7 +21,7 @@ impl SSEItemType {
             Self::FunctionCall => "function_call",
             Self::CustomToolCall => "custom_tool_call",
             Self::WebSearchCall => "web_search_call",
-            Self::McpToolCall => "mcp_tool_call",
+            Self::McpCall => "mcp_call",
             Self::Message => "message",
         }
     }
@@ -34,7 +34,7 @@ impl From<&str> for SSEItemType {
             "function_call" => Self::FunctionCall,
             "custom_tool_call" => Self::CustomToolCall,
             "web_search_call" => Self::WebSearchCall,
-            "mcp_tool_call" => Self::McpToolCall,
+            "mcp_call" => Self::McpCall,
             _ => Self::Message,
         }
     }
@@ -102,8 +102,11 @@ pub enum SSEEventType {
     WebSearchCallInProgress,
     WebSearchCallSearching,
     WebSearchCallCompleted,
-    McpToolCallInProgress,
-    McpToolCallCompleted,
+    McpCallInProgress,
+    McpCallArgumentsDelta,
+    McpCallArgumentsDone,
+    McpCallCompleted,
+    McpCallFailed,
 
     // Catch-all for unrecognized events
     Other,

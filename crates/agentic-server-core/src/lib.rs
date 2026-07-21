@@ -22,7 +22,7 @@ pub use types::{
     CodeInterpreterToolParam, CodexNamespaceMember, CodexNamespaceToolParam, CustomToolCall,
     CustomToolCallOutputMessage, CustomToolParam, EmptyToolNameError, FileSearchToolParam, FunctionTool,
     FunctionToolCall, FunctionToolParam, FunctionToolResultMessage, GatewayCallStatus, IncompleteDetails, InputContent,
-    InputImageContent, InputItem, InputMessage, InputMessageContent, InputTextContent, InputTokenDetails, McpToolCall,
+    InputImageContent, InputItem, InputMessage, InputMessageContent, InputTextContent, InputTokenDetails, McpCall,
     McpToolParam, NonEmptyToolName, OutputItem, OutputMessage, OutputTextContent, OutputTokenDetails, ReasoningOutput,
     ReasoningTextContent, RequestPayload, ResponsePayload, ResponseUsage, ResponsesInput, ResponsesTool, ToolChoice,
     UpstreamRequest, UpstreamTool, WebSearchActionSearch, WebSearchCall, WebSearchCallStatus, WebSearchContextSize,

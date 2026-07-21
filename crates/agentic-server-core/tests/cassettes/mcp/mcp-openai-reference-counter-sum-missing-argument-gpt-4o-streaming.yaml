@@ -1,0 +1,386 @@
+turns:
+- filename: t1
+  request:
+    body:
+      input: Call counter__sum exactly once using the literal argument object {"a":40}.
+        Do not add the missing b argument and do not correct the object. After the
+        MCP call fails, report its error in one sentence. Do not retry.
+      max_output_tokens: 4096
+      model: gpt-4o
+      store: true
+      stream: true
+      tool_choice: required
+      tools:
+      - allowed_tools:
+        - sum
+        require_approval: never
+        server_label: counter
+        server_url: https://applications-clean-districts-departments.trycloudflare.com/mcp
+        type: mcp
+    headers:
+      accept: '*/*'
+      authorization: Bearer ***
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    headers:
+      content-type: text/event-stream; charset=utf-8
+    sse:
+    - 'event: response.created
+
+      '
+    - 'data: {"type":"response.created","response":{"id":"resp_09debbcb7cf0fd18006a5f79eab1808198a1a2b1daa8a75b0a","object":"response","created_at":1784642026,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":4096,"max_tool_calls":null,"model":"gpt-4o-2024-08-06","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"in_memory","reasoning":{"context":null,"effort":null,"summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"required","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[{"type":"mcp","allowed_tools":["sum"],"headers":null,"require_approval":"never","server_description":null,"server_label":"counter","server_url":"https://applications-clean-districts-departments.trycloudflare.com/mcp"}],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":0}
+
+      '
+    - '
+
+      '
+    - 'event: response.in_progress
+
+      '
+    - 'data: {"type":"response.in_progress","response":{"id":"resp_09debbcb7cf0fd18006a5f79eab1808198a1a2b1daa8a75b0a","object":"response","created_at":1784642026,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":4096,"max_tool_calls":null,"model":"gpt-4o-2024-08-06","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"in_memory","reasoning":{"context":null,"effort":null,"summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"required","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[{"type":"mcp","allowed_tools":["sum"],"headers":null,"require_approval":"never","server_description":null,"server_label":"counter","server_url":"https://applications-clean-districts-departments.trycloudflare.com/mcp"}],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":1}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.added
+
+      '
+    - 'data: {"type":"response.output_item.added","item":{"id":"mcpl_09debbcb7cf0fd18006a5f79eabfcc8198a7eb2405e0a2d531","type":"mcp_list_tools","server_label":"counter","tools":[]},"output_index":0,"sequence_number":2}
+
+      '
+    - '
+
+      '
+    - 'event: response.mcp_list_tools.in_progress
+
+      '
+    - 'data: {"type":"response.mcp_list_tools.in_progress","item_id":"mcpl_09debbcb7cf0fd18006a5f79eabfcc8198a7eb2405e0a2d531","output_index":0,"sequence_number":3}
+
+      '
+    - '
+
+      '
+    - 'event: response.mcp_list_tools.completed
+
+      '
+    - 'data: {"type":"response.mcp_list_tools.completed","item_id":"mcpl_09debbcb7cf0fd18006a5f79eabfcc8198a7eb2405e0a2d531","output_index":0,"sequence_number":4}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.done
+
+      '
+    - 'data: {"type":"response.output_item.done","item":{"id":"mcpl_09debbcb7cf0fd18006a5f79eabfcc8198a7eb2405e0a2d531","type":"mcp_list_tools","server_label":"counter","tools":[{"annotations":{"read_only":false},"description":"Calculate
+      the sum of two numbers","input_schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"a":{"format":"int32","type":"integer"},"b":{"format":"int32","type":"integer"}},"required":["a","b"],"type":"object"},"name":"sum"}]},"output_index":0,"sequence_number":5}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.added
+
+      '
+    - 'data: {"type":"response.output_item.added","item":{"id":"mcp_09debbcb7cf0fd18006a5f79ec0bac81988d02634e6b6ccb7e","type":"mcp_call","status":"in_progress","approval_request_id":null,"arguments":"","error":null,"name":"sum","output":null,"server_label":"counter"},"output_index":1,"sequence_number":6}
+
+      '
+    - '
+
+      '
+    - 'event: response.mcp_call.in_progress
+
+      '
+    - 'data: {"type":"response.mcp_call.in_progress","item_id":"mcp_09debbcb7cf0fd18006a5f79ec0bac81988d02634e6b6ccb7e","output_index":1,"sequence_number":7}
+
+      '
+    - '
+
+      '
+    - 'event: response.mcp_call_arguments.delta
+
+      '
+    - 'data: {"type":"response.mcp_call_arguments.delta","delta":"{\"a\":40}","item_id":"mcp_09debbcb7cf0fd18006a5f79ec0bac81988d02634e6b6ccb7e","obfuscation":"7RsNfh0I","output_index":1,"sequence_number":8}
+
+      '
+    - '
+
+      '
+    - 'event: response.mcp_call_arguments.done
+
+      '
+    - 'data: {"type":"response.mcp_call_arguments.done","arguments":"{\"a\":40}","item_id":"mcp_09debbcb7cf0fd18006a5f79ec0bac81988d02634e6b6ccb7e","output_index":1,"sequence_number":9}
+
+      '
+    - '
+
+      '
+    - 'event: response.mcp_call.failed
+
+      '
+    - 'data: {"type":"response.mcp_call.failed","item_id":"mcp_09debbcb7cf0fd18006a5f79ec0bac81988d02634e6b6ccb7e","output_index":1,"sequence_number":10}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.done
+
+      '
+    - 'data: {"type":"response.output_item.done","item":{"id":"mcp_09debbcb7cf0fd18006a5f79ec0bac81988d02634e6b6ccb7e","type":"mcp_call","status":"failed","approval_request_id":null,"arguments":"{\"a\":40}","error":{"type":"mcp_tool_execution_error","content":[{"type":"text","text":"failed
+      to deserialize parameters: missing field `b`","annotations":null,"meta":null}]},"name":"sum","output":null,"server_label":"counter"},"output_index":1,"sequence_number":11}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.added
+
+      '
+    - 'data: {"type":"response.output_item.added","item":{"id":"msg_09debbcb7cf0fd18006a5f79ecca988198a2f7438937f6dfd9","type":"message","status":"in_progress","content":[],"role":"assistant"},"output_index":2,"sequence_number":12}
+
+      '
+    - '
+
+      '
+    - 'event: response.content_part.added
+
+      '
+    - 'data: {"type":"response.content_part.added","content_index":0,"item_id":"msg_09debbcb7cf0fd18006a5f79ecca988198a2f7438937f6dfd9","output_index":2,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":""},"sequence_number":13}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"The","item_id":"msg_09debbcb7cf0fd18006a5f79ecca988198a2f7438937f6dfd9","logprobs":[],"obfuscation":"IeNGfM0aFkCC5","output_index":2,"sequence_number":14}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" MCP","item_id":"msg_09debbcb7cf0fd18006a5f79ecca988198a2f7438937f6dfd9","logprobs":[],"obfuscation":"7qD7o0vQuiFZ","output_index":2,"sequence_number":15}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" call","item_id":"msg_09debbcb7cf0fd18006a5f79ecca988198a2f7438937f6dfd9","logprobs":[],"obfuscation":"8FwLT4IrQyI","output_index":2,"sequence_number":16}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" failed","item_id":"msg_09debbcb7cf0fd18006a5f79ecca988198a2f7438937f6dfd9","logprobs":[],"obfuscation":"zPrzdIjuQ","output_index":2,"sequence_number":17}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" with","item_id":"msg_09debbcb7cf0fd18006a5f79ecca988198a2f7438937f6dfd9","logprobs":[],"obfuscation":"8g5GWwL4OWH","output_index":2,"sequence_number":18}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" the","item_id":"msg_09debbcb7cf0fd18006a5f79ecca988198a2f7438937f6dfd9","logprobs":[],"obfuscation":"mZSqpYv7pBFw","output_index":2,"sequence_number":19}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" error","item_id":"msg_09debbcb7cf0fd18006a5f79ecca988198a2f7438937f6dfd9","logprobs":[],"obfuscation":"G044HVtyJl","output_index":2,"sequence_number":20}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":":","item_id":"msg_09debbcb7cf0fd18006a5f79ecca988198a2f7438937f6dfd9","logprobs":[],"obfuscation":"PFa2cQzFtwVgtAk","output_index":2,"sequence_number":21}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" \"","item_id":"msg_09debbcb7cf0fd18006a5f79ecca988198a2f7438937f6dfd9","logprobs":[],"obfuscation":"s6TiK0WxLNCQYq","output_index":2,"sequence_number":22}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"failed","item_id":"msg_09debbcb7cf0fd18006a5f79ecca988198a2f7438937f6dfd9","logprobs":[],"obfuscation":"fcRK3dEr2A","output_index":2,"sequence_number":23}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" to","item_id":"msg_09debbcb7cf0fd18006a5f79ecca988198a2f7438937f6dfd9","logprobs":[],"obfuscation":"eFB4epESjE1aU","output_index":2,"sequence_number":24}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" deserialize","item_id":"msg_09debbcb7cf0fd18006a5f79ecca988198a2f7438937f6dfd9","logprobs":[],"obfuscation":"2JyD","output_index":2,"sequence_number":25}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" parameters","item_id":"msg_09debbcb7cf0fd18006a5f79ecca988198a2f7438937f6dfd9","logprobs":[],"obfuscation":"mKqAp","output_index":2,"sequence_number":26}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":":","item_id":"msg_09debbcb7cf0fd18006a5f79ecca988198a2f7438937f6dfd9","logprobs":[],"obfuscation":"qCDTYAOm1O5Ye2F","output_index":2,"sequence_number":27}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" missing","item_id":"msg_09debbcb7cf0fd18006a5f79ecca988198a2f7438937f6dfd9","logprobs":[],"obfuscation":"8NoWTEbp","output_index":2,"sequence_number":28}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" field","item_id":"msg_09debbcb7cf0fd18006a5f79ecca988198a2f7438937f6dfd9","logprobs":[],"obfuscation":"KXqE8jR7jp","output_index":2,"sequence_number":29}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" `","item_id":"msg_09debbcb7cf0fd18006a5f79ecca988198a2f7438937f6dfd9","logprobs":[],"obfuscation":"ZIVXMmgKhc1L5v","output_index":2,"sequence_number":30}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"b","item_id":"msg_09debbcb7cf0fd18006a5f79ecca988198a2f7438937f6dfd9","logprobs":[],"obfuscation":"Dkq6QRTYuGmFAoF","output_index":2,"sequence_number":31}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"`","item_id":"msg_09debbcb7cf0fd18006a5f79ecca988198a2f7438937f6dfd9","logprobs":[],"obfuscation":"YGbeFz587BkjmFE","output_index":2,"sequence_number":32}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"\".","item_id":"msg_09debbcb7cf0fd18006a5f79ecca988198a2f7438937f6dfd9","logprobs":[],"obfuscation":"yFaEFLOWIDJ7wE","output_index":2,"sequence_number":33}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.done
+
+      '
+    - 'data: {"type":"response.output_text.done","content_index":0,"item_id":"msg_09debbcb7cf0fd18006a5f79ecca988198a2f7438937f6dfd9","logprobs":[],"output_index":2,"sequence_number":34,"text":"The
+      MCP call failed with the error: \"failed to deserialize parameters: missing
+      field `b`\"."}
+
+      '
+    - '
+
+      '
+    - 'event: response.content_part.done
+
+      '
+    - 'data: {"type":"response.content_part.done","content_index":0,"item_id":"msg_09debbcb7cf0fd18006a5f79ecca988198a2f7438937f6dfd9","output_index":2,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":"The
+      MCP call failed with the error: \"failed to deserialize parameters: missing
+      field `b`\"."},"sequence_number":35}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.done
+
+      '
+    - 'data: {"type":"response.output_item.done","item":{"id":"msg_09debbcb7cf0fd18006a5f79ecca988198a2f7438937f6dfd9","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"The
+      MCP call failed with the error: \"failed to deserialize parameters: missing
+      field `b`\"."}],"role":"assistant"},"output_index":2,"sequence_number":36}
+
+      '
+    - '
+
+      '
+    - 'event: response.completed
+
+      '
+    - 'data: {"type":"response.completed","response":{"id":"resp_09debbcb7cf0fd18006a5f79eab1808198a1a2b1daa8a75b0a","object":"response","created_at":1784642026,"status":"completed","background":false,"completed_at":1784642028,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":4096,"max_tool_calls":null,"model":"gpt-4o-2024-08-06","moderation":null,"output":[{"id":"mcpl_09debbcb7cf0fd18006a5f79eabfcc8198a7eb2405e0a2d531","type":"mcp_list_tools","server_label":"counter","tools":[{"annotations":{"read_only":false},"description":"Calculate
+      the sum of two numbers","input_schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"a":{"format":"int32","type":"integer"},"b":{"format":"int32","type":"integer"}},"required":["a","b"],"type":"object"},"name":"sum"}]},{"id":"mcp_09debbcb7cf0fd18006a5f79ec0bac81988d02634e6b6ccb7e","type":"mcp_call","status":"failed","approval_request_id":null,"arguments":"{\"a\":40}","error":{"type":"mcp_tool_execution_error","content":[{"type":"text","text":"failed
+      to deserialize parameters: missing field `b`","annotations":null,"meta":null}]},"name":"sum","output":null,"server_label":"counter"},{"id":"msg_09debbcb7cf0fd18006a5f79ecca988198a2f7438937f6dfd9","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"The
+      MCP call failed with the error: \"failed to deserialize parameters: missing
+      field `b`\"."}],"role":"assistant"}],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"in_memory","reasoning":{"context":null,"effort":null,"summary":null},"safety_identifier":null,"service_tier":"default","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"required","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[{"type":"mcp","allowed_tools":["sum"],"headers":null,"require_approval":"never","server_description":null,"server_label":"counter","server_url":"https://applications-clean-districts-departments.trycloudflare.com/mcp"}],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":{"input_tokens":163,"input_tokens_details":{"cache_write_tokens":0,"cached_tokens":0},"output_tokens":37,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":200},"user":null,"metadata":{}},"sequence_number":37}
+
+      '
+    - '
+
+      '
+    status_code: 200

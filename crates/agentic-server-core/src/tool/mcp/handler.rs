@@ -8,7 +8,7 @@ use serde_json::Value;
 
 use crate::tool::{GatewayExecutor, ToolError, ToolHandler, ToolOutput, ToolType};
 use crate::types::io::FunctionTool;
-use crate::types::io::output::{FunctionToolCall, GatewayCallStatus, McpToolCall, OutputItem};
+use crate::types::io::output::{FunctionToolCall, GatewayCallStatus, McpCall, McpCallError, OutputItem};
 use crate::types::tools::McpDiscoveredToolParam;
 use crate::utils::common::{deserialize_from_str_opt, deserialize_from_value, serialize_to_string};
 
@@ -22,24 +22,20 @@ pub(crate) fn output_item(
     config: &Value,
 ) -> OutputItem {
     let identity = mcp_call_identity(call, config);
-    let arguments =
-        deserialize_from_str_opt::<Value>(&call.arguments).unwrap_or_else(|| Value::Object(serde_json::Map::new()));
-    let parsed_output = deserialize_from_str_opt::<Value>(&output.output);
     let error = if status == GatewayCallStatus::Failed {
-        Some(error_text_from_output(&output.output))
+        Some(McpCallError::tool_execution(error_text_from_output(&output.output)))
     } else {
         None
     };
-    let result = (status == GatewayCallStatus::Completed)
-        .then(|| parsed_output.unwrap_or_else(|| Value::String(output.output.clone())));
+    let successful_output = (status == GatewayCallStatus::Completed).then(|| output.output.clone());
 
-    OutputItem::McpToolCall(McpToolCall::new(
+    OutputItem::McpCall(McpCall::new(
         call_output_id(call),
         identity.server_label,
         identity.name,
-        arguments,
+        call.arguments.clone(),
         status,
-        result,
+        successful_output,
         error,
     ))
 }
@@ -47,14 +43,12 @@ pub(crate) fn output_item(
 #[must_use]
 pub(crate) fn started_output_item(call: &FunctionToolCall, config: &Value) -> OutputItem {
     let identity = mcp_call_identity(call, config);
-    let arguments =
-        deserialize_from_str_opt::<Value>(&call.arguments).unwrap_or_else(|| Value::Object(serde_json::Map::new()));
 
-    OutputItem::McpToolCall(McpToolCall::new(
+    OutputItem::McpCall(McpCall::new(
         call_output_id(call),
         identity.server_label,
         identity.name,
-        arguments,
+        "",
         GatewayCallStatus::InProgress,
         None,
         None,
@@ -415,14 +409,14 @@ mod tests {
         };
         let config = serde_json::to_value(discovered_param()).expect("serializable discovered tool");
 
-        let OutputItem::McpToolCall(item) = output_item(&call, &output, GatewayCallStatus::Completed, &config) else {
-            panic!("expected mcp_tool_call");
+        let OutputItem::McpCall(item) = output_item(&call, &output, GatewayCallStatus::Completed, &config) else {
+            panic!("expected mcp_call");
         };
 
-        assert_eq!(item.server, "counter");
-        assert_eq!(item.tool, "increment");
-        assert_eq!(item.arguments, serde_json::json!({}));
-        assert_eq!(item.result, Some(serde_json::json!(1)));
+        assert_eq!(item.server_label, "counter");
+        assert_eq!(item.name, "increment");
+        assert_eq!(item.arguments, "{}");
+        assert_eq!(item.output.as_deref(), Some("1"));
     }
 
     #[test]
@@ -449,7 +443,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_mcp_output_uses_execution_error_text() {
+    fn failed_mcp_output_uses_openai_structured_error() {
         let call = FunctionToolCall {
             id: "fc_1".to_owned(),
             call_id: "call_1".to_owned(),
@@ -467,10 +461,14 @@ mod tests {
         let config = serde_json::to_value(param).expect("serializable discovered tool");
 
         let item = output_item(&call, &output, GatewayCallStatus::Failed, &config);
-        let json = serde_json::to_value(item).expect("serializable mcp_tool_call");
+        let json = serde_json::to_value(item).expect("serializable mcp_call");
 
         assert_eq!(json["status"], "failed");
-        assert!(json["result"].is_null());
-        assert_eq!(json["error"], "missing field `b`");
+        assert!(json["output"].is_null());
+        assert_eq!(json["error"]["type"], "mcp_tool_execution_error");
+        assert_eq!(json["error"]["content"][0]["type"], "text");
+        assert_eq!(json["error"]["content"][0]["text"], "missing field `b`");
+        assert!(json["error"]["content"][0]["annotations"].is_null());
+        assert!(json["error"]["content"][0]["meta"].is_null());
     }
 }
