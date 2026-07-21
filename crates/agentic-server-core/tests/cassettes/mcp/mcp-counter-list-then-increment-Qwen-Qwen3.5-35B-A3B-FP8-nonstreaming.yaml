@@ -1,0 +1,257 @@
+turns:
+- filename: t1
+  request:
+    body:
+      input: List the MCP tools you have access to from the 'counter' server. For
+        each one, give its name and a one-sentence description. Do not call any tool
+        yet.
+      max_output_tokens: 4096
+      model: Qwen/Qwen3.5-35B-A3B-FP8
+      store: true
+      stream: false
+      tool_choice: auto
+      tools:
+      - require_approval: never
+        server_label: counter
+        server_url: http://localhost:8000/mcp
+        type: mcp
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      conversation_id: null
+      created_at: 1784640428
+      error: null
+      id: resp_019f84db-d102-73e2-941f-907e08c38127
+      incomplete_details: null
+      instructions: null
+      model: Qwen/Qwen3.5-35B-A3B-FP8
+      object: response
+      output:
+      - content:
+        - text: 'The user wants me to list the MCP tools I have access to from the
+            ''counter'' server, with their names and one-sentence descriptions. They
+            explicitly said not to call any tools yet, just list them.
+
+
+            Looking at the available functions, I can see these MCP tools from the
+            counter server:
+
+
+            1. mcp__counter__decrement - Decrement the counter by 1
+
+            2. mcp__counter__echo - Repeat what you say
+
+            3. mcp__counter__get_session_id - Get the session ID for this connection
+
+            4. mcp__counter__get_value - Get the current counter value
+
+            5. mcp__counter__increment - Increment the counter by 1
+
+            6. mcp__counter__long_task - Long running task example
+
+            7. mcp__counter__say_hello - Say hello to the client
+
+            8. mcp__counter__sum - Calculate the sum of two numbers
+
+
+            I should list these with their names and brief descriptions based on what
+            I can see in the tool definitions.
+
+            '
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_91ba563c1a695896
+        status: null
+        summary: []
+        type: reasoning
+      - content:
+        - annotations: []
+          text: '
+
+
+            Here are the MCP tools I have access to from the ''counter'' server:
+
+
+            1. **mcp__counter__decrement** - Decrements the counter by 1
+
+            2. **mcp__counter__echo** - Repeats what you say
+
+            3. **mcp__counter__get_session_id** - Gets the session ID for this connection
+
+            4. **mcp__counter__get_value** - Gets the current counter value
+
+            5. **mcp__counter__increment** - Increments the counter by 1
+
+            6. **mcp__counter__long_task** - Executes a long running task example
+
+            7. **mcp__counter__say_hello** - Says hello to the client
+
+            8. **mcp__counter__sum** - Calculates the sum of two numbers'
+          type: output_text
+        id: msg_a0e257302286dd4f
+        role: assistant
+        status: completed
+        type: message
+      previous_response_id: null
+      status: completed
+      usage:
+        input_tokens: 942
+        input_tokens_details:
+          cached_tokens: 0
+        output_tokens: 383
+        output_tokens_details:
+          reasoning_tokens: 0
+        total_tokens: 1325
+    headers:
+      content-type: application/json
+    status_code: 200
+- filename: t2
+  request:
+    body:
+      input: Use the discovered MCP counter tools to prove that counter state is preserved
+        across MCP connections. Call increment exactly twice, one call at a time.
+        After the second increment, call get_value exactly once. Do not call any other
+        tool. When get_value returns, reply exactly COUNTER_FINAL=<value>.
+      max_output_tokens: 4096
+      model: Qwen/Qwen3.5-35B-A3B-FP8
+      previous_response_id: resp_019f84db-d102-73e2-941f-907e08c38127
+      store: true
+      stream: false
+      tool_choice: auto
+      tools:
+      - require_approval: never
+        server_label: counter
+        server_url: http://localhost:8000/mcp
+        type: mcp
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      conversation_id: null
+      created_at: 1784640431
+      error: null
+      id: resp_019f84db-db33-7f10-a595-2dec925dd4c9
+      incomplete_details: null
+      instructions: null
+      model: Qwen/Qwen3.5-35B-A3B-FP8
+      object: response
+      output:
+      - content:
+        - text: 'The user wants me to use the MCP counter tools to prove that counter
+            state is preserved across MCP connections. The instructions are very specific:
+
+
+            1. Call increment exactly twice, one call at a time
+
+            2. After the second increment, call get_value exactly once
+
+            3. Do not call any other tool
+
+            4. When get_value returns, reply exactly COUNTER_FINAL=<value>
+
+
+            Let me start by calling increment the first time.
+
+            '
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_b6be6b432937bb8a
+        status: null
+        summary: []
+        type: reasoning
+      - approval_request_id: null
+        arguments: '{}'
+        error: null
+        id: mcp_952adc786132ab90
+        name: increment
+        output: '{"content":[{"type":"text","text":"1"}],"isError":false}'
+        server_label: counter
+        status: completed
+        type: mcp_call
+      - content:
+        - text: 'Good, the first increment was successful. The counter is now at 1.
+            Now I need to call increment again.
+
+            '
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_a7e9609ef408e9d9
+        status: null
+        summary: []
+        type: reasoning
+      - approval_request_id: null
+        arguments: '{}'
+        error: null
+        id: mcp_90a2657ada1b5769
+        name: increment
+        output: '{"content":[{"type":"text","text":"2"}],"isError":false}'
+        server_label: counter
+        status: completed
+        type: mcp_call
+      - content:
+        - text: 'Good, the second increment was successful. The counter is now at
+            2. Now I need to call get_value to check the final counter value.
+
+            '
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_8e8d7f98b78602d9
+        status: null
+        summary: []
+        type: reasoning
+      - approval_request_id: null
+        arguments: '{}'
+        error: null
+        id: mcp_a43610950b6fe7b8
+        name: get_value
+        output: '{"content":[{"type":"text","text":"2"}],"isError":false}'
+        server_label: counter
+        status: completed
+        type: mcp_call
+      - content:
+        - text: 'The counter value is 2, which confirms that the state was preserved
+            across the two increment calls. Now I need to reply exactly as specified:
+            COUNTER_FINAL=<value>
+
+            '
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_847d849e13e95beb
+        status: null
+        summary: []
+        type: reasoning
+      - content:
+        - annotations: []
+          text: '
+
+
+            COUNTER_FINAL=2'
+          type: output_text
+        id: msg_b1efd50fa8e61b46
+        role: assistant
+        status: completed
+        type: message
+      previous_response_id: resp_019f84db-d102-73e2-941f-907e08c38127
+      status: completed
+      usage:
+        input_tokens: 5372
+        input_tokens_details:
+          cached_tokens: 0
+        output_tokens: 251
+        output_tokens_details:
+          reasoning_tokens: 0
+        total_tokens: 5623
+    headers:
+      content-type: application/json
+    status_code: 200

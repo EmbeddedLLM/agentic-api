@@ -252,6 +252,44 @@ impl WebSearchCall {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum McpCallError {
+    Text(String),
+    ToolExecution(McpToolExecutionError),
+}
+
+impl McpCallError {
+    #[must_use]
+    pub fn tool_execution(text: impl Into<String>) -> Self {
+        Self::ToolExecution(McpToolExecutionError {
+            type_: "mcp_tool_execution_error".to_owned(),
+            content: vec![McpToolExecutionErrorContent {
+                type_: "text".to_owned(),
+                text: text.into(),
+                annotations: None,
+                meta: None,
+            }],
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpToolExecutionError {
+    #[serde(rename = "type")]
+    pub type_: String,
+    pub content: Vec<McpToolExecutionErrorContent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpToolExecutionErrorContent {
+    #[serde(rename = "type")]
+    pub type_: String,
+    pub text: String,
+    pub annotations: Option<Value>,
+    pub meta: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpCall {
     pub id: String,
     pub server_label: String,
@@ -260,7 +298,7 @@ pub struct McpCall {
     pub status: GatewayCallStatus,
     pub approval_request_id: Option<String>,
     pub output: Option<String>,
-    pub error: Option<String>,
+    pub error: Option<McpCallError>,
 }
 
 impl McpCall {
@@ -272,7 +310,7 @@ impl McpCall {
         arguments: impl Into<String>,
         status: GatewayCallStatus,
         output: Option<String>,
-        error: Option<String>,
+        error: Option<McpCallError>,
     ) -> Self {
         Self {
             id: id.into(),
@@ -533,11 +571,11 @@ mod tests {
     fn mcp_call_serializes_as_openai_output_item() {
         let item = OutputItem::McpCall(McpCall::new(
             "mcp_1",
-            "repo",
-            "read_mcp_resource",
-            r#"{"server":"repo","uri":"file://fixture.yaml"}"#,
+            "counter",
+            "increment",
+            "{}",
             GatewayCallStatus::Completed,
-            Some(r#"{"contents":[]}"#.to_owned()),
+            Some("1".to_owned()),
             None,
         ));
 
@@ -545,10 +583,10 @@ mod tests {
         assert_eq!(json["type"], "mcp_call");
         assert_eq!(json["id"], "mcp_1");
         assert_eq!(json["status"], "completed");
-        assert_eq!(json["server_label"], "repo");
-        assert_eq!(json["name"], "read_mcp_resource");
-        assert_eq!(json["arguments"], r#"{"server":"repo","uri":"file://fixture.yaml"}"#);
-        assert_eq!(json["output"], r#"{"contents":[]}"#);
+        assert_eq!(json["server_label"], "counter");
+        assert_eq!(json["name"], "increment");
+        assert_eq!(json["arguments"], "{}");
+        assert_eq!(json["output"], "1");
         assert!(json["approval_request_id"].is_null());
         assert!(json["error"].is_null());
     }

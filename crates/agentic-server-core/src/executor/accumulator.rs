@@ -607,12 +607,12 @@ mod tests {
     #[test]
     fn test_process_event_mcp_call_done_accumulates_output() {
         let lines = vec![
-            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"mcp_call","id":"mcp_1","server_label":"repo","name":"read_mcp_resource","arguments":"","status":"in_progress","approval_request_id":null,"output":null,"error":null}}"#.to_string(),
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"mcp_call","id":"mcp_1","server_label":"counter","name":"increment","arguments":"","status":"in_progress","approval_request_id":null,"output":null,"error":null}}"#.to_string(),
             r#"data: {"type":"response.mcp_call.in_progress","item_id":"mcp_1","output_index":0}"#.to_string(),
-            r#"data: {"type":"response.mcp_call_arguments.delta","delta":"{\"server\":\"repo\"}","item_id":"mcp_1","output_index":0}"#.to_string(),
-            r#"data: {"type":"response.mcp_call_arguments.done","arguments":"{\"server\":\"repo\"}","item_id":"mcp_1","output_index":0}"#.to_string(),
+            r#"data: {"type":"response.mcp_call_arguments.delta","delta":"{}","item_id":"mcp_1","output_index":0}"#.to_string(),
+            r#"data: {"type":"response.mcp_call_arguments.done","arguments":"{}","item_id":"mcp_1","output_index":0}"#.to_string(),
             r#"data: {"type":"response.mcp_call.completed","item_id":"mcp_1","output_index":0}"#.to_string(),
-            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"mcp_call","id":"mcp_1","server_label":"repo","name":"read_mcp_resource","arguments":"{\"server\":\"repo\"}","status":"completed","approval_request_id":null,"output":"{\"contents\":[]}","error":null}}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"mcp_call","id":"mcp_1","server_label":"counter","name":"increment","arguments":"{}","status":"completed","approval_request_id":null,"output":"1","error":null}}"#.to_string(),
             r#"data: {"type":"response.done","response":{"id":"resp_1","status":"completed","usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}"#.to_string(),
         ];
 

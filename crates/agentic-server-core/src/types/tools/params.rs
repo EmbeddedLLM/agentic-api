@@ -375,7 +375,7 @@ mod tests {
     fn responses_tool_mcp_rejects_function_name() {
         let result = serde_json::from_value::<ResponsesTool>(serde_json::json!({
             "type": "mcp",
-            "name": "read_mcp_resource",
+            "name": "increment",
             "server_label": "repo",
             "server_url": "http://localhost:9001/mcp"
         }));

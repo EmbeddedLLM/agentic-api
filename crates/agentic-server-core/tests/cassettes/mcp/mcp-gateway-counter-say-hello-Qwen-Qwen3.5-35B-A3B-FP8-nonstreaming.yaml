@@ -1,0 +1,95 @@
+turns:
+- filename: t1
+  request:
+    body:
+      input: Call mcp__counter__say_hello exactly once with {}. Do not call any other
+        tool. Return exactly MCP_SAYS=hello.
+      max_output_tokens: 4096
+      model: Qwen/Qwen3.5-35B-A3B-FP8
+      store: true
+      stream: false
+      tool_choice: required
+      tools:
+      - allowed_tools:
+        - say_hello
+        require_approval: never
+        server_label: counter
+        server_url: https://applications-clean-districts-departments.trycloudflare.com/mcp
+        type: mcp
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      conversation_id: null
+      created_at: 1784642984
+      error: null
+      id: resp_019f8502-d73f-7860-b402-d52c7fda29c2
+      incomplete_details: null
+      instructions: null
+      model: Qwen/Qwen3.5-35B-A3B-FP8
+      object: response
+      output:
+      - content:
+        - text: 'The user wants me to call the mcp__counter__say_hello function exactly
+            once with empty parameters {}. They specifically don''t want me to call
+            any other tool, and they want the response to be exactly "MCP_SAYS=hello".
+
+
+            Let me make the function call first, then provide the response.
+
+            '
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_9626015fce37ca2b
+        status: null
+        summary: []
+        type: reasoning
+      - approval_request_id: null
+        arguments: '{"parameters": "{}"}'
+        error: null
+        id: mcp_9c9cdbb7e2dfb4ae
+        name: say_hello
+        output: hello
+        server_label: counter
+        status: completed
+        type: mcp_call
+      - content:
+        - text: 'The function returned "hello" as expected. Now I need to return exactly
+            "MCP_SAYS=hello" as requested.
+
+            '
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_801f923b5b2875de
+        status: null
+        summary: []
+        type: reasoning
+      - content:
+        - annotations: []
+          text: '
+
+
+            MCP_SAYS=hello'
+          type: output_text
+        id: msg_9431026a6960f8c4
+        role: assistant
+        status: completed
+        type: message
+      previous_response_id: null
+      status: completed
+      usage:
+        input_tokens: 739
+        input_tokens_details:
+          cached_tokens: 0
+        output_tokens: 132
+        output_tokens_details:
+          reasoning_tokens: 0
+        total_tokens: 871
+    headers:
+      content-type: application/json
+    status_code: 200

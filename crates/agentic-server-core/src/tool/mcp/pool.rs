@@ -86,36 +86,9 @@ impl McpClientPool {
         self.clients.get(server_label)
     }
 
-    pub fn client_for_param(&self, param: &McpToolParam) -> Option<Arc<McpClient>> {
-        let Some(server_label) = clean_string(Some(&param.server_label)) else {
-            tracing::debug!("MCP tool param has no server_label");
-            return None;
-        };
-
-        let Some(client) = self.get(&server_label).cloned() else {
-            if let Some(error) = self.connection_error(&server_label) {
-                tracing::warn!(server_label, error, "MCP server failed to connect");
-            } else {
-                tracing::warn!(server_label, "MCP server is not connected");
-            }
-            return None;
-        };
-
-        Some(client)
-    }
-
     #[must_use]
     pub fn connection_error(&self, server_label: &str) -> Option<&str> {
         self.connection_errors.get(server_label).map(String::as_str)
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = (&String, &Arc<McpClient>)> {
-        self.clients.iter()
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.clients.is_empty()
     }
 }
 

@@ -1,290 +1,316 @@
 use agentic_core::executor::accumulator::ResponseAccumulator;
-use agentic_core::types::io::OutputItem;
+use agentic_core::types::io::{McpCall, OutputItem};
+use serde_json::{Value, json};
+use std::collections::HashMap;
 
 mod support;
 
+const MODEL: &str = "Qwen/Qwen3.5-35B-A3B-FP8";
 const MCP_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/mcp");
-const READ_RESOURCE_URI: &str =
-    "repo://crates/agentic-server-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml";
+const GATEWAY_MODEL_SLUG: &str = "Qwen-Qwen3.5-35B-A3B-FP8";
+const OPENAI_MODEL_SLUG: &str = "gpt-4o";
+const MCP_SERVER_URL: &str = "https://applications-clean-districts-departments.trycloudflare.com/mcp";
 
 fn load_mcp_cassette(filename: &str) -> support::Cassette {
-    let path = format!("{MCP_DIR}/{filename}");
-    support::load_cassette(&path)
+    support::load_cassette(&format!("{MCP_DIR}/{filename}"))
 }
 
-fn extract_data_lines(sse_entries: &[String]) -> Vec<String> {
-    sse_entries
+fn load_scenario_pair(scenario: &str, streaming: bool) -> (support::Cassette, support::Cassette) {
+    let mode = if streaming { "streaming" } else { "nonstreaming" };
+    let openai = load_mcp_cassette(&format!(
+        "mcp-openai-reference-counter-{scenario}-{OPENAI_MODEL_SLUG}-{mode}.yaml"
+    ));
+    let gateway = load_mcp_cassette(&format!(
+        "mcp-gateway-counter-{scenario}-{GATEWAY_MODEL_SLUG}-{mode}.yaml"
+    ));
+    (openai, gateway)
+}
+
+fn assert_matching_native_mcp_requests(
+    openai: &support::Cassette,
+    gateway: &support::Cassette,
+    streaming: bool,
+    allowed_tools: Option<&[&str]>,
+) {
+    assert_eq!(openai.turns.len(), 1);
+    assert_eq!(gateway.turns.len(), 1);
+
+    let openai_request = &openai.turns[0].request;
+    let gateway_request = &gateway.turns[0].request;
+    for request in [openai_request, gateway_request] {
+        assert_eq!(request.path, "/v1/responses");
+        assert_eq!(request.body.stream, streaming);
+        assert_eq!(request.body.tools.len(), 1);
+
+        let declaration = &request.body.tools[0];
+        assert_eq!(declaration["type"], "mcp");
+        assert_eq!(declaration["server_label"], "counter");
+        assert_eq!(declaration["server_url"], MCP_SERVER_URL);
+        assert_eq!(declaration["require_approval"], "never");
+        assert!(declaration.get("name").is_none());
+
+        match allowed_tools {
+            Some(expected) => {
+                let actual = declaration["allowed_tools"]
+                    .as_array()
+                    .expect("allowed_tools array")
+                    .iter()
+                    .map(|name| name.as_str().expect("allowed tool name"))
+                    .collect::<Vec<_>>();
+                assert_eq!(actual, expected);
+            }
+            None => assert!(declaration.get("allowed_tools").is_none()),
+        }
+    }
+
+    assert_eq!(openai_request.body.tools, gateway_request.body.tools);
+    assert_eq!(openai_request.body.tool_choice, gateway_request.body.tool_choice);
+}
+
+fn streaming_events(turn: &support::Turn) -> Vec<Value> {
+    turn.response
+        .sse
+        .as_ref()
+        .expect("streaming SSE response")
         .iter()
         .flat_map(|entry| entry.lines())
-        .filter(|line| line.starts_with("data: "))
-        .map(ToString::to_string)
+        .filter_map(|line| line.strip_prefix("data: "))
+        .filter(|data| *data != "[DONE]")
+        .filter_map(|data| serde_json::from_str(data).ok())
         .collect()
 }
 
-fn count_function_calls(output: &[OutputItem]) -> usize {
+fn response_output(turn: &support::Turn) -> Vec<OutputItem> {
+    let response = if let Some(body) = &turn.response.body {
+        body.clone()
+    } else {
+        streaming_events(turn)
+            .into_iter()
+            .rev()
+            .filter_map(|event| event.get("response").cloned())
+            .find(|response| response["status"] == "completed" && response["output"].is_array())
+            .expect("completed streaming response payload")
+    };
+    let accumulator = ResponseAccumulator::from_json(&response.to_string(), None).expect("valid completed response");
+    let payload = accumulator.finalize(MODEL, None, None);
+    assert_eq!(payload.status, "completed");
+    payload.output
+}
+
+fn output_text(output: &[OutputItem]) -> String {
     output
         .iter()
-        .filter(|item| matches!(item, OutputItem::FunctionCall(_)))
-        .count()
-}
-
-fn has_reasoning(output: &[OutputItem]) -> bool {
-    output.iter().any(|item| matches!(item, OutputItem::Reasoning(_)))
-}
-
-fn assert_loopback_mcp_url(value: &str) {
-    let url = reqwest::Url::parse(value).expect("server_url should be a valid URL");
-    assert_eq!(url.scheme(), "http");
-    assert_eq!(url.path(), "/mcp");
-    assert!(
-        matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "::1")),
-        "server_url should point at a loopback MCP server, got {value}"
-    );
-}
-
-fn process_nonstreaming_turn(cassette: &support::Cassette, turn_idx: usize, model: &str) -> Vec<OutputItem> {
-    let body = cassette.turns[turn_idx]
-        .response
-        .body
-        .as_ref()
-        .unwrap_or_else(|| panic!("turn {} must have response body", turn_idx + 1));
-    let body_str = serde_json::to_string(body).unwrap();
-    let acc = ResponseAccumulator::from_json(&body_str, None).unwrap();
-    let payload = acc.finalize(model, None, None);
-    assert_eq!(payload.status, "completed");
-    payload.output
-}
-
-fn process_streaming_turn(cassette: &support::Cassette, turn_idx: usize, model: &str) -> Vec<OutputItem> {
-    let sse = cassette.turns[turn_idx]
-        .response
-        .sse
-        .as_ref()
-        .unwrap_or_else(|| panic!("turn {} must have SSE events", turn_idx + 1));
-    let data_lines = extract_data_lines(sse);
-    assert!(
-        !data_lines.is_empty(),
-        "streaming turn {} must have SSE data lines",
-        turn_idx + 1
-    );
-    let final_payload = data_lines
-        .iter()
-        .rev()
-        .filter_map(|line| line.strip_prefix("data: "))
-        .filter(|data| *data != "[DONE]")
-        .filter_map(|data| serde_json::from_str::<serde_json::Value>(data).ok())
-        .filter_map(|event| event.get("response").cloned())
-        .find(|response| response["status"].as_str() == Some("completed") && response["output"].is_array())
-        .unwrap_or_else(|| panic!("turn {} must include a completed final response payload", turn_idx + 1));
-    let final_payload = serde_json::to_string(&final_payload).unwrap();
-    let acc = ResponseAccumulator::from_json(&final_payload, None).unwrap();
-    let payload = acc.finalize(model, None, None);
-    assert_eq!(payload.status, "completed");
-    payload.output
-}
-
-fn assert_completed_read_mcp_resource(output: &[OutputItem]) {
-    assert_eq!(
-        count_function_calls(output),
-        0,
-        "raw read_mcp_resource function call should not leak"
-    );
-    let mcp_call = output
-        .iter()
-        .find_map(|item| match item {
-            OutputItem::McpCall(call) if call.status.as_str() == "completed" => Some(call),
+        .filter_map(|item| match item {
+            OutputItem::Message(message) => Some(
+                message
+                    .content
+                    .iter()
+                    .map(|content| content.text.as_str())
+                    .collect::<String>(),
+            ),
             _ => None,
         })
-        .expect("cassette output should include a completed mcp_call item");
-    assert_eq!(mcp_call.status.as_str(), "completed");
-    assert_eq!(mcp_call.server_label, "repo");
-    assert_eq!(mcp_call.name, "read_mcp_resource");
-    let arguments: serde_json::Value = serde_json::from_str(&mcp_call.arguments).expect("MCP arguments JSON");
-    assert_eq!(arguments["server"], "repo");
-    assert_eq!(arguments["uri"], READ_RESOURCE_URI);
-
-    let result: serde_json::Value = serde_json::from_str(
-        mcp_call
-            .output
-            .as_deref()
-            .expect("completed MCP call should include output"),
-    )
-    .expect("MCP output JSON");
-    let text = result["contents"][0]["text"]
-        .as_str()
-        .expect("read_mcp_resource result should include text content");
-    assert!(text.contains("web_search_preview"));
-    assert!(text.contains("Potato - Wikipedia"));
-    assert!(
-        output.iter().any(|item| matches!(item, OutputItem::Message(_))),
-        "cassette output should include a final assistant message"
-    );
+        .collect::<String>()
+        .trim()
+        .to_owned()
 }
 
-#[test]
-fn read_mcp_resource_cassette_nonstreaming() {
-    let cassette = load_mcp_cassette("mcp-read-resource-Qwen-Qwen3-30B-A3B-FP8-nonstreaming.yaml");
-    assert_eq!(cassette.turns.len(), 1);
-    let body = &cassette.turns[0].request.body;
-    let tool = &body.tools[0];
-    assert_eq!(tool["type"].as_str().unwrap(), "function");
-    assert_eq!(tool["name"].as_str().unwrap(), "read_mcp_resource");
-    assert_eq!(tool["metadata"]["server_label"].as_str().unwrap(), "repo");
-    assert_loopback_mcp_url(tool["metadata"]["server_url"].as_str().unwrap());
-    assert_eq!(body.tool_choice.as_ref().unwrap().as_str().unwrap(), "required");
-
-    let output = process_nonstreaming_turn(&cassette, 0, "Qwen/Qwen3-30B-A3B-FP8");
+fn mcp_calls(output: &[OutputItem]) -> Vec<&McpCall> {
     assert!(
-        has_reasoning(&output),
-        "mcp read_resource cassette should include reasoning"
+        !output.iter().any(|item| matches!(item, OutputItem::FunctionCall(_))),
+        "internal function calls must not leak from the gateway"
     );
-    assert_completed_read_mcp_resource(&output);
-}
-
-#[test]
-fn read_mcp_resource_cassette_streaming_success_events() {
-    let cassette = load_mcp_cassette("mcp-read-resource-Qwen-Qwen3-30B-A3B-FP8-streaming.yaml");
-    assert_eq!(cassette.turns.len(), 1);
-    let body = &cassette.turns[0].request.body;
-    assert_eq!(body.tools[0]["type"].as_str().unwrap(), "function");
-
-    let sse = cassette.turns[0]
-        .response
-        .sse
-        .as_ref()
-        .expect("streaming cassette should include SSE events");
-    let data_lines = extract_data_lines(sse);
-    let events: Vec<serde_json::Value> = data_lines
+    output
         .iter()
-        .filter_map(|line| line.strip_prefix("data: "))
-        .filter(|data| *data != "[DONE]")
-        .filter_map(|data| serde_json::from_str(data).ok())
-        .collect();
-    let event_types: Vec<&str> = events.iter().filter_map(|event| event["type"].as_str()).collect();
-    assert!(
-        !event_types.contains(&"response.error") && !event_types.contains(&"response.failed"),
-        "streaming MCP cassette must record a successful tool loop"
-    );
-    assert!(event_types.contains(&"response.output_item.added"));
-    assert!(event_types.contains(&"response.mcp_call.in_progress"));
-    assert!(event_types.contains(&"response.mcp_call_arguments.delta"));
-    assert!(event_types.contains(&"response.mcp_call_arguments.done"));
-    assert!(event_types.contains(&"response.mcp_call.completed"));
-    assert!(event_types.contains(&"response.output_item.done"));
-    assert!(
-        events
-            .iter()
-            .filter_map(|event| event.get("response"))
-            .any(|response| response["status"].as_str() == Some("completed") && response["output"].is_array()),
-        "streaming MCP cassette should include a completed final response payload"
-    );
-
-    let output = process_streaming_turn(&cassette, 0, "Qwen/Qwen3-30B-A3B-FP8");
-    assert_completed_read_mcp_resource(&output);
-}
-
-/// Asserts the cassette's `read_mcp_resource` call failed with an error
-/// message containing `expected_error_fragment`, and that the request still
-/// completes (the failure is fed back to the model, not surfaced as a
-/// whole-request error).
-fn assert_failed_read_mcp_resource(output: &[OutputItem], expected_error_fragment: &str) {
-    assert_eq!(
-        count_function_calls(output),
-        0,
-        "raw read_mcp_resource function call should not leak"
-    );
-    let mcp_call = output
-        .iter()
-        .find_map(|item| match item {
+        .filter_map(|item| match item {
             OutputItem::McpCall(call) => Some(call),
             _ => None,
         })
-        .expect("cassette output should include a mcp_call item");
-    assert_eq!(mcp_call.status.as_str(), "failed");
-    assert_eq!(mcp_call.server_label, "repo");
-    assert_eq!(mcp_call.name, "read_mcp_resource");
-    assert!(mcp_call.output.is_none(), "a failed mcp_call should not carry output");
-    let error = mcp_call
-        .error
-        .as_deref()
-        .expect("failed mcp_call should carry an error message");
-    assert!(
-        error.contains(expected_error_fragment),
-        "expected error to contain '{expected_error_fragment}', got: {error}"
-    );
-    assert!(
-        output.iter().any(|item| matches!(item, OutputItem::Message(_))),
-        "cassette output should still include a final assistant message reporting the failure"
-    );
+        .collect()
 }
 
-/// Loads a single-turn streaming MCP cassette, asserts its SSE stream is a
-/// well-formed failed-tool-call loop (not a whole-request error), and
-/// returns the finalized output for failure-specific assertions.
-fn load_and_process_failed_streaming_cassette(filename: &str) -> Vec<OutputItem> {
-    let cassette = load_mcp_cassette(filename);
-    assert_eq!(cassette.turns.len(), 1);
-    let body = &cassette.turns[0].request.body;
-    assert_eq!(body.tools[0]["type"].as_str().unwrap(), "function");
-
-    let sse = cassette.turns[0]
-        .response
-        .sse
-        .as_ref()
-        .expect("streaming cassette should include SSE events");
-    let data_lines = extract_data_lines(sse);
-    let events: Vec<serde_json::Value> = data_lines
-        .iter()
-        .filter_map(|line| line.strip_prefix("data: "))
-        .filter(|data| *data != "[DONE]")
-        .filter_map(|data| serde_json::from_str(data).ok())
-        .collect();
-    let event_types: Vec<&str> = events.iter().filter_map(|event| event["type"].as_str()).collect();
-    assert!(
-        !event_types.contains(&"response.error") && !event_types.contains(&"response.failed"),
-        "a failed tool call must not surface as a whole-request error"
-    );
-    assert!(event_types.contains(&"response.mcp_call.in_progress"));
-    assert!(event_types.contains(&"response.mcp_call_arguments.delta"));
-    assert!(event_types.contains(&"response.mcp_call_arguments.done"));
-    assert!(event_types.contains(&"response.mcp_call.failed"));
-    assert!(
-        events
-            .iter()
-            .filter_map(|event| event.get("response"))
-            .any(|response| response["status"].as_str() == Some("completed") && response["output"].is_array()),
-        "streaming MCP cassette should include a completed final response payload"
-    );
-
-    process_streaming_turn(&cassette, 0, "Qwen/Qwen3-30B-A3B-FP8")
+fn normalized_json_string(value: &str) -> Value {
+    serde_json::from_str(value).unwrap_or_else(|_| Value::String(value.to_owned()))
 }
 
-/// Unhappy path: `server_url` fails the gateway's SSRF host allowlist, so no
-/// connection is ever attempted.
+fn normalized_optional_output(output: Option<&str>) -> Value {
+    output.map_or(Value::Null, normalized_json_string)
+}
+
+fn assert_calls_match_openai(openai: &[OutputItem], gateway: &[OutputItem], compare_arguments: bool) {
+    let expected = mcp_calls(openai);
+    let actual = mcp_calls(gateway);
+    assert_eq!(actual.len(), expected.len());
+
+    for (expected, actual) in expected.into_iter().zip(actual) {
+        assert_eq!(actual.server_label, expected.server_label);
+        assert_eq!(actual.name, expected.name);
+        assert_eq!(actual.status, expected.status);
+        assert_eq!(
+            normalized_optional_output(actual.output.as_deref()),
+            normalized_optional_output(expected.output.as_deref())
+        );
+        assert_eq!(
+            serde_json::to_value(&actual.error).expect("gateway MCP error JSON"),
+            serde_json::to_value(&expected.error).expect("OpenAI MCP error JSON")
+        );
+        if compare_arguments {
+            assert_eq!(
+                normalized_json_string(&actual.arguments),
+                normalized_json_string(&expected.arguments)
+            );
+        } else {
+            assert!(normalized_json_string(&actual.arguments).is_object());
+            assert!(normalized_json_string(&expected.arguments).is_object());
+        }
+    }
+}
+
+fn mcp_call_event_traces(events: &[Value]) -> Vec<(String, Vec<String>)> {
+    let mut traces: HashMap<String, (String, Vec<String>)> = HashMap::new();
+
+    for event in events {
+        let Some(event_type) = event["type"].as_str() else {
+            continue;
+        };
+        let item = event.get("item");
+        let mcp_item = item.filter(|item| item["type"] == "mcp_call");
+        let item_id = mcp_item
+            .and_then(|item| item["id"].as_str())
+            .or_else(|| event["item_id"].as_str());
+        let Some(item_id) = item_id else {
+            continue;
+        };
+
+        if let Some(item) = mcp_item {
+            let name = item["name"].as_str().expect("mcp_call name").to_owned();
+            traces.entry(item_id.to_owned()).or_insert_with(|| (name, Vec::new()));
+        }
+        if event_type.starts_with("response.mcp_call")
+            || matches!(event_type, "response.output_item.added" | "response.output_item.done") && mcp_item.is_some()
+        {
+            traces
+                .get_mut(item_id)
+                .expect("mcp_call added before lifecycle events")
+                .1
+                .push(event_type.to_owned());
+        }
+    }
+
+    let mut traces = traces.into_values().collect::<Vec<_>>();
+    traces.sort_by(|left, right| left.0.cmp(&right.0));
+    traces
+}
+
+fn normalized_mcp_item_transitions(events: &[Value]) -> HashMap<String, Vec<Value>> {
+    let mut transitions: HashMap<String, Vec<Value>> = HashMap::new();
+    for event in events {
+        let Some(event_type) = event["type"].as_str() else {
+            continue;
+        };
+        if !matches!(event_type, "response.output_item.added" | "response.output_item.done") {
+            continue;
+        }
+        let Some(item) = event.get("item") else {
+            continue;
+        };
+        if item["type"] != "mcp_call" {
+            continue;
+        }
+        let name = item["name"].as_str().expect("mcp_call name").to_owned();
+        transitions.entry(name).or_default().push(json!({
+            "event_type": event_type,
+            "type": item["type"],
+            "server_label": item["server_label"],
+            "name": item["name"],
+            "status": item["status"],
+            "arguments": item["arguments"].as_str().map(normalized_json_string),
+            "output": item["output"].as_str().map(normalized_json_string),
+            "error": item["error"],
+            "approval_request_id": item["approval_request_id"],
+        }));
+    }
+    transitions
+}
+
+fn assert_streaming_contract_matches_openai(openai: &support::Turn, gateway: &support::Turn) {
+    let expected = streaming_events(openai);
+    let actual = streaming_events(gateway);
+    assert_eq!(mcp_call_event_traces(&actual), mcp_call_event_traces(&expected));
+    assert_eq!(
+        normalized_mcp_item_transitions(&actual),
+        normalized_mcp_item_transitions(&expected)
+    );
+    assert!(actual.iter().all(|event| {
+        !event["type"]
+            .as_str()
+            .is_some_and(|kind| kind.contains("mcp_tool_call"))
+    }));
+}
+
 #[test]
-fn read_mcp_resource_cassette_unreachable_server() {
-    let output = load_and_process_failed_streaming_cassette(
-        "mcp-read-resource-unreachable-server-Qwen-Qwen3-30B-A3B-FP8-streaming.yaml",
-    );
-    assert_failed_read_mcp_resource(&output, "unknown MCP server");
+fn mcp_tool_listing_has_no_calls_on_either_provider() {
+    let (openai, gateway) = load_scenario_pair("list-tools", true);
+    assert_matching_native_mcp_requests(&openai, &gateway, true, None);
+
+    let openai_output = response_output(&openai.turns[0]);
+    let gateway_output = response_output(&gateway.turns[0]);
+    assert_calls_match_openai(&openai_output, &gateway_output, true);
+    assert_streaming_contract_matches_openai(&openai.turns[0], &gateway.turns[0]);
+
+    for text in [output_text(&openai_output), output_text(&gateway_output)] {
+        for tool_name in ["increment", "get_value", "sum"] {
+            assert!(
+                text.contains(tool_name),
+                "tool listing should contain {tool_name}: {text}"
+            );
+        }
+    }
 }
 
-/// Unhappy path: `server_url` is loopback (passes the allowlist) but nothing
-/// is listening, so the gateway's connection attempt itself fails.
 #[test]
-fn read_mcp_resource_cassette_connection_refused() {
-    let output = load_and_process_failed_streaming_cassette(
-        "mcp-read-resource-connection-refused-Qwen-Qwen3-30B-A3B-FP8-streaming.yaml",
-    );
-    assert_failed_read_mcp_resource(&output, "failed to connect");
+fn successful_streaming_mcp_calls_match_openai() {
+    let (openai, gateway) = load_scenario_pair("call-sum-and-echo", true);
+    assert_matching_native_mcp_requests(&openai, &gateway, true, Some(&["sum", "echo"]));
+
+    let openai_output = response_output(&openai.turns[0]);
+    let gateway_output = response_output(&gateway.turns[0]);
+    assert_calls_match_openai(&openai_output, &gateway_output, true);
+    assert_streaming_contract_matches_openai(&openai.turns[0], &gateway.turns[0]);
+    assert_eq!(output_text(&gateway_output), output_text(&openai_output));
 }
 
-/// Unhappy path: the MCP server connects fine but `resources/read` fails
-/// because the requested URI does not exist.
 #[test]
-fn read_mcp_resource_cassette_missing_resource() {
-    let output = load_and_process_failed_streaming_cassette(
-        "mcp-read-resource-missing-resource-Qwen-Qwen3-30B-A3B-FP8-streaming.yaml",
-    );
-    assert_failed_read_mcp_resource(&output, "resources/read failed");
+fn missing_argument_mcp_failure_matches_openai() {
+    let (openai, gateway) = load_scenario_pair("sum-missing-argument", true);
+    assert_matching_native_mcp_requests(&openai, &gateway, true, Some(&["sum"]));
+
+    let openai_output = response_output(&openai.turns[0]);
+    let gateway_output = response_output(&gateway.turns[0]);
+    assert_calls_match_openai(&openai_output, &gateway_output, true);
+    assert_streaming_contract_matches_openai(&openai.turns[0], &gateway.turns[0]);
+}
+
+#[test]
+fn invalid_argument_type_mcp_failure_matches_openai() {
+    let (openai, gateway) = load_scenario_pair("sum-invalid-argument-type", true);
+    assert_matching_native_mcp_requests(&openai, &gateway, true, Some(&["sum"]));
+
+    let openai_output = response_output(&openai.turns[0]);
+    let gateway_output = response_output(&gateway.turns[0]);
+    assert_calls_match_openai(&openai_output, &gateway_output, true);
+    assert_streaming_contract_matches_openai(&openai.turns[0], &gateway.turns[0]);
+}
+
+#[test]
+fn successful_blocking_mcp_call_matches_openai() {
+    let (openai, gateway) = load_scenario_pair("say-hello", false);
+    assert_matching_native_mcp_requests(&openai, &gateway, false, Some(&["say_hello"]));
+
+    let openai_output = response_output(&openai.turns[0]);
+    let gateway_output = response_output(&gateway.turns[0]);
+    // Arguments are model-generated. Qwen adds an ignored placeholder field
+    // while GPT-4o sends `{}`; both execute the same zero-argument MCP tool.
+    assert_calls_match_openai(&openai_output, &gateway_output, false);
+    assert_eq!(output_text(&gateway_output), output_text(&openai_output));
 }

@@ -1,21 +1,9 @@
 [
   {
-    "type": "function",
-    "name": "read_mcp_resource",
-    "description": "Read a resource exposed by an MCP server.",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "server": {"type": "string"},
-        "uri": {"type": "string"}
-      },
-      "required": ["server", "uri"],
-      "additionalProperties": false
-    },
-    "strict": true,
-    "metadata": {
-      "server_label": "repo",
-      "server_url": "http://localhost:8000/mcp"
-    }
+    "type": "mcp",
+    "server_label": "counter",
+    "server_url": "https://applications-clean-districts-departments.trycloudflare.com/mcp",
+
+    "require_approval": "never"
   }
 ]

@@ -16,9 +16,6 @@ pub use codex::{CodexNamespaceHandler, NamespaceMap, model_visible_namespace_mem
 pub use executors::{GatewayExecutorRegistration, GatewayExecutors};
 pub use function::FunctionHandler;
 pub use handler::{GatewayExecutor, ToolError, ToolHandler, ToolOutput};
-pub use mcp::{
-    McpClient, McpClientPool, McpDiscoveredHandler, McpError, McpHandler, McpHandlerFactory, McpHandlerKind,
-    McpOperation, McpServerEntry, McpSpec, READ_MCP_RESOURCE_TOOL_NAME, ReadResourceArgs, read_mcp_resource_spec,
-};
+pub use mcp::{McpClient, McpClientPool, McpDiscoveredHandler, McpError, McpHandler, McpOperation, McpServerEntry};
 pub use registry::{GatewayDispatchResult, ToolEntry, ToolRegistry, ToolType};
 pub use web_search::WebSearchHandler;

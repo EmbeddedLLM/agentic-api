@@ -6,7 +6,7 @@ use crate::utils::common::serialize_to_value_or_custom_default;
 use super::codex::CodexNamespaceHandler;
 use super::function::FunctionHandler;
 use super::handler::{ToolHandler, ToolOutput};
-use super::mcp::{McpHandler, maybe_mcp_function};
+use super::mcp::McpHandler;
 use super::registry::ToolType;
 use super::web_search::web_search_function_tool;
 
@@ -15,10 +15,7 @@ impl ResponsesTool {
     #[must_use]
     pub fn tool_type(&self) -> Option<ToolType> {
         match self {
-            Self::Function(p) => match maybe_mcp_function(p) {
-                Some(params) if !params.is_empty() => Some(ToolType::Mcp),
-                _ => Some(ToolType::Function),
-            },
+            Self::Function(_) => Some(ToolType::Function),
             Self::Mcp(_) => Some(ToolType::Mcp),
             Self::WebSearch(_) => Some(ToolType::WebSearch),
             Self::FileSearch(_) => Some(ToolType::FileSearch),

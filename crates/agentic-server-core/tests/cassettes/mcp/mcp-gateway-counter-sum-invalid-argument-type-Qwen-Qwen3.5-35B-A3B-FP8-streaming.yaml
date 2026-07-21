@@ -1,0 +1,1066 @@
+turns:
+- filename: t1
+  request:
+    body:
+      input: Call mcp__counter__sum exactly once using the literal argument object
+        {"a":"not-an-integer","b":2}. Do not correct the argument type. After the
+        MCP call fails, report its error in one sentence. Do not retry.
+      max_output_tokens: 4096
+      model: Qwen/Qwen3.5-35B-A3B-FP8
+      store: true
+      stream: true
+      tool_choice: required
+      tools:
+      - allowed_tools:
+        - sum
+        require_approval: never
+        server_label: counter
+        server_url: https://applications-clean-districts-departments.trycloudflare.com/mcp
+        type: mcp
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    headers:
+      content-type: text/event-stream; charset=utf-8
+    sse:
+    - 'data: {"response":{"background":false,"created_at":1784642980,"ec_transfer_params":null,"frequency_penalty":0.0,"id":"resp_019f8502-cb45-7d20-a27e-da5126c59979","incomplete_details":null,"input_messages":null,"instructions":null,"kv_transfer_params":null,"max_output_tokens":4096,"max_tool_calls":null,"metadata":null,"model":"Qwen/Qwen3.5-35B-A3B-FP8","object":"response","output":[],"output_messages":null,"parallel_tool_calls":false,"presence_penalty":0.0,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","temperature":1.0,"text":null,"tool_choice":"required","tools":[{"allowed_callers":null,"defer_loading":null,"description":"Calculate
+      the sum of two numbers","name":"mcp__counter__sum","output_schema":null,"parameters":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"a":{"format":"int32","type":"integer"},"b":{"format":"int32","type":"integer"}},"required":["a","b"],"type":"object"},"strict":false,"type":"function"}],"top_logprobs":null,"top_p":0.95,"truncation":"disabled","usage":null,"user":null},"sequence_number":0,"type":"response.created"}
+
+      '
+    - '
+
+      '
+    - 'data: {"response":{"background":false,"created_at":1784642980,"ec_transfer_params":null,"frequency_penalty":0.0,"id":"resp_019f8502-cb45-7d20-a27e-da5126c59979","incomplete_details":null,"input_messages":null,"instructions":null,"kv_transfer_params":null,"max_output_tokens":4096,"max_tool_calls":null,"metadata":null,"model":"Qwen/Qwen3.5-35B-A3B-FP8","object":"response","output":[],"output_messages":null,"parallel_tool_calls":false,"presence_penalty":0.0,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","temperature":1.0,"text":null,"tool_choice":"required","tools":[{"allowed_callers":null,"defer_loading":null,"description":"Calculate
+      the sum of two numbers","name":"mcp__counter__sum","output_schema":null,"parameters":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"a":{"format":"int32","type":"integer"},"b":{"format":"int32","type":"integer"}},"required":["a","b"],"type":"object"},"strict":false,"type":"function"}],"top_logprobs":null,"top_p":0.95,"truncation":"disabled","usage":null,"user":null},"sequence_number":1,"type":"response.in_progress"}
+
+      '
+    - '
+
+      '
+    - 'data: {"item":{"content":null,"encrypted_content":null,"id":"a3d5b6e41750e7ae","status":"in_progress","summary":[],"type":"reasoning"},"output_index":0,"sequence_number":2,"type":"response.output_item.added"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"item_id":"a3d5b6e41750e7ae","output_index":0,"part":{"text":"","type":"reasoning_text"},"sequence_number":3,"type":"response.reasoning_part.added"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"The","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":4,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" user","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":5,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" wants","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":6,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" me","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":7,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" to","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":8,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" call","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":9,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":10,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" m","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":11,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"cp","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":12,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"__","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":13,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"counter","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":14,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"__","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":15,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"sum","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":16,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" function","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":17,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" with","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":18,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" a","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":19,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" specific","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":20,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" argument","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":21,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" object","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":22,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" where","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":23,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" \"","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":24,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"a","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":25,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"\"","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":26,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" is","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":27,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":28,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" string","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":29,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" \"","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":30,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"not","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":31,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"-an","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":32,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"-","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":33,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"integer","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":34,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"\"","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":35,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" instead","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":36,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" of","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":37,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" an","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":38,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" integer","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":39,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":",","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":40,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" and","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":41,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" \"","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":42,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"b","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":43,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"\"","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":44,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" is","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":45,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" ","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":46,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"2","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":47,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":48,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" They","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":49,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" want","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":50,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" me","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":51,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" to","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":52,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" not","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":53,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" correct","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":54,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":55,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" argument","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":56,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" type","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":57,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" and","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":58,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" report","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":59,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":60,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" error","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":61,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" after","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":62,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":63,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" MCP","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":64,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" call","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":65,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" fails","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":66,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":67,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"\n\n","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":68,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"I","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":69,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" need","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":70,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" to","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":71,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" use","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":72,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":73,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" m","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":74,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"cp","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":75,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"__","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":76,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"counter","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":77,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"__","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":78,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"sum","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":79,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" function","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":80,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" with","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":81,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":82,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" exact","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":83,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" parameters","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":84,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" provided","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":85,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":86,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"\n","item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":87,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"item_id":"a3d5b6e41750e7ae","output_index":0,"sequence_number":88,"text":"The
+      user wants me to call the mcp__counter__sum function with a specific argument
+      object where \"a\" is the string \"not-an-integer\" instead of an integer, and
+      \"b\" is 2. They want me to not correct the argument type and report the error
+      after the MCP call fails.\n\nI need to use the mcp__counter__sum function with
+      the exact parameters provided.\n","type":"response.reasoning_text.done"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"item_id":"a3d5b6e41750e7ae","output_index":0,"part":{"text":"The
+      user wants me to call the mcp__counter__sum function with a specific argument
+      object where \"a\" is the string \"not-an-integer\" instead of an integer, and
+      \"b\" is 2. They want me to not correct the argument type and report the error
+      after the MCP call fails.\n\nI need to use the mcp__counter__sum function with
+      the exact parameters provided.\n","type":"reasoning_text"},"sequence_number":89,"type":"response.reasoning_part.done"}
+
+      '
+    - '
+
+      '
+    - 'data: {"item":{"content":[{"text":"The user wants me to call the mcp__counter__sum
+      function with a specific argument object where \"a\" is the string \"not-an-integer\"
+      instead of an integer, and \"b\" is 2. They want me to not correct the argument
+      type and report the error after the MCP call fails.\n\nI need to use the mcp__counter__sum
+      function with the exact parameters provided.\n","type":"reasoning_text"}],"encrypted_content":null,"id":"a3d5b6e41750e7ae","status":"completed","summary":[],"type":"reasoning"},"output_index":0,"sequence_number":90,"type":"response.output_item.done"}
+
+      '
+    - '
+
+      '
+    - 'data: {"item":{"approval_request_id":null,"arguments":"","error":null,"id":"mcp_a40c0854833a64ea","name":"sum","output":null,"server_label":"counter","status":"in_progress","type":"mcp_call"},"output_index":1,"type":"response.output_item.added"}
+
+      '
+    - '
+
+      '
+    - 'data: {"item_id":"mcp_a40c0854833a64ea","output_index":1,"type":"response.mcp_call.in_progress"}
+
+      '
+    - '
+
+      '
+    - 'data: {"delta":"{\"a\": \"not-an-integer\", \"b\": 2}","item_id":"mcp_a40c0854833a64ea","output_index":1,"type":"response.mcp_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"arguments":"{\"a\": \"not-an-integer\", \"b\": 2}","item_id":"mcp_a40c0854833a64ea","output_index":1,"type":"response.mcp_call_arguments.done"}
+
+      '
+    - '
+
+      '
+    - 'data: {"item_id":"mcp_a40c0854833a64ea","output_index":1,"type":"response.mcp_call.failed"}
+
+      '
+    - '
+
+      '
+    - 'data: {"item":{"approval_request_id":null,"arguments":"{\"a\": \"not-an-integer\",
+      \"b\": 2}","error":{"content":[{"annotations":null,"meta":null,"text":"failed
+      to deserialize parameters: invalid type: string \"not-an-integer\", expected
+      i32","type":"text"}],"type":"mcp_tool_execution_error"},"id":"mcp_a40c0854833a64ea","name":"sum","output":null,"server_label":"counter","status":"failed","type":"mcp_call"},"output_index":1,"type":"response.output_item.done"}
+
+      '
+    - '
+
+      '
+    - 'data: {"response":{"background":false,"created_at":1784642981,"ec_transfer_params":null,"frequency_penalty":0.0,"id":"resp_019f8502-cb45-7d20-a27e-da5126c59979","incomplete_details":null,"input_messages":null,"instructions":null,"kv_transfer_params":null,"max_output_tokens":4096,"max_tool_calls":null,"metadata":null,"model":"Qwen/Qwen3.5-35B-A3B-FP8","object":"response","output":[],"output_messages":null,"parallel_tool_calls":false,"presence_penalty":0.0,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","temperature":1.0,"text":null,"tool_choice":"auto","tools":[{"allowed_callers":null,"defer_loading":null,"description":"Calculate
+      the sum of two numbers","name":"mcp__counter__sum","output_schema":null,"parameters":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"a":{"format":"int32","type":"integer"},"b":{"format":"int32","type":"integer"}},"required":["a","b"],"type":"object"},"strict":false,"type":"function"}],"top_logprobs":null,"top_p":0.95,"truncation":"disabled","usage":null,"user":null},"sequence_number":0,"type":"response.created"}
+
+      '
+    - '
+
+      '
+    - 'data: {"response":{"background":false,"created_at":1784642981,"ec_transfer_params":null,"frequency_penalty":0.0,"id":"resp_019f8502-cb45-7d20-a27e-da5126c59979","incomplete_details":null,"input_messages":null,"instructions":null,"kv_transfer_params":null,"max_output_tokens":4096,"max_tool_calls":null,"metadata":null,"model":"Qwen/Qwen3.5-35B-A3B-FP8","object":"response","output":[],"output_messages":null,"parallel_tool_calls":false,"presence_penalty":0.0,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","temperature":1.0,"text":null,"tool_choice":"auto","tools":[{"allowed_callers":null,"defer_loading":null,"description":"Calculate
+      the sum of two numbers","name":"mcp__counter__sum","output_schema":null,"parameters":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"a":{"format":"int32","type":"integer"},"b":{"format":"int32","type":"integer"}},"required":["a","b"],"type":"object"},"strict":false,"type":"function"}],"top_logprobs":null,"top_p":0.95,"truncation":"disabled","usage":null,"user":null},"sequence_number":1,"type":"response.in_progress"}
+
+      '
+    - '
+
+      '
+    - 'data: {"item":{"content":null,"encrypted_content":null,"id":"b24a9dec9501aedb","status":"in_progress","summary":[],"type":"reasoning"},"output_index":0,"sequence_number":2,"type":"response.output_item.added"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"item_id":"b24a9dec9501aedb","output_index":0,"part":{"text":"","type":"reasoning_text"},"sequence_number":3,"type":"response.reasoning_part.added"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"The","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":4,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" MCP","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":5,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" call","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":6,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" failed","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":7,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" as","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":8,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" expected","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":9,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" because","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":10,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":11,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" \"","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":12,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"a","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":13,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"\"","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":14,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" parameter","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":15,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" was","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":16,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" a","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":17,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" string","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":18,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" instead","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":19,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" of","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":20,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" an","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":21,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" integer","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":22,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":23,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" I","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":24,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" need","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":25,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" to","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":26,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" report","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":27,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" this","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":28,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" error","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":29,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" in","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":30,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" one","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":31,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" sentence","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":32,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" without","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":33,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" retry","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":34,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"ing","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":35,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":36,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"\n","item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":37,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"item_id":"b24a9dec9501aedb","output_index":0,"sequence_number":38,"text":"The
+      MCP call failed as expected because the \"a\" parameter was a string instead
+      of an integer. I need to report this error in one sentence without retrying.\n","type":"response.reasoning_text.done"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"item_id":"b24a9dec9501aedb","output_index":0,"part":{"text":"The
+      MCP call failed as expected because the \"a\" parameter was a string instead
+      of an integer. I need to report this error in one sentence without retrying.\n","type":"reasoning_text"},"sequence_number":39,"type":"response.reasoning_part.done"}
+
+      '
+    - '
+
+      '
+    - 'data: {"item":{"content":[{"text":"The MCP call failed as expected because
+      the \"a\" parameter was a string instead of an integer. I need to report this
+      error in one sentence without retrying.\n","type":"reasoning_text"}],"encrypted_content":null,"id":"b24a9dec9501aedb","status":"completed","summary":[],"type":"reasoning"},"output_index":0,"sequence_number":40,"type":"response.output_item.done"}
+
+      '
+    - '
+
+      '
+    - 'data: {"item":{"content":[],"id":"9112ba67075ad4ad","phase":null,"role":"assistant","status":"in_progress","type":"message"},"output_index":1,"sequence_number":41,"type":"response.output_item.added"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"item_id":"9112ba67075ad4ad","output_index":1,"part":{"annotations":[],"logprobs":[],"text":"","type":"output_text"},"sequence_number":42,"type":"response.content_part.added"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"\n\nThe","item_id":"9112ba67075ad4ad","logprobs":[],"output_index":1,"sequence_number":43,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" MCP","item_id":"9112ba67075ad4ad","logprobs":[],"output_index":1,"sequence_number":44,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" call","item_id":"9112ba67075ad4ad","logprobs":[],"output_index":1,"sequence_number":45,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" failed","item_id":"9112ba67075ad4ad","logprobs":[],"output_index":1,"sequence_number":46,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" because","item_id":"9112ba67075ad4ad","logprobs":[],"output_index":1,"sequence_number":47,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"9112ba67075ad4ad","logprobs":[],"output_index":1,"sequence_number":48,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" parameter","item_id":"9112ba67075ad4ad","logprobs":[],"output_index":1,"sequence_number":49,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" \"","item_id":"9112ba67075ad4ad","logprobs":[],"output_index":1,"sequence_number":50,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"a","item_id":"9112ba67075ad4ad","logprobs":[],"output_index":1,"sequence_number":51,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":"\"","item_id":"9112ba67075ad4ad","logprobs":[],"output_index":1,"sequence_number":52,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" was","item_id":"9112ba67075ad4ad","logprobs":[],"output_index":1,"sequence_number":53,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" a","item_id":"9112ba67075ad4ad","logprobs":[],"output_index":1,"sequence_number":54,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" string","item_id":"9112ba67075ad4ad","logprobs":[],"output_index":1,"sequence_number":55,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" instead","item_id":"9112ba67075ad4ad","logprobs":[],"output_index":1,"sequence_number":56,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" of","item_id":"9112ba67075ad4ad","logprobs":[],"output_index":1,"sequence_number":57,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"9112ba67075ad4ad","logprobs":[],"output_index":1,"sequence_number":58,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" required","item_id":"9112ba67075ad4ad","logprobs":[],"output_index":1,"sequence_number":59,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" integer","item_id":"9112ba67075ad4ad","logprobs":[],"output_index":1,"sequence_number":60,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":" type","item_id":"9112ba67075ad4ad","logprobs":[],"output_index":1,"sequence_number":61,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"delta":".","item_id":"9112ba67075ad4ad","logprobs":[],"output_index":1,"sequence_number":62,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"item_id":"9112ba67075ad4ad","logprobs":[],"output_index":1,"sequence_number":63,"text":"\n\nThe
+      MCP call failed because the parameter \"a\" was a string instead of the required
+      integer type.","type":"response.output_text.done"}
+
+      '
+    - '
+
+      '
+    - 'data: {"content_index":0,"item_id":"9112ba67075ad4ad","output_index":1,"part":{"annotations":[],"logprobs":null,"text":"\n\nThe
+      MCP call failed because the parameter \"a\" was a string instead of the required
+      integer type.","type":"output_text"},"sequence_number":64,"type":"response.content_part.done"}
+
+      '
+    - '
+
+      '
+    - 'data: {"item":{"content":[{"annotations":[],"logprobs":null,"text":"\n\nThe
+      MCP call failed because the parameter \"a\" was a string instead of the required
+      integer type.","type":"output_text"}],"id":"9112ba67075ad4ad","phase":null,"role":"assistant","status":"completed","summary":[],"type":"message"},"output_index":1,"sequence_number":65,"type":"response.output_item.done"}
+
+      '
+    - '
+
+      '
+    - 'data: {"response":{"conversation_id":null,"created_at":1784642982,"error":null,"id":"resp_019f8502-cb45-7d20-a27e-da5126c59979","incomplete_details":null,"instructions":null,"model":"Qwen/Qwen3.5-35B-A3B-FP8","object":"response","output":[{"content":[{"text":"The
+      user wants me to call the mcp__counter__sum function with a specific argument
+      object where \"a\" is the string \"not-an-integer\" instead of an integer, and
+      \"b\" is 2. They want me to not correct the argument type and report the error
+      after the MCP call fails.\n\nI need to use the mcp__counter__sum function with
+      the exact parameters provided.\n","type":"reasoning_text"}],"encrypted_content":null,"id":"a3d5b6e41750e7ae","status":null,"summary":[],"type":"reasoning"},{"approval_request_id":null,"arguments":"{\"a\":
+      \"not-an-integer\", \"b\": 2}","error":{"content":[{"annotations":null,"meta":null,"text":"failed
+      to deserialize parameters: invalid type: string \"not-an-integer\", expected
+      i32","type":"text"}],"type":"mcp_tool_execution_error"},"id":"mcp_a40c0854833a64ea","name":"sum","output":null,"server_label":"counter","status":"failed","type":"mcp_call"},{"content":[{"text":"The
+      MCP call failed as expected because the \"a\" parameter was a string instead
+      of an integer. I need to report this error in one sentence without retrying.\n","type":"reasoning_text"}],"encrypted_content":null,"id":"b24a9dec9501aedb","status":null,"summary":[],"type":"reasoning"},{"content":[{"annotations":[],"text":"\n\nThe
+      MCP call failed because the parameter \"a\" was a string instead of the required
+      integer type.","type":"output_text"}],"id":"9112ba67075ad4ad","role":"assistant","status":"completed","type":"message"}],"previous_response_id":null,"status":"completed","usage":{"input_tokens":969,"input_tokens_details":{"cached_tokens":0},"output_tokens":185,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":1154}},"type":"response.completed"}
+
+      '
+    - '
+
+      '
+    - 'data: [DONE]
+
+      '
+    - '
+
+      '
+    status_code: 200
