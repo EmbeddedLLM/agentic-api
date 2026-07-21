@@ -6,16 +6,17 @@ References:
 
 - [OpenAI Responses MCP guide](https://developers.openai.com/api/docs/guides/tools-connectors-mcp)
 - [MCP tools specification](https://modelcontextprotocol.io/specification/2025-06-18/server/tools)
-- [MCP resources specification](https://modelcontextprotocol.io/specification/2025-06-18/server/resources)
 - [Codex MCP client](https://github.com/openai/codex/tree/main/codex-rs/codex-mcp)
+- [Codex MCP tool handler](https://github.com/openai/codex/blob/main/codex-rs/core/src/tools/handlers/mcp.rs)
 
 ## Goal
 
-Agentic API accepts an OpenAI Responses `type: "mcp"` declaration for tools exposed by a remote MCP server. The
-gateway connects to each declared server, discovers its tools with `tools/list`, presents the discovered tools to the
-upstream model as function tools, and executes model-selected tools with `tools/call`.
+Agentic API implements the OpenAI Responses `type: "mcp"` contract for tools exposed by a remote MCP server. The
+gateway connects to each declared server, discovers tools with `tools/list`, presents those tools to the upstream
+model as function tools, executes model-selected tools with `tools/call`, and restores the public Responses MCP
+identity in output items and streaming events.
 
-The request declaration contains server identity and connection information, not a tool name:
+The request declaration has server identity and connection information, not a tool name:
 
 ```json
 {
@@ -27,15 +28,12 @@ The request declaration contains server identity and connection information, not
 }
 ```
 
-The MCP server owns the tool names returned by `tools/list`. A client cannot add `name` to the MCP declaration to
-select an operation.
-
-This phase covers the request, discovery, normalization, registry, and execution path. Aligning public output items
-and streaming events with the OpenAI `mcp_call` lifecycle is a separate follow-up.
+The server owns the tool names returned by `tools/list`. A client cannot put `name` on the MCP declaration to select
+an operation.
 
 ## Supported MCP surface
 
-The gateway supports MCP tools through this flow:
+The gateway supports the model-controlled MCP tool lifecycle:
 
 ```text
 Responses type:mcp declaration
@@ -45,31 +43,21 @@ Responses type:mcp declaration
   -> normalize discovered tools for the upstream model
   -> model emits an internal function call
   -> tools/call
-  -> append a function call output for the next inference round
+  -> restore public mcp_call identity and events
 ```
 
-The internal function-tool representation lets a model served by vLLM select a discovered MCP tool. It is not part
-of the client request contract.
+The OpenAI public contract uses:
 
-## MCP resources are not a gateway feature
+- `mcp_list_tools` for discovery output
+- `mcp_call` for a selected tool call
+- `response.mcp_call.in_progress`
+- `response.mcp_call_arguments.delta`
+- `response.mcp_call_arguments.done`
+- `response.mcp_call.completed` or `response.mcp_call.failed`
 
-Agentic API does not implement `resources/list`, `resources/templates/list`, `resources/read`, resource subscriptions,
-or a synthetic `read_mcp_resource` tool.
-
-This is intentional. The MCP specification classifies resources as application-controlled context. A host normally
-lets a user or application browse or select a resource, reads it, and attaches its content to the model context.
-Interactive clients such as Codex and Claude Code own that lifecycle themselves.
-
-The previous function bridge accepted a client-declared function named `read_mcp_resource`, decoded custom metadata
-containing MCP server URLs, and translated the function call into `resources/read`. That path was not part of the
-OpenAI Responses `type: "mcp"` request contract and has been removed. A function named `read_mcp_resource` is now an
-ordinary client-executed function tool.
-
-If resource support is needed in the future, it should be designed as a host-facing context API. It should not be
-added by overloading the current MCP tool handler. The future design must define resource discovery, URI selection,
-content and MIME handling, attachment limits, authorization, caching, and update subscriptions. Alternatively, an MCP
-server can expose a real `read_resource` tool through `tools/list`; the gateway will treat it as an ordinary MCP tool
-and invoke it through `tools/call`.
+The internal function-tool representation is an implementation detail and must not leak as a public function call.
+The current gateway work implements the `mcp_call` lifecycle; emitting the separate `mcp_list_tools` discovery
+lifecycle remains follow-up work and does not change the tool execution design described here.
 
 ## Components
 
@@ -85,6 +73,13 @@ impl McpClient {
         headers: Option<HashMap<String, String>>,
     ) -> Result<Self, McpError>;
 
+    pub async fn connect_stdio(
+        command: &str,
+        args: &[String],
+        env: Option<&HashMap<String, String>>,
+        cwd: Option<&str>,
+    ) -> Result<Self, McpError>;
+
     pub async fn list_tools(&self) -> Result<Vec<rmcp::model::Tool>, McpError>;
 
     pub async fn call_tool(
@@ -95,13 +90,10 @@ impl McpClient {
 }
 ```
 
-The client may also connect to operator-configured stdio MCP servers. Request-provided MCP declarations only accept
-remote HTTP URLs.
-
 ### `McpClientPool`
 
 `McpClientPool` owns clients keyed by `server_label`. Request-scoped HTTP clients are constructed from
-`McpToolParam`. Gateway configuration may construct HTTP or stdio clients through `McpServerEntry`.
+`McpToolParam`. Gateway configuration may also construct HTTP or stdio clients through `McpServerEntry`.
 
 Request-provided URLs allow loopback hosts by default. Additional trusted hostnames may be configured through
 `AGENTIC_MCP_ALLOWED_HOSTS`. URL validation, pinned DNS addresses, disabled automatic proxy discovery, and disabled
@@ -122,10 +114,11 @@ An empty final allowed set is a configuration error.
 
 ### `McpHandler`
 
-`McpHandler` normalizes and executes discovered MCP tools. An executable handler contains the `McpClient` bound to
-the server that advertised the tool. A spec-only handler has no client and exists only for
-`ResponsesTool::to_function_tools()` normalization. The handler no longer switches between `tools/call` and
-`resources/read`.
+`McpHandler` has one responsibility: normalize and execute discovered MCP tools.
+
+An executable handler contains the `McpClient` bound to the server that advertised the tool. A spec-only handler has
+no client and exists only for `ResponsesTool::to_function_tools()` normalization. Each executable handler invokes a
+discovered tool through `tools/call`, so it does not need an operation enum.
 
 ```rust
 pub struct McpHandler {
@@ -135,9 +128,9 @@ pub struct McpHandler {
 
 During execution, the registry entry supplies `McpDiscoveredToolParam`, which contains:
 
-- the public `server_label`
-- the public MCP `tool_name`
-- the internal model-visible name
+- public `server_label`
+- public MCP `tool_name`
+- internal model-visible name
 - the tool schema returned by `tools/list`
 
 `McpHandler::execute()` reads that identity, validates the model arguments as a JSON object, calls `tools/call`, and
@@ -157,11 +150,19 @@ ResponsesTool::Mcp
   -> McpHandler::spec_from_param(...).normalize(...)
 ```
 
-The `_agentic_discovered_tools` field is internal state and is rejected on the public request wire.
+The `_agentic_discovered_tools` field is internal state and is not part of the public request contract.
 
-Each upstream function name includes both server and tool identity, for example `mcp__counter__increment`. Names are
-sanitized and bounded to the upstream function-name limit. The registry retains the original server and tool identity
-for gateway dispatch and public output mapping.
+Each upstream function name includes both server and tool identity, for example
+`mcp__counter__increment`. Names are sanitized and bounded to the upstream function-name limit. The registry retains
+the original identity so public output uses:
+
+```json
+{
+  "type": "mcp_call",
+  "server_label": "counter",
+  "name": "increment"
+}
+```
 
 ## Turn execution
 
@@ -175,7 +176,15 @@ build request-scoped registry
   -> registry dispatches to McpHandler
   -> McpClient tools/call
   -> append function call output for the next upstream round
+  -> expose public mcp_call item/events to the Responses client
 ```
 
 Tool execution failures become failed tool call output and are returned to the model for the next round; they do not
 automatically fail the whole Responses request.
+
+## Recorder coverage
+
+`crates/agentic-server-core/tests/cassettes/record_mcp_cassettes.sh` records matching native-MCP scenarios against the
+gateway and OpenAI. For each provider it records two streaming happy paths, two streaming tool-error paths, and one
+blocking happy path. `tests/mcp_tool_test.rs` uses the OpenAI recordings as ground truth when checking that internal
+function calls are exposed as public `mcp_call` items and streaming events.
