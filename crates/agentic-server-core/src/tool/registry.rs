@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -7,7 +7,7 @@ use serde_json::Value;
 use super::codex::insert_namespace_entries;
 use super::executors::GatewayExecutors;
 use super::function::insert_function_entry;
-use super::mcp::{insert_mcp_entry, maybe_mcp_function};
+use super::mcp::{insert_discovered_mcp_entry, insert_read_resource_entry, maybe_mcp_function};
 use super::web_search::insert_web_search_entry;
 use super::{CodexNamespaceHandler, GatewayExecutor, NamespaceMap, ToolError, ToolOutput};
 use crate::types::io::OutputItem;
@@ -136,27 +136,48 @@ impl ToolRegistry {
     ///
     /// Panics if serialization of a tool param struct fails, which cannot happen
     /// for the types defined in this module (`#[derive(Serialize)]` on plain structs).
-    pub async fn build_with_handlers(tools: &[ResponsesTool], executors: &GatewayExecutors) -> Result<Self, ToolError> {
+    pub async fn build_with_handlers(
+        tools: &mut [ResponsesTool],
+        executors: &mut GatewayExecutors,
+    ) -> Result<Self, ToolError> {
         let mut entries = HashMap::with_capacity(tools.len());
+        let mut mcp_server_labels = HashSet::new();
         // Namespace members must be keyed by the same flat, model-visible name
         // the model will call, so resolve them first — the same pure pass used
         // to build the upstream request.
         let resolved_tools = CodexNamespaceHandler.resolve_namespace_members(tools)?;
 
         for tool in &resolved_tools {
+            let ResponsesTool::Mcp(param) = tool else {
+                continue;
+            };
+            if !mcp_server_labels.insert(param.server_label.clone()) {
+                return Err(ToolError::Config(format!(
+                    "duplicate MCP declarations are not allowed for server_label '{}'",
+                    param.server_label
+                )));
+            }
+        }
+
+        for (index, tool) in resolved_tools.iter().enumerate() {
             match tool {
                 ResponsesTool::Function(p) => match maybe_mcp_function(p) {
                     Some(mcp_params) if !mcp_params.is_empty() => {
                         let handler = executors.mcp_read_resource_handler(&mcp_params).await;
-                        for declaration_param in &mcp_params {
-                            insert_mcp_entry(&mut entries, declaration_param, handler.clone()).await;
+                        if let Some(declaration_param) = mcp_params.first() {
+                            insert_read_resource_entry(&mut entries, declaration_param, handler);
                         }
                     }
                     _ => insert_function_entry(&mut entries, p),
                 },
                 ResponsesTool::Mcp(p) => {
-                    let handler = executors.mcp_handler(p).await;
-                    insert_mcp_entry(&mut entries, p, handler).await;
+                    let handlers = executors.mcp_handler(p).await?;
+                    if let ResponsesTool::Mcp(declaration) = &mut tools[index] {
+                        declaration.discovered_tools = handlers.iter().map(|item| item.param.clone()).collect();
+                    }
+                    for discovered in handlers {
+                        insert_discovered_mcp_entry(&mut entries, discovered);
+                    }
                 }
                 ResponsesTool::WebSearch(p) => {
                     insert_web_search_entry(&mut entries, p, executors.web_search_handler());
@@ -246,5 +267,77 @@ impl ToolRegistry {
                 .execute(&call.call_id, &call.name, &call.arguments, &config)
                 .await,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tool::executors::GatewayExecutorRegistration;
+    use crate::tool::mcp::{McpDiscoveredHandler, McpHandler};
+    use crate::types::tools::McpDiscoveredToolParam;
+
+    fn declaration(server_label: &str) -> ResponsesTool {
+        serde_json::from_value(serde_json::json!({
+            "type": "mcp",
+            "server_label": server_label,
+            "server_url": "http://127.0.0.1:8000/mcp"
+        }))
+        .expect("MCP declaration")
+    }
+
+    fn discovered_handler() -> McpDiscoveredHandler {
+        let param = McpDiscoveredToolParam {
+            server_label: "counter".to_owned(),
+            tool_name: "increment".to_owned(),
+            internal_name: "mcp__counter__increment".to_owned(),
+            tool: serde_json::from_value(serde_json::json!({
+                "name": "increment",
+                "description": "Increment the counter",
+                "inputSchema": {"type": "object"}
+            }))
+            .expect("discovered MCP tool"),
+        };
+        McpDiscoveredHandler {
+            param,
+            handler: Arc::new(McpHandler::discovered_tool_spec_only()),
+        }
+    }
+
+    #[tokio::test]
+    async fn cached_mcp_handler_populates_declaration_and_registry() {
+        let mut executors = GatewayExecutors::default();
+        executors.insert(GatewayExecutorRegistration::Mcp {
+            server_label: "counter".to_owned(),
+            handlers: vec![discovered_handler()],
+        });
+        let mut tools = vec![declaration("counter")];
+
+        let registry = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
+            .await
+            .expect("registry with cached MCP handler");
+
+        assert!(registry.lookup("mcp__counter__increment").is_some());
+        let ResponsesTool::Mcp(declared) = &tools[0] else {
+            panic!("expected MCP declaration");
+        };
+        assert_eq!(declared.discovered_tools.len(), 1);
+        let normalized = tools[0].to_function_tools();
+        assert_eq!(normalized.len(), 1);
+        assert_eq!(normalized[0].name, "mcp__counter__increment");
+    }
+
+    #[tokio::test]
+    async fn duplicate_mcp_server_labels_are_rejected() {
+        let mut tools = vec![declaration("counter"), declaration("counter")];
+        let mut executors = GatewayExecutors::default();
+
+        let error = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
+            .await
+            .expect_err("duplicate server_label must fail");
+
+        assert!(
+            matches!(error, ToolError::Config(message) if message.contains("duplicate MCP declarations") && message.contains("counter"))
+        );
     }
 }

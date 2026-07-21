@@ -62,8 +62,11 @@ fn classify_event_type(type_str: &str) -> SSEEventType {
         "response.web_search_call.in_progress" => SSEEventType::WebSearchCallInProgress,
         "response.web_search_call.searching" => SSEEventType::WebSearchCallSearching,
         "response.web_search_call.completed" => SSEEventType::WebSearchCallCompleted,
-        "response.mcp_tool_call.in_progress" => SSEEventType::McpToolCallInProgress,
-        "response.mcp_tool_call.completed" => SSEEventType::McpToolCallCompleted,
+        "response.mcp_call.in_progress" => SSEEventType::McpCallInProgress,
+        "response.mcp_call_arguments.delta" => SSEEventType::McpCallArgumentsDelta,
+        "response.mcp_call_arguments.done" => SSEEventType::McpCallArgumentsDone,
+        "response.mcp_call.completed" => SSEEventType::McpCallCompleted,
+        "response.mcp_call.failed" => SSEEventType::McpCallFailed,
         _ => SSEEventType::Other,
     }
 }
@@ -100,8 +103,11 @@ fn extract_payload(event_type: SSEEventType, json: &Value) -> EventPayload {
         | SSEEventType::WebSearchCallInProgress
         | SSEEventType::WebSearchCallSearching
         | SSEEventType::WebSearchCallCompleted
-        | SSEEventType::McpToolCallInProgress
-        | SSEEventType::McpToolCallCompleted
+        | SSEEventType::McpCallInProgress
+        | SSEEventType::McpCallArgumentsDelta
+        | SSEEventType::McpCallArgumentsDone
+        | SSEEventType::McpCallCompleted
+        | SSEEventType::McpCallFailed
         | SSEEventType::Other => EventPayload::Raw(json.clone()),
     }
 }

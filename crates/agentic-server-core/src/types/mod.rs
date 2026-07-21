@@ -7,7 +7,7 @@ pub mod tools;
 pub use io::{
     CustomToolCall, CustomToolCallOutputMessage, FunctionTool, FunctionToolCall, FunctionToolResultMessage,
     GatewayCallStatus, InputContent, InputImageContent, InputItem, InputMessage, InputMessageContent, InputTextContent,
-    InputTokenDetails, McpToolCall, OutputItem, OutputMessage, OutputTextContent, OutputTokenDetails, ReasoningOutput,
+    InputTokenDetails, McpCall, OutputItem, OutputMessage, OutputTextContent, OutputTokenDetails, ReasoningOutput,
     ReasoningTextContent, ResponseUsage, ResponsesInput, ToolChoice, WebSearchActionSearch, WebSearchCall,
     WebSearchCallStatus, WebSearchSource,
 };

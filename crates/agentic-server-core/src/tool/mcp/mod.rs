@@ -10,4 +10,4 @@ pub use codex_mcp_resource::maybe_mcp_function;
 pub use handler::{McpDiscoveredHandler, McpHandler, McpHandlerFactory, McpHandlerKind, McpSpec};
 pub use pool::{McpClientPool, McpServerEntry};
 pub use read_resource::{READ_MCP_RESOURCE_TOOL_NAME, ReadResourceArgs, read_mcp_resource_spec};
-pub use registry::{build_mcp_registry, insert_mcp_entry};
+pub use registry::{insert_discovered_mcp_entry, insert_read_resource_entry};

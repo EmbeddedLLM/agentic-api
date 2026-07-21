@@ -142,13 +142,12 @@ async fn messages_stream_presents_one_message_and_hides_gateway_tool() {
             "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}]
     });
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
+    let mut registry_tool_params = registry_tools(Some(&tools), &GatewayToolMap::default());
+    let mut gateway_executors = exec_ctx.gateway_executors.clone();
     let registry = Arc::new(
-        ToolRegistry::build_with_handlers(
-            &registry_tools(Some(&tools), &GatewayToolMap::default()),
-            &exec_ctx.gateway_executors,
-        )
-        .await
-        .unwrap(),
+        ToolRegistry::build_with_handlers(&mut registry_tool_params, &mut gateway_executors)
+            .await
+            .unwrap(),
     );
 
     let stream = run_messages_stream(request, registry, Arc::clone(&exec_ctx), None);
@@ -216,13 +215,12 @@ async fn messages_stream_multiround_single_lifecycle() {
             "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}]
     });
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
+    let mut registry_tool_params = registry_tools(Some(&tools), &GatewayToolMap::default());
+    let mut gateway_executors = exec_ctx.gateway_executors.clone();
     let registry = Arc::new(
-        ToolRegistry::build_with_handlers(
-            &registry_tools(Some(&tools), &GatewayToolMap::default()),
-            &exec_ctx.gateway_executors,
-        )
-        .await
-        .unwrap(),
+        ToolRegistry::build_with_handlers(&mut registry_tool_params, &mut gateway_executors)
+            .await
+            .unwrap(),
     );
 
     let stream = run_messages_stream(request, registry, Arc::clone(&exec_ctx), None);

@@ -1,0 +1,180 @@
+turns:
+- filename: t1
+  request:
+    body:
+      input: 'You have one MCP resource tool available: read_mcp_resource. The MCP
+        server label is repo. Call read_mcp_resource exactly once with server repo
+        and uri repo://crates/agentic-server-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml.
+        Then summarize the gpt_oss_web_search_nonstreaming.yaml cassette in 2-3 sentences
+        and mention that read_mcp_resource was used.'
+      max_output_tokens: 1024
+      model: Qwen/Qwen3.5-35B-A3B-FP8
+      store: true
+      stream: false
+      tool_choice: required
+      tools:
+      - description: Read a resource exposed by an MCP server.
+        metadata:
+          server_label: repo
+          server_url: http://localhost:8000/mcp
+        name: read_mcp_resource
+        parameters:
+          additionalProperties: false
+          properties:
+            server:
+              type: string
+            uri:
+              type: string
+          required:
+          - server
+          - uri
+          type: object
+        strict: true
+        type: function
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      conversation_id: null
+      created_at: 1784637716
+      error: null
+      id: resp_019f84b2-6a0d-7380-bf40-232fd4e099f0
+      incomplete_details: null
+      instructions: null
+      model: Qwen/Qwen3.5-35B-A3B-FP8
+      object: response
+      output:
+      - content:
+        - text: 'The user is asking me to use the read_mcp_resource tool to read a
+            specific MCP resource. They''ve given me exact parameters:
+
+            - server: "repo"
+
+            - uri: "repo://crates/agentic-server-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml"
+
+
+            I need to call read_mcp_resource exactly once with these parameters, then
+            summarize what I read in 2-3 sentences and mention that I used read_mcp_resource.
+
+            '
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_b0cd5a43812a264f
+        status: null
+        summary: []
+        type: reasoning
+      - approval_request_id: null
+        arguments: '{"server": "repo", "uri": "repo://crates/agentic-server-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml"}'
+        error: null
+        id: mcp_ba3b985180e8bbf8
+        name: read_mcp_resource
+        output: '{"contents":[{"uri":"repo://crates/agentic-server-core/tests/cassettes/web_search/gpt_oss_web_search_nonstreaming.yaml","mimeType":"text/plain","text":"turns:\n-
+          filename: t1\n  request:\n    body:\n      input: Use web search to look
+          up potato, then summarize in one sentence.\n      max_output_tokens: 1024\n      model:
+          openai/gpt-oss-20b\n      store: true\n      stream: false\n      tool_choice:
+          auto\n      tools:\n      - type: web_search_preview\n    headers:\n      accept:
+          ''*/*''\n      content-type: application/json\n      user-agent: python-httpx/0.28.1\n    method:
+          POST\n    path: /v1/responses\n    query_params: {}\n  response:\n    body:\n      conversation_id:
+          null\n      created_at: 1783307879\n      error: null\n      id: resp_019f356e-aacf-7ea3-87c6-075c2fcc1eb2\n      incomplete_details:
+          null\n      instructions: null\n      model: openai/gpt-oss-20b\n      object:
+          response\n      output:\n      - content:\n        - text: ''User: \"Use
+          web search to look up potato, then summarize in one sentence.\"\n            We
+          need to call web_search. Use search query \"potato\". Provide let''''s\n            say
+          count=5. Ask for news? Might not need. We just want general info.\n            Probably
+          get definition. Use general web search. Use appropriate countries.\n            Use
+          English. Use default. Ok.''\n          type: reasoning_text\n        encrypted_content:
+          null\n        id: rs_8c5223df3fb54ba8\n        status: null\n        summary:
+          []\n        type: reasoning\n      - action:\n          query: potato\n          sources:\n          -
+          title: Potato - Wikipedia\n            url: https://en.wikipedia.org/wiki/Potato\n          -
+          title: Potatoes | Potato Nutrition | Types of Potatoes | Recipes\n            url:
+          https://potatogoodness.com/\n          - title: Potato Facts\n            url:
+          https://www.idahopotatomuseum.com/potato-facts/\n          - title: Idaho
+          Potato Commission\n            url: https://idahopotato.com/\n          -
+          title: Home of U.S. Potato Farmers | Potatoes USA\n            url: https://potatoesusa.com/\n          type:
+          search\n        id: ws_b67561c650733812\n        status: completed\n        type:
+          web_search_call\n      - content:\n        - text: ''We have a summary from
+          Wikipedia. Enough.\n\n\n            Now produce one sentence summary: \"Potato
+          is a starchy tuberous vegetable\n            native to the Americas, cultivated
+          from Solanum tuberosum, and is a staple\n            food worldwide.\" Provide
+          brief.''\n          type: reasoning_text\n        encrypted_content: null\n        id:
+          rs_9d6b942ea84e3e00\n        status: null\n        summary: []\n        type:
+          reasoning\n      - content:\n        - annotations: []\n          text:
+          Potato (Solanum tuberosum) is a starchy, underground tuber native\n            to
+          the Americas that has been domesticated for thousands of years and\n            is
+          today a staple food in many cultures worldwide.\n          type: output_text\n        id:
+          msg_a8af96caf08bdc00\n        role: assistant\n        status: completed\n        type:
+          message\n      previous_response_id: null\n      status: completed\n      usage:\n        input_tokens:
+          2285\n        input_tokens_details:\n          cached_tokens: 352\n        output_tokens:
+          204\n        output_tokens_details:\n          reasoning_tokens: 135\n        total_tokens:
+          2489\n    headers:\n      content-type: application/json\n    status_code:
+          200\n"}]}'
+        server_label: repo
+        status: completed
+        type: mcp_call
+      - content:
+        - text: 'Great, I''ve successfully read the resource. Now I need to summarize
+            the cassette in 2-3 sentences and mention that I used read_mcp_resource.
+
+
+            Let me analyze what this cassette contains:
+
+            - It''s a test cassette for a web search functionality with gpt-oss model
+
+            - It shows a single turn with a request asking to use web search to look
+            up "potato" and summarize in one sentence
+
+            - The request uses openai/gpt-oss-20b model with web_search_preview tool
+
+            - The response shows the reasoning process, the web search call with 5
+            sources returned, and a final output summarizing that potato is a starchy
+            tuber native to the Americas
+
+            - It includes token usage information (2285 input tokens, 204 output tokens)
+
+
+            I''ll summarize this in 2-3 sentences.
+
+            '
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_a7f6aa3a23cf54d9
+        status: null
+        summary: []
+        type: reasoning
+      - content:
+        - annotations: []
+          text: '
+
+
+            I used the read_mcp_resource tool to retrieve the cassette, which contains
+            a test case demonstrating the gpt-oss-web search functionality. The cassette
+            shows a single turn where the model receives a request to use web search
+            to look up "potato" and summarize the findings in one sentence, using
+            the openai/gpt-oss-20b model with the web_search_preview tool enabled.
+            The response includes the model''s reasoning process, a successful web
+            search call that returned 5 sources including Wikipedia and potato-related
+            websites, and a final output summarizing that potato is a starchy tuberous
+            vegetable native to the Americas that is now a global staple food.'
+          type: output_text
+        id: msg_b511ee04e900a464
+        role: assistant
+        status: completed
+        type: message
+      previous_response_id: null
+      status: completed
+      usage:
+        input_tokens: 1912
+        input_tokens_details:
+          cached_tokens: 0
+        output_tokens: 479
+        output_tokens_details:
+          reasoning_tokens: 0
+        total_tokens: 2391
+    headers:
+      content-type: application/json
+    status_code: 200

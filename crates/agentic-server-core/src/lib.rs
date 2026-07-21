@@ -15,14 +15,14 @@ pub use storage::{
     models::{Conversation as DbConversation, Item as DbItem, Response as DbResponse},
 };
 pub use tool::{
-    CodexNamespaceHandler, FunctionHandler, GatewayExecutor, McpServerEntry, ToolEntry, ToolError, ToolHandler,
-    ToolOutput, ToolRegistry, ToolType, WebSearchHandler,
+    CodexNamespaceHandler, FunctionHandler, GatewayExecutor, GatewayExecutorRegistration, McpServerEntry, ToolEntry,
+    ToolError, ToolHandler, ToolOutput, ToolRegistry, ToolType, WebSearchHandler,
 };
 pub use types::{
     CodeInterpreterToolParam, CodexNamespaceMember, CodexNamespaceToolParam, CustomToolCall,
     CustomToolCallOutputMessage, CustomToolParam, EmptyToolNameError, FileSearchToolParam, FunctionTool,
     FunctionToolCall, FunctionToolParam, FunctionToolResultMessage, GatewayCallStatus, IncompleteDetails, InputContent,
-    InputImageContent, InputItem, InputMessage, InputMessageContent, InputTextContent, InputTokenDetails, McpToolCall,
+    InputImageContent, InputItem, InputMessage, InputMessageContent, InputTextContent, InputTokenDetails, McpCall,
     McpToolParam, NonEmptyToolName, OutputItem, OutputMessage, OutputTextContent, OutputTokenDetails, ReasoningOutput,
     ReasoningTextContent, RequestPayload, ResponsePayload, ResponseUsage, ResponsesInput, ResponsesTool, ToolChoice,
     UpstreamRequest, UpstreamTool, WebSearchActionSearch, WebSearchCall, WebSearchCallStatus, WebSearchContextSize,

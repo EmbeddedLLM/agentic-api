@@ -293,7 +293,7 @@ impl ResponseAccumulator {
                         item,
                         text: String::with_capacity(256),
                     }),
-                    SSEItemType::WebSearchCall | SSEItemType::McpToolCall => None,
+                    SSEItemType::WebSearchCall | SSEItemType::McpCall => None,
                 };
                 if let Some(inflight) = entry {
                     self.in_flight.insert(item_id.clone(), inflight);
@@ -309,7 +309,7 @@ impl ResponseAccumulator {
                 },
             ) => self.complete_custom_tool_call(item_id, item),
             (SSEEventType::OutputItemDone, EventPayload::OutputItemDone { item, .. }) => {
-                if let Some(output_item @ (OutputItem::WebSearchCall(_) | OutputItem::McpToolCall(_))) =
+                if let Some(output_item @ (OutputItem::WebSearchCall(_) | OutputItem::McpCall(_))) =
                     deserialize_from_value_opt::<OutputItem>(item.clone())
                 {
                     self.output.push(output_item);
@@ -605,19 +605,21 @@ mod tests {
     }
 
     #[test]
-    fn test_process_event_mcp_tool_call_done_accumulates_output() {
+    fn test_process_event_mcp_call_done_accumulates_output() {
         let lines = vec![
-            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"mcp_tool_call","id":"mcp_1","server":"repo","tool":"read_mcp_resource","arguments":{"server":"repo"},"status":"in_progress"}}"#.to_string(),
-            r#"data: {"type":"response.mcp_tool_call.in_progress","item_id":"mcp_1","output_index":0}"#.to_string(),
-            r#"data: {"type":"response.mcp_tool_call.completed","item_id":"mcp_1","output_index":0,"item":{"type":"mcp_tool_call","id":"mcp_1","server":"repo","tool":"read_mcp_resource","arguments":{"server":"repo"},"status":"completed","result":{"contents":[]}}}"#.to_string(),
-            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"mcp_tool_call","id":"mcp_1","server":"repo","tool":"read_mcp_resource","arguments":{"server":"repo"},"status":"completed","result":{"contents":[]}}}"#.to_string(),
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"mcp_call","id":"mcp_1","server_label":"repo","name":"read_mcp_resource","arguments":"","status":"in_progress","approval_request_id":null,"output":null,"error":null}}"#.to_string(),
+            r#"data: {"type":"response.mcp_call.in_progress","item_id":"mcp_1","output_index":0}"#.to_string(),
+            r#"data: {"type":"response.mcp_call_arguments.delta","delta":"{\"server\":\"repo\"}","item_id":"mcp_1","output_index":0}"#.to_string(),
+            r#"data: {"type":"response.mcp_call_arguments.done","arguments":"{\"server\":\"repo\"}","item_id":"mcp_1","output_index":0}"#.to_string(),
+            r#"data: {"type":"response.mcp_call.completed","item_id":"mcp_1","output_index":0}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"mcp_call","id":"mcp_1","server_label":"repo","name":"read_mcp_resource","arguments":"{\"server\":\"repo\"}","status":"completed","approval_request_id":null,"output":"{\"contents\":[]}","error":null}}"#.to_string(),
             r#"data: {"type":"response.done","response":{"id":"resp_1","status":"completed","usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}"#.to_string(),
         ];
 
         let acc = ResponseAccumulator::from_sse_lines(lines, None);
         assert_eq!(acc.status, ResponseStatus::Completed);
         assert_eq!(acc.output.len(), 1);
-        assert!(matches!(acc.output[0], OutputItem::McpToolCall(_)));
+        assert!(matches!(acc.output[0], OutputItem::McpCall(_)));
     }
 
     #[test]

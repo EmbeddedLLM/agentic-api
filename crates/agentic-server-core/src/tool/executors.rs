@@ -1,20 +1,44 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::GatewayExecutor;
-use super::mcp::{McpClientPool, McpHandler, McpHandlerFactory};
+use super::mcp::{McpClientPool, McpDiscoveredHandler, McpHandler, McpHandlerFactory};
 use super::registry::ToolType;
 use super::web_search::WebSearchHandler;
+use super::{GatewayExecutor, ToolError};
 use crate::types::tools::McpToolParam;
+
+pub enum GatewayExecutorRegistration {
+    Shared(Arc<dyn GatewayExecutor>),
+    Mcp {
+        server_label: String,
+        handlers: Vec<McpDiscoveredHandler>,
+    },
+}
+
+impl<T> From<Arc<T>> for GatewayExecutorRegistration
+where
+    T: GatewayExecutor,
+{
+    fn from(executor: Arc<T>) -> Self {
+        Self::Shared(executor)
+    }
+}
+
+impl From<Arc<dyn GatewayExecutor>> for GatewayExecutorRegistration {
+    fn from(executor: Arc<dyn GatewayExecutor>) -> Self {
+        Self::Shared(executor)
+    }
+}
 
 /// Shared, per-server registry of gateway-owned tool executors.
 ///
 /// Built once at startup ([`GatewayExecutors::from_env`]) and reused across
 /// every request. MCP tools are the exception: their handler depends on the
-/// per-request `McpToolParam`, so [`GatewayExecutors::mcp_handler`] builds one
-/// lazily unless a handler has been pre-registered via [`GatewayExecutors::insert`].
+/// per-request `McpToolParam`, so discovery builds them lazily unless a handler
+/// has been pre-registered via [`GatewayExecutors::insert`].
 #[derive(Clone, Default)]
 pub struct GatewayExecutors {
-    mcp: Option<Arc<dyn GatewayExecutor>>,
+    mcp: HashMap<String, Vec<McpDiscoveredHandler>>,
     web_search: Option<Arc<dyn GatewayExecutor>>,
 }
 
@@ -22,18 +46,29 @@ impl GatewayExecutors {
     #[must_use]
     pub fn from_env(client: Arc<reqwest::Client>) -> Self {
         Self {
-            // MCP handlers need request payload information from the MCP tool
-            // params, so the default executor is created in `mcp_handler`.
-            mcp: None,
+            mcp: HashMap::new(),
             web_search: Some(Arc::new(WebSearchHandler::from_env(client))),
         }
     }
 
-    pub fn insert(&mut self, executor: Arc<dyn GatewayExecutor>) {
-        match executor.tool_type() {
-            ToolType::Mcp => self.mcp = Some(executor),
-            ToolType::WebSearch => self.web_search = Some(executor),
-            other => tracing::debug!(tool_type = ?other, "gateway executor type has no executor slot"),
+    pub fn insert(&mut self, registration: impl Into<GatewayExecutorRegistration>) {
+        match registration.into() {
+            GatewayExecutorRegistration::Shared(executor) => match executor.tool_type() {
+                ToolType::WebSearch => self.web_search = Some(executor),
+                ToolType::Mcp => {
+                    tracing::debug!("MCP executors must be registered with a server_label and discovered handlers")
+                }
+                other => tracing::debug!(tool_type = ?other, "gateway executor type has no executor slot"),
+            },
+            GatewayExecutorRegistration::Mcp { server_label, handlers } => {
+                if handlers.is_empty() {
+                    tracing::debug!(server_label, "empty MCP discovered handler registration skipped");
+                    return;
+                }
+                if self.mcp.insert(server_label.clone(), handlers).is_some() {
+                    tracing::debug!(server_label, "replaced MCP discovered handler registration");
+                }
+            }
         }
     }
 
@@ -42,22 +77,48 @@ impl GatewayExecutors {
         self.web_search.clone()
     }
 
-    pub async fn mcp_handler(&self, param: &McpToolParam) -> Option<Arc<dyn GatewayExecutor>> {
-        if let Some(handler) = self.mcp.clone() {
-            return Some(handler);
+    #[must_use]
+    pub(crate) fn request_scoped(&self) -> Self {
+        self.clone()
+    }
+
+    pub async fn mcp_handler(&mut self, param: &McpToolParam) -> Result<Vec<McpDiscoveredHandler>, ToolError> {
+        let server_label = param.server_label.trim();
+        if server_label.is_empty() {
+            return Err(ToolError::Config(
+                "MCP declaration requires a non-empty server_label".to_owned(),
+            ));
+        }
+        if let Some(cached) = self.mcp.get(server_label) {
+            return Ok(cached.clone());
         }
 
-        McpHandlerFactory::new()
-            .from_params(param)
-            .await
-            .map(|handler| Arc::new(handler) as Arc<dyn GatewayExecutor>)
+        let pool = Arc::new(McpClientPool::from_params(std::slice::from_ref(param)).await);
+        if pool.get(server_label).is_none() {
+            return Err(pool.connection_error(server_label).map_or_else(
+                || {
+                    ToolError::Config(format!(
+                        "MCP server '{server_label}' has no valid request-declared configuration"
+                    ))
+                },
+                |error| ToolError::Execution(format!("MCP server '{server_label}' failed to connect: {error}")),
+            ));
+        }
+        let factory = McpHandlerFactory::new();
+        let discovery = McpHandler::read_resource(pool);
+        let discovered = discovery
+            .discovered_tool_handlers(&factory, param.allowed_tools.as_deref())
+            .await;
+        if discovered.is_empty() {
+            return Err(ToolError::Config(format!(
+                "MCP server '{server_label}' has an empty final allowed tool set"
+            )));
+        }
+        self.mcp.insert(server_label.to_owned(), discovered.clone());
+        Ok(discovered)
     }
 
     pub async fn mcp_read_resource_handler(&self, params: &[McpToolParam]) -> Option<Arc<dyn GatewayExecutor>> {
-        if let Some(handler) = self.mcp.clone() {
-            return Some(handler);
-        }
-
         let pool = Arc::new(McpClientPool::from_params(params).await);
         Some(Arc::new(McpHandler::read_resource(pool)))
     }
@@ -66,7 +127,7 @@ impl GatewayExecutors {
 impl std::fmt::Debug for GatewayExecutors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GatewayExecutors")
-            .field("mcp", &self.mcp.is_some())
+            .field("mcp_server_handlers", &self.mcp.len())
             .field("web_search", &self.web_search.is_some())
             .finish()
     }
@@ -77,19 +138,17 @@ mod tests {
     use std::sync::Arc;
 
     use super::GatewayExecutors;
-    use crate::tool::mcp::READ_MCP_RESOURCE_TOOL_NAME;
     use crate::types::tools::McpToolParam;
 
     #[tokio::test]
-    async fn from_env_builds_request_scoped_mcp_handler_from_params() {
+    async fn from_env_builds_read_resource_handler_from_params() {
         let executors = GatewayExecutors::from_env(Arc::new(reqwest::Client::new()));
         let param: McpToolParam = serde_json::from_value(serde_json::json!({
-            "name": READ_MCP_RESOURCE_TOOL_NAME,
             "server_label": "missing"
         }))
         .expect("mcp tool param");
 
-        assert!(executors.mcp_handler(&param).await.is_some());
+        assert!(executors.mcp_read_resource_handler(&[param]).await.is_some());
         assert!(executors.web_search_handler().is_some());
     }
 }

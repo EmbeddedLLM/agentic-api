@@ -184,11 +184,12 @@ async fn assert_registry_lookup(cassette_file: &str) {
         let Some(tools_val) = tools_from_turn(turn) else {
             continue;
         };
-        let tools: Vec<ResponsesTool> = serde_json::from_value(tools_val).expect("tools parse");
-        let registry = ToolRegistry::build_with_handlers(&tools, &GatewayExecutors::default())
+        let mut tools: Vec<ResponsesTool> = serde_json::from_value(tools_val).expect("tools parse");
+        let declared_tools = tools.clone();
+        let registry = ToolRegistry::build_with_handlers(&mut tools, &mut GatewayExecutors::default())
             .await
             .unwrap_or_else(|err| panic!("{cassette_file} turn {i}: registry failed: {err}"));
-        for tool in &tools {
+        for tool in &declared_tools {
             if let ResponsesTool::Function(p) = tool {
                 let entry = registry
                     .lookup(p.name.as_str())
@@ -338,7 +339,8 @@ async fn codex_custom_cassettes_preserve_native_upstream_shape_and_client_owners
                 "{filename} turn {i}: expected native custom grammar declaration"
             );
 
-            let registry = ToolRegistry::build_with_handlers(tools, &GatewayExecutors::default())
+            let mut registry_tools = tools.clone();
+            let registry = ToolRegistry::build_with_handlers(&mut registry_tools, &mut GatewayExecutors::default())
                 .await
                 .unwrap_or_else(|err| panic!("{filename} turn {i}: registry failed: {err}"));
             assert!(

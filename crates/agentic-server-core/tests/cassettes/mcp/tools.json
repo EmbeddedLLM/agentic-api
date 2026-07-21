@@ -1,8 +1,21 @@
 [
   {
-    "type": "mcp",
+    "type": "function",
     "name": "read_mcp_resource",
-    "server_label": "repo",
-    "server_url": "http://localhost:8000/mcp"
+    "description": "Read a resource exposed by an MCP server.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "server": {"type": "string"},
+        "uri": {"type": "string"}
+      },
+      "required": ["server", "uri"],
+      "additionalProperties": false
+    },
+    "strict": true,
+    "metadata": {
+      "server_label": "repo",
+      "server_url": "http://localhost:8000/mcp"
+    }
   }
 ]

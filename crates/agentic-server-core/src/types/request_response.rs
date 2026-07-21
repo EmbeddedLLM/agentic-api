@@ -451,7 +451,6 @@ mod tests {
             }),
             serde_json::json!({
                 "type": "mcp",
-                "name": "read_mcp_resource",
                 "server_label": "repo",
                 "server_url": "http://localhost:9001/mcp"
             }),

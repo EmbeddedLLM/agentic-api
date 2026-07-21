@@ -92,17 +92,24 @@ fn assert_completed_read_mcp_resource(output: &[OutputItem]) {
     let mcp_call = output
         .iter()
         .find_map(|item| match item {
-            OutputItem::McpToolCall(call) if call.status.as_str() == "completed" => Some(call),
+            OutputItem::McpCall(call) if call.status.as_str() == "completed" => Some(call),
             _ => None,
         })
-        .expect("cassette output should include a completed mcp_tool_call item");
+        .expect("cassette output should include a completed mcp_call item");
     assert_eq!(mcp_call.status.as_str(), "completed");
-    assert_eq!(mcp_call.server, "repo");
-    assert_eq!(mcp_call.tool, "read_mcp_resource");
-    assert_eq!(mcp_call.arguments["server"], "repo");
-    assert_eq!(mcp_call.arguments["uri"], READ_RESOURCE_URI);
+    assert_eq!(mcp_call.server_label, "repo");
+    assert_eq!(mcp_call.name, "read_mcp_resource");
+    let arguments: serde_json::Value = serde_json::from_str(&mcp_call.arguments).expect("MCP arguments JSON");
+    assert_eq!(arguments["server"], "repo");
+    assert_eq!(arguments["uri"], READ_RESOURCE_URI);
 
-    let result = mcp_call.result.as_ref().expect("mcp tool call should include a result");
+    let result: serde_json::Value = serde_json::from_str(
+        mcp_call
+            .output
+            .as_deref()
+            .expect("completed MCP call should include output"),
+    )
+    .expect("MCP output JSON");
     let text = result["contents"][0]["text"]
         .as_str()
         .expect("read_mcp_resource result should include text content");
@@ -120,10 +127,10 @@ fn read_mcp_resource_cassette_nonstreaming() {
     assert_eq!(cassette.turns.len(), 1);
     let body = &cassette.turns[0].request.body;
     let tool = &body.tools[0];
-    assert_eq!(tool["type"].as_str().unwrap(), "mcp");
+    assert_eq!(tool["type"].as_str().unwrap(), "function");
     assert_eq!(tool["name"].as_str().unwrap(), "read_mcp_resource");
-    assert_eq!(tool["server_label"].as_str().unwrap(), "repo");
-    assert_loopback_mcp_url(tool["server_url"].as_str().unwrap());
+    assert_eq!(tool["metadata"]["server_label"].as_str().unwrap(), "repo");
+    assert_loopback_mcp_url(tool["metadata"]["server_url"].as_str().unwrap());
     assert_eq!(body.tool_choice.as_ref().unwrap().as_str().unwrap(), "required");
 
     let output = process_nonstreaming_turn(&cassette, 0, "Qwen/Qwen3-30B-A3B-FP8");
@@ -139,7 +146,7 @@ fn read_mcp_resource_cassette_streaming_success_events() {
     let cassette = load_mcp_cassette("mcp-read-resource-Qwen-Qwen3-30B-A3B-FP8-streaming.yaml");
     assert_eq!(cassette.turns.len(), 1);
     let body = &cassette.turns[0].request.body;
-    assert_eq!(body.tools[0]["type"].as_str().unwrap(), "mcp");
+    assert_eq!(body.tools[0]["type"].as_str().unwrap(), "function");
 
     let sse = cassette.turns[0]
         .response
@@ -159,8 +166,10 @@ fn read_mcp_resource_cassette_streaming_success_events() {
         "streaming MCP cassette must record a successful tool loop"
     );
     assert!(event_types.contains(&"response.output_item.added"));
-    assert!(event_types.contains(&"response.mcp_tool_call.in_progress"));
-    assert!(event_types.contains(&"response.mcp_tool_call.completed"));
+    assert!(event_types.contains(&"response.mcp_call.in_progress"));
+    assert!(event_types.contains(&"response.mcp_call_arguments.delta"));
+    assert!(event_types.contains(&"response.mcp_call_arguments.done"));
+    assert!(event_types.contains(&"response.mcp_call.completed"));
     assert!(event_types.contains(&"response.output_item.done"));
     assert!(
         events
@@ -187,21 +196,18 @@ fn assert_failed_read_mcp_resource(output: &[OutputItem], expected_error_fragmen
     let mcp_call = output
         .iter()
         .find_map(|item| match item {
-            OutputItem::McpToolCall(call) => Some(call),
+            OutputItem::McpCall(call) => Some(call),
             _ => None,
         })
-        .expect("cassette output should include a mcp_tool_call item");
+        .expect("cassette output should include a mcp_call item");
     assert_eq!(mcp_call.status.as_str(), "failed");
-    assert_eq!(mcp_call.server, "repo");
-    assert_eq!(mcp_call.tool, "read_mcp_resource");
-    assert!(
-        mcp_call.result.is_none(),
-        "a failed mcp_tool_call should not carry a result"
-    );
+    assert_eq!(mcp_call.server_label, "repo");
+    assert_eq!(mcp_call.name, "read_mcp_resource");
+    assert!(mcp_call.output.is_none(), "a failed mcp_call should not carry output");
     let error = mcp_call
         .error
         .as_deref()
-        .expect("failed mcp_tool_call should carry an error message");
+        .expect("failed mcp_call should carry an error message");
     assert!(
         error.contains(expected_error_fragment),
         "expected error to contain '{expected_error_fragment}', got: {error}"
@@ -219,7 +225,7 @@ fn load_and_process_failed_streaming_cassette(filename: &str) -> Vec<OutputItem>
     let cassette = load_mcp_cassette(filename);
     assert_eq!(cassette.turns.len(), 1);
     let body = &cassette.turns[0].request.body;
-    assert_eq!(body.tools[0]["type"].as_str().unwrap(), "mcp");
+    assert_eq!(body.tools[0]["type"].as_str().unwrap(), "function");
 
     let sse = cassette.turns[0]
         .response
@@ -238,8 +244,10 @@ fn load_and_process_failed_streaming_cassette(filename: &str) -> Vec<OutputItem>
         !event_types.contains(&"response.error") && !event_types.contains(&"response.failed"),
         "a failed tool call must not surface as a whole-request error"
     );
-    assert!(event_types.contains(&"response.mcp_tool_call.in_progress"));
-    assert!(event_types.contains(&"response.mcp_tool_call.completed"));
+    assert!(event_types.contains(&"response.mcp_call.in_progress"));
+    assert!(event_types.contains(&"response.mcp_call_arguments.delta"));
+    assert!(event_types.contains(&"response.mcp_call_arguments.done"));
+    assert!(event_types.contains(&"response.mcp_call.failed"));
     assert!(
         events
             .iter()

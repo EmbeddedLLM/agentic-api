@@ -252,36 +252,36 @@ impl WebSearchCall {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct McpToolCall {
+pub struct McpCall {
     pub id: String,
-    pub server: String,
-    pub tool: String,
-    pub arguments: Value,
+    pub server_label: String,
+    pub name: String,
+    pub arguments: String,
     pub status: GatewayCallStatus,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_request_id: Option<String>,
+    pub output: Option<String>,
     pub error: Option<String>,
 }
 
-impl McpToolCall {
+impl McpCall {
     #[must_use]
     pub fn new(
         id: impl Into<String>,
-        server: impl Into<String>,
-        tool: impl Into<String>,
-        arguments: Value,
+        server_label: impl Into<String>,
+        name: impl Into<String>,
+        arguments: impl Into<String>,
         status: GatewayCallStatus,
-        result: Option<Value>,
+        output: Option<String>,
         error: Option<String>,
     ) -> Self {
         Self {
             id: id.into(),
-            server: server.into(),
-            tool: tool.into(),
-            arguments,
+            server_label: server_label.into(),
+            name: name.into(),
+            arguments: arguments.into(),
             status,
-            result,
+            approval_request_id: None,
+            output,
             error,
         }
     }
@@ -420,8 +420,8 @@ pub enum OutputItem {
     CustomToolCall(CustomToolCall),
     #[serde(rename = "web_search_call")]
     WebSearchCall(WebSearchCall),
-    #[serde(rename = "mcp_tool_call")]
-    McpToolCall(McpToolCall),
+    #[serde(rename = "mcp_call")]
+    McpCall(McpCall),
     #[serde(rename = "reasoning")]
     Reasoning(ReasoningOutput),
     #[serde(other)]
@@ -436,9 +436,7 @@ impl OutputItem {
                 .lookup(&call.name)
                 .is_none_or(|entry| !entry.tool_type.is_gateway_owned()),
             Self::CustomToolCall(_) => true,
-            Self::Message(_) | Self::WebSearchCall(_) | Self::McpToolCall(_) | Self::Reasoning(_) | Self::Unknown => {
-                false
-            }
+            Self::Message(_) | Self::WebSearchCall(_) | Self::McpCall(_) | Self::Reasoning(_) | Self::Unknown => false,
         }
     }
 
@@ -449,7 +447,7 @@ impl OutputItem {
             Self::Reasoning(reasoning) => Some(InputItem::Reasoning(reasoning.clone())),
             Self::FunctionCall(call) => Some(InputItem::FunctionCall(call.clone())),
             Self::CustomToolCall(call) => Some(InputItem::CustomToolCall(call.clone())),
-            Self::WebSearchCall(_) | Self::McpToolCall(_) | Self::Unknown => None,
+            Self::WebSearchCall(_) | Self::McpCall(_) | Self::Unknown => None,
         }
     }
 }
@@ -532,23 +530,27 @@ mod tests {
     }
 
     #[test]
-    fn mcp_tool_call_serializes_as_output_item() {
-        let item = OutputItem::McpToolCall(McpToolCall::new(
+    fn mcp_call_serializes_as_openai_output_item() {
+        let item = OutputItem::McpCall(McpCall::new(
             "mcp_1",
             "repo",
             "read_mcp_resource",
-            serde_json::json!({"server": "repo", "uri": "file://fixture.yaml"}),
+            r#"{"server":"repo","uri":"file://fixture.yaml"}"#,
             GatewayCallStatus::Completed,
-            Some(serde_json::json!({"contents": []})),
+            Some(r#"{"contents":[]}"#.to_owned()),
             None,
         ));
 
         let json = serde_json::to_value(item).unwrap();
-        assert_eq!(json["type"], "mcp_tool_call");
+        assert_eq!(json["type"], "mcp_call");
         assert_eq!(json["id"], "mcp_1");
         assert_eq!(json["status"], "completed");
-        assert_eq!(json["server"], "repo");
-        assert_eq!(json["tool"], "read_mcp_resource");
+        assert_eq!(json["server_label"], "repo");
+        assert_eq!(json["name"], "read_mcp_resource");
+        assert_eq!(json["arguments"], r#"{"server":"repo","uri":"file://fixture.yaml"}"#);
+        assert_eq!(json["output"], r#"{"contents":[]}"#);
+        assert!(json["approval_request_id"].is_null());
+        assert!(json["error"].is_null());
     }
 
     #[test]

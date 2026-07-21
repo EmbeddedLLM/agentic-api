@@ -8,7 +8,7 @@ pub use input::{
     InputMessageContent, InputTextContent, ResponsesInput,
 };
 pub use output::{
-    ApplyDone, CustomToolCall, FunctionToolCall, GatewayCallStatus, McpToolCall, OutputItem, OutputMessage,
+    ApplyDone, CustomToolCall, FunctionToolCall, GatewayCallStatus, McpCall, OutputItem, OutputMessage,
     OutputTextContent, ReasoningOutput, ReasoningTextContent, WebSearchActionSearch, WebSearchCall,
     WebSearchCallStatus, WebSearchSource,
 };

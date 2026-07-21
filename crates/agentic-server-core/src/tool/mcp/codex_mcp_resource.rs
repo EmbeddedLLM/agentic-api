@@ -17,7 +17,7 @@ use std::collections::HashMap;
 
 use serde::Deserialize;
 
-use crate::types::tools::{FunctionToolParam, McpToolParam, NonEmptyToolName};
+use crate::types::tools::{FunctionToolParam, McpToolParam};
 use crate::utils::common::deserialize_from_value_or_custom_default;
 
 use super::READ_MCP_RESOURCE_TOOL_NAME;
@@ -61,17 +61,17 @@ fn mcp_params_from_function(p: &FunctionToolParam) -> Vec<McpToolParam> {
 }
 
 fn mcp_params_from_metadata(metadata: McpFunctionMetadata) -> Vec<McpToolParam> {
-    let Ok(name) = NonEmptyToolName::try_from(READ_MCP_RESOURCE_TOOL_NAME) else {
-        return Vec::new();
-    };
-
     if metadata.mcp_servers.is_empty() {
         return match (metadata.server_label, metadata.server_url) {
             (Some(server_label), Some(server_url)) => vec![McpToolParam {
-                name,
-                server_label: Some(server_label),
+                server_label,
                 server_url: Some(server_url),
+                connector_id: None,
                 headers: metadata.headers,
+                authorization: None,
+                allowed_tools: None,
+                require_approval: None,
+                discovered_tools: Vec::new(),
             }],
             _ => Vec::new(),
         };
@@ -83,20 +83,28 @@ fn mcp_params_from_metadata(metadata: McpFunctionMetadata) -> Vec<McpToolParam> 
             return Vec::new();
         };
         return vec![McpToolParam {
-            name,
-            server_label: Some(server_label),
+            server_label,
             server_url: Some(server.server_url),
+            connector_id: None,
             headers: server.headers,
+            authorization: None,
+            allowed_tools: None,
+            require_approval: None,
+            discovered_tools: Vec::new(),
         }];
     }
 
     let mut params = Vec::with_capacity(server_count);
     for (server_label, server) in metadata.mcp_servers {
         params.push(McpToolParam {
-            name: name.clone(),
-            server_label: Some(server_label),
+            server_label,
             server_url: Some(server.server_url),
+            connector_id: None,
             headers: server.headers,
+            authorization: None,
+            allowed_tools: None,
+            require_approval: None,
+            discovered_tools: Vec::new(),
         });
     }
 
