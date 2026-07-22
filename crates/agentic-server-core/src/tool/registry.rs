@@ -31,6 +31,18 @@ pub enum ToolType {
 
 impl ToolType {
     #[must_use]
+    pub(crate) const fn description(self) -> &'static str {
+        match self {
+            Self::Function => "function tool",
+            Self::CodexNamespace => "Codex namespace tool",
+            Self::Mcp => "MCP tool",
+            Self::WebSearch => "web search tool",
+            Self::FileSearch => "file search tool",
+            Self::CodeInterpreter => "code interpreter tool",
+        }
+    }
+
+    #[must_use]
     pub const fn is_gateway_owned(self) -> bool {
         !matches!(self, Self::Function | Self::CodexNamespace)
     }
