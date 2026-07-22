@@ -1,5 +1,5 @@
+use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -8,9 +8,10 @@ use serde_json::Value;
 use super::codex::insert_namespace_entries;
 use super::executors::GatewayExecutors;
 use super::function::insert_function_entry;
+use super::mcp::handler::{McpToolMap, McpToolRef};
 use super::mcp::registry::insert_discovered_mcp_entry;
 use super::web_search::insert_web_search_entry;
-use super::{CodexNamespaceHandler, GatewayExecutor, NamespaceMap, ToolError, ToolOutput};
+use super::{CodexNamespaceHandler, GatewayExecutor, McpHandler, NamespaceMap, ToolError, ToolOutput};
 use crate::types::io::OutputItem;
 use crate::types::io::output::FunctionToolCall;
 use crate::types::tools::{CodeInterpreterToolParam, FileSearchToolParam, ResponsesTool};
@@ -155,8 +156,9 @@ fn insert_code_interpreter_entry(
 #[derive(Debug, Default)]
 pub struct ToolRegistry {
     entries: HashMap<String, ToolEntry>,
-    /// MCP server labels declared by and validated for this request.
-    mcp_server_labels: HashSet<String>,
+    /// Maps model-visible MCP function names back to their public server and
+    /// tool identities without reparsing executor configuration.
+    mcp_tool_map: McpToolMap,
     /// Built once from the declared tools, so `restore_final_payload_output`
     /// and `restore_stream_event_value` — the latter called once per SSE line
     /// during streaming — don't rebuild it on every call.
@@ -181,23 +183,12 @@ impl ToolRegistry {
         executors: &mut GatewayExecutors,
     ) -> Result<Self, ToolError> {
         let mut entries = HashMap::with_capacity(tools.len());
-        let mut mcp_server_labels = HashSet::new();
+        let mut mcp_tool_map = McpToolMap::default();
         // Namespace members must be keyed by the same flat, model-visible name
         // the model will call, so resolve them first — the same pure pass used
         // to build the upstream request.
         let resolved_tools = CodexNamespaceHandler.resolve_namespace_members(tools)?;
-
-        for param in resolved_tools.iter().filter_map(|tool| match tool {
-            ResponsesTool::Mcp(param) => Some(param),
-            _ => None,
-        }) {
-            if !mcp_server_labels.insert(param.server_label.clone()) {
-                return Err(ToolError::Config(format!(
-                    "duplicate MCP declarations are not allowed for server_label '{}'",
-                    param.server_label
-                )));
-            }
-        }
+        McpHandler::validate_server_labels(&resolved_tools)?;
 
         for (index, tool) in resolved_tools.iter().enumerate() {
             match tool {
@@ -210,9 +201,12 @@ impl ToolRegistry {
                         declaration.discovered_tools = handlers.iter().map(|item| item.param.clone()).collect();
                     }
                     for discovered in handlers {
+                        let internal_name = discovered.param.internal_name.clone();
+                        let tool_ref = McpToolRef::from(&discovered.param);
                         insert_unique_tool_entries(&mut entries, |resolved| {
                             insert_discovered_mcp_entry(resolved, discovered);
                         })?;
+                        mcp_tool_map.record(internal_name, tool_ref);
                     }
                 }
                 ResponsesTool::WebSearch(p) => {
@@ -244,7 +238,7 @@ impl ToolRegistry {
 
         Ok(Self {
             entries,
-            mcp_server_labels,
+            mcp_tool_map,
             namespace_map,
         })
     }
@@ -266,7 +260,11 @@ impl ToolRegistry {
 
     #[must_use]
     pub fn contains_mcp_server_label(&self, server_label: &str) -> bool {
-        self.mcp_server_labels.contains(server_label)
+        self.mcp_tool_map.contains_server_label(server_label)
+    }
+
+    pub(crate) fn mcp_tool_ref(&self, internal_name: &str) -> Option<&McpToolRef> {
+        self.mcp_tool_map.tool_ref(internal_name)
     }
 
     pub fn restore_final_payload_output(&self, output: &mut [OutputItem]) {
