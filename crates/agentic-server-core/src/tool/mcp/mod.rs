@@ -6,4 +6,3 @@ pub mod registry;
 pub use client::{McpClient, McpError, McpOperation};
 pub use handler::{McpDiscoveredHandler, McpHandler};
 pub use pool::{McpClientPool, McpServerEntry};
-pub use registry::insert_discovered_mcp_entry;

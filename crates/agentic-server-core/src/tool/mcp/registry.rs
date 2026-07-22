@@ -9,10 +9,8 @@ use super::McpDiscoveredHandler;
 /// Registers one tool returned by MCP `tools/list`, keyed by its internal
 /// model-visible name while retaining the raw server and tool identity in its
 /// serialized config.
-pub fn insert_discovered_mcp_entry<S: std::hash::BuildHasher>(
-    entries: &mut HashMap<String, ToolEntry, S>,
-    discovered: McpDiscoveredHandler,
-) {
+///
+pub(crate) fn insert_discovered_mcp_entry(entries: &mut HashMap<String, ToolEntry>, discovered: McpDiscoveredHandler) {
     let McpDiscoveredHandler { param, handler } = discovered;
     let config = serialize_to_value_or_custom_default(
         &param,
@@ -25,18 +23,13 @@ pub fn insert_discovered_mcp_entry<S: std::hash::BuildHasher>(
         internal_name,
         ..
     } = param;
-    if entries
-        .insert(
-            internal_name.clone(),
-            ToolEntry {
-                tool_type: ToolType::Mcp,
-                config,
-                server_label: Some(server_label),
-                handler: Some(handler),
-            },
-        )
-        .is_some()
-    {
-        tracing::warn!(name = %internal_name, "duplicate discovered MCP tool name — previous definition overwritten");
-    }
+    entries.insert(
+        internal_name,
+        ToolEntry {
+            tool_type: ToolType::Mcp,
+            config,
+            server_label: Some(server_label),
+            handler: Some(handler),
+        },
+    );
 }

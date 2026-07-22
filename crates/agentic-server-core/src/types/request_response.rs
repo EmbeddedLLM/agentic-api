@@ -504,7 +504,7 @@ mod tests {
             panic!("colliding namespace member should be rejected");
         };
 
-        assert!(err.to_string().contains("collides with top-level function"));
+        assert!(err.to_string().contains("collides with a declared function tool"));
     }
 
     #[test]

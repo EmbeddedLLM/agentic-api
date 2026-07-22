@@ -367,7 +367,7 @@ async fn test_codex_namespace_collision_with_top_level_function_is_rejected() {
     };
 
     assert!(
-        err.to_string().contains("collides with top-level function"),
+        err.to_string().contains("collides with a declared function tool"),
         "unexpected error: {err}"
     );
     assert!(

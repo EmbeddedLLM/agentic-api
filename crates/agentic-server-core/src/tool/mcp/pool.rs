@@ -186,7 +186,7 @@ fn clean_string(value: Option<&str>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{McpServerEntry, parse_allowed_hosts, validate_request_server_url};
+    use super::{McpServerEntry, parse_allowed_hosts, server_entry_from_param, validate_request_server_url};
     use crate::types::tools::McpToolParam;
 
     #[test]
@@ -251,14 +251,15 @@ mod tests {
     }
 
     #[test]
-    fn request_params_do_not_accept_stdio_command() {
-        let result = serde_json::from_value::<McpToolParam>(serde_json::json!({
+    fn request_params_ignore_stdio_fields_without_configuring_transport() {
+        let param = serde_json::from_value::<McpToolParam>(serde_json::json!({
             "server_label": "repo",
             "command": "python3",
             "args": ["/tmp/server.py"]
-        }));
+        }))
+        .unwrap();
 
-        assert!(result.is_err());
+        assert!(server_entry_from_param(&param).is_none());
     }
 
     #[test]

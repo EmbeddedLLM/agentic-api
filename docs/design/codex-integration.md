@@ -56,6 +56,8 @@ The model-visible namespace member format is:
 agentic_ns__{namespace}__{member}
 ```
 
+Names at or below the upstream 64-character function-name limit retain that exact form. Longer generated names keep a readable prefix and replace the tail with a deterministic 16-hex fingerprint, producing exactly 64 characters. The request-scoped namespace map records the result, so restoration never depends on parsing either form.
+
 For example, Codex can send:
 
 ```json
@@ -91,10 +93,7 @@ When the model calls that flat function, the gateway restores:
 
 ## Collision Handling
 
-The `agentic_ns__` prefix marks gateway-generated namespace member names. If a declared top-level function already uses
-the generated name for a namespace member, or if two distinct namespace members generate the same
-flat name, the typed executor rejects the request as invalid. Forwarding either shape would make a later model call
-ambiguous and impossible to restore reliably to `{ namespace, name }`.
+The `agentic_ns__` prefix marks gateway-generated namespace member names. If any other declared tool registers the same function-call name as a namespace member (including a function, MCP tool, or normalized built-in), or if two distinct namespace members generate the same flat name, the typed executor rejects the request as invalid before upstream inference or gateway tool setup. Forwarding either shape would make a later model call ambiguous and impossible to restore reliably to `{ namespace, name }`. Custom tools are excluded from this check because they use `custom_tool_call`, not `function_call`.
 
 ---
 
