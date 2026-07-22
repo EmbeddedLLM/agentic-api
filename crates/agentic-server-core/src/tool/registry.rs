@@ -7,7 +7,7 @@ use serde_json::Value;
 use super::codex::insert_namespace_entries;
 use super::executors::GatewayExecutors;
 use super::function::insert_function_entry;
-use super::mcp::insert_discovered_mcp_entry;
+use super::mcp::registry::insert_discovered_mcp_entry;
 use super::web_search::insert_web_search_entry;
 use super::{CodexNamespaceHandler, GatewayExecutor, NamespaceMap, ToolError, ToolOutput};
 use crate::types::io::OutputItem;
@@ -118,6 +118,8 @@ fn insert_code_interpreter_entry(
 #[derive(Debug, Default)]
 pub struct ToolRegistry {
     entries: HashMap<String, ToolEntry>,
+    /// MCP server labels declared by and validated for this request.
+    mcp_server_labels: HashSet<String>,
     /// Built once from the declared tools, so `restore_final_payload_output`
     /// and `restore_stream_event_value` — the latter called once per SSE line
     /// during streaming — don't rebuild it on every call.
@@ -130,7 +132,8 @@ impl ToolRegistry {
     /// # Errors
     ///
     /// Returns [`ToolError::Config`] when Codex namespace member flattening
-    /// would collide with another declared tool name.
+    /// would collide with another declared tool name, or when discovered MCP
+    /// tools derive the same internal model-visible name.
     ///
     /// # Panics
     ///
@@ -168,7 +171,7 @@ impl ToolRegistry {
                         declaration.discovered_tools = handlers.iter().map(|item| item.param.clone()).collect();
                     }
                     for discovered in handlers {
-                        insert_discovered_mcp_entry(&mut entries, discovered);
+                        insert_discovered_mcp_entry(&mut entries, discovered)?;
                     }
                 }
                 ResponsesTool::WebSearch(p) => {
@@ -188,7 +191,11 @@ impl ToolRegistry {
 
         let namespace_map = CodexNamespaceHandler.build_namespace_map((!tools.is_empty()).then_some(tools))?;
 
-        Ok(Self { entries, namespace_map })
+        Ok(Self {
+            entries,
+            mcp_server_labels,
+            namespace_map,
+        })
     }
 
     #[must_use]
@@ -204,6 +211,11 @@ impl ToolRegistry {
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
+    }
+
+    #[must_use]
+    pub fn contains_mcp_server_label(&self, server_label: &str) -> bool {
+        self.mcp_server_labels.contains(server_label)
     }
 
     pub fn restore_final_payload_output(&self, output: &mut [OutputItem]) {
@@ -278,14 +290,14 @@ mod tests {
         .expect("MCP declaration")
     }
 
-    fn discovered_handler() -> McpDiscoveredHandler {
+    fn discovered_handler(server_label: &str, tool_name: &str, internal_name: &str) -> McpDiscoveredHandler {
         let param = McpDiscoveredToolParam {
-            server_label: "counter".to_owned(),
-            tool_name: "increment".to_owned(),
-            internal_name: "mcp__counter__increment".to_owned(),
+            server_label: server_label.to_owned(),
+            tool_name: tool_name.to_owned(),
+            internal_name: internal_name.to_owned(),
             tool: serde_json::from_value(serde_json::json!({
-                "name": "increment",
-                "description": "Increment the counter",
+                "name": tool_name,
+                "description": "Discovered test tool",
                 "inputSchema": {"type": "object"}
             }))
             .expect("discovered MCP tool"),
@@ -301,7 +313,7 @@ mod tests {
         let mut executors = GatewayExecutors::default();
         executors.insert(GatewayExecutorRegistration::Mcp {
             server_label: "counter".to_owned(),
-            handlers: vec![discovered_handler()],
+            handlers: vec![discovered_handler("counter", "increment", "mcp__counter__increment")],
         });
         let mut tools = vec![declaration("counter")];
 
@@ -310,6 +322,8 @@ mod tests {
             .expect("registry with cached MCP handler");
 
         assert!(registry.lookup("mcp__counter__increment").is_some());
+        assert!(registry.contains_mcp_server_label("counter"));
+        assert!(!registry.contains_mcp_server_label("missing"));
         let ResponsesTool::Mcp(declared) = &tools[0] else {
             panic!("expected MCP declaration");
         };
@@ -331,5 +345,30 @@ mod tests {
         assert!(
             matches!(error, ToolError::Config(message) if message.contains("duplicate MCP declarations") && message.contains("counter"))
         );
+    }
+
+    #[tokio::test]
+    async fn cross_server_internal_name_collisions_are_rejected() {
+        let internal_name = "mcp__foo__bar__baz";
+        let mut executors = GatewayExecutors::default();
+        executors.insert(GatewayExecutorRegistration::Mcp {
+            server_label: "foo".to_owned(),
+            handlers: vec![discovered_handler("foo", "bar__baz", internal_name)],
+        });
+        executors.insert(GatewayExecutorRegistration::Mcp {
+            server_label: "foo__bar".to_owned(),
+            handlers: vec![discovered_handler("foo__bar", "baz", internal_name)],
+        });
+        let mut tools = vec![declaration("foo"), declaration("foo__bar")];
+
+        let error = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
+            .await
+            .expect_err("colliding derived MCP names must fail");
+
+        assert!(matches!(
+            error,
+            ToolError::Config(message)
+                if message.contains("foo__bar/baz") && message.contains(internal_name)
+        ));
     }
 }

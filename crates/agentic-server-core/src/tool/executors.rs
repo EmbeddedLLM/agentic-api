@@ -89,6 +89,8 @@ impl GatewayExecutors {
     /// Returns a configuration error for an invalid declaration or an empty
     /// allowed tool set, and an execution error when the server cannot connect.
     pub async fn mcp_handler(&mut self, param: &McpToolParam) -> Result<Vec<McpDiscoveredHandler>, ToolError> {
+        validate_mcp_execution_options(param)?;
+
         let server_label = param.server_label.trim();
         if server_label.is_empty() {
             return Err(ToolError::Config(
@@ -122,11 +124,70 @@ impl GatewayExecutors {
     }
 }
 
+fn validate_mcp_execution_options(param: &McpToolParam) -> Result<(), ToolError> {
+    if param.connector_id.is_some() {
+        return Err(ToolError::Config(
+            "MCP connector_id is not supported; configure server_url instead".to_owned(),
+        ));
+    }
+    if !matches!(param.require_approval.as_deref(), None | Some("never")) {
+        return Err(ToolError::Config(
+            "MCP require_approval supports only 'never'; approval gating is not yet supported".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 impl std::fmt::Debug for GatewayExecutors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GatewayExecutors")
             .field("mcp_server_handlers", &self.mcp.len())
             .field("web_search", &self.web_search.is_some())
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_mcp_execution_options;
+    use crate::types::tools::McpToolParam;
+
+    fn mcp_param(value: serde_json::Value) -> McpToolParam {
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn mcp_execution_allows_no_approval_policy_or_never() {
+        for require_approval in [None, Some("never")] {
+            let param = mcp_param(serde_json::json!({
+                "server_label": "counter",
+                "server_url": "http://localhost:8000/mcp",
+                "require_approval": require_approval
+            }));
+            validate_mcp_execution_options(&param).unwrap();
+        }
+    }
+
+    #[test]
+    fn mcp_execution_rejects_unsupported_approval_policy() {
+        let param = mcp_param(serde_json::json!({
+            "server_label": "counter",
+            "server_url": "http://localhost:8000/mcp",
+            "require_approval": "always"
+        }));
+
+        let error = validate_mcp_execution_options(&param).unwrap_err();
+        assert!(error.to_string().contains("approval gating is not yet supported"));
+    }
+
+    #[test]
+    fn mcp_execution_rejects_connector_id() {
+        let param = mcp_param(serde_json::json!({
+            "server_label": "counter",
+            "connector_id": "connector_dropbox"
+        }));
+
+        let error = validate_mcp_execution_options(&param).unwrap_err();
+        assert!(error.to_string().contains("connector_id is not supported"));
     }
 }

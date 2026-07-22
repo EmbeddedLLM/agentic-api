@@ -28,15 +28,18 @@ fn native_mcp_declaration_uses_server_identity_without_a_tool_name() {
 }
 
 #[test]
-fn native_mcp_declaration_rejects_a_client_supplied_tool_name() {
-    let result = serde_json::from_value::<ResponsesTool>(serde_json::json!({
+fn native_mcp_declaration_ignores_a_client_supplied_tool_name() {
+    let tool = serde_json::from_value::<ResponsesTool>(serde_json::json!({
         "type": "mcp",
         "name": "increment",
         "server_label": "counter",
         "server_url": "http://127.0.0.1:8000/mcp"
-    }));
+    }))
+    .expect("MCP declaration with an unknown field");
 
-    assert!(result.is_err());
+    let serialized = serde_json::to_value(tool).expect("serialized MCP declaration");
+    assert_eq!(serialized["server_label"], "counter");
+    assert!(serialized.get("name").is_none());
 }
 
 #[tokio::test]

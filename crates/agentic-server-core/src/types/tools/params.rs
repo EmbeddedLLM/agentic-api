@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Error returned when a tool name is empty.
@@ -144,7 +144,7 @@ pub struct CustomToolParam {
 }
 
 /// Parameters for a gateway MCP built-in tool declaration.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpToolParam {
     pub server_label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -159,48 +159,15 @@ pub struct McpToolParam {
     pub allowed_tools: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub require_approval: Option<String>,
-    /// Request-scoped `tools/list` results used by MCP normalization. The
-    /// custom `Deserialize` implementation rejects this internal field on the
-    /// public request wire.
-    #[serde(rename = "_agentic_discovered_tools", default, skip_serializing_if = "Vec::is_empty")]
+    /// Request-scoped `tools/list` results used by MCP normalization. This
+    /// field is populated internally and ignored on the public request wire.
+    #[serde(
+        rename = "_agentic_discovered_tools",
+        default,
+        skip_deserializing,
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub(crate) discovered_tools: Vec<McpDiscoveredToolParam>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct McpToolParamWire {
-    server_label: String,
-    #[serde(default)]
-    server_url: Option<String>,
-    #[serde(default)]
-    connector_id: Option<String>,
-    #[serde(default)]
-    headers: Option<HashMap<String, String>>,
-    #[serde(default)]
-    authorization: Option<String>,
-    #[serde(default)]
-    allowed_tools: Option<Vec<String>>,
-    #[serde(default)]
-    require_approval: Option<String>,
-}
-
-impl<'de> Deserialize<'de> for McpToolParam {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let wire = McpToolParamWire::deserialize(deserializer)?;
-        Ok(Self {
-            server_label: wire.server_label,
-            server_url: wire.server_url,
-            connector_id: wire.connector_id,
-            headers: wire.headers,
-            authorization: wire.authorization,
-            allowed_tools: wire.allowed_tools,
-            require_approval: wire.require_approval,
-            discovered_tools: Vec::new(),
-        })
-    }
 }
 
 /// Parameters for a discovered MCP (Model Context Protocol) server tool.
@@ -372,15 +339,36 @@ mod tests {
     }
 
     #[test]
-    fn responses_tool_mcp_rejects_function_name() {
-        let result = serde_json::from_value::<ResponsesTool>(serde_json::json!({
+    fn responses_tool_mcp_ignores_unknown_fields() {
+        let tool = serde_json::from_value::<ResponsesTool>(serde_json::json!({
             "type": "mcp",
             "name": "increment",
             "server_label": "repo",
-            "server_url": "http://localhost:9001/mcp"
-        }));
+            "server_url": "http://localhost:9001/mcp",
+            "future_field": true
+        }))
+        .unwrap();
 
-        assert!(result.is_err());
+        let back = serde_json::to_value(tool).unwrap();
+        assert_eq!(back["server_label"], "repo");
+        assert!(back.get("name").is_none());
+        assert!(back.get("future_field").is_none());
+    }
+
+    #[test]
+    fn responses_tool_mcp_ignores_internal_discovery_field_from_request() {
+        let tool = serde_json::from_value::<ResponsesTool>(serde_json::json!({
+            "type": "mcp",
+            "server_label": "repo",
+            "server_url": "http://localhost:9001/mcp",
+            "_agentic_discovered_tools": [{"not": "a discovered tool"}]
+        }))
+        .unwrap();
+
+        let ResponsesTool::Mcp(param) = tool else {
+            panic!("expected MCP tool");
+        };
+        assert!(param.discovered_tools.is_empty());
     }
 
     #[test]
