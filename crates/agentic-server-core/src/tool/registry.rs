@@ -241,8 +241,8 @@ impl ToolRegistry {
 
         Ok(Self {
             entries,
-            mcp_tool_map,
             namespace_map,
+            mcp_tool_map,
         })
     }
 

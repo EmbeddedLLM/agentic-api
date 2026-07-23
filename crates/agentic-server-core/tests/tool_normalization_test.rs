@@ -416,7 +416,7 @@ fn codex_namespace_cassettes_flatten_to_safe_upstream_function_name() {
 
 #[tokio::test]
 async fn tool_registry_restores_wire_event_namespace_losslessly() {
-    let tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([
+    let mut tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([
         {
             "type": "namespace",
             "name": "mcp__agentic_fixture",
@@ -424,7 +424,7 @@ async fn tool_registry_restores_wire_event_namespace_losslessly() {
         }
     ]))
     .unwrap();
-    let registry = ToolRegistry::build_with_handlers(&tools, &GatewayExecutors::default())
+    let registry = ToolRegistry::build_with_handlers(&mut tools, &mut GatewayExecutors::default())
         .await
         .expect("valid registry");
     let mut wire = WireEvent::new("response.output_item.done");
