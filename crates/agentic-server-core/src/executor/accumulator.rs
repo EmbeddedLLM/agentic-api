@@ -194,7 +194,7 @@ impl ResponseAccumulator {
     fn process_stream_chunks(rx: mpsc::Receiver<String>, conversation_id: Option<String>) -> Self {
         let mut acc = Self::new(uuid7_str("resp_"), conversation_id);
         for line in rx {
-            acc.process_sse_line(&line);
+            let _ = acc.process_sse_line(&line);
         }
         acc.finish_stream();
         acc
@@ -209,7 +209,7 @@ impl ResponseAccumulator {
     pub fn from_sse_lines(lines: impl IntoIterator<Item = String>, conversation_id: Option<&str>) -> Self {
         let mut acc = Self::new(uuid7_str("resp_"), conversation_id.map(str::to_string));
         for line in lines {
-            acc.process_sse_line(&line);
+            let _ = acc.process_sse_line(&line);
         }
         acc.finalize_all();
         acc
@@ -222,32 +222,32 @@ impl ResponseAccumulator {
         }
     }
 
-    pub(crate) fn process_sse_line(&mut self, line: &str) {
-        if let Some(frame) = normalize_sse_line(line) {
-            if matches!(
-                frame.event_type,
-                SSEEventType::ResponseFailed | SSEEventType::ResponseIncomplete
-            ) {
-                self.capture_terminal_details(line);
-            }
-            self.process_event(&frame);
-        }
+    pub(crate) fn process_sse_line(&mut self, line: &str) -> Option<EventFrame> {
+        let frame = normalize_sse_line(line)?;
+        self.capture_terminal_details_if_needed(&frame);
+        self.process_event(&frame);
+        Some(frame)
     }
 
-    fn capture_terminal_details(&mut self, line: &str) {
-        let Some(data) = line.strip_prefix("data: ") else {
-            return;
-        };
-        let Ok(mut event) = deserialize_from_str::<serde_json::Value>(data) else {
-            return;
-        };
-        let Some(response) = event.get_mut("response") else {
+    fn capture_terminal_details(&mut self, frame: &EventFrame) {
+        let Some(response) = frame.wire.rest.get("response") else {
             return;
         };
 
-        self.incomplete_details =
-            deserialize_from_value_opt::<IncompleteDetails>(response["incomplete_details"].take());
-        self.error = (!response["error"].is_null()).then(|| response["error"].take());
+        self.incomplete_details = response
+            .get("incomplete_details")
+            .cloned()
+            .and_then(deserialize_from_value_opt::<IncompleteDetails>);
+        self.error = response.get("error").filter(|error| !error.is_null()).cloned();
+    }
+
+    fn capture_terminal_details_if_needed(&mut self, frame: &EventFrame) {
+        if matches!(
+            frame.event_type,
+            SSEEventType::ResponseFailed | SSEEventType::ResponseIncomplete
+        ) {
+            self.capture_terminal_details(frame);
+        }
     }
 
     pub(crate) fn finish_stream(&mut self) {
@@ -431,6 +431,7 @@ impl ResponseAccumulator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::events::WireEvent;
 
     #[test]
     fn test_accumulator_new() {
@@ -525,7 +526,7 @@ mod tests {
                 status: "in_progress".into(),
                 usage: None,
             },
-            sequence_number: Some(0),
+            wire: WireEvent::new("test"),
         };
         acc.process_event(&frame);
         assert_eq!(acc.response_id, "resp_new");
@@ -541,7 +542,7 @@ mod tests {
                 status: "in_progress".into(),
                 usage: None,
             },
-            sequence_number: Some(0),
+            wire: WireEvent::new("test"),
         };
         acc.process_event(&frame);
         assert_eq!(acc.response_id, "resp_keep");
@@ -561,7 +562,7 @@ mod tests {
                 namespace: None,
                 call_id: None,
             },
-            sequence_number: Some(1),
+            wire: WireEvent::new("test"),
         });
 
         acc.process_event(&EventFrame {
@@ -572,7 +573,7 @@ mod tests {
                 output_index: 0,
                 content_index: 0,
             },
-            sequence_number: Some(2),
+            wire: WireEvent::new("test"),
         });
         acc.process_event(&EventFrame {
             event_type: SSEEventType::OutputTextDelta,
@@ -582,7 +583,7 @@ mod tests {
                 output_index: 0,
                 content_index: 0,
             },
-            sequence_number: Some(3),
+            wire: WireEvent::new("test"),
         });
 
         acc.process_event(&EventFrame {
@@ -592,7 +593,7 @@ mod tests {
                 status: "completed".into(),
                 usage: None,
             },
-            sequence_number: Some(4),
+            wire: WireEvent::new("test"),
         });
 
         assert_eq!(acc.status, ResponseStatus::Completed);
@@ -652,7 +653,7 @@ mod tests {
                     ..Default::default()
                 }),
             },
-            sequence_number: Some(9),
+            wire: WireEvent::new("test"),
         };
         acc.process_event(&frame);
         assert_eq!(acc.status, ResponseStatus::Completed);
@@ -670,7 +671,7 @@ mod tests {
                 status: "failed".into(),
                 usage: None,
             },
-            sequence_number: Some(4),
+            wire: WireEvent::new("response.failed"),
         });
         assert_eq!(acc.status, ResponseStatus::Error);
     }
@@ -685,7 +686,7 @@ mod tests {
                 status: "incomplete".into(),
                 usage: None,
             },
-            sequence_number: Some(4),
+            wire: WireEvent::new("test"),
         });
         assert_eq!(acc.status, ResponseStatus::Incomplete);
     }
@@ -696,7 +697,7 @@ mod tests {
         let frame = EventFrame {
             event_type: SSEEventType::ContentPartAdded,
             payload: EventPayload::Raw(serde_json::json!({"type": "response.content_part.added"})),
-            sequence_number: Some(3),
+            wire: WireEvent::new("test"),
         };
         acc.process_event(&frame);
         assert_eq!(acc.response_id, "resp_1");
@@ -816,7 +817,7 @@ mod tests {
                 namespace: Some("mcp__weather".into()),
                 call_id: Some("call_abc".into()),
             },
-            sequence_number: Some(1),
+            wire: WireEvent::new("test"),
         });
 
         acc.process_event(&EventFrame {
@@ -827,7 +828,7 @@ mod tests {
                 item_id: "fc_1".into(),
                 output_index: 0,
             },
-            sequence_number: Some(2),
+            wire: WireEvent::new("test"),
         });
 
         acc.process_event(&EventFrame {
@@ -838,7 +839,7 @@ mod tests {
                 item_id: "fc_1".into(),
                 output_index: 0,
             },
-            sequence_number: Some(3),
+            wire: WireEvent::new("test"),
         });
 
         acc.process_event(&EventFrame {
@@ -850,7 +851,7 @@ mod tests {
                 name: "get_weather".into(),
                 output_index: 0,
             },
-            sequence_number: Some(4),
+            wire: WireEvent::new("test"),
         });
 
         acc.process_event(&EventFrame {
@@ -860,7 +861,7 @@ mod tests {
                 status: "completed".into(),
                 usage: None,
             },
-            sequence_number: Some(5),
+            wire: WireEvent::new("test"),
         });
 
         assert_eq!(acc.status, ResponseStatus::Completed);
@@ -891,7 +892,7 @@ mod tests {
                 namespace: None,
                 call_id: Some("call_1".into()),
             },
-            sequence_number: Some(1),
+            wire: WireEvent::new("test"),
         });
 
         acc.process_event(&EventFrame {
@@ -902,7 +903,7 @@ mod tests {
                 item_id: "fc_1".into(),
                 output_index: 0,
             },
-            sequence_number: Some(2),
+            wire: WireEvent::new("test"),
         });
 
         acc.process_event(&EventFrame {
@@ -914,7 +915,7 @@ mod tests {
                 name: "search".into(),
                 output_index: 0,
             },
-            sequence_number: Some(3),
+            wire: WireEvent::new("test"),
         });
 
         acc.finalize_all();
@@ -940,7 +941,7 @@ mod tests {
                 namespace: None,
                 call_id: Some("call_1".into()),
             },
-            sequence_number: Some(1),
+            wire: WireEvent::new("test"),
         });
         acc.process_event(&EventFrame {
             event_type: SSEEventType::FunctionCallArgumentsDone,
@@ -951,7 +952,7 @@ mod tests {
                 name: "get_weather".into(),
                 output_index: 0,
             },
-            sequence_number: Some(2),
+            wire: WireEvent::new("test"),
         });
 
         acc.process_event(&EventFrame {
@@ -964,7 +965,7 @@ mod tests {
                 namespace: None,
                 call_id: Some("call_2".into()),
             },
-            sequence_number: Some(3),
+            wire: WireEvent::new("test"),
         });
         acc.process_event(&EventFrame {
             event_type: SSEEventType::FunctionCallArgumentsDone,
@@ -975,7 +976,7 @@ mod tests {
                 name: "get_time".into(),
                 output_index: 1,
             },
-            sequence_number: Some(4),
+            wire: WireEvent::new("test"),
         });
 
         acc.process_event(&EventFrame {
@@ -985,7 +986,7 @@ mod tests {
                 status: "completed".into(),
                 usage: None,
             },
-            sequence_number: Some(5),
+            wire: WireEvent::new("test"),
         });
 
         assert_eq!(acc.output.len(), 2);
@@ -1007,7 +1008,7 @@ mod tests {
                 namespace: None,
                 call_id: None,
             },
-            sequence_number: Some(1),
+            wire: WireEvent::new("test"),
         });
         acc.process_event(&EventFrame {
             event_type: SSEEventType::OutputTextDelta,
@@ -1017,7 +1018,7 @@ mod tests {
                 output_index: 0,
                 content_index: 0,
             },
-            sequence_number: Some(2),
+            wire: WireEvent::new("test"),
         });
 
         acc.process_event(&EventFrame {
@@ -1030,7 +1031,7 @@ mod tests {
                 namespace: None,
                 call_id: Some("call_x".into()),
             },
-            sequence_number: Some(3),
+            wire: WireEvent::new("test"),
         });
         acc.process_event(&EventFrame {
             event_type: SSEEventType::FunctionCallArgumentsDone,
@@ -1041,7 +1042,7 @@ mod tests {
                 name: "lookup".into(),
                 output_index: 1,
             },
-            sequence_number: Some(4),
+            wire: WireEvent::new("test"),
         });
 
         acc.process_event(&EventFrame {
@@ -1051,7 +1052,7 @@ mod tests {
                 status: "completed".into(),
                 usage: None,
             },
-            sequence_number: Some(5),
+            wire: WireEvent::new("test"),
         });
 
         assert_eq!(acc.output.len(), 2);
@@ -1073,7 +1074,7 @@ mod tests {
                 namespace: None,
                 call_id: Some("old_call".into()),
             },
-            sequence_number: Some(1),
+            wire: WireEvent::new("test"),
         });
 
         acc.process_event(&EventFrame {
@@ -1085,7 +1086,7 @@ mod tests {
                 name: "new_name".into(),
                 output_index: 0,
             },
-            sequence_number: Some(2),
+            wire: WireEvent::new("test"),
         });
 
         acc.finalize_all();
@@ -1111,7 +1112,7 @@ mod tests {
                 namespace: None,
                 call_id: Some("c1".into()),
             },
-            sequence_number: Some(1),
+            wire: WireEvent::new("test"),
         });
 
         acc.process_event(&EventFrame {
@@ -1123,7 +1124,7 @@ mod tests {
                 name: "tool".into(),
                 output_index: 0,
             },
-            sequence_number: Some(2),
+            wire: WireEvent::new("test"),
         });
 
         acc.finalize_all();
@@ -1147,7 +1148,7 @@ mod tests {
                 item_id: String::new(),
                 output_index: 0,
             },
-            sequence_number: Some(1),
+            wire: WireEvent::new("test"),
         });
 
         assert!(acc.output.is_empty());
@@ -1168,7 +1169,7 @@ mod tests {
                 namespace: None,
                 call_id: Some("c1".into()),
             },
-            sequence_number: Some(1),
+            wire: WireEvent::new("test"),
         });
         acc.process_event(&EventFrame {
             event_type: SSEEventType::FunctionCallArgumentsDelta,
@@ -1178,7 +1179,7 @@ mod tests {
                 item_id: "fc_1".into(),
                 output_index: 0,
             },
-            sequence_number: Some(2),
+            wire: WireEvent::new("test"),
         });
 
         acc.process_event(&EventFrame {
@@ -1188,7 +1189,7 @@ mod tests {
                 status: "completed".into(),
                 usage: None,
             },
-            sequence_number: Some(3),
+            wire: WireEvent::new("test"),
         });
 
         assert_eq!(acc.output.len(), 1);
