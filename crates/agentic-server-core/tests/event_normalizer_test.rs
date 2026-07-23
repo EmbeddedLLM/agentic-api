@@ -8,7 +8,7 @@ fn test_text_delta() {
     let line = r#"data: {"type":"response.output_text.delta","delta":"hello","item_id":"msg_1","output_index":0,"content_index":0,"sequence_number":4}"#;
     let frame = normalize_sse_line(line).unwrap();
     assert_eq!(frame.event_type, SSEEventType::OutputTextDelta);
-    assert_eq!(frame.sequence_number, Some(4));
+    assert_eq!(frame.sequence_number(), Some(4));
     if let EventPayload::TextDelta {
         delta,
         item_id,
@@ -30,7 +30,7 @@ fn test_function_call_args_delta() {
     let line = r#"data: {"type":"response.function_call_arguments.delta","delta":"{\"city\":","call_id":"call_abc","item_id":"fc_1","output_index":0,"sequence_number":7}"#;
     let frame = normalize_sse_line(line).unwrap();
     assert_eq!(frame.event_type, SSEEventType::FunctionCallArgumentsDelta);
-    assert_eq!(frame.sequence_number, Some(7));
+    assert_eq!(frame.sequence_number(), Some(7));
     if let EventPayload::FunctionCallArgsDelta {
         delta,
         call_id,
@@ -136,6 +136,27 @@ fn test_unknown_event_type() {
 }
 
 #[test]
+fn test_typeless_json_event_is_preserved() {
+    let frame = normalize_sse_line(r#"data: {"foo":1}"#).unwrap();
+
+    assert_eq!(frame.event_type, SSEEventType::Other);
+    assert_eq!(serde_json::to_value(frame.wire).unwrap(), serde_json::json!({"foo": 1}));
+}
+
+#[test]
+fn test_wire_event_preserves_unknown_fields() {
+    let line = r#"data: {"type":"response.output_text.delta","sequence_number":4,"output_index":2,"item_id":"msg_1","content_index":0,"delta":"hello","provider_extra":{"nested":true},"future_array":[1,2]}"#;
+    let frame = normalize_sse_line(line).unwrap();
+    let wire = serde_json::to_value(&frame.wire).unwrap();
+
+    assert_eq!(wire["type"], "response.output_text.delta");
+    assert_eq!(wire["sequence_number"], 4);
+    assert_eq!(wire["output_index"], 2);
+    assert_eq!(wire["provider_extra"]["nested"], true);
+    assert_eq!(wire["future_array"], serde_json::json!([1, 2]));
+}
+
+#[test]
 fn test_malformed_json_returns_none() {
     assert!(normalize_sse_line("data: {not valid json}").is_none());
     assert!(normalize_sse_line("data: ").is_none());
@@ -146,7 +167,7 @@ fn test_response_created() {
     let line = r#"data: {"type":"response.created","response":{"id":"resp_abc","status":"in_progress","usage":null},"sequence_number":0}"#;
     let frame = normalize_sse_line(line).unwrap();
     assert_eq!(frame.event_type, SSEEventType::ResponseCreated);
-    assert_eq!(frame.sequence_number, Some(0));
+    assert_eq!(frame.sequence_number(), Some(0));
     if let EventPayload::Response { id, status, .. } = &frame.payload {
         assert_eq!(id, "resp_abc");
         assert_eq!(status, "in_progress");
@@ -213,7 +234,7 @@ fn test_no_sequence_number() {
     let line =
         r#"data: {"type":"response.output_text.delta","delta":"x","item_id":"m","output_index":0,"content_index":0}"#;
     let frame = normalize_sse_line(line).unwrap();
-    assert_eq!(frame.sequence_number, None);
+    assert_eq!(frame.sequence_number(), None);
 }
 
 #[test]
@@ -442,7 +463,7 @@ fn test_sequence_numbers_increasing() {
     let mut last_seq: Option<u64> = None;
     for line in SIMULATED_SSE {
         if let Some(frame) = normalize_sse_line(line) {
-            if let Some(seq) = frame.sequence_number {
+            if let Some(seq) = frame.sequence_number() {
                 if let Some(prev) = last_seq {
                     assert!(seq > prev, "sequence {seq} should be > {prev}");
                 }

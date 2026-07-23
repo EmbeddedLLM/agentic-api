@@ -13,19 +13,22 @@ use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
 use super::gateway::{
-    LoopDecision, append_gateway_calls_to_new_input, append_output_items_to_input, append_tool_outputs, classify_round,
-    execute_and_emit_output_calls, has_client_owned_calls, public_output_items,
+    GatewayCallResult, LoopDecision, append_gateway_calls_to_new_input, append_output_items_to_input,
+    append_tool_outputs, classify_round, emit_gateway_completed_events, emit_gateway_start_events,
+    execute_and_emit_output_calls, execute_output_calls, gateway_event_plans, has_client_owned_calls,
+    is_gateway_owned_call, public_output_items,
 };
+use super::gateway_accumulator::{GatewayStreamAccumulator, StreamEvent, error_sse_chunk};
+use crate::events::EventFrame;
 use crate::executor::error::ExecutorResult;
 use crate::executor::inference::DONE_MARKER;
 use crate::executor::persist::persist_if_needed;
 use crate::executor::rehydrate::rehydrate_conversation;
 use crate::executor::request::{ExecutionContext, RequestContext};
-use crate::executor::upstream::{fetch_blocking_payload, fetch_stream_payload};
+use crate::executor::upstream::{emit_deferred_stream_events, fetch_blocking_payload, fetch_stream_payload};
 use crate::tool::ToolRegistry;
 use crate::types::io::{OutputItem, ResponseUsage, ToolChoice};
 use crate::types::request_response::{IncompleteDetails, RequestPayload, ResponsePayload};
-use crate::utils::common::serialize_to_string;
 
 pub use crate::executor::inference::BoxStream;
 
@@ -55,17 +58,6 @@ fn accumulate_usage(total: &mut Option<ResponseUsage>, usage: Option<ResponseUsa
     if let Some(usage) = usage {
         *total = Some(total.map_or(usage, |current| add_usage(current, usage)));
     }
-}
-
-fn error_sse_chunk(message: &str) -> String {
-    let event = serde_json::json!({
-        "type": "error",
-        "error": {
-            "message": message,
-        },
-    });
-    let event_json = serialize_to_string(&event).unwrap_or_else(|_| "{\"error\":\"stream error\"}".to_owned());
-    format!("data: {event_json}\n\n")
 }
 
 struct AbortOnDrop<T> {
@@ -105,7 +97,7 @@ async fn run_until_gateway_tools_complete(
     exec_ctx: &ExecutionContext,
     auth: Option<&str>,
     stream_upstream: bool,
-    stream_events: Option<&mpsc::UnboundedSender<String>>,
+    mut stream: Option<(&mut GatewayStreamAccumulator, &mpsc::UnboundedSender<StreamEvent>)>,
 ) -> ExecutorResult<(ResponsePayload, RequestContext)> {
     let registry: ToolRegistry = match ctx.enriched_request.tools.as_ref() {
         Some(tools) => ToolRegistry::build_with_handlers(tools, &exec_ctx.gateway_executors).await?,
@@ -115,10 +107,22 @@ async fn run_until_gateway_tools_complete(
     let mut combined_usage: Option<ResponseUsage> = None;
 
     for round in 0..MAX_GATEWAY_TOOL_ROUNDS {
-        let mut payload: ResponsePayload = if stream_upstream {
-            fetch_stream_payload(&ctx, exec_ctx, auth, &registry, stream_events).await?
+        let output_offset = combined_output.len();
+        let (mut payload, deferred_stream_events): (ResponsePayload, Vec<_>) = if stream_upstream {
+            let stream_payload = fetch_stream_payload(
+                &ctx,
+                exec_ctx,
+                auth,
+                &registry,
+                stream
+                    .as_mut()
+                    .map(|(accumulator, sender)| (&mut **accumulator, *sender)),
+                output_offset,
+            )
+            .await?;
+            (stream_payload.payload, stream_payload.deferred_events)
         } else {
-            fetch_blocking_payload(&ctx, exec_ctx, auth).await?
+            (fetch_blocking_payload(&ctx, exec_ctx, auth).await?, Vec::new())
         };
         registry.restore_final_payload_output(&mut payload.output);
         accumulate_usage(&mut combined_usage, payload.usage.take());
@@ -135,8 +139,17 @@ async fn run_until_gateway_tools_complete(
             }
         }
         let has_client_owned = has_client_owned_calls(&current_output, &registry);
-        let gateway_results =
-            execute_and_emit_output_calls(&current_output, &registry, combined_output.len(), stream_events).await?;
+        let gateway_results = execute_and_emit_round_output_calls(
+            &current_output,
+            &registry,
+            output_offset,
+            deferred_stream_events,
+            &ctx,
+            stream
+                .as_mut()
+                .map(|(accumulator, sender)| (&mut **accumulator, *sender)),
+        )
+        .await?;
         let public_output = public_output_items(&current_output, &registry, &gateway_results);
         combined_output.extend(public_output);
 
@@ -190,6 +203,112 @@ async fn run_until_gateway_tools_complete(
     unreachable!("the final round returns Done, RequiresClientAction, or Incomplete");
 }
 
+async fn execute_and_emit_round_output_calls(
+    output_items: &[OutputItem],
+    registry: &ToolRegistry,
+    output_offset: usize,
+    deferred_events: Vec<EventFrame>,
+    ctx: &RequestContext,
+    stream: Option<(&mut GatewayStreamAccumulator, &mpsc::UnboundedSender<StreamEvent>)>,
+) -> ExecutorResult<Vec<GatewayCallResult>> {
+    match (deferred_events.is_empty(), stream) {
+        (true, stream) => execute_and_emit_output_calls(output_items, registry, output_offset, stream).await,
+        (false, Some((stream_accumulator, stream_sender))) => {
+            execute_and_emit_ordered_output_calls(
+                output_items,
+                registry,
+                output_offset,
+                deferred_events,
+                ctx,
+                stream_accumulator,
+                stream_sender,
+            )
+            .await
+        }
+        (false, None) => execute_and_emit_output_calls(output_items, registry, output_offset, None).await,
+    }
+}
+
+async fn execute_and_emit_ordered_output_calls(
+    output_items: &[OutputItem],
+    registry: &ToolRegistry,
+    output_offset: usize,
+    deferred_events: Vec<EventFrame>,
+    ctx: &RequestContext,
+    stream_accumulator: &mut GatewayStreamAccumulator,
+    stream_sender: &mpsc::UnboundedSender<StreamEvent>,
+) -> ExecutorResult<Vec<GatewayCallResult>> {
+    let mut events_by_output = Vec::with_capacity(output_items.len());
+    events_by_output.resize_with(output_items.len(), Vec::new);
+    let mut remaining_events = Vec::new();
+    for frame in deferred_events {
+        let Some(output_index) = frame
+            .wire
+            .output_index
+            .and_then(|index| usize::try_from(index).ok())
+            .filter(|index| *index < events_by_output.len())
+        else {
+            remaining_events.push(frame);
+            continue;
+        };
+        events_by_output[output_index].push(frame);
+    }
+
+    let event_plans = gateway_event_plans(output_items, registry, output_offset);
+    let first_gateway_index = output_items
+        .iter()
+        .position(|item| matches!(item, OutputItem::FunctionCall(call) if is_gateway_owned_call(call, registry)));
+    let first_gateway_run_end = first_gateway_index.map_or(0, |start| {
+        output_items[start..]
+            .iter()
+            .take_while(|item| matches!(item, OutputItem::FunctionCall(call) if is_gateway_owned_call(call, registry)))
+            .count()
+            .saturating_add(start)
+    });
+    let first_gateway_run_len = first_gateway_run_end.saturating_sub(first_gateway_index.unwrap_or(0));
+    emit_gateway_start_events(&event_plans[..first_gateway_run_len], stream_accumulator, stream_sender)?;
+
+    let gateway_results = execute_output_calls(output_items, registry).await?;
+    let mut gateway_index = 0;
+    for (index, item) in output_items.iter().enumerate() {
+        if matches!(item, OutputItem::FunctionCall(call) if is_gateway_owned_call(call, registry)) {
+            let plan = &event_plans[gateway_index..=gateway_index];
+            let result = &gateway_results[gateway_index..=gateway_index];
+            if index >= first_gateway_run_end {
+                emit_gateway_start_events(plan, stream_accumulator, stream_sender)?;
+            }
+            emit_gateway_completed_events(result, plan, stream_accumulator, stream_sender)?;
+            emit_deferred_stream_events(
+                std::mem::take(&mut events_by_output[index]),
+                ctx,
+                registry,
+                stream_accumulator,
+                stream_sender,
+                output_offset,
+            )?;
+            gateway_index += 1;
+        } else {
+            emit_deferred_stream_events(
+                std::mem::take(&mut events_by_output[index]),
+                ctx,
+                registry,
+                stream_accumulator,
+                stream_sender,
+                output_offset,
+            )?;
+        }
+    }
+    emit_deferred_stream_events(
+        remaining_events,
+        ctx,
+        registry,
+        stream_accumulator,
+        stream_sender,
+        output_offset,
+    )?;
+    Ok(gateway_results)
+}
+
 /// Move accumulated output/usage onto the terminating round's payload and
 /// inject the response/conversation IDs. The payload's `model`/`created_at`/
 /// `status` from the latest inference turn are preserved.
@@ -224,48 +343,60 @@ fn run_stream(ctx: RequestContext, exec_ctx: Arc<ExecutionContext>, auth: Option
     Box::pin(stream! {
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
         let exec_ctx_for_run = Arc::clone(&exec_ctx);
+        let event_tx_for_run = event_tx.clone();
+        let stream_accumulator = GatewayStreamAccumulator::new();
         let mut run_handle = AbortOnDrop::new(tokio::spawn(async move {
-            run_until_gateway_tools_complete(
+            let mut stream_accumulator = stream_accumulator;
+            let result = run_until_gateway_tools_complete(
                 ctx,
                 exec_ctx_for_run.as_ref(),
                 auth.as_deref(),
                 true,
-                Some(&event_tx),
+                Some((&mut stream_accumulator, &event_tx_for_run)),
             )
-            .await
+            .await;
+            (result, stream_accumulator)
         }));
 
+        let mut next_sequence_number = 0;
         loop {
             tokio::select! {
                 Some(event) = event_rx.recv() => {
-                    yield event;
+                    yield consume_stream_event(event, &mut next_sequence_number);
                 }
                 result = &mut run_handle.handle => {
-                    while let Ok(event) = event_rx.try_recv() {
-                        yield event;
-                    }
                     match result {
                         Err(e) => {
-                            yield error_sse_chunk(&format!("stream task failed: {e}"));
+                            for chunk in panicked_stream_chunks(&e, &mut event_rx, &mut next_sequence_number) {
+                                yield chunk;
+                            }
+                        }
+                        Ok((Err(e), mut stream_accumulator)) => {
+                            while let Ok(event) = event_rx.try_recv() {
+                                yield consume_stream_event(event, &mut next_sequence_number);
+                            }
+                            yield stream_accumulator.error_chunk(&e.to_string());
                             yield DONE_MARKER.to_string();
                         }
-                        Ok(Err(e)) => {
-                            yield error_sse_chunk(&e.to_string());
-                            yield DONE_MARKER.to_string();
-                        }
-                        Ok(Ok((payload, ctx))) => {
+                        Ok((Ok((payload, ctx)), mut stream_accumulator)) => {
+                            while let Ok(event) = event_rx.try_recv() {
+                                yield consume_stream_event(event, &mut next_sequence_number);
+                            }
                             // Codex may close its WebSocket as soon as it receives
                             // `response.completed`. Persist before exposing that
                             // event so a custom call/output continuation cannot be
                             // cancelled by the client disconnect.
-                            let terminal_event = payload.as_terminal_response_chunk();
+                            let terminal_chunk = stream_accumulator.terminal_response_chunk(&payload);
                             let ch = exec_ctx.conv_handler.clone();
                             let rh = exec_ctx.resp_handler.clone();
                             if let Err(e) = persist_if_needed(payload, ctx, ch, rh).await {
                                 warn!("persist failed: {e}");
                             }
 
-                            yield terminal_event;
+                            match terminal_chunk {
+                                Ok(chunk) => yield chunk,
+                                Err(e) => yield stream_accumulator.error_chunk(&e.to_string()),
+                            }
                             yield DONE_MARKER.to_string();
                         }
                     }
@@ -274,6 +405,29 @@ fn run_stream(ctx: RequestContext, exec_ctx: Arc<ExecutionContext>, auth: Option
             }
         }
     })
+}
+
+fn consume_stream_event(event: StreamEvent, next_sequence_number: &mut u64) -> String {
+    *next_sequence_number = event.sequence_number.saturating_add(1);
+    event.content
+}
+
+fn stream_task_failure_chunk(error: &tokio::task::JoinError, sequence_number: u64) -> String {
+    error_sse_chunk(&format!("stream task failed: {error}"), sequence_number)
+}
+
+fn panicked_stream_chunks(
+    error: &tokio::task::JoinError,
+    event_rx: &mut mpsc::UnboundedReceiver<StreamEvent>,
+    next_sequence_number: &mut u64,
+) -> Vec<String> {
+    let mut chunks = Vec::new();
+    while let Ok(event) = event_rx.try_recv() {
+        chunks.push(consume_stream_event(event, next_sequence_number));
+    }
+    chunks.push(stream_task_failure_chunk(error, *next_sequence_number));
+    chunks.push(DONE_MARKER.to_owned());
+    chunks
 }
 
 /// Create a new conversation and return its data.
@@ -356,4 +510,43 @@ pub async fn execute(
     exec_ctx: Arc<ExecutionContext>,
 ) -> ExecutorResult<Either<ResponsePayload, BoxStream>> {
     ExecuteRequest::new(request, exec_ctx).run().await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn stream_task_panic_after_event_uses_next_sequence_number_for_error() {
+        let accumulator = GatewayStreamAccumulator::new();
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let task = tokio::spawn(async move {
+            let mut accumulator = accumulator;
+            let event = accumulator
+                .process_sse_line(r#"data: {"type":"response.created"}"#, 0)
+                .expect("event should be emitted");
+            event_tx
+                .send(StreamEvent {
+                    content: "event".to_owned(),
+                    sequence_number: event.sequence_number().expect("event should be numbered"),
+                })
+                .expect("test receiver should remain open");
+            panic!("test task panic");
+        });
+
+        let error = task.await.expect_err("task should panic");
+        let mut next_sequence_number = 0;
+        let chunks = panicked_stream_chunks(&error, &mut event_rx, &mut next_sequence_number);
+        let error_event: serde_json::Value = serde_json::from_str(
+            chunks[1]
+                .trim_end_matches('\n')
+                .strip_prefix("data: ")
+                .expect("SSE data prefix"),
+        )
+        .expect("error chunk should be valid JSON");
+
+        assert_eq!(chunks[0], "event");
+        assert_eq!(error_event["sequence_number"], 1);
+        assert_eq!(chunks[2], DONE_MARKER);
+    }
 }
