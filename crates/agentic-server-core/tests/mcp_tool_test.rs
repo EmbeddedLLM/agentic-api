@@ -11,7 +11,6 @@ const MODEL: &str = "Qwen/Qwen3.5-35B-A3B-FP8";
 const MCP_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/mcp");
 const GATEWAY_MODEL_SLUG: &str = "Qwen-Qwen3.5-35B-A3B-FP8";
 const OPENAI_MODEL_SLUG: &str = "gpt-4o";
-const MCP_SERVER_URL: &str = "https://applications-clean-districts-departments.trycloudflare.com/mcp";
 
 fn load_mcp_cassette(filename: &str) -> support::Cassette {
     support::load_cassette(&format!("{MCP_DIR}/{filename}"))
@@ -106,6 +105,21 @@ fn assert_matching_native_mcp_requests(
 
     let openai_request = &openai.turns[0].request;
     let gateway_request = &gateway.turns[0].request;
+    let openai_server_url = openai_request.body.tools[0]["server_url"]
+        .as_str()
+        .expect("OpenAI MCP server_url");
+    let gateway_server_url = gateway_request.body.tools[0]["server_url"]
+        .as_str()
+        .expect("gateway MCP server_url");
+    assert_eq!(
+        gateway_server_url, openai_server_url,
+        "gateway and OpenAI cassettes must use the same MCP server"
+    );
+    assert!(
+        openai_server_url.starts_with("https://"),
+        "OpenAI MCP cassette requires a public HTTPS server_url"
+    );
+
     for request in [openai_request, gateway_request] {
         assert_eq!(request.path, "/v1/responses");
         assert_eq!(request.body.stream, streaming);
@@ -114,7 +128,6 @@ fn assert_matching_native_mcp_requests(
         let declaration = &request.body.tools[0];
         assert_eq!(declaration["type"], "mcp");
         assert_eq!(declaration["server_label"], "counter");
-        assert_eq!(declaration["server_url"], MCP_SERVER_URL);
         assert_eq!(declaration["require_approval"], "never");
         assert!(declaration.get("name").is_none());
 

@@ -14,7 +14,7 @@ turns:
         - say_hello
         require_approval: never
         server_label: counter
-        server_url: https://applications-clean-districts-departments.trycloudflare.com/mcp
+        server_url: https://discharge-exhibit-attempt-sponsored.trycloudflare.com/mcp
         type: mcp
     headers:
       accept: '*/*'
@@ -29,11 +29,11 @@ turns:
       background: false
       billing:
         payer: developer
-      completed_at: 1784642039
-      created_at: 1784642034
+      completed_at: 1784802889
+      created_at: 1784802887
       error: null
       frequency_penalty: 0.0
-      id: resp_0b94ffca174aa417006a5f79f2e5a0819aad032063d936183f
+      id: resp_0caeec97187f477e006a61ee479cd88199835e339bb6cc2167
       incomplete_details: null
       instructions: null
       max_output_tokens: 4096
@@ -43,7 +43,7 @@ turns:
       moderation: null
       object: response
       output:
-      - id: mcpl_0b94ffca174aa417006a5f79f2f334819aa80846046e17fcdf
+      - id: mcpl_0caeec97187f477e006a61ee47ab388199a61d10e96eb5bf14
         server_label: counter
         tools:
         - annotations:
@@ -57,7 +57,7 @@ turns:
       - approval_request_id: null
         arguments: '{}'
         error: null
-        id: mcp_0b94ffca174aa417006a5f79f483d4819abfb0ab3209d980fa
+        id: mcp_0caeec97187f477e006a61ee48ee008199a9a49b951a77b46d
         name: say_hello
         output: hello
         server_label: counter
@@ -68,7 +68,7 @@ turns:
           logprobs: []
           text: MCP_SAYS=hello
           type: output_text
-        id: msg_0b94ffca174aa417006a5f79f5fe68819a955b9c744d609ae4
+        id: msg_0caeec97187f477e006a61ee498a0881999a88daaae7da9597
         role: assistant
         status: completed
         type: message
@@ -111,7 +111,7 @@ turns:
         require_approval: never
         server_description: null
         server_label: counter
-        server_url: https://applications-clean-districts-departments.trycloudflare.com/mcp
+        server_url: https://discharge-exhibit-attempt-sponsored.trycloudflare.com/mcp
         type: mcp
       top_logprobs: 0
       top_p: 1.0

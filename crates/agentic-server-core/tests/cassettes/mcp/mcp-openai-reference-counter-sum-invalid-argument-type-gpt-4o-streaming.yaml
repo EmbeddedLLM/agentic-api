@@ -15,7 +15,7 @@ turns:
         - sum
         require_approval: never
         server_label: counter
-        server_url: https://applications-clean-districts-departments.trycloudflare.com/mcp
+        server_url: https://discharge-exhibit-attempt-sponsored.trycloudflare.com/mcp
         type: mcp
     headers:
       accept: '*/*'
@@ -32,7 +32,7 @@ turns:
     - 'event: response.created
 
       '
-    - 'data: {"type":"response.created","response":{"id":"resp_0f8482c2489fa13e006a5f79eedb608199bfade100866991e8","object":"response","created_at":1784642030,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":4096,"max_tool_calls":null,"model":"gpt-4o-2024-08-06","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"in_memory","reasoning":{"context":null,"effort":null,"summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"required","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[{"type":"mcp","allowed_tools":["sum"],"headers":null,"require_approval":"never","server_description":null,"server_label":"counter","server_url":"https://applications-clean-districts-departments.trycloudflare.com/mcp"}],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":0}
+    - 'data: {"type":"response.created","response":{"id":"resp_0d3a2fa41be24818006a61ee426c58819a9cd1578aff71c59f","object":"response","created_at":1784802882,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":4096,"max_tool_calls":null,"model":"gpt-4o-2024-08-06","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"in_memory","reasoning":{"context":null,"effort":null,"summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"required","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[{"type":"mcp","allowed_tools":["sum"],"headers":null,"require_approval":"never","server_description":null,"server_label":"counter","server_url":"https://discharge-exhibit-attempt-sponsored.trycloudflare.com/mcp"}],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":0}
 
       '
     - '
@@ -41,7 +41,7 @@ turns:
     - 'event: response.in_progress
 
       '
-    - 'data: {"type":"response.in_progress","response":{"id":"resp_0f8482c2489fa13e006a5f79eedb608199bfade100866991e8","object":"response","created_at":1784642030,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":4096,"max_tool_calls":null,"model":"gpt-4o-2024-08-06","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"in_memory","reasoning":{"context":null,"effort":null,"summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"required","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[{"type":"mcp","allowed_tools":["sum"],"headers":null,"require_approval":"never","server_description":null,"server_label":"counter","server_url":"https://applications-clean-districts-departments.trycloudflare.com/mcp"}],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":1}
+    - 'data: {"type":"response.in_progress","response":{"id":"resp_0d3a2fa41be24818006a61ee426c58819a9cd1578aff71c59f","object":"response","created_at":1784802882,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":4096,"max_tool_calls":null,"model":"gpt-4o-2024-08-06","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"in_memory","reasoning":{"context":null,"effort":null,"summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"required","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[{"type":"mcp","allowed_tools":["sum"],"headers":null,"require_approval":"never","server_description":null,"server_label":"counter","server_url":"https://discharge-exhibit-attempt-sponsored.trycloudflare.com/mcp"}],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":1}
 
       '
     - '
@@ -50,7 +50,7 @@ turns:
     - 'event: response.output_item.added
 
       '
-    - 'data: {"type":"response.output_item.added","item":{"id":"mcpl_0f8482c2489fa13e006a5f79eef3bc8199b78bccdc691a92ce","type":"mcp_list_tools","server_label":"counter","tools":[]},"output_index":0,"sequence_number":2}
+    - 'data: {"type":"response.output_item.added","item":{"id":"mcpl_0d3a2fa41be24818006a61ee427a34819ab2a7727bc657195e","type":"mcp_list_tools","server_label":"counter","tools":[]},"output_index":0,"sequence_number":2}
 
       '
     - '
@@ -59,7 +59,7 @@ turns:
     - 'event: response.mcp_list_tools.in_progress
 
       '
-    - 'data: {"type":"response.mcp_list_tools.in_progress","item_id":"mcpl_0f8482c2489fa13e006a5f79eef3bc8199b78bccdc691a92ce","output_index":0,"sequence_number":3}
+    - 'data: {"type":"response.mcp_list_tools.in_progress","item_id":"mcpl_0d3a2fa41be24818006a61ee427a34819ab2a7727bc657195e","output_index":0,"sequence_number":3}
 
       '
     - '
@@ -68,7 +68,7 @@ turns:
     - 'event: response.mcp_list_tools.completed
 
       '
-    - 'data: {"type":"response.mcp_list_tools.completed","item_id":"mcpl_0f8482c2489fa13e006a5f79eef3bc8199b78bccdc691a92ce","output_index":0,"sequence_number":4}
+    - 'data: {"type":"response.mcp_list_tools.completed","item_id":"mcpl_0d3a2fa41be24818006a61ee427a34819ab2a7727bc657195e","output_index":0,"sequence_number":4}
 
       '
     - '
@@ -77,7 +77,7 @@ turns:
     - 'event: response.output_item.done
 
       '
-    - 'data: {"type":"response.output_item.done","item":{"id":"mcpl_0f8482c2489fa13e006a5f79eef3bc8199b78bccdc691a92ce","type":"mcp_list_tools","server_label":"counter","tools":[{"annotations":{"read_only":false},"description":"Calculate
+    - 'data: {"type":"response.output_item.done","item":{"id":"mcpl_0d3a2fa41be24818006a61ee427a34819ab2a7727bc657195e","type":"mcp_list_tools","server_label":"counter","tools":[{"annotations":{"read_only":false},"description":"Calculate
       the sum of two numbers","input_schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"a":{"format":"int32","type":"integer"},"b":{"format":"int32","type":"integer"}},"required":["a","b"],"type":"object"},"name":"sum"}]},"output_index":0,"sequence_number":5}
 
       '
@@ -87,7 +87,7 @@ turns:
     - 'event: response.output_item.added
 
       '
-    - 'data: {"type":"response.output_item.added","item":{"id":"mcp_0f8482c2489fa13e006a5f79f034e881999369491c793be00f","type":"mcp_call","status":"in_progress","approval_request_id":null,"arguments":"","error":null,"name":"sum","output":null,"server_label":"counter"},"output_index":1,"sequence_number":6}
+    - 'data: {"type":"response.output_item.added","item":{"id":"mcp_0d3a2fa41be24818006a61ee448b9c819aac0e0ef58e026d66","type":"mcp_call","status":"in_progress","approval_request_id":null,"arguments":"","error":null,"name":"sum","output":null,"server_label":"counter"},"output_index":1,"sequence_number":6}
 
       '
     - '
@@ -96,7 +96,7 @@ turns:
     - 'event: response.mcp_call.in_progress
 
       '
-    - 'data: {"type":"response.mcp_call.in_progress","item_id":"mcp_0f8482c2489fa13e006a5f79f034e881999369491c793be00f","output_index":1,"sequence_number":7}
+    - 'data: {"type":"response.mcp_call.in_progress","item_id":"mcp_0d3a2fa41be24818006a61ee448b9c819aac0e0ef58e026d66","output_index":1,"sequence_number":7}
 
       '
     - '
@@ -105,7 +105,7 @@ turns:
     - 'event: response.mcp_call_arguments.delta
 
       '
-    - 'data: {"type":"response.mcp_call_arguments.delta","delta":"{\"a\":\"not-an-integer\",\"b\":2}","item_id":"mcp_0f8482c2489fa13e006a5f79f034e881999369491c793be00f","obfuscation":"GYbw","output_index":1,"sequence_number":8}
+    - 'data: {"type":"response.mcp_call_arguments.delta","delta":"{\"a\":\"not-an-integer\",\"b\":2}","item_id":"mcp_0d3a2fa41be24818006a61ee448b9c819aac0e0ef58e026d66","obfuscation":"H42A","output_index":1,"sequence_number":8}
 
       '
     - '
@@ -114,7 +114,7 @@ turns:
     - 'event: response.mcp_call_arguments.done
 
       '
-    - 'data: {"type":"response.mcp_call_arguments.done","arguments":"{\"a\":\"not-an-integer\",\"b\":2}","item_id":"mcp_0f8482c2489fa13e006a5f79f034e881999369491c793be00f","output_index":1,"sequence_number":9}
+    - 'data: {"type":"response.mcp_call_arguments.done","arguments":"{\"a\":\"not-an-integer\",\"b\":2}","item_id":"mcp_0d3a2fa41be24818006a61ee448b9c819aac0e0ef58e026d66","output_index":1,"sequence_number":9}
 
       '
     - '
@@ -123,7 +123,7 @@ turns:
     - 'event: response.mcp_call.failed
 
       '
-    - 'data: {"type":"response.mcp_call.failed","item_id":"mcp_0f8482c2489fa13e006a5f79f034e881999369491c793be00f","output_index":1,"sequence_number":10}
+    - 'data: {"type":"response.mcp_call.failed","item_id":"mcp_0d3a2fa41be24818006a61ee448b9c819aac0e0ef58e026d66","output_index":1,"sequence_number":10}
 
       '
     - '
@@ -132,7 +132,7 @@ turns:
     - 'event: response.output_item.done
 
       '
-    - 'data: {"type":"response.output_item.done","item":{"id":"mcp_0f8482c2489fa13e006a5f79f034e881999369491c793be00f","type":"mcp_call","status":"failed","approval_request_id":null,"arguments":"{\"a\":\"not-an-integer\",\"b\":2}","error":{"type":"mcp_tool_execution_error","content":[{"type":"text","text":"failed
+    - 'data: {"type":"response.output_item.done","item":{"id":"mcp_0d3a2fa41be24818006a61ee448b9c819aac0e0ef58e026d66","type":"mcp_call","status":"failed","approval_request_id":null,"arguments":"{\"a\":\"not-an-integer\",\"b\":2}","error":{"type":"mcp_tool_execution_error","content":[{"type":"text","text":"failed
       to deserialize parameters: invalid type: string \"not-an-integer\", expected
       i32","annotations":null,"meta":null}]},"name":"sum","output":null,"server_label":"counter"},"output_index":1,"sequence_number":11}
 
@@ -143,7 +143,7 @@ turns:
     - 'event: response.output_item.added
 
       '
-    - 'data: {"type":"response.output_item.added","item":{"id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","type":"message","status":"in_progress","content":[],"role":"assistant"},"output_index":2,"sequence_number":12}
+    - 'data: {"type":"response.output_item.added","item":{"id":"msg_0d3a2fa41be24818006a61ee457f78819ab0dbf7ca758f83ac","type":"message","status":"in_progress","content":[],"role":"assistant"},"output_index":2,"sequence_number":12}
 
       '
     - '
@@ -152,7 +152,7 @@ turns:
     - 'event: response.content_part.added
 
       '
-    - 'data: {"type":"response.content_part.added","content_index":0,"item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","output_index":2,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":""},"sequence_number":13}
+    - 'data: {"type":"response.content_part.added","content_index":0,"item_id":"msg_0d3a2fa41be24818006a61ee457f78819ab0dbf7ca758f83ac","output_index":2,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":""},"sequence_number":13}
 
       '
     - '
@@ -161,7 +161,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"The","item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","logprobs":[],"obfuscation":"8Xfh4lGAEjESd","output_index":2,"sequence_number":14}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"The","item_id":"msg_0d3a2fa41be24818006a61ee457f78819ab0dbf7ca758f83ac","logprobs":[],"obfuscation":"yNx38BRAJDmd2","output_index":2,"sequence_number":14}
 
       '
     - '
@@ -170,7 +170,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" MCP","item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","logprobs":[],"obfuscation":"jipBIYxMipQj","output_index":2,"sequence_number":15}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" MCP","item_id":"msg_0d3a2fa41be24818006a61ee457f78819ab0dbf7ca758f83ac","logprobs":[],"obfuscation":"RIQn9UXGFFMv","output_index":2,"sequence_number":15}
 
       '
     - '
@@ -179,7 +179,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" call","item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","logprobs":[],"obfuscation":"Ksqp5u4NNYi","output_index":2,"sequence_number":16}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" call","item_id":"msg_0d3a2fa41be24818006a61ee457f78819ab0dbf7ca758f83ac","logprobs":[],"obfuscation":"IyBC8YVQ79S","output_index":2,"sequence_number":16}
 
       '
     - '
@@ -188,7 +188,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" failed","item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","logprobs":[],"obfuscation":"t6alD8Km0","output_index":2,"sequence_number":17}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" failed","item_id":"msg_0d3a2fa41be24818006a61ee457f78819ab0dbf7ca758f83ac","logprobs":[],"obfuscation":"SB2bk7s3g","output_index":2,"sequence_number":17}
 
       '
     - '
@@ -197,7 +197,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" with","item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","logprobs":[],"obfuscation":"89hDRhmbLaF","output_index":2,"sequence_number":18}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" due","item_id":"msg_0d3a2fa41be24818006a61ee457f78819ab0dbf7ca758f83ac","logprobs":[],"obfuscation":"6AbKOMeTjHWo","output_index":2,"sequence_number":18}
 
       '
     - '
@@ -206,7 +206,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" the","item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","logprobs":[],"obfuscation":"4z3s9s5SkvsN","output_index":2,"sequence_number":19}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" to","item_id":"msg_0d3a2fa41be24818006a61ee457f78819ab0dbf7ca758f83ac","logprobs":[],"obfuscation":"VOhhF36zPmwum","output_index":2,"sequence_number":19}
 
       '
     - '
@@ -215,7 +215,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" error","item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","logprobs":[],"obfuscation":"AZY8tY9wvR","output_index":2,"sequence_number":20}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" an","item_id":"msg_0d3a2fa41be24818006a61ee457f78819ab0dbf7ca758f83ac","logprobs":[],"obfuscation":"tyhej0LlC1h4L","output_index":2,"sequence_number":20}
 
       '
     - '
@@ -224,7 +224,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":":","item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","logprobs":[],"obfuscation":"vOZTQqO5h9b3S97","output_index":2,"sequence_number":21}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" invalid","item_id":"msg_0d3a2fa41be24818006a61ee457f78819ab0dbf7ca758f83ac","logprobs":[],"obfuscation":"RrJiXqvo","output_index":2,"sequence_number":21}
 
       '
     - '
@@ -233,7 +233,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" \"","item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","logprobs":[],"obfuscation":"HOwe4fPpg0eoKH","output_index":2,"sequence_number":22}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" type","item_id":"msg_0d3a2fa41be24818006a61ee457f78819ab0dbf7ca758f83ac","logprobs":[],"obfuscation":"7XzbfH6xQFp","output_index":2,"sequence_number":22}
 
       '
     - '
@@ -242,7 +242,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"failed","item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","logprobs":[],"obfuscation":"v55qg6n6CR","output_index":2,"sequence_number":23}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":":","item_id":"msg_0d3a2fa41be24818006a61ee457f78819ab0dbf7ca758f83ac","logprobs":[],"obfuscation":"k8AXh9RBioAa2H8","output_index":2,"sequence_number":23}
 
       '
     - '
@@ -251,7 +251,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" to","item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","logprobs":[],"obfuscation":"NgNuAMHyShuX9","output_index":2,"sequence_number":24}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" it","item_id":"msg_0d3a2fa41be24818006a61ee457f78819ab0dbf7ca758f83ac","logprobs":[],"obfuscation":"Aih2hlYB63YAZ","output_index":2,"sequence_number":24}
 
       '
     - '
@@ -260,7 +260,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" deserialize","item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","logprobs":[],"obfuscation":"fqVR","output_index":2,"sequence_number":25}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" expected","item_id":"msg_0d3a2fa41be24818006a61ee457f78819ab0dbf7ca758f83ac","logprobs":[],"obfuscation":"ESOYedv","output_index":2,"sequence_number":25}
 
       '
     - '
@@ -269,7 +269,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" parameters","item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","logprobs":[],"obfuscation":"lHWuL","output_index":2,"sequence_number":26}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" an","item_id":"msg_0d3a2fa41be24818006a61ee457f78819ab0dbf7ca758f83ac","logprobs":[],"obfuscation":"PGm4e5cKs4Ous","output_index":2,"sequence_number":26}
 
       '
     - '
@@ -278,7 +278,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":":","item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","logprobs":[],"obfuscation":"Gu3TcUg0ahOY4p9","output_index":2,"sequence_number":27}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" integer","item_id":"msg_0d3a2fa41be24818006a61ee457f78819ab0dbf7ca758f83ac","logprobs":[],"obfuscation":"NLGaHPUa","output_index":2,"sequence_number":27}
 
       '
     - '
@@ -287,7 +287,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" invalid","item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","logprobs":[],"obfuscation":"KWx19CU1","output_index":2,"sequence_number":28}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" but","item_id":"msg_0d3a2fa41be24818006a61ee457f78819ab0dbf7ca758f83ac","logprobs":[],"obfuscation":"uOUkXdcgpeXk","output_index":2,"sequence_number":28}
 
       '
     - '
@@ -296,7 +296,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" type","item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","logprobs":[],"obfuscation":"3WCqznbKCcq","output_index":2,"sequence_number":29}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" received","item_id":"msg_0d3a2fa41be24818006a61ee457f78819ab0dbf7ca758f83ac","logprobs":[],"obfuscation":"eg200Tu","output_index":2,"sequence_number":29}
 
       '
     - '
@@ -305,7 +305,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":":","item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","logprobs":[],"obfuscation":"1wfIHuIEOFt7h9C","output_index":2,"sequence_number":30}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" the","item_id":"msg_0d3a2fa41be24818006a61ee457f78819ab0dbf7ca758f83ac","logprobs":[],"obfuscation":"6lFdBLZ41s4i","output_index":2,"sequence_number":30}
 
       '
     - '
@@ -314,7 +314,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" string","item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","logprobs":[],"obfuscation":"EDqCLTSt7","output_index":2,"sequence_number":31}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" string","item_id":"msg_0d3a2fa41be24818006a61ee457f78819ab0dbf7ca758f83ac","logprobs":[],"obfuscation":"VLEZPB77T","output_index":2,"sequence_number":31}
 
       '
     - '
@@ -323,7 +323,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" ''","item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","logprobs":[],"obfuscation":"umGKrHJizenuTl","output_index":2,"sequence_number":32}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" \"","item_id":"msg_0d3a2fa41be24818006a61ee457f78819ab0dbf7ca758f83ac","logprobs":[],"obfuscation":"4RxRbv3OHYdDUq","output_index":2,"sequence_number":32}
 
       '
     - '
@@ -332,7 +332,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"not","item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","logprobs":[],"obfuscation":"uVPAVYetj2Qs6","output_index":2,"sequence_number":33}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"not","item_id":"msg_0d3a2fa41be24818006a61ee457f78819ab0dbf7ca758f83ac","logprobs":[],"obfuscation":"RoaM9X4gqIG2e","output_index":2,"sequence_number":33}
 
       '
     - '
@@ -341,7 +341,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"-an","item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","logprobs":[],"obfuscation":"ceRseKHrXcn3o","output_index":2,"sequence_number":34}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"-an","item_id":"msg_0d3a2fa41be24818006a61ee457f78819ab0dbf7ca758f83ac","logprobs":[],"obfuscation":"0cXSRhT2XG8qQ","output_index":2,"sequence_number":34}
 
       '
     - '
@@ -350,7 +350,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"-in","item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","logprobs":[],"obfuscation":"ooKTnAREEaFCx","output_index":2,"sequence_number":35}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"-in","item_id":"msg_0d3a2fa41be24818006a61ee457f78819ab0dbf7ca758f83ac","logprobs":[],"obfuscation":"44JVQicc04mOk","output_index":2,"sequence_number":35}
 
       '
     - '
@@ -359,7 +359,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"teger","item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","logprobs":[],"obfuscation":"Q9APg7ic8g6","output_index":2,"sequence_number":36}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"teger","item_id":"msg_0d3a2fa41be24818006a61ee457f78819ab0dbf7ca758f83ac","logprobs":[],"obfuscation":"rQqayKSAeHE","output_index":2,"sequence_number":36}
 
       '
     - '
@@ -368,43 +368,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"'',","item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","logprobs":[],"obfuscation":"xJvf6JNP6kBQoE","output_index":2,"sequence_number":37}
-
-      '
-    - '
-
-      '
-    - 'event: response.output_text.delta
-
-      '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" expected","item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","logprobs":[],"obfuscation":"RkxOHAW","output_index":2,"sequence_number":38}
-
-      '
-    - '
-
-      '
-    - 'event: response.output_text.delta
-
-      '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" i","item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","logprobs":[],"obfuscation":"FXmlNUdahSN48o","output_index":2,"sequence_number":39}
-
-      '
-    - '
-
-      '
-    - 'event: response.output_text.delta
-
-      '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"32","item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","logprobs":[],"obfuscation":"dBtohkojanIN0D","output_index":2,"sequence_number":40}
-
-      '
-    - '
-
-      '
-    - 'event: response.output_text.delta
-
-      '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"\".","item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","logprobs":[],"obfuscation":"UMeI7Rora3P9WD","output_index":2,"sequence_number":41}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"\".","item_id":"msg_0d3a2fa41be24818006a61ee457f78819ab0dbf7ca758f83ac","logprobs":[],"obfuscation":"YPKrGeQCIEtb5J","output_index":2,"sequence_number":37}
 
       '
     - '
@@ -413,9 +377,9 @@ turns:
     - 'event: response.output_text.done
 
       '
-    - 'data: {"type":"response.output_text.done","content_index":0,"item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","logprobs":[],"output_index":2,"sequence_number":42,"text":"The
-      MCP call failed with the error: \"failed to deserialize parameters: invalid
-      type: string ''not-an-integer'', expected i32\"."}
+    - 'data: {"type":"response.output_text.done","content_index":0,"item_id":"msg_0d3a2fa41be24818006a61ee457f78819ab0dbf7ca758f83ac","logprobs":[],"output_index":2,"sequence_number":38,"text":"The
+      MCP call failed due to an invalid type: it expected an integer but received
+      the string \"not-an-integer\"."}
 
       '
     - '
@@ -424,9 +388,9 @@ turns:
     - 'event: response.content_part.done
 
       '
-    - 'data: {"type":"response.content_part.done","content_index":0,"item_id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","output_index":2,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":"The
-      MCP call failed with the error: \"failed to deserialize parameters: invalid
-      type: string ''not-an-integer'', expected i32\"."},"sequence_number":43}
+    - 'data: {"type":"response.content_part.done","content_index":0,"item_id":"msg_0d3a2fa41be24818006a61ee457f78819ab0dbf7ca758f83ac","output_index":2,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":"The
+      MCP call failed due to an invalid type: it expected an integer but received
+      the string \"not-an-integer\"."},"sequence_number":39}
 
       '
     - '
@@ -435,9 +399,9 @@ turns:
     - 'event: response.output_item.done
 
       '
-    - 'data: {"type":"response.output_item.done","item":{"id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"The
-      MCP call failed with the error: \"failed to deserialize parameters: invalid
-      type: string ''not-an-integer'', expected i32\"."}],"role":"assistant"},"output_index":2,"sequence_number":44}
+    - 'data: {"type":"response.output_item.done","item":{"id":"msg_0d3a2fa41be24818006a61ee457f78819ab0dbf7ca758f83ac","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"The
+      MCP call failed due to an invalid type: it expected an integer but received
+      the string \"not-an-integer\"."}],"role":"assistant"},"output_index":2,"sequence_number":40}
 
       '
     - '
@@ -446,12 +410,12 @@ turns:
     - 'event: response.completed
 
       '
-    - 'data: {"type":"response.completed","response":{"id":"resp_0f8482c2489fa13e006a5f79eedb608199bfade100866991e8","object":"response","created_at":1784642030,"status":"completed","background":false,"completed_at":1784642033,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":4096,"max_tool_calls":null,"model":"gpt-4o-2024-08-06","moderation":null,"output":[{"id":"mcpl_0f8482c2489fa13e006a5f79eef3bc8199b78bccdc691a92ce","type":"mcp_list_tools","server_label":"counter","tools":[{"annotations":{"read_only":false},"description":"Calculate
-      the sum of two numbers","input_schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"a":{"format":"int32","type":"integer"},"b":{"format":"int32","type":"integer"}},"required":["a","b"],"type":"object"},"name":"sum"}]},{"id":"mcp_0f8482c2489fa13e006a5f79f034e881999369491c793be00f","type":"mcp_call","status":"failed","approval_request_id":null,"arguments":"{\"a\":\"not-an-integer\",\"b\":2}","error":{"type":"mcp_tool_execution_error","content":[{"type":"text","text":"failed
+    - 'data: {"type":"response.completed","response":{"id":"resp_0d3a2fa41be24818006a61ee426c58819a9cd1578aff71c59f","object":"response","created_at":1784802882,"status":"completed","background":false,"completed_at":1784802885,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":4096,"max_tool_calls":null,"model":"gpt-4o-2024-08-06","moderation":null,"output":[{"id":"mcpl_0d3a2fa41be24818006a61ee427a34819ab2a7727bc657195e","type":"mcp_list_tools","server_label":"counter","tools":[{"annotations":{"read_only":false},"description":"Calculate
+      the sum of two numbers","input_schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"a":{"format":"int32","type":"integer"},"b":{"format":"int32","type":"integer"}},"required":["a","b"],"type":"object"},"name":"sum"}]},{"id":"mcp_0d3a2fa41be24818006a61ee448b9c819aac0e0ef58e026d66","type":"mcp_call","status":"failed","approval_request_id":null,"arguments":"{\"a\":\"not-an-integer\",\"b\":2}","error":{"type":"mcp_tool_execution_error","content":[{"type":"text","text":"failed
       to deserialize parameters: invalid type: string \"not-an-integer\", expected
-      i32","annotations":null,"meta":null}]},"name":"sum","output":null,"server_label":"counter"},{"id":"msg_0f8482c2489fa13e006a5f79f0ce8c8199901ca4d2658788fe","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"The
-      MCP call failed with the error: \"failed to deserialize parameters: invalid
-      type: string ''not-an-integer'', expected i32\"."}],"role":"assistant"}],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"in_memory","reasoning":{"context":null,"effort":null,"summary":null},"safety_identifier":null,"service_tier":"default","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"required","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[{"type":"mcp","allowed_tools":["sum"],"headers":null,"require_approval":"never","server_description":null,"server_label":"counter","server_url":"https://applications-clean-districts-departments.trycloudflare.com/mcp"}],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":{"input_tokens":178,"input_tokens_details":{"cache_write_tokens":0,"cached_tokens":0},"output_tokens":52,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":230},"user":null,"metadata":{}},"sequence_number":45}
+      i32","annotations":null,"meta":null}]},"name":"sum","output":null,"server_label":"counter"},{"id":"msg_0d3a2fa41be24818006a61ee457f78819ab0dbf7ca758f83ac","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"The
+      MCP call failed due to an invalid type: it expected an integer but received
+      the string \"not-an-integer\"."}],"role":"assistant"}],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"in_memory","reasoning":{"context":null,"effort":null,"summary":null},"safety_identifier":null,"service_tier":"default","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"required","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[{"type":"mcp","allowed_tools":["sum"],"headers":null,"require_approval":"never","server_description":null,"server_label":"counter","server_url":"https://discharge-exhibit-attempt-sponsored.trycloudflare.com/mcp"}],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":{"input_tokens":178,"input_tokens_details":{"cache_write_tokens":0,"cached_tokens":0},"output_tokens":48,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":226},"user":null,"metadata":{}},"sequence_number":41}
 
       '
     - '
