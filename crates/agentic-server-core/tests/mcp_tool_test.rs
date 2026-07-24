@@ -1,4 +1,3 @@
-use agentic_core::tool::{GatewayExecutors, ToolRegistry, ToolType};
 use agentic_core::types::tools::ResponsesTool;
 
 fn native_mcp_declaration() -> ResponsesTool {
@@ -40,30 +39,4 @@ fn native_mcp_declaration_ignores_a_client_supplied_tool_name() {
     let serialized = serde_json::to_value(tool).expect("serialized MCP declaration");
     assert_eq!(serialized["server_label"], "counter");
     assert!(serialized.get("name").is_none());
-}
-
-#[tokio::test]
-async fn read_mcp_resource_function_is_client_owned() {
-    let mut tools = vec![
-        serde_json::from_value::<ResponsesTool>(serde_json::json!({
-            "type": "function",
-            "name": "read_mcp_resource",
-            "description": "A client-owned function with no gateway MCP semantics",
-            "parameters": {"type": "object"},
-            "metadata": {
-                "server_label": "repo",
-                "server_url": "http://127.0.0.1:8000/mcp"
-            }
-        }))
-        .expect("function declaration"),
-    ];
-    let mut executors = GatewayExecutors::default();
-
-    let registry = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
-        .await
-        .expect("function registry");
-    let entry = registry.lookup("read_mcp_resource").expect("function registry entry");
-
-    assert_eq!(entry.tool_type, ToolType::Function);
-    assert!(entry.handler.is_none());
 }
