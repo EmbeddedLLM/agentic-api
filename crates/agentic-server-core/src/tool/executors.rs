@@ -98,7 +98,10 @@ impl GatewayExecutors {
             ));
         }
         if let Some(cached) = self.mcp.get(server_label) {
-            return Ok(cached.clone());
+            return require_non_empty_mcp_handlers(
+                server_label,
+                filter_allowed_mcp_handlers(cached, param.allowed_tools.as_deref()),
+            );
         }
 
         let pool = McpClientPool::from_params(std::slice::from_ref(param)).await;
@@ -113,15 +116,36 @@ impl GatewayExecutors {
             ));
         };
         let discovered =
-            McpHandler::discovered_tool_handlers(server_label, client, param.allowed_tools.as_deref()).await;
-        if discovered.is_empty() {
-            return Err(ToolError::Config(format!(
-                "MCP server '{server_label}' has an empty final allowed tool set"
-            )));
-        }
+            McpHandler::discovered_tool_handlers(server_label, client, param.allowed_tools.as_deref()).await?;
+        let discovered = require_non_empty_mcp_handlers(server_label, discovered)?;
         self.mcp.insert(server_label.to_owned(), discovered.clone());
         Ok(discovered)
     }
+}
+
+fn filter_allowed_mcp_handlers(
+    handlers: &[McpDiscoveredHandler],
+    allowed_tools: Option<&[String]>,
+) -> Vec<McpDiscoveredHandler> {
+    handlers
+        .iter()
+        .filter(|handler| {
+            allowed_tools.is_none_or(|allowed| allowed.iter().any(|name| name == &handler.param.tool_name))
+        })
+        .cloned()
+        .collect()
+}
+
+fn require_non_empty_mcp_handlers(
+    server_label: &str,
+    handlers: Vec<McpDiscoveredHandler>,
+) -> Result<Vec<McpDiscoveredHandler>, ToolError> {
+    if handlers.is_empty() {
+        return Err(ToolError::Config(format!(
+            "MCP server '{server_label}' has an empty final allowed tool set"
+        )));
+    }
+    Ok(handlers)
 }
 
 fn validate_mcp_execution_options(param: &McpToolParam) -> Result<(), ToolError> {
@@ -130,9 +154,9 @@ fn validate_mcp_execution_options(param: &McpToolParam) -> Result<(), ToolError>
             "MCP connector_id is not supported; configure server_url instead".to_owned(),
         ));
     }
-    if !matches!(param.require_approval.as_deref(), None | Some("never")) {
+    if param.require_approval.as_deref() != Some("never") {
         return Err(ToolError::Config(
-            "MCP require_approval supports only 'never'; approval gating is not yet supported".to_owned(),
+            "MCP require_approval must be explicitly set to 'never'; approval gating is not yet supported".to_owned(),
         ));
     }
     Ok(())
@@ -149,23 +173,52 @@ impl std::fmt::Debug for GatewayExecutors {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_mcp_execution_options;
-    use crate::types::tools::McpToolParam;
+    use std::sync::Arc;
+
+    use super::{GatewayExecutorRegistration, GatewayExecutors, validate_mcp_execution_options};
+    use crate::tool::mcp::{McpDiscoveredHandler, McpHandler};
+    use crate::types::tools::{McpDiscoveredToolParam, McpToolParam};
 
     fn mcp_param(value: serde_json::Value) -> McpToolParam {
         serde_json::from_value(value).unwrap()
     }
 
-    #[test]
-    fn mcp_execution_allows_no_approval_policy_or_never() {
-        for require_approval in [None, Some("never")] {
-            let param = mcp_param(serde_json::json!({
-                "server_label": "counter",
-                "server_url": "http://localhost:8000/mcp",
-                "require_approval": require_approval
-            }));
-            validate_mcp_execution_options(&param).unwrap();
+    fn discovered_handler(tool_name: &str) -> McpDiscoveredHandler {
+        McpDiscoveredHandler {
+            param: McpDiscoveredToolParam {
+                server_label: "counter".to_owned(),
+                tool_name: tool_name.to_owned(),
+                internal_name: format!("mcp__counter__{tool_name}"),
+                tool: serde_json::from_value(serde_json::json!({
+                    "name": tool_name,
+                    "inputSchema": {"type": "object"}
+                }))
+                .unwrap(),
+            },
+            handler: Arc::new(McpHandler::discovered_tool_spec_only()),
         }
+    }
+
+    #[test]
+    fn mcp_execution_allows_explicit_never_approval_policy() {
+        let param = mcp_param(serde_json::json!({
+            "server_label": "counter",
+            "server_url": "http://localhost:8000/mcp",
+            "require_approval": "never"
+        }));
+
+        validate_mcp_execution_options(&param).unwrap();
+    }
+
+    #[test]
+    fn mcp_execution_rejects_omitted_approval_policy() {
+        let param = mcp_param(serde_json::json!({
+            "server_label": "counter",
+            "server_url": "http://localhost:8000/mcp"
+        }));
+
+        let error = validate_mcp_execution_options(&param).unwrap_err();
+        assert!(error.to_string().contains("must be explicitly set to 'never'"));
     }
 
     #[test]
@@ -189,5 +242,44 @@ mod tests {
 
         let error = validate_mcp_execution_options(&param).unwrap_err();
         assert!(error.to_string().contains("connector_id is not supported"));
+    }
+
+    #[tokio::test]
+    async fn cached_mcp_handlers_apply_request_allowed_tools() {
+        let mut executors = GatewayExecutors::default();
+        executors.insert(GatewayExecutorRegistration::Mcp {
+            server_label: "counter".to_owned(),
+            handlers: vec![discovered_handler("read"), discovered_handler("delete")],
+        });
+        let param = mcp_param(serde_json::json!({
+            "server_label": "counter",
+            "allowed_tools": ["read"],
+            "require_approval": "never"
+        }));
+
+        let handlers = executors.mcp_handler(&param).await.unwrap();
+
+        assert_eq!(handlers.len(), 1);
+        assert_eq!(handlers[0].param.tool_name, "read");
+    }
+
+    #[tokio::test]
+    async fn cached_mcp_handlers_reject_empty_final_allowed_set() {
+        let mut executors = GatewayExecutors::default();
+        executors.insert(GatewayExecutorRegistration::Mcp {
+            server_label: "counter".to_owned(),
+            handlers: vec![discovered_handler("delete")],
+        });
+        let param = mcp_param(serde_json::json!({
+            "server_label": "counter",
+            "allowed_tools": ["read"],
+            "require_approval": "never"
+        }));
+
+        let Err(error) = executors.mcp_handler(&param).await else {
+            panic!("expected empty allowed set to be rejected");
+        };
+
+        assert!(error.to_string().contains("empty final allowed tool set"));
     }
 }
