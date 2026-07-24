@@ -56,8 +56,9 @@ The OpenAI public contract uses:
 - `response.mcp_call.completed` or `response.mcp_call.failed`
 
 The internal function-tool representation is an implementation detail and must not leak as a public function call.
-The current gateway work implements the `mcp_call` lifecycle; emitting the separate `mcp_list_tools` discovery
-lifecycle remains follow-up work and does not change the tool execution design described here.
+The gateway exposes execution through the `mcp_call` lifecycle. Emitting the separate `mcp_list_tools` discovery
+lifecycle is an additional public representation of the same discovery step and does not change the tool execution
+design described here.
 
 ## Components
 
@@ -182,9 +183,12 @@ build request-scoped registry
 Tool execution failures become failed tool call output and are returned to the model for the next round; they do not
 automatically fail the whole Responses request.
 
-## Recorder coverage
+## Delivery
 
-`crates/agentic-server-core/tests/cassettes/record_mcp_cassettes.sh` records matching native-MCP scenarios against the
-gateway and OpenAI. For each provider it records two streaming happy paths, two streaming tool-error paths, and one
-blocking happy path. `tests/mcp_tool_test.rs` uses the OpenAI recordings as ground truth when checking that internal
-function calls are exposed as public `mcp_call` items and streaming events.
+This design is being shipped across three PRs:
+
+1. Revisit MCP support by removing gateway-owned MCP resource handling and fixing tool discovery, normalization, and
+   registry routing for native MCP tools. MCP resources remain the responsibility of clients such as Codex and Claude
+   Code.
+2. PR #139 completes the OpenAI-compatible public `mcp_call` output item and streaming event lifecycle.
+3. A follow-up PR will expose MCP discovery through the public `mcp_list_tools` output item and streaming events.
