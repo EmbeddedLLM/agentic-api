@@ -12,7 +12,7 @@ use crate::types::io::output::{FunctionToolCall, GatewayCallStatus, McpToolCall,
 use crate::types::tools::{McpDiscoveredToolParam, ResponsesTool};
 use crate::utils::common::{deserialize_from_str_opt, deserialize_from_value, serialize_to_string};
 
-use super::McpClient;
+use super::{McpClient, McpError};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct McpToolRef {
@@ -150,22 +150,21 @@ impl McpHandler {
         Self { client: Some(client) }
     }
 
+    /// Discovers and normalizes the tools exposed by one MCP server.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ToolError::Execution`] when the server's `tools/list`
+    /// operation fails or times out.
     pub async fn discovered_tool_handlers(
         server_label: &str,
         client: Arc<McpClient>,
         allowed_tools: Option<&[String]>,
-    ) -> Vec<McpDiscoveredHandler> {
-        let tools = match client.list_tools().await {
-            Ok(tools) => tools,
-            Err(error) => {
-                tracing::warn!(
-                    server_label,
-                    error = %error,
-                    "failed to list MCP tools"
-                );
-                return Vec::new();
-            }
-        };
+    ) -> Result<Vec<McpDiscoveredHandler>, ToolError> {
+        let tools = client
+            .list_tools()
+            .await
+            .map_err(|error| mcp_discovery_error(server_label, &error))?;
 
         let mut discovered_handlers = Vec::new();
         let mut internal_names = HashMap::new();
@@ -186,7 +185,7 @@ impl McpHandler {
             });
         }
 
-        discovered_handlers
+        Ok(discovered_handlers)
     }
 
     /// Returns the spec-only MCP tool handler used during request normalization.
@@ -194,6 +193,10 @@ impl McpHandler {
     pub const fn spec_from_param(_param: &Value) -> Self {
         Self::discovered_tool_spec_only()
     }
+}
+
+fn mcp_discovery_error(server_label: &str, error: &McpError) -> ToolError {
+    ToolError::Execution(format!("tools/list failed for MCP server '{server_label}': {error}"))
 }
 
 impl ToolHandler for McpHandler {
@@ -425,6 +428,19 @@ mod tests {
             normalized[0].parameters.as_ref().unwrap()["properties"],
             serde_json::json!({})
         );
+    }
+
+    #[test]
+    fn tools_list_failure_preserves_upstream_cause_as_execution_error() {
+        let upstream_error = super::super::McpError::Timeout {
+            operation: super::super::McpOperation::ListTools,
+        };
+
+        let error = mcp_discovery_error("counter", &upstream_error);
+
+        assert!(matches!(error, ToolError::Execution(_)));
+        assert!(error.to_string().contains("tools/list failed for MCP server 'counter'"));
+        assert!(error.to_string().contains("timed out during tools/list"));
     }
 
     #[test]

@@ -265,6 +265,15 @@ impl ResponsesTool {
             Self::Unknown => None,
         }
     }
+
+    /// Removes request-scoped credentials before a tool declaration is
+    /// persisted as effective response metadata.
+    pub(crate) fn redact_runtime_credentials(&mut self) {
+        if let Self::Mcp(param) = self {
+            param.headers = None;
+            param.authorization = None;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -336,6 +345,33 @@ mod tests {
             assert_eq!(p.server_label, "repo");
             assert_eq!(p.server_url.as_deref(), Some("http://localhost:9001/mcp"));
         }
+    }
+
+    #[test]
+    fn responses_tool_mcp_redacts_runtime_credentials_for_persistence() {
+        let mut tool = serde_json::from_value::<ResponsesTool>(serde_json::json!({
+            "type": "mcp",
+            "server_label": "repo",
+            "server_url": "https://mcp.example.test/mcp",
+            "headers": {
+                "Authorization": "Bearer header-secret",
+                "X-Request-ID": "request-1"
+            },
+            "authorization": "field-secret",
+            "allowed_tools": ["read_file"],
+            "require_approval": "never"
+        }))
+        .unwrap();
+
+        tool.redact_runtime_credentials();
+
+        let persisted = serde_json::to_value(tool).unwrap();
+        assert!(persisted.get("headers").is_none());
+        assert!(persisted.get("authorization").is_none());
+        assert_eq!(persisted["server_label"], "repo");
+        assert_eq!(persisted["server_url"], "https://mcp.example.test/mcp");
+        assert_eq!(persisted["allowed_tools"], serde_json::json!(["read_file"]));
+        assert_eq!(persisted["require_approval"], "never");
     }
 
     #[test]

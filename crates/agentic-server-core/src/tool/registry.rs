@@ -338,7 +338,8 @@ mod tests {
         serde_json::from_value(serde_json::json!({
             "type": "mcp",
             "server_label": server_label,
-            "server_url": "http://127.0.0.1:8000/mcp"
+            "server_url": "http://127.0.0.1:8000/mcp",
+            "require_approval": "never"
         }))
         .expect("MCP declaration")
     }
@@ -371,7 +372,8 @@ mod tests {
             {
                 "type": "mcp",
                 "server_label": "counter",
-                "server_url": "http://127.0.0.1:8000/mcp"
+                "server_url": "http://127.0.0.1:8000/mcp",
+                "require_approval": "never"
             },
             {"type": "web_search_preview", "search_context_size": "low"},
             {"type": "file_search", "vector_store_ids": ["vs_test"]},
