@@ -101,8 +101,9 @@ mod tests {
     use crate::types::event::MessageStatus;
     use crate::types::io::{
         FunctionToolCall, InputContent, InputMessage, InputMessageContent, OutputMessage, OutputTextContent,
-        ReasoningOutput, ReasoningTextContent,
+        ReasoningOutput, ReasoningTextContent, ToolSearchCall, ToolSearchOutput, ToolSearchStatus,
     };
+    use crate::types::tools::ToolSearchExecution;
 
     #[test]
     fn test_inout_item_from_input() {
@@ -212,6 +213,40 @@ mod tests {
         if let InputItem::FunctionCall(f) = &inputs[0] {
             assert_eq!(f.name, "my_tool");
         }
+    }
+
+    #[test]
+    fn test_into_input_items_preserves_tool_search_call_and_output() {
+        let call = ToolSearchCall {
+            execution: Some(ToolSearchExecution::Client),
+            call_id: Some("call_search_1".to_string()),
+            status: Some(ToolSearchStatus::Completed),
+            arguments: serde_json::json!({"goal": "Find shell tools"}),
+            extra: std::collections::HashMap::new(),
+        };
+        let output = ToolSearchOutput {
+            execution: Some(ToolSearchExecution::Client),
+            call_id: Some("call_search_1".to_string()),
+            status: Some(ToolSearchStatus::Completed),
+            tools: vec![serde_json::json!({
+                "type": "function",
+                "name": "run",
+                "defer_loading": true,
+                "parameters": {"type": "object"}
+            })],
+            extra: std::collections::HashMap::new(),
+        };
+        let history = vec![
+            InOutItem::Output(OutputItem::ToolSearchCall(call)),
+            InOutItem::Output(OutputItem::ToolSearchOutput(output)),
+        ];
+
+        let inputs = InOutItem::into_input_items(history);
+        assert!(matches!(inputs[0], InputItem::ToolSearchCall(_)));
+        assert!(matches!(inputs[1], InputItem::ToolSearchOutput(_)));
+        let values = serde_json::to_value(inputs).unwrap();
+        assert_eq!(values[0]["call_id"], "call_search_1");
+        assert_eq!(values[1]["tools"][0]["name"], "run");
     }
 
     #[test]

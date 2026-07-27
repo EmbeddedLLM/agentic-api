@@ -24,7 +24,7 @@ impl ResponsesTool {
             Self::FileSearch(_) => Some(ToolType::FileSearch),
             Self::CodeInterpreter(_) => Some(ToolType::CodeInterpreter),
             Self::Namespace(_) => Some(ToolType::CodexNamespace),
-            Self::Custom(_) | Self::Unknown => None,
+            Self::Custom(_) | Self::ToolSearch(_) | Self::Unknown => None,
         }
     }
 
@@ -39,7 +39,7 @@ impl ResponsesTool {
     ///   Returns an empty list and logs at `debug` level if the name is empty.
     /// - `Mcp` variants convert gateway MCP built-ins to the function specs
     ///   vLLM can call.
-    /// - `Custom` variants return no function tools because
+    /// - `Custom` and `ToolSearch` variants return no function tools because
     ///   `RequestPayload::to_upstream_request()` forwards their native
     ///   Responses declarations separately.
     /// - Unimplemented variants (`FileSearch`, `CodeInterpreter`) return
@@ -82,6 +82,13 @@ impl ResponsesTool {
             ),
             Self::Custom(p) => {
                 tracing::debug!(name = %p.name, "custom tool retained for native upstream forwarding");
+                vec![]
+            }
+            Self::ToolSearch(p) => {
+                tracing::debug!(
+                    execution = ?p.execution,
+                    "tool_search retained for native upstream forwarding"
+                );
                 vec![]
             }
             Self::Unknown => {

@@ -207,6 +207,19 @@ available executor. It routes calls after inference; it is not part of the Respo
 The project-specific conversion of heterogeneous tool declarations into the function-tool shape accepted by the
 upstream inference server. Normalization changes the upstream representation, not the public tool's meaning.
 
+### tool search
+
+A built-in tool that lets a model discover and load deferred tool definitions at runtime. Preserve the exact
+`tool_search`, `tool_search_call`, and `tool_search_output` spellings for their respective wire types. Qualify the
+term as **client-executed tool search** when the caller, such as Codex, searches its own catalog; the gateway passes
+that call and output through and does not execute the search.
+
+### deferred tool
+
+A tool whose full definition is loaded only when selected through tool search. Use the exact `defer_loading` spelling
+for the wire field. For a namespace, `defer_loading` belongs to the nested function declaration rather than the
+namespace object.
+
 ### pass-through
 
 Forwarding a request, field, tool declaration, call, response, or error without executing it locally. Use
@@ -337,6 +350,7 @@ These definitions follow current OpenAI documentation:
 - [Conversation state](https://developers.openai.com/api/docs/guides/conversation-state)
 - [Function calling](https://developers.openai.com/api/docs/guides/function-calling)
 - [Using tools](https://developers.openai.com/api/docs/guides/tools)
+- [Tool search](https://developers.openai.com/api/docs/guides/tools-tool-search)
 - [MCP and Connectors](https://developers.openai.com/api/docs/guides/tools-connectors-mcp)
 - [Streaming API responses](https://developers.openai.com/api/docs/guides/streaming-responses)
 - [Reasoning models](https://developers.openai.com/api/docs/guides/reasoning)

@@ -6,7 +6,7 @@ use tracing::warn;
 use super::super::pool::{DbPool, DbResult, DbTransaction};
 use super::super::types::item::{InOutItem, ItemKind, STORED_ITEM_KIND_KEY};
 use crate::types::io::{InputItem, OutputItem};
-use crate::utils::common::{deserialize_from_str_opt, utcnow_str};
+use crate::utils::common::{deserialize_from_str_opt, deserialize_from_value_opt, utcnow_str};
 
 /// Conversation history item stored in the database.
 ///
@@ -35,13 +35,13 @@ impl Item {
     /// Deserialize data column as `InputItem`.
     #[must_use]
     pub fn as_input(&self) -> Option<InputItem> {
-        deserialize_from_str_opt(&self.data)
+        deserialize_from_value_opt(self.data_without_storage_marker()?)
     }
 
     /// Deserialize data column as `OutputItem`.
     #[must_use]
     pub fn as_output(&self) -> Option<OutputItem> {
-        deserialize_from_str_opt(&self.data)
+        deserialize_from_value_opt(self.data_without_storage_marker()?)
     }
 
     /// Deserialize data column as either `InputItem` or `OutputItem`.
@@ -85,6 +85,12 @@ impl Item {
     fn stored_item_kind(&self) -> Option<ItemKind> {
         let value = deserialize_from_str_opt::<Value>(&self.data)?;
         ItemKind::from_stored_str(value.get(STORED_ITEM_KIND_KEY)?.as_str()?)
+    }
+
+    fn data_without_storage_marker(&self) -> Option<Value> {
+        let mut value = deserialize_from_str_opt::<Value>(&self.data)?;
+        value.as_object_mut()?.remove(STORED_ITEM_KIND_KEY);
+        Some(value)
     }
 }
 
@@ -187,7 +193,10 @@ pub async fn get_items_by_conversation(pool: &DbPool, conversation_id: &str) -> 
 mod tests {
     use super::*;
     use crate::types::event::MessageStatus;
-    use crate::types::io::{InputItem, OutputItem, ReasoningOutput, ReasoningTextContent};
+    use crate::types::io::{
+        InputItem, OutputItem, ReasoningOutput, ReasoningTextContent, ToolSearchCall, ToolSearchStatus,
+    };
+    use crate::types::tools::ToolSearchExecution;
 
     #[test]
     fn test_item_basic() {
@@ -289,6 +298,32 @@ mod tests {
 
         println!("namespace round-trip: mcp__shell.run -> storage -> input function_call");
         println!("storage marker stripped: _agentic_item_kind absent");
+    }
+
+    #[test]
+    fn test_tool_search_call_round_trips_through_stored_item() {
+        let stored = InOutItem::Output(OutputItem::ToolSearchCall(ToolSearchCall {
+            execution: Some(ToolSearchExecution::Client),
+            call_id: Some("call_search_1".to_string()),
+            status: Some(ToolSearchStatus::Completed),
+            arguments: serde_json::json!({"goal": "Find shell tools"}),
+            extra: std::collections::HashMap::new(),
+        }));
+        let item = Item {
+            id: "item_tool_search_call".to_string(),
+            data: String::try_from(&stored).expect("serialization failed"),
+            created_at: 1_704_067_200,
+            conversation_id: None,
+            seq: None,
+        };
+
+        let inputs = InOutItem::into_input_items(vec![item.as_inout().expect("stored item")]);
+        let value = serde_json::to_value(&inputs[0]).expect("input value");
+        assert_eq!(value["type"], "tool_search_call");
+        assert_eq!(value["execution"], "client");
+        assert_eq!(value["call_id"], "call_search_1");
+        assert_eq!(value["arguments"]["goal"], "Find shell tools");
+        assert!(value.get(STORED_ITEM_KIND_KEY).is_none());
     }
 
     #[test]

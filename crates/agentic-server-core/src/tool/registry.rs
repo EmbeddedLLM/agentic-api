@@ -8,11 +8,12 @@ use super::codex::insert_namespace_entries;
 use super::executors::GatewayExecutors;
 use super::function::insert_function_entry;
 use super::mcp::{insert_mcp_entry, maybe_mcp_function};
+use super::tool_search;
 use super::web_search::insert_web_search_entry;
 use super::{CodexNamespaceHandler, GatewayExecutor, NamespaceMap, ToolError, ToolOutput};
 use crate::types::io::OutputItem;
 use crate::types::io::output::FunctionToolCall;
-use crate::types::tools::{CodeInterpreterToolParam, FileSearchToolParam, ResponsesTool};
+use crate::types::tools::{CodeInterpreterToolParam, FileSearchToolParam, ResponsesTool, ToolSearchExecution};
 use crate::utils::common::serialize_to_value_or_custom_default;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -134,6 +135,9 @@ pub struct ToolRegistry {
     /// and `restore_stream_event_value` — the latter called once per SSE line
     /// during streaming — don't rebuild it on every call.
     namespace_map: Option<NamespaceMap>,
+    client_tool_search: bool,
+    loaded_tool_namespaces: HashMap<String, String>,
+    tool_search_name_owned: bool,
 }
 
 impl ToolRegistry {
@@ -179,6 +183,12 @@ impl ToolRegistry {
                 ResponsesTool::Custom(p) => {
                     tracing::debug!(name = %p.name, "client-owned custom tool skipped in function registry");
                 }
+                ResponsesTool::ToolSearch(p) => {
+                    tracing::debug!(
+                        execution = ?p.execution,
+                        "tool_search skipped in function registry"
+                    );
+                }
                 ResponsesTool::Unknown => {
                     tracing::debug!("unknown tool declared but skipped in registry");
                 }
@@ -186,8 +196,22 @@ impl ToolRegistry {
         }
 
         let namespace_map = CodexNamespaceHandler.build_namespace_map((!tools.is_empty()).then_some(tools))?;
+        let client_tool_search = tools.iter().any(|tool| {
+            matches!(
+                tool,
+                ResponsesTool::ToolSearch(search)
+                    if search.execution == Some(ToolSearchExecution::Client)
+            )
+        });
+        let tool_search_name_owned = entries.contains_key(tool_search::TOOL_SEARCH_NAME);
 
-        Ok(Self { entries, namespace_map })
+        Ok(Self {
+            entries,
+            namespace_map,
+            client_tool_search,
+            loaded_tool_namespaces: HashMap::new(),
+            tool_search_name_owned,
+        })
     }
 
     #[must_use]
@@ -207,10 +231,28 @@ impl ToolRegistry {
 
     pub fn restore_final_payload_output(&self, output: &mut [OutputItem]) {
         CodexNamespaceHandler.restore_output_items(output, self.namespace_map.as_ref());
+        tool_search::restore_loaded_namespace_output_items(output, &self.loaded_tool_namespaces);
+        tool_search::restore_output_items(output, self.can_restore_tool_search_fallback());
     }
 
     pub fn restore_stream_event_value(&self, value: &mut Value) -> bool {
-        CodexNamespaceHandler.restore_response_value(value, self.namespace_map.as_ref())
+        let mut changed = CodexNamespaceHandler.restore_response_value(value, self.namespace_map.as_ref());
+        changed |= tool_search::restore_loaded_namespace_response_value(value, &self.loaded_tool_namespaces);
+        changed |= tool_search::restore_response_value(value, self.can_restore_tool_search_fallback());
+        changed
+    }
+
+    #[must_use]
+    pub(crate) const fn can_restore_tool_search_fallback(&self) -> bool {
+        self.client_tool_search && !self.tool_search_name_owned
+    }
+
+    pub(crate) fn load_tool_search_output(&mut self, input: &crate::types::io::ResponsesInput) {
+        self.loaded_tool_namespaces = tool_search::loaded_namespace_members(input);
+        self.loaded_tool_namespaces
+            .retain(|name, _| !self.entries.contains_key(name));
+        self.tool_search_name_owned |=
+            tool_search::loaded_function_names(input).contains(tool_search::TOOL_SEARCH_NAME);
     }
 
     /// Returns the subset of `calls` whose names map to gateway-owned tools.
@@ -258,5 +300,128 @@ impl ToolRegistry {
                 .execute(&call.call_id, &call.name, &call.arguments, &config)
                 .await,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tool::model_visible_namespace_member_name;
+    use crate::types::event::MessageStatus;
+    use crate::types::io::FunctionToolCall;
+
+    fn function_call(name: impl Into<String>, namespace: Option<&str>) -> OutputItem {
+        OutputItem::FunctionCall(FunctionToolCall {
+            id: "fc_1".to_owned(),
+            call_id: "call_1".to_owned(),
+            name: name.into(),
+            namespace: namespace.map(str::to_owned),
+            arguments: "{}".to_owned(),
+            status: MessageStatus::Completed,
+        })
+    }
+
+    #[tokio::test]
+    async fn declared_function_named_tool_search_owns_its_call() {
+        let tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([
+            {"type": "function", "name": "tool_search"},
+            {"type": "tool_search", "execution": "client"}
+        ]))
+        .unwrap();
+        let registry = ToolRegistry::build_with_handlers(&tools, &GatewayExecutors::default())
+            .await
+            .unwrap();
+        let mut output = vec![function_call("tool_search", None)];
+
+        registry.restore_final_payload_output(&mut output);
+
+        assert!(matches!(output[0], OutputItem::FunctionCall(_)));
+        assert!(!registry.can_restore_tool_search_fallback());
+    }
+
+    #[tokio::test]
+    async fn declared_namespace_member_named_tool_search_is_restored_before_fallback_classification() {
+        let tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([
+            {
+                "type": "namespace",
+                "name": "fixture",
+                "tools": [{"type": "function", "name": "tool_search"}]
+            },
+            {"type": "tool_search", "execution": "client"}
+        ]))
+        .unwrap();
+        let registry = ToolRegistry::build_with_handlers(&tools, &GatewayExecutors::default())
+            .await
+            .unwrap();
+        let flat_name = model_visible_namespace_member_name("fixture", "tool_search");
+        let mut output = vec![function_call(flat_name, None)];
+
+        registry.restore_final_payload_output(&mut output);
+
+        let OutputItem::FunctionCall(call) = &output[0] else {
+            panic!("namespace member must remain a function call");
+        };
+        assert_eq!(call.name, "tool_search");
+        assert_eq!(call.namespace.as_deref(), Some("fixture"));
+    }
+
+    #[tokio::test]
+    async fn dynamically_loaded_namespace_member_named_tool_search_owns_its_call() {
+        let tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([
+            {"type": "tool_search", "execution": "client"}
+        ]))
+        .unwrap();
+        let mut registry = ToolRegistry::build_with_handlers(&tools, &GatewayExecutors::default())
+            .await
+            .unwrap();
+        let input = serde_json::from_value(serde_json::json!([
+            {
+                "type": "tool_search_call",
+                "execution": "client",
+                "call_id": "call_search",
+                "status": "completed",
+                "arguments": {"query": "search helper"}
+            },
+            {
+                "type": "tool_search_output",
+                "execution": "client",
+                "call_id": "call_search",
+                "status": "completed",
+                "tools": [{
+                    "type": "namespace",
+                    "name": "fixture",
+                    "tools": [{"type": "function", "name": "tool_search"}]
+                }]
+            }
+        ]))
+        .unwrap();
+        registry.load_tool_search_output(&input);
+        let mut output = vec![function_call("tool_search", None)];
+
+        registry.restore_final_payload_output(&mut output);
+
+        let OutputItem::FunctionCall(call) = &output[0] else {
+            panic!("loaded namespace member must remain a function call");
+        };
+        assert_eq!(call.name, "tool_search");
+        assert_eq!(call.namespace.as_deref(), Some("fixture"));
+        assert!(!registry.can_restore_tool_search_fallback());
+    }
+
+    #[tokio::test]
+    async fn unqualified_provider_fallback_is_restored_when_name_is_unowned() {
+        let tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([
+            {"type": "tool_search", "execution": "client"}
+        ]))
+        .unwrap();
+        let registry = ToolRegistry::build_with_handlers(&tools, &GatewayExecutors::default())
+            .await
+            .unwrap();
+        let mut output = vec![function_call("tool_search", None)];
+
+        registry.restore_final_payload_output(&mut output);
+
+        assert!(matches!(output[0], OutputItem::ToolSearchCall(_)));
+        assert!(registry.can_restore_tool_search_fallback());
     }
 }

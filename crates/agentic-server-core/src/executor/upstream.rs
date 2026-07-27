@@ -56,6 +56,7 @@ pub(super) async fn fetch_stream_payload(
     ));
     let mut acc = ResponseAccumulator::new(ctx.response_id.clone(), ctx.conversation_id.clone());
     let mut hidden_gateway_item_ids = HashSet::new();
+    let mut fallback_tool_search_item_ids = HashSet::new();
     let mut pending_unnamed_function_events = HashMap::<String, Vec<String>>::new();
     while let Some(line_result) = line_stream.next().await {
         let line = line_result?;
@@ -67,6 +68,7 @@ pub(super) async fn fetch_stream_payload(
                 registry,
                 sender,
                 &mut hidden_gateway_item_ids,
+                &mut fallback_tool_search_item_ids,
                 &mut pending_unnamed_function_events,
             )?;
         }
@@ -125,6 +127,7 @@ fn emit_upstream_stream_event(
     registry: &ToolRegistry,
     sender: &mpsc::UnboundedSender<String>,
     hidden_gateway_item_ids: &mut HashSet<String>,
+    fallback_tool_search_item_ids: &mut HashSet<String>,
     pending_unnamed_function_events: &mut HashMap<String, Vec<String>>,
 ) -> ExecutorResult<()> {
     let Some(data) = line.strip_prefix("data: ") else {
@@ -138,6 +141,16 @@ fn emit_upstream_stream_event(
     let Some(frame) = normalize_sse_line(line) else {
         return Ok(());
     };
+    if handle_fallback_tool_search_event(
+        &frame,
+        ctx,
+        registry,
+        sender,
+        fallback_tool_search_item_ids,
+        pending_unnamed_function_events,
+    )? {
+        return Ok(());
+    }
     if should_hide_upstream_event(frame.event_type, &frame.payload, registry, hidden_gateway_item_ids)
         || is_terminal_response_event(frame.event_type)
     {
@@ -157,6 +170,136 @@ fn emit_upstream_stream_event(
     }
 
     emit_stream_line(data, ctx, registry, sender)
+}
+
+fn handle_fallback_tool_search_event(
+    frame: &crate::events::EventFrame,
+    ctx: &RequestContext,
+    registry: &ToolRegistry,
+    sender: &mpsc::UnboundedSender<String>,
+    fallback_item_ids: &mut HashSet<String>,
+    pending_unnamed_function_events: &mut HashMap<String, Vec<String>>,
+) -> ExecutorResult<bool> {
+    if !registry.can_restore_tool_search_fallback() {
+        return Ok(false);
+    }
+
+    match (&frame.event_type, &frame.payload) {
+        (
+            SSEEventType::OutputItemAdded,
+            EventPayload::OutputItemAdded {
+                item_id,
+                item_type: SSEItemType::FunctionCall,
+                name: Some(name),
+                namespace: None,
+                ..
+            },
+        ) if name == "tool_search" => {
+            fallback_item_ids.insert(item_id.clone());
+            Ok(false)
+        }
+        (
+            SSEEventType::FunctionCallArgumentsDelta | SSEEventType::FunctionCallArgumentsDone,
+            EventPayload::FunctionCallArgsDelta { item_id, .. } | EventPayload::FunctionCallArgsDone { item_id, .. },
+        ) if fallback_item_ids.contains(item_id) => Ok(true),
+        (
+            SSEEventType::FunctionCallArgumentsDone,
+            EventPayload::FunctionCallArgsDone {
+                item_id,
+                call_id: Some(call_id),
+                name,
+                output_index,
+                ..
+            },
+        ) if name == "tool_search"
+            && !call_id.is_empty()
+            && pending_function_is_unqualified(item_id, pending_unnamed_function_events) =>
+        {
+            pending_unnamed_function_events.remove(item_id);
+            fallback_item_ids.insert(item_id.clone());
+            emit_fallback_tool_search_added(item_id, call_id, *output_index, ctx, registry, sender)?;
+            Ok(true)
+        }
+        (
+            SSEEventType::OutputItemDone,
+            EventPayload::OutputItemDone {
+                item_id,
+                item_type: SSEItemType::FunctionCall,
+                item,
+                ..
+            },
+        ) if is_unqualified_tool_search_function(item) => {
+            if !fallback_item_ids.contains(item_id)
+                && pending_function_is_unqualified(item_id, pending_unnamed_function_events)
+                && let Some(call_id) = item
+                    .get("call_id")
+                    .and_then(Value::as_str)
+                    .filter(|call_id| !call_id.is_empty())
+            {
+                emit_fallback_tool_search_added(item_id, call_id, frame_output_index(frame), ctx, registry, sender)?;
+            }
+            pending_unnamed_function_events.remove(item_id);
+            fallback_item_ids.remove(item_id);
+            Ok(false)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn pending_function_is_unqualified(
+    item_id: &str,
+    pending_unnamed_function_events: &HashMap<String, Vec<String>>,
+) -> bool {
+    pending_unnamed_function_events
+        .get(item_id)
+        .and_then(|events| events.first())
+        .and_then(|line| normalize_sse_line(line))
+        .is_some_and(|frame| {
+            matches!(
+                frame.payload,
+                EventPayload::OutputItemAdded {
+                    item_type: SSEItemType::FunctionCall,
+                    namespace: None,
+                    ..
+                }
+            )
+        })
+}
+
+fn is_unqualified_tool_search_function(item: &Value) -> bool {
+    item.get("name").and_then(Value::as_str) == Some("tool_search")
+        && item.get("namespace").and_then(Value::as_str).is_none()
+}
+
+fn frame_output_index(frame: &crate::events::EventFrame) -> u32 {
+    match &frame.payload {
+        EventPayload::OutputItemDone { output_index, .. } => *output_index,
+        _ => 0,
+    }
+}
+
+fn emit_fallback_tool_search_added(
+    item_id: &str,
+    call_id: &str,
+    output_index: u32,
+    ctx: &RequestContext,
+    registry: &ToolRegistry,
+    sender: &mpsc::UnboundedSender<String>,
+) -> ExecutorResult<()> {
+    let event = serde_json::json!({
+        "type": "response.output_item.added",
+        "output_index": output_index,
+        "item": {
+            "type": "tool_search_call",
+            "id": item_id,
+            "execution": "client",
+            "call_id": call_id,
+            "status": "in_progress",
+            "arguments": {}
+        }
+    });
+    let data = serialize_to_string(&event).map_err(ExecutorError::JsonError)?;
+    emit_stream_line(&data, ctx, registry, sender)
 }
 
 fn emit_stream_line(
@@ -330,5 +473,76 @@ fn apply_context_response_ids(value: &mut Value, ctx: &RequestContext) {
     }
     if let Some(conversation_id) = &ctx.conversation_id {
         response.insert("conversation_id".to_owned(), Value::String(conversation_id.clone()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tool::GatewayExecutors;
+    use crate::types::request_response::RequestPayload;
+
+    fn emitted_event(receiver: &mut mpsc::UnboundedReceiver<String>) -> Value {
+        let line = receiver.try_recv().expect("emitted SSE event");
+        let data = line
+            .strip_prefix("data: ")
+            .and_then(|line| line.strip_suffix("\n\n"))
+            .expect("SSE data framing");
+        serde_json::from_str(data).expect("valid emitted JSON")
+    }
+
+    #[tokio::test]
+    async fn unnamed_fallback_emits_only_canonical_tool_search_lifecycle() {
+        let request: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test",
+            "input": "find a tool",
+            "tools": [{"type": "tool_search", "execution": "client"}]
+        }))
+        .unwrap();
+        let registry =
+            ToolRegistry::build_with_handlers(request.tools.as_deref().unwrap(), &GatewayExecutors::default())
+                .await
+                .unwrap();
+        let ctx = RequestContext {
+            original_request: request.clone(),
+            enriched_request: request,
+            new_input_items: Vec::new(),
+            response_id: "resp_gateway".to_owned(),
+            conversation_id: None,
+        };
+        let (sender, mut receiver) = mpsc::unbounded_channel();
+        let mut hidden_ids = HashSet::new();
+        let mut fallback_ids = HashSet::new();
+        let mut pending = HashMap::new();
+        let lines = [
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"id":"fc_search","type":"function_call","call_id":"call_search"}}"#,
+            r#"data: {"type":"response.function_call_arguments.delta","item_id":"fc_search","output_index":0,"call_id":"call_search","delta":"{\"query\":"}"#,
+            r#"data: {"type":"response.function_call_arguments.done","item_id":"fc_search","output_index":0,"call_id":"call_search","name":"tool_search","arguments":"{\"query\":\"shell\"}"}"#,
+            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"id":"fc_search","type":"function_call","call_id":"call_search","name":"tool_search","status":"completed","arguments":"{\"query\":\"shell\"}"}}"#,
+        ];
+
+        for line in lines {
+            emit_upstream_stream_event(
+                line,
+                &ctx,
+                &registry,
+                &sender,
+                &mut hidden_ids,
+                &mut fallback_ids,
+                &mut pending,
+            )
+            .unwrap();
+        }
+
+        let added = emitted_event(&mut receiver);
+        assert_eq!(added["type"], "response.output_item.added");
+        assert_eq!(added["item"]["type"], "tool_search_call");
+        assert_eq!(added["item"]["execution"], "client");
+        assert_eq!(added["item"]["call_id"], "call_search");
+        let done = emitted_event(&mut receiver);
+        assert_eq!(done["type"], "response.output_item.done");
+        assert_eq!(done["item"]["type"], "tool_search_call");
+        assert_eq!(done["item"]["arguments"]["query"], "shell");
+        assert!(receiver.try_recv().is_err());
     }
 }

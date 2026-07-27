@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::output::{CustomToolCall, FunctionToolCall, ReasoningOutput};
+use super::output::{CustomToolCall, FunctionToolCall, ReasoningOutput, ToolSearchCall, ToolSearchOutput};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InputTextContent {
@@ -79,6 +79,12 @@ pub enum InputItem {
     CustomToolCall(CustomToolCall),
     #[serde(rename = "custom_tool_call_output")]
     CustomToolCallOutput(CustomToolCallOutputMessage),
+    /// The model's request for the caller to discover deferred tools.
+    #[serde(rename = "tool_search_call")]
+    ToolSearchCall(ToolSearchCall),
+    /// The tool definitions loaded by a hosted or client-executed search.
+    #[serde(rename = "tool_search_output")]
+    ToolSearchOutput(ToolSearchOutput),
     #[serde(rename = "reasoning")]
     Reasoning(ReasoningOutput),
     #[serde(other)]
@@ -97,4 +103,40 @@ impl InputItem {
 pub enum ResponsesInput {
     Text(String),
     Items(Vec<InputItem>),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tool_search_input_items_preserve_omitted_execution_and_status() {
+        let expected = serde_json::json!([
+            {
+                "type": "tool_search_call",
+                "call_id": "call_search",
+                "arguments": {"query": "tools"}
+            },
+            {
+                "type": "tool_search_output",
+                "call_id": "call_search",
+                "tools": []
+            }
+        ]);
+        let input: ResponsesInput = serde_json::from_value(expected.clone()).unwrap();
+        let ResponsesInput::Items(items) = &input else {
+            panic!("expected input items");
+        };
+        let InputItem::ToolSearchCall(call) = &items[0] else {
+            panic!("expected tool-search call");
+        };
+        assert_eq!(call.execution, None);
+        assert_eq!(call.status, None);
+        let InputItem::ToolSearchOutput(output) = &items[1] else {
+            panic!("expected tool-search output");
+        };
+        assert_eq!(output.execution, None);
+        assert_eq!(output.status, None);
+        assert_eq!(serde_json::to_value(input).unwrap(), expected);
+    }
 }

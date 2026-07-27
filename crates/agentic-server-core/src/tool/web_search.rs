@@ -85,6 +85,7 @@ pub(crate) fn web_search_function_tool() -> FunctionTool {
             "required": ["query"]
         })),
         strict: Some(false),
+        defer_loading: None,
     }
 }
 

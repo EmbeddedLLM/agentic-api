@@ -8,12 +8,12 @@ pub use io::{
     CustomToolCall, CustomToolCallOutputMessage, FunctionTool, FunctionToolCall, FunctionToolResultMessage,
     GatewayCallStatus, InputContent, InputImageContent, InputItem, InputMessage, InputMessageContent, InputTextContent,
     InputTokenDetails, McpToolCall, OutputItem, OutputMessage, OutputTextContent, OutputTokenDetails, ReasoningOutput,
-    ReasoningTextContent, ResponseUsage, ResponsesInput, ToolChoice, WebSearchActionSearch, WebSearchCall,
-    WebSearchCallStatus, WebSearchSource,
+    ReasoningTextContent, ResponseUsage, ResponsesInput, ToolChoice, ToolSearchCall, ToolSearchOutput,
+    ToolSearchStatus, WebSearchActionSearch, WebSearchCall, WebSearchCallStatus, WebSearchSource,
 };
 pub use request_response::{IncompleteDetails, RequestPayload, ResponsePayload, UpstreamRequest, UpstreamTool};
 pub use tools::{
     CodeInterpreterToolParam, CodexNamespaceMember, CodexNamespaceToolParam, CustomToolParam, EmptyToolNameError,
-    FileSearchToolParam, FunctionToolParam, McpToolParam, NonEmptyToolName, ResponsesTool, WebSearchContextSize,
-    WebSearchFilters, WebSearchToolParam, WebSearchUserLocation,
+    FileSearchToolParam, FunctionToolParam, McpToolParam, NonEmptyToolName, ResponsesTool, ToolSearchExecution,
+    ToolSearchToolParam, WebSearchContextSize, WebSearchFilters, WebSearchToolParam, WebSearchUserLocation,
 };

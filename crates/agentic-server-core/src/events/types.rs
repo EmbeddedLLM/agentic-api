@@ -8,9 +8,12 @@ pub enum SSEItemType {
     Reasoning,
     FunctionCall,
     CustomToolCall,
+    ToolSearchCall,
+    ToolSearchOutput,
     WebSearchCall,
     McpToolCall,
     Message,
+    Unknown,
 }
 
 impl SSEItemType {
@@ -20,9 +23,12 @@ impl SSEItemType {
             Self::Reasoning => "reasoning",
             Self::FunctionCall => "function_call",
             Self::CustomToolCall => "custom_tool_call",
+            Self::ToolSearchCall => "tool_search_call",
+            Self::ToolSearchOutput => "tool_search_output",
             Self::WebSearchCall => "web_search_call",
             Self::McpToolCall => "mcp_tool_call",
             Self::Message => "message",
+            Self::Unknown => "unknown",
         }
     }
 }
@@ -33,9 +39,12 @@ impl From<&str> for SSEItemType {
             "reasoning" => Self::Reasoning,
             "function_call" => Self::FunctionCall,
             "custom_tool_call" => Self::CustomToolCall,
+            "tool_search_call" => Self::ToolSearchCall,
+            "tool_search_output" => Self::ToolSearchOutput,
             "web_search_call" => Self::WebSearchCall,
             "mcp_tool_call" => Self::McpToolCall,
-            _ => Self::Message,
+            "message" => Self::Message,
+            _ => Self::Unknown,
         }
     }
 }

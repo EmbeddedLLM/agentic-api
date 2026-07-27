@@ -407,7 +407,10 @@ fn typed_top_level_registry_keys(tools: &[ResponsesTool]) -> HashMap<String, Too
                 ResponsesTool::WebSearch(_) => "web_search".to_owned(),
                 ResponsesTool::FileSearch(_) => "file_search".to_owned(),
                 ResponsesTool::CodeInterpreter(_) => "code_interpreter".to_owned(),
-                ResponsesTool::Namespace(_) | ResponsesTool::Custom(_) | ResponsesTool::Unknown => return None,
+                ResponsesTool::Namespace(_)
+                | ResponsesTool::Custom(_)
+                | ResponsesTool::ToolSearch(_)
+                | ResponsesTool::Unknown => return None,
             };
             tool.tool_type().map(|tool_type| (registry_key, tool_type))
         })

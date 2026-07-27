@@ -388,6 +388,7 @@ fn mcp_tool_to_function_tool(name: &str, tool: &rmcp::model::Tool) -> FunctionTo
         description: tool.description.as_ref().map(ToString::to_string),
         parameters: Some(parameters),
         strict: Some(false),
+        defer_loading: None,
     }
 }
 

@@ -5,6 +5,7 @@ use crate::events::EventPayload;
 use crate::executor::error::ExecutorError;
 use crate::tool::ToolRegistry;
 use crate::types::event::MessageStatus;
+use crate::types::tools::ToolSearchExecution;
 use crate::utils::uuid7_str;
 
 use super::input::{InputContent, InputItem, InputMessage, InputMessageContent, InputTextContent};
@@ -111,6 +112,70 @@ pub struct CustomToolCall {
     pub name: String,
     #[serde(default)]
     pub input: String,
+}
+
+/// Lifecycle status for a tool-search call or output item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolSearchStatus {
+    InProgress,
+    Completed,
+    Incomplete,
+}
+
+impl From<MessageStatus> for ToolSearchStatus {
+    fn from(status: MessageStatus) -> Self {
+        match status {
+            MessageStatus::InProgress => Self::InProgress,
+            MessageStatus::Completed => Self::Completed,
+        }
+    }
+}
+
+/// A model-generated request to discover deferred tools.
+///
+/// Client execution carries a call ID that the caller echoes in a matching
+/// [`ToolSearchOutput`]. Hosted execution uses a null call ID.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolSearchCall {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<ToolSearchExecution>,
+    pub call_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<ToolSearchStatus>,
+    pub arguments: Value,
+    #[serde(default)]
+    #[serde(flatten)]
+    pub extra: std::collections::HashMap<String, Value>,
+}
+
+impl ToolSearchCall {
+    #[must_use]
+    pub fn requires_client_execution(&self) -> bool {
+        matches!(
+            (self.execution, self.status),
+            (Some(ToolSearchExecution::Client), Some(ToolSearchStatus::Completed))
+        ) && self.call_id.as_deref().is_some_and(|call_id| !call_id.is_empty())
+    }
+}
+
+/// Tool definitions made available by a tool search.
+///
+/// Loaded declarations remain opaque because the gateway passes them through
+/// without normalizing or executing the search. This also preserves tool types
+/// and fields added by future Responses API versions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolSearchOutput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<ToolSearchExecution>,
+    pub call_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<ToolSearchStatus>,
+    #[serde(default)]
+    pub tools: Vec<Value>,
+    #[serde(default)]
+    #[serde(flatten)]
+    pub extra: std::collections::HashMap<String, Value>,
 }
 
 fn default_completed_status() -> MessageStatus {
@@ -418,6 +483,10 @@ pub enum OutputItem {
     FunctionCall(FunctionToolCall),
     #[serde(rename = "custom_tool_call")]
     CustomToolCall(CustomToolCall),
+    #[serde(rename = "tool_search_call")]
+    ToolSearchCall(ToolSearchCall),
+    #[serde(rename = "tool_search_output")]
+    ToolSearchOutput(ToolSearchOutput),
     #[serde(rename = "web_search_call")]
     WebSearchCall(WebSearchCall),
     #[serde(rename = "mcp_tool_call")]
@@ -436,9 +505,13 @@ impl OutputItem {
                 .lookup(&call.name)
                 .is_none_or(|entry| !entry.tool_type.is_gateway_owned()),
             Self::CustomToolCall(_) => true,
-            Self::Message(_) | Self::WebSearchCall(_) | Self::McpToolCall(_) | Self::Reasoning(_) | Self::Unknown => {
-                false
-            }
+            Self::ToolSearchCall(call) => call.requires_client_execution(),
+            Self::Message(_)
+            | Self::ToolSearchOutput(_)
+            | Self::WebSearchCall(_)
+            | Self::McpToolCall(_)
+            | Self::Reasoning(_)
+            | Self::Unknown => false,
         }
     }
 
@@ -449,6 +522,8 @@ impl OutputItem {
             Self::Reasoning(reasoning) => Some(InputItem::Reasoning(reasoning.clone())),
             Self::FunctionCall(call) => Some(InputItem::FunctionCall(call.clone())),
             Self::CustomToolCall(call) => Some(InputItem::CustomToolCall(call.clone())),
+            Self::ToolSearchCall(call) => Some(InputItem::ToolSearchCall(call.clone())),
+            Self::ToolSearchOutput(output) => Some(InputItem::ToolSearchOutput(output.clone())),
             Self::WebSearchCall(_) | Self::McpToolCall(_) | Self::Unknown => None,
         }
     }
@@ -497,6 +572,129 @@ mod tests {
         assert_eq!(call.status, None);
         let serialized = serde_json::to_value(call).unwrap();
         assert!(serialized.get("status").is_none());
+    }
+
+    #[test]
+    fn client_tool_search_call_requires_action_and_rehydrates() {
+        let expected = serde_json::json!({
+            "type": "tool_search_call",
+            "execution": "client",
+            "call_id": "call_search_1",
+            "status": "completed",
+            "arguments": {"goal": "Find the shipping tool"},
+            "x-provider-field": true
+        });
+        let item: OutputItem = serde_json::from_value(expected.clone()).unwrap();
+
+        assert!(item.requires_client_action(&ToolRegistry::default()));
+        let Some(input) = item.to_input_item() else {
+            panic!("tool search call should rehydrate as input");
+        };
+        assert!(matches!(input, InputItem::ToolSearchCall(_)));
+        assert_eq!(serde_json::to_value(input).unwrap(), expected);
+    }
+
+    #[test]
+    fn incomplete_tool_search_items_round_trip_and_require_no_action() {
+        let items = [
+            serde_json::json!({
+                "type": "tool_search_call",
+                "execution": "client",
+                "call_id": "call_search_1",
+                "status": "incomplete",
+                "arguments": {"goal": "Find a tool"}
+            }),
+            serde_json::json!({
+                "type": "tool_search_output",
+                "execution": "client",
+                "call_id": "call_search_1",
+                "status": "incomplete",
+                "tools": []
+            }),
+        ];
+
+        for expected in items {
+            let item: OutputItem = serde_json::from_value(expected.clone()).unwrap();
+            assert!(!item.requires_client_action(&ToolRegistry::default()));
+            match &item {
+                OutputItem::ToolSearchCall(call) => {
+                    assert_eq!(call.status, Some(ToolSearchStatus::Incomplete));
+                }
+                OutputItem::ToolSearchOutput(output) => {
+                    assert_eq!(output.status, Some(ToolSearchStatus::Incomplete));
+                }
+                _ => panic!("expected tool-search item"),
+            }
+            let input = item.to_input_item().expect("tool-search item rehydrates");
+            assert_eq!(serde_json::to_value(input).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn tool_search_call_with_optional_fields_omitted_requires_no_action() {
+        let expected = serde_json::json!({
+            "type": "tool_search_call",
+            "call_id": "call_search_1",
+            "arguments": {"goal": "Find a tool"}
+        });
+        let item: OutputItem = serde_json::from_value(expected.clone()).unwrap();
+
+        assert!(!item.requires_client_action(&ToolRegistry::default()));
+        let OutputItem::ToolSearchCall(call) = &item else {
+            panic!("expected tool-search call");
+        };
+        assert_eq!(call.execution, None);
+        assert_eq!(call.status, None);
+        let input = item.to_input_item().expect("tool-search call rehydrates");
+        assert_eq!(serde_json::to_value(input).unwrap(), expected);
+    }
+
+    #[test]
+    fn completed_client_tool_search_call_requires_a_nonempty_call_id_for_action() {
+        for call_id in [serde_json::Value::Null, serde_json::Value::String(String::new())] {
+            let item: OutputItem = serde_json::from_value(serde_json::json!({
+                "type": "tool_search_call",
+                "execution": "client",
+                "call_id": call_id,
+                "status": "completed",
+                "arguments": {"goal": "Find a tool"}
+            }))
+            .unwrap();
+
+            assert!(!item.requires_client_action(&ToolRegistry::default()));
+        }
+    }
+
+    #[test]
+    fn tool_search_output_preserves_loaded_tools_and_server_items_do_not_require_action() {
+        let call: OutputItem = serde_json::from_value(serde_json::json!({
+            "type": "tool_search_call",
+            "execution": "server",
+            "call_id": null,
+            "status": "completed",
+            "arguments": {"paths": ["crm"]}
+        }))
+        .unwrap();
+        assert!(!call.requires_client_action(&ToolRegistry::default()));
+
+        let expected = serde_json::json!({
+            "type": "tool_search_output",
+            "execution": "client",
+            "call_id": "call_search_1",
+            "status": "completed",
+            "tools": [{
+                "type": "future_tool",
+                "name": "provider_tool",
+                "opaque": {"nested": true}
+            }]
+        });
+        let output: OutputItem = serde_json::from_value(expected.clone()).unwrap();
+        assert!(!output.requires_client_action(&ToolRegistry::default()));
+        let Some(input) = output.to_input_item() else {
+            panic!("tool search output should rehydrate as input");
+        };
+        assert!(matches!(input, InputItem::ToolSearchOutput(_)));
+        assert_eq!(serde_json::to_value(input).unwrap(), expected);
     }
 
     #[test]

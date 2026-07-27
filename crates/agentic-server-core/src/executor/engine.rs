@@ -107,10 +107,11 @@ async fn run_until_gateway_tools_complete(
     stream_upstream: bool,
     stream_events: Option<&mpsc::UnboundedSender<String>>,
 ) -> ExecutorResult<(ResponsePayload, RequestContext)> {
-    let registry: ToolRegistry = match ctx.enriched_request.tools.as_ref() {
+    let mut registry: ToolRegistry = match ctx.enriched_request.tools.as_ref() {
         Some(tools) => ToolRegistry::build_with_handlers(tools, &exec_ctx.gateway_executors).await?,
         None => ToolRegistry::default(),
     };
+    registry.load_tool_search_output(&ctx.enriched_request.input);
     let mut combined_output: Vec<crate::OutputItem> = Vec::new();
     let mut combined_usage: Option<ResponseUsage> = None;
 
@@ -124,14 +125,24 @@ async fn run_until_gateway_tools_complete(
         accumulate_usage(&mut combined_usage, payload.usage.take());
         let current_output = std::mem::take(&mut payload.output);
         for item in &current_output {
-            if let OutputItem::CustomToolCall(call) = item {
-                debug!(
-                    response_id = %ctx.response_id,
-                    call_id = %call.call_id,
-                    name = %call.name,
-                    input_bytes = call.input.len(),
-                    "custom tool call requires client execution"
-                );
+            match item {
+                OutputItem::CustomToolCall(call) => {
+                    debug!(
+                        response_id = %ctx.response_id,
+                        call_id = %call.call_id,
+                        name = %call.name,
+                        input_bytes = call.input.len(),
+                        "custom tool call requires client execution"
+                    );
+                }
+                OutputItem::ToolSearchCall(call) if call.requires_client_execution() => {
+                    debug!(
+                        response_id = %ctx.response_id,
+                        call_id = ?call.call_id,
+                        "tool search call requires client execution"
+                    );
+                }
+                _ => {}
             }
         }
         let has_client_owned = has_client_owned_calls(&current_output, &registry);

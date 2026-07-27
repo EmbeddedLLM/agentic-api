@@ -11,6 +11,8 @@ pub struct FunctionTool {
     pub description: Option<String>,
     pub parameters: Option<Value>,
     pub strict: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub defer_loading: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

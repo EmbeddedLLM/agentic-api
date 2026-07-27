@@ -17,6 +17,7 @@ impl From<&FunctionToolParam> for FunctionTool {
             description: p.description.clone(),
             parameters: p.parameters.clone(),
             strict: p.strict,
+            defer_loading: p.defer_loading,
         }
     }
 }

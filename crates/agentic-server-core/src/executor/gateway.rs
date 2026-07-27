@@ -319,6 +319,8 @@ fn emit_gateway_start_events(
             OutputItem::Message(_)
             | OutputItem::FunctionCall(_)
             | OutputItem::CustomToolCall(_)
+            | OutputItem::ToolSearchCall(_)
+            | OutputItem::ToolSearchOutput(_)
             | OutputItem::Reasoning(_)
             | OutputItem::Unknown => {}
         }
@@ -350,6 +352,8 @@ fn emit_gateway_completed_events(
             OutputItem::Message(_)
             | OutputItem::FunctionCall(_)
             | OutputItem::CustomToolCall(_)
+            | OutputItem::ToolSearchCall(_)
+            | OutputItem::ToolSearchOutput(_)
             | OutputItem::Reasoning(_)
             | OutputItem::Unknown => continue,
         };

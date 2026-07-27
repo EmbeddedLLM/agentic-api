@@ -9,8 +9,8 @@ pub use input::{
 };
 pub use output::{
     ApplyDone, CustomToolCall, FunctionToolCall, GatewayCallStatus, McpToolCall, OutputItem, OutputMessage,
-    OutputTextContent, ReasoningOutput, ReasoningTextContent, WebSearchActionSearch, WebSearchCall,
-    WebSearchCallStatus, WebSearchSource,
+    OutputTextContent, ReasoningOutput, ReasoningTextContent, ToolSearchCall, ToolSearchOutput, ToolSearchStatus,
+    WebSearchActionSearch, WebSearchCall, WebSearchCallStatus, WebSearchSource,
 };
 pub use tools::{FunctionTool, ToolChoice};
 pub(crate) use tools::{resolve_tool_choice, resolve_tools};

@@ -10,6 +10,7 @@ pub mod handler;
 pub mod mcp;
 pub mod normalize;
 pub mod registry;
+mod tool_search;
 pub mod web_search;
 
 pub use codex::{CodexNamespaceHandler, NamespaceMap, model_visible_namespace_member_name};
@@ -22,4 +23,5 @@ pub use mcp::{
     read_mcp_resource_spec,
 };
 pub use registry::{GatewayDispatchResult, ToolEntry, ToolRegistry, ToolType};
+pub(crate) use tool_search::loaded_function_tools;
 pub use web_search::WebSearchHandler;

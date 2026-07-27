@@ -7,6 +7,7 @@
 //! runs on a blocking thread while the async task continues reading from the
 //! network — keeping the tokio executor thread free between chunk arrivals.
 
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::mpsc;
 
@@ -46,34 +47,34 @@ impl std::fmt::Debug for InFlight {
 }
 
 impl InFlight {
-    fn finalize(self, output: &mut Vec<OutputItem>) {
+    fn finalize(self) -> OutputItem {
         match self {
             Self::Reasoning { mut item, text } => {
                 if !text.is_empty() {
                     item.content.push(ReasoningTextContent::new(text));
                 }
-                output.push(OutputItem::Reasoning(item));
+                OutputItem::Reasoning(item)
             }
             Self::FunctionCall { mut item, arguments } => {
                 if !arguments.is_empty() && item.arguments.is_empty() {
                     item.arguments = arguments;
                 }
                 item.status = MessageStatus::Completed;
-                output.push(OutputItem::FunctionCall(item));
+                OutputItem::FunctionCall(item)
             }
             Self::Message { mut item, text } => {
                 if !text.is_empty() {
                     item.content.push(OutputTextContent::new(text));
                 }
                 item.status = MessageStatus::Completed;
-                output.push(OutputItem::Message(item));
+                OutputItem::Message(item)
             }
             Self::CustomToolCall { mut item, input } => {
                 if item.input.is_empty() {
                     item.input = input;
                 }
                 item.status = Some(MessageStatus::Completed);
-                output.push(OutputItem::CustomToolCall(item));
+                OutputItem::CustomToolCall(item)
             }
         }
     }
@@ -85,12 +86,15 @@ pub struct ResponseAccumulator {
     response_id: String,
     conversation_id: Option<String>,
     output: Vec<OutputItem>,
+    /// Streaming output indexes parallel to `output`; sorted on finalization.
+    output_indices: Vec<u32>,
     usage: Option<ResponseUsage>,
     status: ResponseStatus,
     incomplete_details: Option<IncompleteDetails>,
     error: Option<serde_json::Value>,
     /// In-flight output items keyed by `item_id`, in insertion order.
     in_flight: IndexMap<String, InFlight>,
+    in_flight_indices: HashMap<String, u32>,
 }
 
 impl ResponseAccumulator {
@@ -101,11 +105,13 @@ impl ResponseAccumulator {
             response_id,
             conversation_id,
             output: Vec::new(),
+            output_indices: Vec::new(),
             usage: None,
             status: ResponseStatus::InProgress,
             incomplete_details: None,
             error: None,
             in_flight: IndexMap::new(),
+            in_flight_indices: HashMap::new(),
         }
     }
 
@@ -128,6 +134,9 @@ impl ResponseAccumulator {
                 out
             })
             .unwrap_or_default();
+        let output_indices = (0..output.len())
+            .map(|index| u32::try_from(index).unwrap_or(u32::MAX))
+            .collect();
 
         let status = json["status"]
             .as_str()
@@ -141,11 +150,13 @@ impl ResponseAccumulator {
             response_id,
             conversation_id: conversation_id.map(str::to_string),
             output,
+            output_indices,
             usage,
             status,
             incomplete_details,
             error,
             in_flight: IndexMap::new(),
+            in_flight_indices: HashMap::new(),
         })
     }
 
@@ -215,11 +226,14 @@ impl ResponseAccumulator {
         acc
     }
 
-    /// Finalizes all in-flight items in insertion order, pushing them to `output`.
+    /// Finalizes all in-flight items and restores upstream output-index order.
     pub(crate) fn finalize_all(&mut self) {
-        for (_, entry) in self.in_flight.drain(..) {
-            entry.finalize(&mut self.output);
+        for (item_id, entry) in self.in_flight.drain(..) {
+            let output_index = self.in_flight_indices.remove(&item_id).unwrap_or(u32::MAX);
+            self.output_indices.push(output_index);
+            self.output.push(entry.finalize());
         }
+        self.sort_output_by_index();
     }
 
     pub(crate) fn process_sse_line(&mut self, line: &str) {
@@ -267,53 +281,21 @@ impl ResponseAccumulator {
             (SSEEventType::ResponseCreated, EventPayload::Response { id, .. }) if !id.is_empty() => {
                 self.response_id.clone_from(id);
             }
-            (SSEEventType::OutputItemAdded, payload @ EventPayload::OutputItemAdded { item_id, item_type, .. }) => {
-                let entry = match item_type {
-                    SSEItemType::Reasoning => ReasoningOutput::try_from(payload).ok().map(|item| InFlight::Reasoning {
-                        item,
-                        text: String::with_capacity(256),
-                    }),
-                    SSEItemType::FunctionCall => {
-                        FunctionToolCall::try_from(payload)
-                            .ok()
-                            .map(|item| InFlight::FunctionCall {
-                                item,
-                                arguments: String::with_capacity(128),
-                            })
-                    }
-                    SSEItemType::CustomToolCall => {
-                        CustomToolCall::try_from(payload)
-                            .ok()
-                            .map(|item| InFlight::CustomToolCall {
-                                item,
-                                input: String::with_capacity(256),
-                            })
-                    }
-                    SSEItemType::Message => OutputMessage::try_from(payload).ok().map(|item| InFlight::Message {
-                        item,
-                        text: String::with_capacity(256),
-                    }),
-                    SSEItemType::WebSearchCall | SSEItemType::McpToolCall => None,
-                };
-                if let Some(inflight) = entry {
-                    self.in_flight.insert(item_id.clone(), inflight);
-                }
+            (SSEEventType::OutputItemAdded, payload @ EventPayload::OutputItemAdded { .. }) => {
+                self.begin_output_item(payload);
             }
             (
                 SSEEventType::OutputItemDone,
                 EventPayload::OutputItemDone {
                     item_id,
                     item_type: SSEItemType::CustomToolCall,
+                    output_index,
                     item,
                     ..
                 },
-            ) => self.complete_custom_tool_call(item_id, item),
-            (SSEEventType::OutputItemDone, EventPayload::OutputItemDone { item, .. }) => {
-                if let Some(output_item @ (OutputItem::WebSearchCall(_) | OutputItem::McpToolCall(_))) =
-                    deserialize_from_value_opt::<OutputItem>(item.clone())
-                {
-                    self.output.push(output_item);
-                }
+            ) => self.complete_custom_tool_call(item_id, *output_index, item),
+            (SSEEventType::OutputItemDone, EventPayload::OutputItemDone { output_index, item, .. }) => {
+                self.complete_non_delta_output_item(*output_index, item);
             }
             (SSEEventType::ReasoningTextDelta, EventPayload::ReasoningDelta { delta, item_id }) => {
                 if let Some(InFlight::Reasoning { text, .. }) = self.in_flight.get_mut(item_id) {
@@ -363,13 +345,58 @@ impl ResponseAccumulator {
         }
     }
 
+    fn begin_output_item(&mut self, payload: &EventPayload) {
+        let EventPayload::OutputItemAdded {
+            item_id,
+            item_type,
+            output_index,
+            ..
+        } = payload
+        else {
+            return;
+        };
+        let entry = match item_type {
+            SSEItemType::Reasoning => ReasoningOutput::try_from(payload).ok().map(|item| InFlight::Reasoning {
+                item,
+                text: String::with_capacity(256),
+            }),
+            SSEItemType::FunctionCall => FunctionToolCall::try_from(payload)
+                .ok()
+                .map(|item| InFlight::FunctionCall {
+                    item,
+                    arguments: String::with_capacity(128),
+                }),
+            SSEItemType::CustomToolCall => {
+                CustomToolCall::try_from(payload)
+                    .ok()
+                    .map(|item| InFlight::CustomToolCall {
+                        item,
+                        input: String::with_capacity(256),
+                    })
+            }
+            SSEItemType::Message => OutputMessage::try_from(payload).ok().map(|item| InFlight::Message {
+                item,
+                text: String::with_capacity(256),
+            }),
+            SSEItemType::ToolSearchCall
+            | SSEItemType::ToolSearchOutput
+            | SSEItemType::WebSearchCall
+            | SSEItemType::McpToolCall
+            | SSEItemType::Unknown => None,
+        };
+        if let Some(inflight) = entry {
+            self.in_flight.insert(item_id.clone(), inflight);
+            self.in_flight_indices.insert(item_id.clone(), *output_index);
+        }
+    }
+
     fn finish_response(&mut self, status: ResponseStatus, usage: Option<ResponseUsage>) {
         self.finalize_all();
         self.status = status;
         self.usage = usage;
     }
 
-    fn complete_custom_tool_call(&mut self, item_id: &str, raw_item: &serde_json::Value) {
+    fn complete_custom_tool_call(&mut self, item_id: &str, output_index: u32, raw_item: &serde_json::Value) {
         let Some(OutputItem::CustomToolCall(mut call)) = deserialize_from_value_opt::<OutputItem>(raw_item.clone())
         else {
             return;
@@ -388,7 +415,39 @@ impl ResponseAccumulator {
             *item = call;
         } else {
             // Some Responses-compatible providers omit `output_item.added`.
-            self.output.push(OutputItem::CustomToolCall(call));
+            self.push_output(output_index, OutputItem::CustomToolCall(call));
+        }
+    }
+
+    fn complete_non_delta_output_item(&mut self, output_index: u32, raw_item: &serde_json::Value) {
+        let Some(output_item) = deserialize_from_value_opt::<OutputItem>(raw_item.clone()) else {
+            return;
+        };
+        if matches!(
+            output_item,
+            OutputItem::ToolSearchCall(_)
+                | OutputItem::ToolSearchOutput(_)
+                | OutputItem::WebSearchCall(_)
+                | OutputItem::McpToolCall(_)
+        ) {
+            self.push_output(output_index, output_item);
+        }
+    }
+
+    fn push_output(&mut self, output_index: u32, item: OutputItem) {
+        self.output_indices.push(output_index);
+        self.output.push(item);
+    }
+
+    fn sort_output_by_index(&mut self) {
+        let mut indexed = std::mem::take(&mut self.output_indices)
+            .into_iter()
+            .zip(std::mem::take(&mut self.output))
+            .collect::<Vec<_>>();
+        indexed.sort_by_key(|(output_index, _)| *output_index);
+        for (output_index, item) in indexed {
+            self.output_indices.push(output_index);
+            self.output.push(item);
         }
     }
 
@@ -1245,5 +1304,93 @@ mod tests {
         assert_eq!(call.name, "apply_patch");
         assert_eq!(call.input, "*** Begin Patch");
         assert_eq!(call.status, Some(MessageStatus::Completed));
+    }
+
+    #[test]
+    fn test_tool_search_items_accumulate_from_complete_sse_items() {
+        let lines = vec![
+            r#"data: {"type":"response.created","response":{"id":"resp_search"}}"#.to_string(),
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"tool_search_call","execution":"client","call_id":"call_search_1","status":"in_progress","arguments":{}}}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"tool_search_call","execution":"client","call_id":"call_search_1","status":"completed","arguments":{"goal":"Find shell tools"}}}"#.to_string(),
+            r#"data: {"type":"response.output_item.added","output_index":1,"item":{"type":"tool_search_output","execution":"client","call_id":"call_search_1","status":"in_progress","tools":[]}}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":1,"item":{"type":"tool_search_output","execution":"client","call_id":"call_search_1","status":"completed","tools":[{"type":"function","name":"run","defer_loading":true,"parameters":{"type":"object"}}]}}"#.to_string(),
+            r#"data: {"type":"response.completed","response":{"id":"resp_search","status":"completed","usage":null}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert_eq!(acc.output.len(), 2);
+        let OutputItem::ToolSearchCall(call) = &acc.output[0] else {
+            panic!("expected ToolSearchCall");
+        };
+        assert_eq!(call.call_id.as_deref(), Some("call_search_1"));
+        assert_eq!(call.arguments["goal"], "Find shell tools");
+
+        let OutputItem::ToolSearchOutput(output) = &acc.output[1] else {
+            panic!("expected ToolSearchOutput");
+        };
+        assert_eq!(output.call_id.as_deref(), Some("call_search_1"));
+        assert_eq!(output.tools[0]["name"], "run");
+        assert_eq!(output.tools[0]["defer_loading"], true);
+    }
+
+    #[test]
+    fn test_incomplete_and_optional_tool_search_fields_accumulate() {
+        let lines = vec![
+            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"tool_search_call","execution":"client","call_id":"call_incomplete","status":"incomplete","arguments":{"query":"shell"}}}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":1,"item":{"type":"tool_search_output","call_id":"call_optional","tools":[]}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        let OutputItem::ToolSearchCall(call) = &acc.output[0] else {
+            panic!("expected incomplete tool-search call");
+        };
+        assert_eq!(call.status, Some(crate::types::io::ToolSearchStatus::Incomplete));
+        assert!(!call.requires_client_execution());
+        let OutputItem::ToolSearchOutput(output) = &acc.output[1] else {
+            panic!("expected tool-search output with optional fields omitted");
+        };
+        assert_eq!(output.execution, None);
+        assert_eq!(output.status, None);
+    }
+
+    #[test]
+    fn test_unknown_output_item_type_is_not_accumulated_as_message() {
+        let lines = vec![
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"id":"future_1","type":"future_item"}}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"id":"future_1","type":"future_item","payload":{"a":1}}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert!(acc.output.is_empty());
+    }
+
+    #[test]
+    fn test_reasoning_precedes_completed_native_tool_search_item_by_output_index() {
+        let lines = vec![
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning"}}"#.to_string(),
+            r#"data: {"type":"response.reasoning_summary_text.delta","item_id":"rs_1","output_index":0,"delta":"Need a tool."}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":1,"item":{"type":"tool_search_call","execution":"client","call_id":"call_search","status":"completed","arguments":{"query":"shell"}}}"#.to_string(),
+            r#"data: {"type":"response.completed","response":{"id":"resp_search","status":"completed","usage":null}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert!(matches!(acc.output[0], OutputItem::Reasoning(_)));
+        assert!(matches!(acc.output[1], OutputItem::ToolSearchCall(_)));
+    }
+
+    #[test]
+    fn test_hosted_search_call_output_and_function_follow_output_index_order() {
+        let lines = vec![
+            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"tool_search_call","execution":"server","call_id":null,"status":"completed","arguments":{"paths":["crm"]}}}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":1,"item":{"type":"tool_search_output","execution":"server","call_id":null,"status":"completed","tools":[{"type":"function","name":"lookup"}]}}"#.to_string(),
+            r#"data: {"type":"response.output_item.added","output_index":2,"item":{"id":"fc_1","type":"function_call","call_id":"call_lookup","name":"lookup"}}"#.to_string(),
+            r#"data: {"type":"response.function_call_arguments.done","item_id":"fc_1","output_index":2,"call_id":"call_lookup","name":"lookup","arguments":"{}"}"#.to_string(),
+            r#"data: {"type":"response.completed","response":{"id":"resp_search","status":"completed","usage":null}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert!(matches!(acc.output[0], OutputItem::ToolSearchCall(_)));
+        assert!(matches!(acc.output[1], OutputItem::ToolSearchOutput(_)));
+        assert!(matches!(acc.output[2], OutputItem::FunctionCall(_)));
     }
 }

@@ -44,6 +44,13 @@ fn has_gateway_tools(payload: &RequestPayload) -> bool {
         .is_some_and(|tools| tools.iter().any(|tool| !matches!(tool, ResponsesTool::Function(_))))
 }
 
+fn has_tool_search_promotions(payload: &RequestPayload) -> bool {
+    payload.has_tool_search_promotions().unwrap_or_else(|error| {
+        debug!(%error, "routing request with invalid tool declarations through executor");
+        true
+    })
+}
+
 pub async fn responses(State(state): State<AppState>, req: Request) -> Response {
     let (parts, body) = req.into_parts();
     let (bytes, payload) = match read_and_parse(body).await {
@@ -51,16 +58,21 @@ pub async fn responses(State(state): State<AppState>, req: Request) -> Response 
         Err(e) => return e,
     };
 
-    let should_execute = payload.store
+    let has_gateway_tools = has_gateway_tools(&payload);
+    let already_requires_executor = payload.store
         || payload.previous_response_id.is_some()
         || payload.conversation_id.is_some()
-        || has_gateway_tools(&payload);
+        || has_gateway_tools;
+    let has_tool_search_promotions = !already_requires_executor && has_tool_search_promotions(&payload);
+    let should_execute = already_requires_executor || has_tool_search_promotions;
     debug!(
         route = if should_execute { "executor" } else { "proxy" },
         store = payload.store,
         stream = payload.stream,
         has_previous_response_id = payload.previous_response_id.is_some(),
         has_conversation_id = payload.conversation_id.is_some(),
+        has_gateway_tools,
+        has_tool_search_promotions,
         tools = payload.tools.as_ref().map_or(0, Vec::len),
         "routing HTTP responses request"
     );

@@ -99,6 +99,10 @@ pub enum ResponsesTool {
     /// text in `custom_tool_call.input` rather than JSON arguments.
     #[serde(rename = "custom")]
     Custom(CustomToolParam),
+    /// Dynamically discovers deferred tool definitions. Client-executed search
+    /// is performed by the caller (for example, Codex), not by the gateway.
+    #[serde(rename = "tool_search")]
+    ToolSearch(ToolSearchToolParam),
     #[serde(rename = "unknown", other)]
     Unknown,
 }
@@ -138,6 +142,31 @@ pub struct CustomToolParam {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub format: Option<Value>,
+    #[serde(default)]
+    #[serde(flatten)]
+    pub extra: HashMap<String, Value>,
+}
+
+/// Where a tool search is executed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolSearchExecution {
+    Client,
+    Server,
+}
+
+/// Parameters for a `type: "tool_search"` declaration.
+///
+/// Hosted search omits `execution`, `description`, and `parameters`. Client
+/// search supplies those fields so the caller controls discovery semantics.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolSearchToolParam {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<ToolSearchExecution>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parameters: Option<Value>,
     #[serde(default)]
     #[serde(flatten)]
     pub extra: HashMap<String, Value>,
@@ -247,6 +276,7 @@ impl ResponsesTool {
             Self::CodeInterpreter(_) => Some("code_interpreter"),
             Self::Namespace(_) => Some("namespace"),
             Self::Custom(_) => Some("custom"),
+            Self::ToolSearch(_) => Some("tool_search"),
             Self::Unknown => None,
         }
     }
@@ -437,5 +467,39 @@ mod tests {
         assert_eq!(serialized["type"], "custom");
         assert_eq!(serialized["format"]["syntax"], "lark");
         assert_eq!(serialized["format"]["future_option"], true);
+    }
+
+    #[test]
+    fn client_tool_search_shape_round_trips_and_preserves_extensions() {
+        let expected = serde_json::json!({
+            "type": "tool_search",
+            "execution": "client",
+            "description": "Find tools needed for the task.",
+            "parameters": {
+                "type": "object",
+                "properties": {"goal": {"type": "string"}},
+                "required": ["goal"]
+            },
+            "x-provider-field": {"version": 2}
+        });
+
+        let tool: ResponsesTool = serde_json::from_value(expected.clone()).unwrap();
+        let ResponsesTool::ToolSearch(search) = &tool else {
+            panic!("expected tool_search declaration");
+        };
+        assert_eq!(search.execution, Some(ToolSearchExecution::Client));
+        assert_eq!(tool.original_type(), Some("tool_search"));
+        assert_eq!(serde_json::to_value(tool).unwrap(), expected);
+    }
+
+    #[test]
+    fn hosted_tool_search_allows_bare_declaration() {
+        let expected = serde_json::json!({"type": "tool_search"});
+        let tool: ResponsesTool = serde_json::from_value(expected.clone()).unwrap();
+        let ResponsesTool::ToolSearch(search) = &tool else {
+            panic!("expected tool_search declaration");
+        };
+        assert_eq!(search.execution, None);
+        assert_eq!(serde_json::to_value(tool).unwrap(), expected);
     }
 }

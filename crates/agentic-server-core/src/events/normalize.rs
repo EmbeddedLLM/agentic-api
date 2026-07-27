@@ -118,6 +118,12 @@ fn json_u32(json: &Value, key: &str) -> u32 {
     u32::try_from(json[key].as_u64().unwrap_or(0)).unwrap_or(u32::MAX)
 }
 
+fn output_item_type(item: &Value) -> SSEItemType {
+    item.get("type")
+        .and_then(Value::as_str)
+        .map_or(SSEItemType::Message, SSEItemType::from)
+}
+
 fn extract_response_payload(json: &Value) -> EventPayload {
     let response = &json["response"];
     EventPayload::Response {
@@ -134,7 +140,7 @@ fn extract_output_item_added(json: &Value) -> EventPayload {
     let item = &json["item"];
     EventPayload::OutputItemAdded {
         item_id: json_str(item, "id"),
-        item_type: SSEItemType::from(json_str(item, "type")),
+        item_type: output_item_type(item),
         output_index: json_u32(json, "output_index"),
         name: json_str_opt(item, "name"),
         namespace: json_str_opt(item, "namespace"),
@@ -146,7 +152,7 @@ fn extract_output_item_done(json: &Value) -> EventPayload {
     let item = &json["item"];
     EventPayload::OutputItemDone {
         item_id: json_str(item, "id"),
-        item_type: SSEItemType::from(json_str(item, "type")),
+        item_type: output_item_type(item),
         output_index: json_u32(json, "output_index"),
         item: item.clone(),
     }

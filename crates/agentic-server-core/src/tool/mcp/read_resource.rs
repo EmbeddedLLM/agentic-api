@@ -33,6 +33,7 @@ pub fn read_mcp_resource_spec() -> FunctionTool {
             "additionalProperties": false
         })),
         strict: Some(false),
+        defer_loading: None,
     }
 }
 
