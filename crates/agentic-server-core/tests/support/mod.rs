@@ -7,6 +7,7 @@
 
 #![allow(dead_code)]
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::Router;
@@ -371,6 +372,9 @@ pub fn make_request(
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
+        reasoning: None,
+        prompt_cache_key: None,
+        extra: HashMap::new(),
     }
 }
 

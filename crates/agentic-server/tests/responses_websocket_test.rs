@@ -617,7 +617,11 @@ async fn test_websocket_first_turn_forwards_incremental_events_and_final_payload
             "model": "test-model",
             "input": [{"type": "message", "role": "user", "content": "hi"}],
             "store": true,
-            "stream": true
+            "stream": true,
+            "generate": true,
+            "reasoning": {"effort": "low"},
+            "prompt_cache_key": "ws-cache-key",
+            "x-future-responses-field": {"preserved": true}
         }),
     )
     .await;
@@ -647,6 +651,10 @@ async fn test_websocket_first_turn_forwards_incremental_events_and_final_payload
     assert_eq!(requests[0]["stream"], true);
     assert_eq!(requests[0]["input"][0]["content"], "hi");
     assert!(requests[0].get("type").is_none());
+    assert!(requests[0].get("generate").is_none());
+    assert_eq!(requests[0]["reasoning"]["effort"], "low");
+    assert_eq!(requests[0]["prompt_cache_key"], "ws-cache-key");
+    assert_eq!(requests[0]["x-future-responses-field"]["preserved"], true);
 }
 
 #[tokio::test]

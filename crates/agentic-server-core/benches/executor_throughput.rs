@@ -28,6 +28,7 @@
 //! cargo bench --bench executor_throughput -- --sample-size=20
 //! ```
 
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use axum::Router;
@@ -147,6 +148,9 @@ fn make_request(input: &str, stream: bool, prev_id: Option<String>) -> RequestPa
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
+        reasoning: None,
+        prompt_cache_key: None,
+        extra: HashMap::new(),
     }
 }
 
