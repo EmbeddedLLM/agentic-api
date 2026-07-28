@@ -16,11 +16,17 @@ SERVER_VERSION = "0.1.0"
 REPO_ROOT = Path(os.environ.get("AGENTIC_FIXTURE_ROOT", Path(__file__).resolve().parents[1])).resolve()
 SKIP_DIRS = {".git", "target", "__pycache__", "codex_captures"}
 MAX_READ_BYTES = 12_000
+READ_ONLY_TOOL_ANNOTATIONS = {
+    "readOnlyHint": True,
+    "destructiveHint": False,
+    "openWorldHint": False,
+}
 
 TOOLS = [
     {
         "name": "run",
         "description": "Echo a command string for agentic-api Codex namespace round-trip validation.",
+        "annotations": READ_ONLY_TOOL_ANNOTATIONS,
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -33,6 +39,7 @@ TOOLS = [
     {
         "name": "echo_text",
         "description": "Echo text with basic metadata. Useful for proving a simple MCP function call worked.",
+        "annotations": READ_ONLY_TOOL_ANNOTATIONS,
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -46,6 +53,7 @@ TOOLS = [
     {
         "name": "add_numbers",
         "description": "Add a list of numbers and return the total.",
+        "annotations": READ_ONLY_TOOL_ANNOTATIONS,
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -62,6 +70,7 @@ TOOLS = [
     {
         "name": "make_slug",
         "description": "Turn text into a lowercase URL/file-name friendly slug.",
+        "annotations": READ_ONLY_TOOL_ANNOTATIONS,
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -75,6 +84,7 @@ TOOLS = [
     {
         "name": "repo_file_head",
         "description": "Read the first lines of a repository file, limited to the agentic-api workspace.",
+        "annotations": READ_ONLY_TOOL_ANNOTATIONS,
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -88,6 +98,7 @@ TOOLS = [
     {
         "name": "search_repo",
         "description": "Literal text search across repository files, returning a small capped result set.",
+        "annotations": READ_ONLY_TOOL_ANNOTATIONS,
         "inputSchema": {
             "type": "object",
             "properties": {
