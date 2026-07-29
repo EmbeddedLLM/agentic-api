@@ -39,7 +39,7 @@ pub(crate) async fn persist_if_needed(
 /// Returns [`ExecutorError`] if the storage operation fails.
 pub async fn persist_response(
     payload: ResponsePayload,
-    mut ctx: RequestContext,
+    ctx: RequestContext,
     conv_handler: ConversationHandler,
     resp_handler: ResponseHandler,
 ) -> ExecutorResult<()> {
@@ -50,15 +50,6 @@ pub async fn persist_response(
     ) || payload.id.is_empty()
     {
         return Ok(());
-    }
-
-    // MCP headers and authorization are request-scoped runtime credentials.
-    // Tool execution has completed at this point, so remove them before either
-    // persistence mode builds and serializes effective tool metadata.
-    if let Some(tools) = ctx.enriched_request.tools.as_mut() {
-        for tool in tools {
-            tool.redact_runtime_credentials();
-        }
     }
 
     // Move output items from payload; handlers build ResponseMetadata from ctx internally.

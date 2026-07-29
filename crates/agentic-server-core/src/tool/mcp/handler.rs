@@ -10,7 +10,9 @@ use crate::tool::{GatewayExecutor, ToolError, ToolHandler, ToolOutput, ToolType}
 use crate::types::io::FunctionTool;
 use crate::types::io::output::{FunctionToolCall, GatewayCallStatus, McpCall, McpCallError, OutputItem};
 use crate::types::tools::{McpDiscoveredToolParam, ResponsesTool};
-use crate::utils::common::{deserialize_from_str_opt, deserialize_from_value, serialize_to_string};
+use crate::utils::common::{
+    deserialize_from_str, deserialize_from_str_opt, deserialize_from_value, serialize_to_string,
+};
 
 use super::{McpClient, McpError};
 
@@ -248,14 +250,25 @@ async fn execute_tool_call(
     mcp_tool_name: &str,
     arguments: &str,
 ) -> Result<String, ToolError> {
-    let args = deserialize_from_str_opt::<Value>(arguments);
+    let args = parse_tool_arguments(arguments)?;
 
     let result = client
-        .call_tool(mcp_tool_name, args)
+        .call_tool(mcp_tool_name, Some(args))
         .await
         .map_err(|error| ToolError::Execution(format!("tools/call failed for MCP server '{server_label}': {error}")))?;
 
     mcp_tool_result_text(&result)
+}
+
+fn parse_tool_arguments(arguments: &str) -> Result<Value, ToolError> {
+    let arguments = deserialize_from_str::<Value>(arguments)
+        .map_err(|error| ToolError::Execution(format!("invalid MCP tool arguments: {error}")))?;
+    if !arguments.is_object() {
+        return Err(ToolError::Execution(
+            "MCP tool arguments must be a JSON object".to_owned(),
+        ));
+    }
+    Ok(arguments)
 }
 
 fn mcp_tool_result_text(result: &rmcp::model::CallToolResult) -> Result<String, ToolError> {
@@ -434,6 +447,26 @@ mod tests {
         assert!(matches!(error, ToolError::Execution(_)));
         assert!(error.to_string().contains("tools/list failed for MCP server 'counter'"));
         assert!(error.to_string().contains("timed out during tools/list"));
+    }
+
+    #[test]
+    fn mcp_tool_arguments_require_valid_json_object() {
+        assert_eq!(
+            parse_tool_arguments(r#"{"amount":1}"#).unwrap(),
+            serde_json::json!({"amount": 1})
+        );
+
+        let malformed = parse_tool_arguments(r#"{"amount":"#).unwrap_err();
+        assert!(matches!(
+            malformed,
+            ToolError::Execution(message) if message.contains("invalid MCP tool arguments")
+        ));
+
+        let non_object = parse_tool_arguments("null").unwrap_err();
+        assert!(matches!(
+            non_object,
+            ToolError::Execution(message) if message == "MCP tool arguments must be a JSON object"
+        ));
     }
 
     #[test]

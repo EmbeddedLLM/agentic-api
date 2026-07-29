@@ -266,12 +266,13 @@ impl ResponsesTool {
         }
     }
 
-    /// Removes request-scoped credentials before a tool declaration is
-    /// persisted as effective response metadata.
-    pub(crate) fn redact_runtime_credentials(&mut self) {
+    /// Removes request-scoped MCP state before a tool declaration is persisted
+    /// as effective response metadata.
+    pub(crate) fn sanitize_for_persistence(&mut self) {
         if let Self::Mcp(param) = self {
             param.headers = None;
             param.authorization = None;
+            param.discovered_tools.clear();
         }
     }
 }
@@ -348,7 +349,7 @@ mod tests {
     }
 
     #[test]
-    fn responses_tool_mcp_redacts_runtime_credentials_for_persistence() {
+    fn responses_tool_mcp_removes_request_scoped_state_for_persistence() {
         let mut tool = serde_json::from_value::<ResponsesTool>(serde_json::json!({
             "type": "mcp",
             "server_label": "repo",
@@ -363,11 +364,26 @@ mod tests {
         }))
         .unwrap();
 
-        tool.redact_runtime_credentials();
+        let ResponsesTool::Mcp(param) = &mut tool else {
+            panic!("expected MCP tool");
+        };
+        param.discovered_tools.push(McpDiscoveredToolParam {
+            server_label: "repo".to_owned(),
+            tool_name: "read_file".to_owned(),
+            internal_name: "mcp__repo__read_file".to_owned(),
+            tool: serde_json::from_value(serde_json::json!({
+                "name": "read_file",
+                "inputSchema": {"type": "object"}
+            }))
+            .expect("discovered MCP tool"),
+        });
+
+        tool.sanitize_for_persistence();
 
         let persisted = serde_json::to_value(tool).unwrap();
         assert!(persisted.get("headers").is_none());
         assert!(persisted.get("authorization").is_none());
+        assert!(persisted.get("_agentic_discovered_tools").is_none());
         assert_eq!(persisted["server_label"], "repo");
         assert_eq!(persisted["server_url"], "https://mcp.example.test/mcp");
         assert_eq!(persisted["allowed_tools"], serde_json::json!(["read_file"]));
