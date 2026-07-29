@@ -33,6 +33,20 @@ The base loop handles text messages. This design extends it with:
 3. **Streaming tee** — forward SSE to client in real-time while accumulating for tool detection
 4. **Extended SSE events** — function_call, reasoning, file_search, web_search event types
 5. **Tool executor traits** — MCP, web_search, vector_store as pluggable implementations
+6. **Context compaction** — standalone and threshold-driven canonical item-history replacement
+
+### Responses compaction extension
+
+The executor exposes `compact_response()` alongside the normal `ExecuteRequest` path. Both standalone
+`POST /v1/responses/compact` requests and automatic `context_management` use the same inference-backed summary
+service. Public compaction items remain protocol types in stored or replayed item history; the upstream adapter renders
+the latest canonical window as retained user messages plus an assistant summary because vLLM does not accept the
+public `compaction` item type.
+
+Automatic compaction runs after rehydration and is re-evaluated before every inference round, including rounds after
+gateway-managed tool output. Its threshold therefore applies to the current resolved model-facing history, not only
+the newest client input. Every summary call's usage is added to the final answer usage. The `context_management`
+configuration is executor-only and is not forwarded to the upstream inference server.
 
 ---
 
@@ -246,7 +260,7 @@ How the complete pipeline maps to @leseb's proposed filter chain:
 | 8 | `mcp_tool` | `McpToolExecutor::execute()` | Phase 4 | @ashwing |
 | 9 | `web_search` | `WebSearchProvider::search()` | Phase 4 | @franciscojavierarceo |
 | 10 | `file_search` | `VectorStoreClient::search()` | Phase 4 | @franciscojavierarceo |
-| 11 | `compact` | `compact_context()` | Future | — |
+| 11 | `compact` | `compact_response()` / automatic context management | Implemented | — |
 | 12 | `reasoning` | `summarize_reasoning()` | Future | — |
 | 13 | `response_store` (resp) | `persist_response()` | PR #46 | @maralbahari |
 

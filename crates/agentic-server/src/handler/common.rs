@@ -4,6 +4,7 @@ use axum::response::Response;
 use bytes::Bytes;
 use futures::StreamExt;
 use http::StatusCode;
+use serde::de::DeserializeOwned;
 use tracing::warn;
 
 use agentic_core::executor::{BoxStream, ExecutorError};
@@ -59,6 +60,11 @@ pub(super) async fn read_and_parse(body: Body) -> Result<(Bytes, RequestPayload)
     let payload = serde_json::from_slice::<RequestPayload>(&bytes)
         .map_err(|e| executor_error_response(ExecutorError::from(e)))?;
     Ok((bytes, payload))
+}
+
+pub(super) async fn read_json<T: DeserializeOwned>(body: Body) -> Result<T, Response> {
+    let bytes = read_bytes(body).await?;
+    serde_json::from_slice::<T>(&bytes).map_err(|error| executor_error_response(ExecutorError::from(error)))
 }
 
 pub(super) fn extract_store(bytes: &[u8]) -> bool {

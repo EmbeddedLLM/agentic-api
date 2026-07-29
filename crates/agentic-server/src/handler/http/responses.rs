@@ -7,12 +7,14 @@ use tracing::debug;
 
 use std::sync::Arc;
 
-use agentic_core::executor::ExecuteRequest;
+use agentic_core::executor::{ExecuteRequest, compact_response as execute_compaction};
 use agentic_core::proxy::{ProxyRequest, proxy_request};
-use agentic_core::types::request_response::RequestPayload;
+use agentic_core::types::request_response::{CompactRequest, RequestPayload};
 use agentic_core::types::tools::ResponsesTool;
 
-use super::super::common::{convert_response, executor_error_response, extract_bearer, read_and_parse, sse_response};
+use super::super::common::{
+    convert_response, executor_error_response, extract_bearer, read_and_parse, read_json, sse_response,
+};
 use crate::app::AppState;
 
 async fn proxy_responses(state: &AppState, parts: Parts, body: Bytes) -> Response {
@@ -54,6 +56,11 @@ pub async fn responses(State(state): State<AppState>, req: Request) -> Response 
     let should_execute = payload.store
         || payload.previous_response_id.is_some()
         || payload.conversation_id.is_some()
+        || payload.input.contains_compaction()
+        || payload
+            .context_management
+            .as_ref()
+            .is_some_and(|entries| !entries.is_empty())
         || has_gateway_tools(&payload);
     debug!(
         route = if should_execute { "executor" } else { "proxy" },
@@ -61,6 +68,8 @@ pub async fn responses(State(state): State<AppState>, req: Request) -> Response 
         stream = payload.stream,
         has_previous_response_id = payload.previous_response_id.is_some(),
         has_conversation_id = payload.conversation_id.is_some(),
+        has_compaction = payload.input.contains_compaction(),
+        context_management = payload.context_management.as_ref().map_or(0, Vec::len),
         tools = payload.tools.as_ref().map_or(0, Vec::len),
         "routing HTTP responses request"
     );
@@ -69,5 +78,18 @@ pub async fn responses(State(state): State<AppState>, req: Request) -> Response 
         execute_responses(&state, parts, payload).await
     } else {
         proxy_responses(&state, parts, bytes).await
+    }
+}
+
+pub async fn compact_response(State(state): State<AppState>, req: Request) -> Response {
+    let (parts, body) = req.into_parts();
+    let request: CompactRequest = match read_json(body).await {
+        Ok(request) => request,
+        Err(response) => return response,
+    };
+    let auth = extract_bearer(&parts.headers, state.openai_api_key.as_deref());
+    match execute_compaction(request, state.exec_ctx.as_ref(), auth.as_deref()).await {
+        Ok(response) => axum::Json(response).into_response(),
+        Err(error) => executor_error_response(error),
     }
 }

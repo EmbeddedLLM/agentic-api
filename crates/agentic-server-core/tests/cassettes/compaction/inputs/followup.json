@@ -1,0 +1,22 @@
+[
+  {
+    "type": "message",
+    "role": "user",
+    "content": "Remember the stable marker BANANA-CASSETTE for the next model."
+  },
+  {
+    "type": "message",
+    "role": "assistant",
+    "content": [
+      {
+        "type": "output_text",
+        "text": "Checkpoint: preserve the stable marker BANANA-CASSETTE. The implementation uses Rust, OpenAI-only recordings, and offline replay tests."
+      }
+    ]
+  },
+  {
+    "type": "message",
+    "role": "user",
+    "content": "Reply with only the stable marker from the checkpoint."
+  }
+]

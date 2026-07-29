@@ -11,7 +11,9 @@ use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use agentic_core::executor::ExecutionContext;
 use agentic_core::proxy::ProxyState;
 
-use crate::handler::{conversations, count_tokens, health, messages, models, ready, responses, responses_ws};
+use crate::handler::{
+    compact_response, conversations, count_tokens, health, messages, models, ready, responses, responses_ws,
+};
 
 #[derive(Clone, Default)]
 pub struct WebSocketTracker {
@@ -127,6 +129,7 @@ pub fn build_router(state: AppState, server_config: &ServerConfig) -> Router {
         .route("/v1/messages", post(messages))
         .route("/v1/messages/count_tokens", post(count_tokens))
         .route("/v1/responses", post(responses).get(responses_ws))
+        .route("/v1/responses/compact", post(compact_response))
         .layer(server_config.cors_layer())
         .with_state(state)
 }

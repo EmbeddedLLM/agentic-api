@@ -129,6 +129,29 @@ Describes a flow in which the service retains or resolves prior state, such as R
 Describes a flow in which the request supplies all required context and the service does not rely on retained response
 or conversation state. `store: false` disables stored-response state, although callers may still replay prior items.
 
+### compaction
+
+Replacing a long item history with a smaller canonical window that preserves user messages and a model-generated
+summary. Compaction is distinct from truncation: it uses an inference call to summarize context rather than silently
+dropping items.
+
+### compaction item
+
+An item with `type: "compaction"` whose `encrypted_content` carries the context checkpoint consumed by a later model
+request. Preserve the exact field name in wire-format discussion. In this project's local implementation the field is
+plaintext despite its protocol name.
+
+### compacted window
+
+The canonical output of a compaction request: retained user-message items followed by one compaction item. Replay the
+complete window as later Responses input; do not extract only the summary.
+
+### context management
+
+The Responses request policy expressed by `context_management`. A `type: "compaction"` entry with
+`compact_threshold` asks the gateway to compact resolved input before inference when its estimated token count exceeds
+the threshold.
+
 ## Tools and tool calling
 
 ### tool
@@ -340,3 +363,4 @@ These definitions follow current OpenAI documentation:
 - [MCP and Connectors](https://developers.openai.com/api/docs/guides/tools-connectors-mcp)
 - [Streaming API responses](https://developers.openai.com/api/docs/guides/streaming-responses)
 - [Reasoning models](https://developers.openai.com/api/docs/guides/reasoning)
+- [Compaction](https://developers.openai.com/api/docs/guides/compaction)

@@ -92,6 +92,8 @@ markdown_extensions:
 nav:
   - Home: index.md
   - API Reference: api/index.md
+  - Guides:
+    - Responses Compaction: guides/responses-compaction.md
   - Developing:
     - Getting Started: developing/getting-started.md
   - Deploying:
