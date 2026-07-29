@@ -22,10 +22,12 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use tokio_util::sync::CancellationToken;
 
-use agentic_core::executor::{ConversationHandler, ExecutionContext, ResponseHandler};
+use agentic_core::executor::{ConversationHandler, ExecutionContext, RequestContext, ResponseHandler};
 use agentic_core::proxy::ProxyState;
 use agentic_core::storage::{ConversationStore, ResponseStore, create_pool_with_schema};
 use agentic_core::tool::{WebSearchHandler, model_visible_namespace_member_name};
+use agentic_core::types::RequestPayload;
+use agentic_core::types::tools::ResponsesTool;
 use agentic_server::app::{AppState, WebSocketTracker};
 
 use common::{spawn_gateway, test_config};
@@ -634,6 +636,70 @@ async fn test_websocket_generate_false_prewarm_persists_context_without_inferenc
     assert_eq!(requests[0]["tools"][0]["type"], "custom");
     assert_eq!(requests[0]["tools"][0]["name"], "apply_patch");
     assert!(requests[0].get("generate").is_none());
+}
+
+#[tokio::test]
+async fn test_websocket_generate_false_prewarm_redacts_mcp_runtime_credentials() {
+    let mock = MockResponsesServer::start(vec![]).await;
+    let fixture = storage_backed_state(&mock.url).await;
+    let (gateway_url, _gateway) = spawn_gateway(fixture.state.clone()).await;
+    let mut ws = connect_responses_ws(&gateway_url).await;
+
+    send_json(
+        &mut ws,
+        json!({
+            "type": "response.create",
+            "model": "test-model",
+            "input": [],
+            "tools": [{
+                "type": "mcp",
+                "server_label": "counter",
+                "server_url": "https://mcp.example.com/mcp",
+                "headers": {"X-API-Key": "secret"},
+                "authorization": "bearer-secret",
+                "require_approval": "never"
+            }],
+            "generate": false,
+            "store": false,
+            "stream": true
+        }),
+    )
+    .await;
+
+    let prewarm = recv_until_completed(&mut ws).await;
+    let response_id = prewarm.last().unwrap()["response"]["id"]
+        .as_str()
+        .expect("prewarm response id")
+        .to_owned();
+    assert!(mock.request_bodies().await.is_empty());
+
+    let request = serde_json::from_value::<RequestPayload>(json!({
+        "model": "test-model",
+        "input": [],
+        "previous_response_id": response_id
+    }))
+    .expect("lookup request");
+    let lookup_ctx = RequestContext {
+        original_request: request.clone(),
+        enriched_request: request,
+        new_input_items: vec![],
+        response_id: "resp_lookup".to_owned(),
+        conversation_id: None,
+    };
+    let stored = fixture
+        .state
+        .exec_ctx
+        .resp_handler
+        .get(&lookup_ctx)
+        .await
+        .expect("stored prewarm response");
+    let tools = stored.metadata.effective_tools.expect("persisted tools");
+    let ResponsesTool::Mcp(tool) = &tools[0] else {
+        panic!("expected MCP tool");
+    };
+
+    assert!(tool.headers.is_none());
+    assert!(tool.authorization.is_none());
 }
 
 #[tokio::test]
