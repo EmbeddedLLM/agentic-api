@@ -12,6 +12,7 @@ use either::Either;
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
+use super::compaction::maybe_compact_context;
 use super::gateway::{
     GatewayCallResult, LoopDecision, append_gateway_calls_to_new_input, append_output_items_to_input,
     append_tool_outputs, classify_round, emit_gateway_completed_events, emit_gateway_start_events,
@@ -104,9 +105,11 @@ async fn run_until_gateway_tools_complete(
         None => ToolRegistry::default(),
     };
     let mut combined_output: Vec<crate::OutputItem> = Vec::new();
-    let mut combined_usage: Option<ResponseUsage> = None;
+    let mut combined_usage = None;
 
     for round in 0..MAX_GATEWAY_TOOL_ROUNDS {
+        let compaction_usage = maybe_compact_context(&mut ctx, exec_ctx, auth).await?;
+        accumulate_usage(&mut combined_usage, compaction_usage);
         let output_offset = combined_output.len();
         let (mut payload, deferred_stream_events): (ResponsePayload, Vec<_>) = if stream_upstream {
             let stream_payload = fetch_stream_payload(

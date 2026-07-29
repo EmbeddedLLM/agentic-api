@@ -56,6 +56,9 @@ pub enum ExecutorError {
     #[error("invalid request: {0}")]
     InvalidRequest(String),
 
+    #[error("compaction summarization failed with status '{status}': {details}")]
+    CompactionFailed { status: String, details: String },
+
     #[error("tool error: {0}")]
     Tool(#[from] ToolError),
 }
@@ -68,7 +71,7 @@ impl ExecutorError {
             Self::Storage(e) if e.is_not_found() => StatusCode::NOT_FOUND,
             Self::LLMRequest { status, .. } => *status,
             Self::Tool(ToolError::Config(_)) | Self::InvalidRequest(_) | Self::JsonError(_) => StatusCode::BAD_REQUEST,
-            Self::Tool(ToolError::Execution(_)) => StatusCode::BAD_GATEWAY,
+            Self::Tool(ToolError::Execution(_)) | Self::CompactionFailed { .. } => StatusCode::BAD_GATEWAY,
             Self::ParseError(_) => StatusCode::UNPROCESSABLE_ENTITY,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         }
@@ -79,7 +82,7 @@ impl ExecutorError {
     pub fn error_code(&self) -> &'static str {
         match self {
             Self::Storage(e) if e.is_not_found() => "not_found",
-            Self::LLMRequest { .. } => "upstream_error",
+            Self::LLMRequest { .. } | Self::CompactionFailed { .. } => "upstream_error",
             Self::Tool(ToolError::Config(_)) | Self::InvalidRequest(_) | Self::ParseError(_) | Self::JsonError(_) => {
                 "invalid_request_error"
             }

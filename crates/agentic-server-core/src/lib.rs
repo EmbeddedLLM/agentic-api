@@ -19,9 +19,10 @@ pub use tool::{
     ToolOutput, ToolRegistry, ToolType, WebSearchHandler,
 };
 pub use types::{
-    CodeInterpreterToolParam, CodexNamespaceMember, CodexNamespaceToolParam, CustomToolCall,
-    CustomToolCallOutputMessage, CustomToolParam, EmptyToolNameError, FileSearchToolParam, FunctionTool,
-    FunctionToolCall, FunctionToolParam, FunctionToolResultMessage, GatewayCallStatus, IncompleteDetails, InputContent,
+    CodeInterpreterToolParam, CodexNamespaceMember, CodexNamespaceToolParam, CompactRequest, CompactedResponse,
+    CompactionItem, ContextManagement, CustomToolCall, CustomToolCallOutputMessage, CustomToolParam,
+    EmptyToolNameError, FileSearchToolParam, FunctionTool, FunctionToolCall, FunctionToolParam,
+    FunctionToolResultMessage, GatewayCallStatus, IncompleteDetails, InputContent, InputFunctionToolCall,
     InputImageContent, InputItem, InputMessage, InputMessageContent, InputTextContent, InputTokenDetails, McpToolCall,
     McpToolParam, NonEmptyToolName, OutputItem, OutputMessage, OutputTextContent, OutputTokenDetails, ReasoningOutput,
     ReasoningTextContent, RequestPayload, ResponsePayload, ResponseUsage, ResponsesInput, ResponsesTool, ToolChoice,

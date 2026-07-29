@@ -1,0 +1,27 @@
+[
+  {
+    "type": "message",
+    "role": "user",
+    "content": "Remember the stable marker BANANA-CASSETTE for the next model."
+  },
+  {
+    "type": "message",
+    "role": "assistant",
+    "content": "I will preserve BANANA-CASSETTE in the checkpoint."
+  },
+  {
+    "type": "message",
+    "role": "user",
+    "content": "The implementation uses Rust and must keep offline replay tests."
+  },
+  {
+    "type": "message",
+    "role": "assistant",
+    "content": "The constraints are OpenAI-only recordings and no network access in CI."
+  },
+  {
+    "type": "message",
+    "role": "user",
+    "content": "You are performing a CONTEXT CHECKPOINT COMPACTION. Create a concise handoff summary that preserves current progress, decisions, constraints, unresolved work, and critical references for the next model. Return only the summary."
+  }
+]

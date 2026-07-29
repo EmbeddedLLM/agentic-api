@@ -1,0 +1,42 @@
+[
+  {
+    "type": "message",
+    "id": "msg_retained",
+    "role": "user",
+    "status": "completed",
+    "content": "Keep the stable marker BANANA-CASSETTE."
+  },
+  {
+    "type": "message",
+    "role": "assistant",
+    "content": [
+      {
+        "type": "output_text",
+        "text": "Prior checkpoint: preserve BANANA-CASSETTE and continue the Rust replay work."
+      }
+    ]
+  },
+  {
+    "type": "message",
+    "role": "user",
+    "content": "Use the documentation lookup result when updating the tests."
+  },
+  {
+    "type": "function_call",
+    "id": "fc_lookup",
+    "call_id": "call_lookup",
+    "name": "lookup_docs",
+    "arguments": "{\"topic\":\"compaction\"}",
+    "status": "completed"
+  },
+  {
+    "type": "function_call_output",
+    "call_id": "call_lookup",
+    "output": "{\"requirement\":\"record OpenAI replay cassettes\"}"
+  },
+  {
+    "type": "message",
+    "role": "user",
+    "content": "You are performing a CONTEXT CHECKPOINT COMPACTION. Create a concise handoff summary that preserves current progress, decisions, constraints, unresolved work, and critical references for the next model. Return only the summary."
+  }
+]

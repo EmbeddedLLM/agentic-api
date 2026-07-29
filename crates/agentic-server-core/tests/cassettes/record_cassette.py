@@ -634,6 +634,18 @@ def _prompt(label: str) -> str:
         sys.exit(0)
 
 
+def _load_response_input(path: str | None) -> str | list | None:
+    if path is None:
+        return None
+    try:
+        value = json.loads(Path(path).read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise click.UsageError(f"--input-file is not valid JSON: {error}") from error
+    if not isinstance(value, (str, list)):
+        raise click.UsageError("--input-file must contain a JSON string or array.")
+    return value
+
+
 def _inject_tools(body: dict, tools: list | None, tool_choice: Any) -> None:
     if tools is not None:
         body["tools"] = tools
@@ -916,6 +928,7 @@ def run_responses(
     tool_choice: Any = None,
     tool_outputs: dict[str, str] | None = None,
     max_output_tokens: int | None = None,
+    preset_input: str | list | None = None,
 ) -> None:
     response_ids: dict[int, str] = {}
     responses: dict[int, dict] = {}
@@ -942,19 +955,22 @@ def run_responses(
             click.echo(
                 f"\n[Branch] turn {turn} chains from turn {branch_from} (response_id={previous_response_id})"
             )
-        prompt = _prompt(f"Turn {turn}/{turns} — enter prompt: ")
-
-        # Inject matching function/custom output items before the user message.
-        pending_calls = _extract_tool_calls(last_response) if tool_outputs else []
-        if pending_calls and tool_outputs:
-            input_value: Any = _build_tool_output_input(
-                pending_calls, tool_outputs, prompt if prompt else None
-            )
-            click.echo(
-                f"  [injecting {len(pending_calls)} tool output(s) before user message]"
-            )
+        if preset_input is not None:
+            input_value: Any = preset_input
         else:
-            input_value = prompt
+            prompt = _prompt(f"Turn {turn}/{turns} — enter prompt: ")
+
+            # Inject matching function/custom output items before the user message.
+            pending_calls = _extract_tool_calls(last_response) if tool_outputs else []
+            if pending_calls and tool_outputs:
+                input_value = _build_tool_output_input(
+                    pending_calls, tool_outputs, prompt if prompt else None
+                )
+                click.echo(
+                    f"  [injecting {len(pending_calls)} tool output(s) before user message]"
+                )
+            else:
+                input_value = prompt
 
         body: dict = {"model": model, "input": input_value, "stream": stream, "store": store}
         if max_output_tokens is not None:
@@ -1131,6 +1147,11 @@ def run_responses(
     "between turns (required for OpenAI Responses API).",
 )
 @click.option(
+    "--input-file",
+    type=click.Path(exists=True, dir_okay=False),
+    help="JSON file containing one Responses input value; requires HTTP --mode responses --turns 1.",
+)
+@click.option(
     "--max-output-tokens",
     type=int,
     default=1024,
@@ -1154,6 +1175,7 @@ def main(
     tools_file: str | None,
     tool_choice_raw: str | None,
     tool_outputs_file: str | None,
+    input_file: str | None,
     max_output_tokens: int,
 ) -> None:
     """Interactive multi-turn cassette recorder (proxy embedded)."""
@@ -1181,6 +1203,11 @@ def main(
         )
     if max_output_tokens < 0:
         raise click.UsageError("--max-output-tokens must be >= 0.")
+    if input_file and (mode != "responses" or turns != 1 or branches or transport != "http"):
+        raise click.UsageError(
+            "--input-file requires HTTP --mode responses --turns 1 without branches."
+        )
+    preset_input = _load_response_input(input_file)
 
     tools: list | None = None
     if tools_file:
@@ -1258,6 +1285,7 @@ def main(
                 tool_choice,
                 tool_outputs,
                 response_max_output_tokens,
+                preset_input,
             )
     else:
         click.echo(f"Proxy:   {proxy_url}  (requests go through here for recording)")
@@ -1289,6 +1317,7 @@ def main(
                         tool_choice,
                         tool_outputs,
                         response_max_output_tokens,
+                        preset_input,
                     )
                 elif mode == "messages":
                     run_messages(

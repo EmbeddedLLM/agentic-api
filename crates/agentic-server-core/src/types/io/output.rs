@@ -7,7 +7,9 @@ use crate::tool::ToolRegistry;
 use crate::types::event::MessageStatus;
 use crate::utils::uuid7_str;
 
-use super::input::{InputContent, InputItem, InputMessage, InputMessageContent, InputTextContent};
+use super::input::{
+    InputContent, InputFunctionToolCall, InputItem, InputMessage, InputMessageContent, InputTextContent,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutputTextContent {
@@ -72,7 +74,9 @@ impl From<OutputMessage> for InputMessage {
             .map(|c| InputContent::OutputText(InputTextContent { text: c.text }))
             .collect();
         Self {
+            id: Some(msg.id),
             role: msg.role,
+            status: Some(msg.status),
             content: InputMessageContent::Parts(parts),
         }
     }
@@ -447,7 +451,7 @@ impl OutputItem {
         match self {
             Self::Message(message) => Some(InputItem::Message(message.clone().into())),
             Self::Reasoning(reasoning) => Some(InputItem::Reasoning(reasoning.clone())),
-            Self::FunctionCall(call) => Some(InputItem::FunctionCall(call.clone())),
+            Self::FunctionCall(call) => Some(InputItem::FunctionCall(InputFunctionToolCall::from(call.clone()))),
             Self::CustomToolCall(call) => Some(InputItem::CustomToolCall(call.clone())),
             Self::WebSearchCall(_) | Self::McpToolCall(_) | Self::Unknown => None,
         }

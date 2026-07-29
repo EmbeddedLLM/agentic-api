@@ -438,7 +438,7 @@ pub(super) fn append_gateway_calls_to_new_input(
         let OutputItem::FunctionCall(call) = item else {
             return None;
         };
-        is_gateway_owned_call(call, registry).then(|| InputItem::FunctionCall(call.clone()))
+        is_gateway_owned_call(call, registry).then(|| InputItem::FunctionCall(call.clone().into()))
     }));
 }
 

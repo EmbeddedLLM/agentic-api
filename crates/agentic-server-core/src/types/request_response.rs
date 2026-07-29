@@ -1,3 +1,6 @@
+use std::borrow::Cow;
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -31,6 +34,8 @@ pub struct RequestPayload {
     pub parallel_tool_calls: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_salt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_management: Option<Vec<ContextManagement>>,
 }
 
 fn default_true() -> bool {
@@ -40,7 +45,7 @@ fn default_true() -> bool {
 #[derive(Debug, Serialize)]
 pub struct UpstreamRequest<'a> {
     pub model: &'a str,
-    pub input: &'a ResponsesInput,
+    pub input: Cow<'a, ResponsesInput>,
     pub stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instructions: Option<&'a str>,
@@ -154,7 +159,7 @@ impl RequestPayload {
         let tool_choice = CodexNamespaceHandler.resolve_tool_choice(namespace_map.as_ref(), self.tool_choice.as_ref());
         Ok(UpstreamRequest {
             model: &self.model,
-            input: &self.input,
+            input: self.input.model_input(),
             stream,
             instructions: self.instructions.as_deref(),
             tools,
@@ -175,6 +180,40 @@ impl RequestPayload {
             .as_deref()
             .is_some_and(|tools| tools.iter().any(ResponsesTool::is_gateway_owned))
     }
+}
+
+/// Server-side context management configuration for a Responses request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextManagement {
+    #[serde(rename = "type")]
+    pub type_: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compact_threshold: Option<u64>,
+}
+
+/// Request body accepted by `POST /v1/responses/compact`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CompactRequest {
+    pub model: String,
+    #[serde(default)]
+    pub input: Option<ResponsesInput>,
+    #[serde(default)]
+    pub instructions: Option<String>,
+    #[serde(default)]
+    pub previous_response_id: Option<String>,
+    /// Compatibility fields sent by current SDK and Codex clients.
+    #[serde(flatten)]
+    pub compatibility: HashMap<String, Value>,
+}
+
+/// Result returned by `POST /v1/responses/compact`.
+#[derive(Debug, Clone, Serialize)]
+pub struct CompactedResponse {
+    pub id: String,
+    pub object: String,
+    pub created_at: i64,
+    pub output: Vec<InputItem>,
+    pub usage: ResponseUsage,
 }
 
 fn upstream_tools(tool: ResponsesTool) -> Vec<UpstreamTool> {
@@ -260,7 +299,9 @@ impl From<&ResponsesInput> for Vec<InputItem> {
     fn from(input: &ResponsesInput) -> Self {
         match input {
             ResponsesInput::Text(text) => vec![InputItem::Message(InputMessage {
+                id: None,
                 role: "user".into(),
+                status: None,
                 content: InputMessageContent::Text(text.clone()),
             })],
             ResponsesInput::Items(items) => items.iter().filter(|item| !item.is_unknown()).cloned().collect(),
@@ -268,9 +309,40 @@ impl From<&ResponsesInput> for Vec<InputItem> {
     }
 }
 
+impl From<ResponsesInput> for Vec<InputItem> {
+    fn from(input: ResponsesInput) -> Self {
+        match input {
+            ResponsesInput::Text(text) => vec![InputItem::Message(InputMessage {
+                id: None,
+                role: "user".into(),
+                status: None,
+                content: InputMessageContent::Text(text),
+            })],
+            ResponsesInput::Items(items) => items.into_iter().filter(|item| !item.is_unknown()).collect(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compact_request_accepts_codex_compatibility_fields() {
+        let request: CompactRequest = serde_json::from_value(serde_json::json!({
+            "model": "test-model",
+            "input": [{"role": "user", "content": "hello"}],
+            "tools": [],
+            "parallel_tool_calls": true,
+            "reasoning": {"effort": "medium"},
+            "text": {"verbosity": "low"}
+        }))
+        .expect("compact request should parse");
+
+        assert_eq!(request.model, "test-model");
+        assert!(request.input.is_some());
+        assert_eq!(request.compatibility.len(), 4);
+    }
 
     #[test]
     fn request_payload_forwards_cache_salt_upstream() {

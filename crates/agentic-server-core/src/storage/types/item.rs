@@ -107,7 +107,9 @@ mod tests {
     #[test]
     fn test_inout_item_from_input() {
         let input = InputItem::Message(InputMessage {
+            id: None,
             role: "user".to_string(),
+            status: None,
             content: InputMessageContent::Text("hello".to_string()),
         });
         let item: InOutItem = input.into();
@@ -124,7 +126,9 @@ mod tests {
     #[test]
     fn test_inout_item_to_string() {
         let input = InputItem::Message(InputMessage {
+            id: None,
             role: "user".to_string(),
+            status: None,
             content: InputMessageContent::Text("test".to_string()),
         });
         let item = InOutItem::Input(input);
@@ -141,12 +145,16 @@ mod tests {
         output.content.push(OutputTextContent::new("answer"));
         let items = vec![
             InOutItem::Input(InputItem::Message(InputMessage {
+                id: None,
                 role: "user".to_string(),
+                status: None,
                 content: InputMessageContent::Text("msg1".to_string()),
             })),
             InOutItem::Output(OutputItem::Message(output)),
             InOutItem::Input(InputItem::Message(InputMessage {
+                id: None,
                 role: "user".to_string(),
+                status: None,
                 content: InputMessageContent::Text("msg2".to_string()),
             })),
         ];
