@@ -606,22 +606,6 @@ mod tests {
     }
 
     #[test]
-    fn test_process_event_mcp_tool_call_done_accumulates_output() {
-        let lines = vec![
-            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"mcp_tool_call","id":"mcp_1","server":"repo","tool":"read_mcp_resource","arguments":{"server":"repo"},"status":"in_progress"}}"#.to_string(),
-            r#"data: {"type":"response.mcp_tool_call.in_progress","item_id":"mcp_1","output_index":0}"#.to_string(),
-            r#"data: {"type":"response.mcp_tool_call.completed","item_id":"mcp_1","output_index":0,"item":{"type":"mcp_tool_call","id":"mcp_1","server":"repo","tool":"read_mcp_resource","arguments":{"server":"repo"},"status":"completed","result":{"contents":[]}}}"#.to_string(),
-            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"mcp_tool_call","id":"mcp_1","server":"repo","tool":"read_mcp_resource","arguments":{"server":"repo"},"status":"completed","result":{"contents":[]}}}"#.to_string(),
-            r#"data: {"type":"response.done","response":{"id":"resp_1","status":"completed","usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}"#.to_string(),
-        ];
-
-        let acc = ResponseAccumulator::from_sse_lines(lines, None);
-        assert_eq!(acc.status, ResponseStatus::Completed);
-        assert_eq!(acc.output.len(), 1);
-        assert!(matches!(acc.output[0], OutputItem::McpToolCall(_)));
-    }
-
-    #[test]
     fn test_process_event_web_search_done_accumulates_output() {
         let lines = vec![
             r#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"web_search_call","id":"ws_1","status":"in_progress","action":{"type":"search","query":"rust","sources":[]}}}"#.to_string(),

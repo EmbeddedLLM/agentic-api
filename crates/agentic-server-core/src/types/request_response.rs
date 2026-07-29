@@ -514,16 +514,7 @@ mod tests {
     fn builtin_tool_declarations() -> Vec<Value> {
         vec![
             serde_json::json!({
-                "type": "function",
-                "name": "read_mcp_resource",
-                "metadata": {
-                    "server_label": "repo",
-                    "server_url": "http://localhost:9001/mcp"
-                }
-            }),
-            serde_json::json!({
                 "type": "mcp",
-                "name": "read_mcp_resource",
                 "server_label": "repo",
                 "server_url": "http://localhost:9001/mcp"
             }),

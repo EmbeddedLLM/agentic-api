@@ -76,12 +76,9 @@ async fn execute_messages(state: &AppState, headers: &HeaderMap, req: &MessagesR
     // ownership (incl. configured aliases like Claude Code's `WebSearch`) is
     // resolved against the operator-configured map.
     let gateway_map = &state.exec_ctx.messages_gateway_tools;
-    let registry = match ToolRegistry::build_with_handlers(
-        &registry_tools(req.tools.as_ref(), gateway_map),
-        &state.exec_ctx.gateway_executors,
-    )
-    .await
-    {
+    let mut tools = registry_tools(req.tools.as_ref(), gateway_map);
+    let mut executors = state.exec_ctx.gateway_executors.clone();
+    let registry = match ToolRegistry::build_with_handlers(&mut tools, &mut executors).await {
         Ok(r) => r,
         Err(e) => return messages_error_response(&ExecutorError::from(e)),
     };

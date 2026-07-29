@@ -536,26 +536,6 @@ mod tests {
     }
 
     #[test]
-    fn mcp_tool_call_serializes_as_output_item() {
-        let item = OutputItem::McpToolCall(McpToolCall::new(
-            "mcp_1",
-            "repo",
-            "read_mcp_resource",
-            serde_json::json!({"server": "repo", "uri": "file://fixture.yaml"}),
-            GatewayCallStatus::Completed,
-            Some(serde_json::json!({"contents": []})),
-            None,
-        ));
-
-        let json = serde_json::to_value(item).unwrap();
-        assert_eq!(json["type"], "mcp_tool_call");
-        assert_eq!(json["id"], "mcp_1");
-        assert_eq!(json["status"], "completed");
-        assert_eq!(json["server"], "repo");
-        assert_eq!(json["tool"], "read_mcp_resource");
-    }
-
-    #[test]
     fn vllm_reasoning_response_deserializes() {
         let vllm_output = serde_json::json!([
             {

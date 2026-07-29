@@ -100,8 +100,9 @@ async fn run_until_gateway_tools_complete(
     stream_upstream: bool,
     mut stream: Option<(&mut GatewayStreamAccumulator, &mpsc::UnboundedSender<StreamEvent>)>,
 ) -> ExecutorResult<(ResponsePayload, RequestContext)> {
-    let registry: ToolRegistry = match ctx.enriched_request.tools.as_ref() {
-        Some(tools) => ToolRegistry::build_with_handlers(tools, &exec_ctx.gateway_executors).await?,
+    let mut executors = exec_ctx.gateway_executors.request_scoped();
+    let registry: ToolRegistry = match ctx.enriched_request.tools.as_mut() {
+        Some(tools) => ToolRegistry::build_with_handlers(tools, &mut executors).await?,
         None => ToolRegistry::default(),
     };
     let mut combined_output: Vec<crate::OutputItem> = Vec::new();

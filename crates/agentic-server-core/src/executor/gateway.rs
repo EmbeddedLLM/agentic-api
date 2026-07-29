@@ -172,7 +172,7 @@ async fn execute_gateway_call_with_timeout(
             (execution_error_output(&call, &message)?, GatewayCallStatus::Failed)
         }
     };
-    let public_output = gateway_public_output(dispatch.tool_type, &call, &output, status);
+    let public_output = gateway_public_output(dispatch.tool_type, &call, &output, status, registry);
     Ok(GatewayCallResult {
         call,
         input_item: InputItem::FunctionCallOutput(output.into()),
@@ -185,10 +185,13 @@ fn gateway_public_output(
     call: &FunctionToolCall,
     output: &ToolOutput,
     status: GatewayCallStatus,
+    registry: &ToolRegistry,
 ) -> Option<OutputItem> {
     match tool_type {
         ToolType::WebSearch => Some(crate::tool::web_search::output_item(call, output, status)),
-        ToolType::Mcp => Some(crate::tool::mcp::handler::output_item(call, output, status)),
+        ToolType::Mcp => registry
+            .mcp_tool_ref(&call.name)
+            .map(|tool_ref| crate::tool::mcp::handler::output_item(call, output, status, tool_ref)),
         ToolType::Function | ToolType::CodexNamespace | ToolType::FileSearch | ToolType::CodeInterpreter => None,
     }
 }
@@ -252,7 +255,9 @@ pub(super) fn gateway_event_plans(
                 output_index: u32::try_from(output_index).unwrap_or(u32::MAX),
                 started_output: match entry.tool_type {
                     ToolType::WebSearch => Some(crate::tool::web_search::started_output_item(call)),
-                    ToolType::Mcp => Some(crate::tool::mcp::handler::started_output_item(call)),
+                    ToolType::Mcp => registry
+                        .mcp_tool_ref(&call.name)
+                        .map(|tool_ref| crate::tool::mcp::handler::started_output_item(call, tool_ref)),
                     ToolType::Function
                     | ToolType::CodexNamespace
                     | ToolType::FileSearch
@@ -573,7 +578,8 @@ mod tests {
             serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).expect("web_search tool param");
         let mut executors = GatewayExecutors::default();
         executors.insert(Arc::new(SlowExecutor));
-        let registry = ToolRegistry::build_with_handlers(&[web_search], &executors)
+        let mut tools = [web_search];
+        let registry = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
             .await
             .expect("registry builds");
 
@@ -609,7 +615,9 @@ mod tests {
         // not fail the whole request.
         let web_search: ResponsesTool =
             serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).expect("web_search tool param");
-        let registry = ToolRegistry::build_with_handlers(&[web_search], &GatewayExecutors::default())
+        let mut tools = [web_search];
+        let mut executors = GatewayExecutors::default();
+        let registry = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
             .await
             .expect("registry builds");
 

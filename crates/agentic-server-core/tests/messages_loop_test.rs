@@ -152,6 +152,14 @@ async fn build_exec_ctx(vllm_url: &str, search_url: &str) -> ExecutionContext {
     ))
 }
 
+async fn build_tool_registry(tools: &Vec<ToolParam>, exec_ctx: &ExecutionContext) -> ToolRegistry {
+    let mut registry_tool_params = registry_tools(Some(tools), &GatewayToolMap::default());
+    let mut gateway_executors = exec_ctx.gateway_executors.clone();
+    ToolRegistry::build_with_handlers(&mut registry_tool_params, &mut gateway_executors)
+        .await
+        .unwrap()
+}
+
 fn web_search_request() -> Value {
     serde_json::json!({
         "model": "qwen3",
@@ -171,12 +179,7 @@ async fn messages_loop_hides_gateway_tool_and_surfaces_final_text() {
 
     let request = web_search_request();
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
-    let registry = ToolRegistry::build_with_handlers(
-        &registry_tools(Some(&tools), &GatewayToolMap::default()),
-        &exec_ctx.gateway_executors,
-    )
-    .await
-    .unwrap();
+    let registry = build_tool_registry(&tools, &exec_ctx).await;
 
     let result = run_messages_loop(request, &registry, &exec_ctx, None)
         .await
@@ -244,12 +247,7 @@ async fn repro_f3_next_round_preserves_thinking_and_text_blocks() {
     let exec_ctx = build_exec_ctx(&vllm_url, &search_url).await;
     let request = web_search_request();
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
-    let registry = ToolRegistry::build_with_handlers(
-        &registry_tools(Some(&tools), &GatewayToolMap::default()),
-        &exec_ctx.gateway_executors,
-    )
-    .await
-    .unwrap();
+    let registry = build_tool_registry(&tools, &exec_ctx).await;
     run_messages_loop(request, &registry, &exec_ctx, None).await.unwrap();
 
     // Inspect the assistant turn the loop appended for round 2.
@@ -318,12 +316,7 @@ async fn run_against(bodies: Vec<Value>, request: Value) -> (Value, usize) {
     let (search_url, _rx, _s) = spawn_mock_search().await;
     let exec_ctx = build_exec_ctx(&vllm_url, &search_url).await;
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap_or_default();
-    let registry = ToolRegistry::build_with_handlers(
-        &registry_tools(Some(&tools), &GatewayToolMap::default()),
-        &exec_ctx.gateway_executors,
-    )
-    .await
-    .unwrap();
+    let registry = build_tool_registry(&tools, &exec_ctx).await;
     let result = run_messages_loop(request, &registry, &exec_ctx, None).await.unwrap();
     (result, upstream.calls.load(Ordering::SeqCst))
 }
@@ -381,12 +374,7 @@ async fn messages_loop_multi_round_sequential() {
     let exec_ctx = build_exec_ctx(&vllm_url, &search_url).await;
     let request = web_search_request();
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
-    let registry = ToolRegistry::build_with_handlers(
-        &registry_tools(Some(&tools), &GatewayToolMap::default()),
-        &exec_ctx.gateway_executors,
-    )
-    .await
-    .unwrap();
+    let registry = build_tool_registry(&tools, &exec_ctx).await;
 
     let result = run_messages_loop(request, &registry, &exec_ctx, None).await.unwrap();
 
@@ -409,12 +397,7 @@ async fn messages_loop_parallel_tool_use() {
     let exec_ctx = build_exec_ctx(&vllm_url, &search_url).await;
     let request = web_search_request();
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
-    let registry = ToolRegistry::build_with_handlers(
-        &registry_tools(Some(&tools), &GatewayToolMap::default()),
-        &exec_ctx.gateway_executors,
-    )
-    .await
-    .unwrap();
+    let registry = build_tool_registry(&tools, &exec_ctx).await;
 
     let result = run_messages_loop(request, &registry, &exec_ctx, None).await.unwrap();
 
@@ -457,12 +440,7 @@ async fn messages_loop_tool_failure_becomes_error_tool_result() {
     let exec_ctx = build_exec_ctx(&vllm_url, &search_url).await;
     let request = web_search_request();
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
-    let registry = ToolRegistry::build_with_handlers(
-        &registry_tools(Some(&tools), &GatewayToolMap::default()),
-        &exec_ctx.gateway_executors,
-    )
-    .await
-    .unwrap();
+    let registry = build_tool_registry(&tools, &exec_ctx).await;
 
     let result = run_messages_loop(request, &registry, &exec_ctx, None).await.unwrap();
 
@@ -506,12 +484,7 @@ async fn messages_loop_caps_at_max_rounds() {
     let exec_ctx = build_exec_ctx(&vllm_url, &search_url).await;
     let request = web_search_request();
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
-    let registry = ToolRegistry::build_with_handlers(
-        &registry_tools(Some(&tools), &GatewayToolMap::default()),
-        &exec_ctx.gateway_executors,
-    )
-    .await
-    .unwrap();
+    let registry = build_tool_registry(&tools, &exec_ctx).await;
 
     let result = run_messages_loop(request, &registry, &exec_ctx, None).await.unwrap();
 

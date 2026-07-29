@@ -146,13 +146,28 @@ pub struct CustomToolParam {
 /// Parameters for a gateway MCP built-in tool declaration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpToolParam {
-    pub name: NonEmptyToolName,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub server_label: Option<String>,
+    pub server_label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connector_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub headers: Option<HashMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authorization: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed_tools: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub require_approval: Option<String>,
+    /// Request-scoped `tools/list` results used by MCP normalization. This
+    /// field is populated internally and ignored on the public request wire.
+    #[serde(
+        rename = "_agentic_discovered_tools",
+        default,
+        skip_deserializing,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub(crate) discovered_tools: Vec<McpDiscoveredToolParam>,
 }
 
 /// Parameters for a discovered MCP (Model Context Protocol) server tool.
@@ -160,7 +175,7 @@ pub struct McpToolParam {
 pub struct McpDiscoveredToolParam {
     pub server_label: String,
     pub tool_name: String,
-    pub exposed_name: String,
+    pub internal_name: String,
     pub tool: rmcp::model::Tool,
 }
 
@@ -250,6 +265,16 @@ impl ResponsesTool {
             Self::Unknown => None,
         }
     }
+
+    /// Removes request-scoped MCP state before a tool declaration is persisted
+    /// as effective response metadata.
+    pub(crate) fn sanitize_for_persistence(&mut self) {
+        if let Self::Mcp(param) = self {
+            param.headers = None;
+            param.authorization = None;
+            param.discovered_tools.clear();
+        }
+    }
 }
 
 #[cfg(test)]
@@ -305,22 +330,97 @@ mod tests {
     fn responses_tool_mcp_round_trips_with_field_values() {
         let json = serde_json::json!({
             "type": "mcp",
-            "name": "read_mcp_resource",
             "server_label": "repo",
             "server_url": "http://localhost:9001/mcp",
-            "headers": {"Authorization": "Bearer token"}
+            "headers": {"X-Request-ID": "request-1"},
+            "authorization": "token",
+            "allowed_tools": ["read_file"],
+            "require_approval": "never"
         });
         let tool: ResponsesTool = serde_json::from_value(json).unwrap();
         let back = serde_json::to_value(&tool).unwrap();
         assert_eq!(back["type"], "mcp");
-        assert_eq!(back["name"], "read_mcp_resource");
         assert_eq!(back["server_label"], "repo");
         assert_eq!(back["server_url"], "http://localhost:9001/mcp");
         if let ResponsesTool::Mcp(ref p) = tool {
-            assert_eq!(p.name.as_str(), "read_mcp_resource");
-            assert_eq!(p.server_label.as_deref(), Some("repo"));
+            assert_eq!(p.server_label, "repo");
             assert_eq!(p.server_url.as_deref(), Some("http://localhost:9001/mcp"));
         }
+    }
+
+    #[test]
+    fn responses_tool_mcp_removes_request_scoped_state_for_persistence() {
+        let mut tool = serde_json::from_value::<ResponsesTool>(serde_json::json!({
+            "type": "mcp",
+            "server_label": "repo",
+            "server_url": "https://mcp.example.test/mcp",
+            "headers": {
+                "Authorization": "Bearer header-secret",
+                "X-Request-ID": "request-1"
+            },
+            "authorization": "field-secret",
+            "allowed_tools": ["read_file"],
+            "require_approval": "never"
+        }))
+        .unwrap();
+
+        let ResponsesTool::Mcp(param) = &mut tool else {
+            panic!("expected MCP tool");
+        };
+        param.discovered_tools.push(McpDiscoveredToolParam {
+            server_label: "repo".to_owned(),
+            tool_name: "read_file".to_owned(),
+            internal_name: "mcp__repo__read_file".to_owned(),
+            tool: serde_json::from_value(serde_json::json!({
+                "name": "read_file",
+                "inputSchema": {"type": "object"}
+            }))
+            .expect("discovered MCP tool"),
+        });
+
+        tool.sanitize_for_persistence();
+
+        let persisted = serde_json::to_value(tool).unwrap();
+        assert!(persisted.get("headers").is_none());
+        assert!(persisted.get("authorization").is_none());
+        assert!(persisted.get("_agentic_discovered_tools").is_none());
+        assert_eq!(persisted["server_label"], "repo");
+        assert_eq!(persisted["server_url"], "https://mcp.example.test/mcp");
+        assert_eq!(persisted["allowed_tools"], serde_json::json!(["read_file"]));
+        assert_eq!(persisted["require_approval"], "never");
+    }
+
+    #[test]
+    fn responses_tool_mcp_ignores_unknown_fields() {
+        let tool = serde_json::from_value::<ResponsesTool>(serde_json::json!({
+            "type": "mcp",
+            "name": "increment",
+            "server_label": "repo",
+            "server_url": "http://localhost:9001/mcp",
+            "future_field": true
+        }))
+        .unwrap();
+
+        let back = serde_json::to_value(tool).unwrap();
+        assert_eq!(back["server_label"], "repo");
+        assert!(back.get("name").is_none());
+        assert!(back.get("future_field").is_none());
+    }
+
+    #[test]
+    fn responses_tool_mcp_ignores_internal_discovery_field_from_request() {
+        let tool = serde_json::from_value::<ResponsesTool>(serde_json::json!({
+            "type": "mcp",
+            "server_label": "repo",
+            "server_url": "http://localhost:9001/mcp",
+            "_agentic_discovered_tools": [{"not": "a discovered tool"}]
+        }))
+        .unwrap();
+
+        let ResponsesTool::Mcp(param) = tool else {
+            panic!("expected MCP tool");
+        };
+        assert!(param.discovered_tools.is_empty());
     }
 
     #[test]
@@ -368,7 +468,7 @@ mod tests {
         let json = serde_json::json!({
             "server_label": "my_server",
             "tool_name": "fetch",
-            "exposed_name": "my_server__fetch",
+            "internal_name": "mcp__my_server__fetch",
             "tool": {
                 "name": "fetch",
                 "inputSchema": {

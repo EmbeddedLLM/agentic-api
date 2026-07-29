@@ -5,6 +5,7 @@ use serde_json::{Map, Value};
 use crate::events::WireEvent;
 use crate::types::io::{FunctionTool, FunctionToolCall, OutputItem, ToolChoice};
 use crate::types::tools::{CodexNamespaceMember, CodexNamespaceToolParam, NonEmptyToolName, ResponsesTool};
+use crate::utils::common::serialize_to_value_or_custom_default;
 
 use super::handler::{ToolError, ToolHandler};
 use super::registry::{ToolEntry, ToolType};
@@ -45,27 +46,33 @@ pub fn model_visible_namespace_member_name(namespace: &str, member: &str) -> Str
 /// namespace members to those flat names first (see
 /// [`CodexNamespaceHandler::resolve_namespace_members`]).
 pub(crate) fn insert_namespace_entries(entries: &mut HashMap<String, ToolEntry>, p: &CodexNamespaceToolParam) {
-    let config = serde_json::to_value(p).expect("serialization of known struct is infallible");
-    for member in &p.tools {
-        let CodexNamespaceMember::Function(function) = member else {
-            continue;
-        };
-        let name = function.name.as_str().to_owned();
-        if entries
-            .insert(
-                name.clone(),
-                ToolEntry {
-                    tool_type: ToolType::CodexNamespace,
-                    config: config.clone(),
-                    server_label: Some(p.name.clone()),
-                    handler: None,
-                },
-            )
-            .is_some()
-        {
-            tracing::warn!(name = %name, namespace = %p.name, "duplicate tool name - previous definition overwritten");
-        }
-    }
+    serialize_to_value_or_custom_default(
+        p,
+        "namespace tool config serialization failed",
+        |config| {
+            for member in &p.tools {
+                let CodexNamespaceMember::Function(function) = member else {
+                    continue;
+                };
+                let name = function.name.as_str().to_owned();
+                if entries
+                    .insert(
+                        name.clone(),
+                        ToolEntry {
+                            tool_type: ToolType::CodexNamespace,
+                            config: config.clone(),
+                            server_label: Some(p.name.clone()),
+                            handler: None,
+                        },
+                    )
+                    .is_some()
+                {
+                    tracing::warn!(name = %name, namespace = %p.name, "duplicate tool name - previous definition overwritten");
+                }
+            }
+        },
+        (),
+    );
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -412,11 +419,13 @@ fn typed_top_level_registry_keys(tools: &[ResponsesTool]) -> HashMap<String, Too
         .filter_map(|tool| {
             let registry_key = match tool {
                 ResponsesTool::Function(function) => function.name.as_str().to_owned(),
-                ResponsesTool::Mcp(mcp) => mcp.name.as_str().to_owned(),
                 ResponsesTool::WebSearch(_) => "web_search".to_owned(),
                 ResponsesTool::FileSearch(_) => "file_search".to_owned(),
                 ResponsesTool::CodeInterpreter(_) => "code_interpreter".to_owned(),
-                ResponsesTool::Namespace(_) | ResponsesTool::Custom(_) | ResponsesTool::Unknown => return None,
+                ResponsesTool::Mcp(_)
+                | ResponsesTool::Namespace(_)
+                | ResponsesTool::Custom(_)
+                | ResponsesTool::Unknown => return None,
             };
             tool.tool_type().map(|tool_type| (registry_key, tool_type))
         })
@@ -774,10 +783,9 @@ mod tests {
     }
 
     #[test]
-    fn resolve_namespace_members_rejects_shortened_name_collision_with_later_mcp_tool() {
+    fn resolve_namespace_members_accepts_native_mcp_without_static_registry_key() {
         let namespace = "mcp__codex_apps__github";
         let member = "_remove_reaction_from_pr_review_comment";
-        let shortened_name = model_visible_namespace_member_name(namespace, member);
         let tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([
             {
                 "type": "namespace",
@@ -786,16 +794,15 @@ mod tests {
             },
             {
                 "type": "mcp",
-                "name": shortened_name,
                 "server_label": "fixture",
                 "server_url": "http://127.0.0.1:1/mcp"
             }
         ]))
         .unwrap();
 
-        let err = CodexNamespaceHandler.resolve_namespace_members(&tools).unwrap_err();
-
-        assert!(err.to_string().contains("collides with a declared MCP tool"));
+        CodexNamespaceHandler
+            .resolve_namespace_members(&tools)
+            .expect("native MCP registry keys are derived after discovery");
     }
 
     #[test]
