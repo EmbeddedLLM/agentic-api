@@ -8,7 +8,7 @@ use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::executor::gateway_accumulator::{GatewayStreamAccumulator, StreamEvent, emit_sse_frame, synthetic_event};
 use crate::executor::request::RequestContext;
 use crate::tool::{GatewayDispatchResult, ToolError, ToolOutput, ToolRegistry, ToolType};
-use crate::types::io::output::{FunctionToolCall, GatewayCallStatus};
+use crate::types::io::output::{FunctionToolCall, GatewayCallStatus, McpCallStatus};
 use crate::types::io::{InputItem, OutputItem, ResponsesInput};
 use crate::utils::common::serialize_to_string;
 
@@ -89,6 +89,7 @@ pub(super) struct GatewayCallEventPlan {
     call_id: String,
     output_index: u32,
     started_output: Option<OutputItem>,
+    arguments: Option<String>,
 }
 
 fn function_calls(output_items: &[OutputItem]) -> Vec<FunctionToolCall> {
@@ -253,6 +254,7 @@ pub(super) fn gateway_event_plans(
             plans.push(GatewayCallEventPlan {
                 call_id: call.call_id.clone(),
                 output_index: u32::try_from(output_index).unwrap_or(u32::MAX),
+                arguments: (entry.tool_type == ToolType::Mcp).then(|| call.arguments.clone()),
                 started_output: match entry.tool_type {
                     ToolType::WebSearch => Some(crate::tool::web_search::started_output_item(call)),
                     ToolType::Mcp => registry
@@ -311,15 +313,34 @@ pub(super) fn emit_gateway_start_events(
                 )?;
                 emit_gateway_event(&mut searching_event, stream_accumulator, stream_sender)?;
             }
-            OutputItem::McpToolCall(mcp_tool_call) => {
+            OutputItem::McpCall(mcp_call) => {
                 let mut in_progress_event = synthetic_event(
-                    SSEEventType::McpToolCallInProgress,
+                    SSEEventType::McpCallInProgress,
                     [
-                        ("item_id".to_owned(), serde_json::json!(mcp_tool_call.id)),
+                        ("item_id".to_owned(), serde_json::json!(mcp_call.id)),
                         ("output_index".to_owned(), serde_json::json!(plan.output_index)),
                     ],
                 )?;
                 emit_gateway_event(&mut in_progress_event, stream_accumulator, stream_sender)?;
+                let arguments = plan.arguments.as_deref().unwrap_or_default();
+                let mut arguments_delta_event = synthetic_event(
+                    SSEEventType::McpCallArgumentsDelta,
+                    [
+                        ("delta".to_owned(), serde_json::json!(arguments)),
+                        ("item_id".to_owned(), serde_json::json!(mcp_call.id)),
+                        ("output_index".to_owned(), serde_json::json!(plan.output_index)),
+                    ],
+                )?;
+                emit_gateway_event(&mut arguments_delta_event, stream_accumulator, stream_sender)?;
+                let mut arguments_done_event = synthetic_event(
+                    SSEEventType::McpCallArgumentsDone,
+                    [
+                        ("arguments".to_owned(), serde_json::json!(arguments)),
+                        ("item_id".to_owned(), serde_json::json!(mcp_call.id)),
+                        ("output_index".to_owned(), serde_json::json!(plan.output_index)),
+                    ],
+                )?;
+                emit_gateway_event(&mut arguments_done_event, stream_accumulator, stream_sender)?;
             }
             OutputItem::Message(_)
             | OutputItem::FunctionCall(_)
@@ -349,7 +370,14 @@ pub(super) fn emit_gateway_completed_events(
             OutputItem::WebSearchCall(web_search_call) => {
                 (SSEEventType::WebSearchCallCompleted, web_search_call.id.as_str())
             }
-            OutputItem::McpToolCall(mcp_tool_call) => (SSEEventType::McpToolCallCompleted, mcp_tool_call.id.as_str()),
+            OutputItem::McpCall(mcp_call) => (
+                if mcp_call.status == Some(McpCallStatus::Failed) {
+                    SSEEventType::McpCallFailed
+                } else {
+                    SSEEventType::McpCallCompleted
+                },
+                mcp_call.id.as_str(),
+            ),
             OutputItem::Message(_)
             | OutputItem::FunctionCall(_)
             | OutputItem::CustomToolCall(_)
@@ -357,14 +385,14 @@ pub(super) fn emit_gateway_completed_events(
             | OutputItem::Unknown => continue,
         };
         let item = output_item_value(public_output)?;
-        let mut completed_event = synthetic_event(
-            event_type,
-            [
-                ("item_id".to_owned(), serde_json::json!(item_id)),
-                ("output_index".to_owned(), serde_json::json!(output_index)),
-                ("item".to_owned(), item.clone()),
-            ],
-        )?;
+        let mut completed_fields = serde_json::Map::from_iter([
+            ("item_id".to_owned(), serde_json::json!(item_id)),
+            ("output_index".to_owned(), serde_json::json!(output_index)),
+        ]);
+        if matches!(public_output, OutputItem::WebSearchCall(_)) {
+            completed_fields.insert("item".to_owned(), item.clone());
+        }
+        let mut completed_event = synthetic_event(event_type, completed_fields)?;
         emit_gateway_event(&mut completed_event, stream_accumulator, stream_sender)?;
         let mut done_event = synthetic_event(
             SSEEventType::OutputItemDone,
@@ -450,8 +478,9 @@ pub(super) fn append_gateway_calls_to_new_input(
 #[cfg(test)]
 mod tests {
     use super::{GatewayCallResult, LoopDecision, classify_round};
-    use crate::types::io::InputItem;
     use crate::types::io::output::FunctionToolCall;
+    use crate::types::io::{InputItem, McpCallStatus};
+    use tokio::sync::mpsc;
 
     const MAX: usize = 10;
 
@@ -635,6 +664,184 @@ mod tests {
         assert!(
             body.contains("no registered handler"),
             "error output should mention the missing handler: {body}"
+        );
+    }
+
+    #[test]
+    fn mcp_gateway_events_follow_openai_lifecycle() {
+        let call = FunctionToolCall {
+            id: "fc_1".to_owned(),
+            call_id: "call_1".to_owned(),
+            name: "mcp__counter__increment".to_owned(),
+            arguments: "{}".to_owned(),
+            status: crate::types::event::MessageStatus::Completed,
+            namespace: None,
+        };
+        let started = OutputItem::McpCall(crate::types::io::McpCall::new(
+            "mcp_1",
+            "counter",
+            "increment",
+            "",
+            McpCallStatus::InProgress,
+            None,
+            None,
+        ));
+        let plans = vec![super::GatewayCallEventPlan {
+            call_id: call.call_id.clone(),
+            output_index: 0,
+            started_output: Some(started),
+            arguments: Some(call.arguments.clone()),
+        }];
+        let (sender, mut receiver) = mpsc::unbounded_channel();
+        let mut stream_accumulator = crate::executor::gateway_accumulator::GatewayStreamAccumulator::new();
+
+        super::emit_gateway_start_events(&plans, &mut stream_accumulator, &sender).expect("start events");
+
+        let mut start_events = Vec::new();
+        while let Ok(event) = receiver.try_recv() {
+            let data = event.content.strip_prefix("data: ").expect("SSE data").trim();
+            start_events.push(serde_json::from_str::<Value>(data).expect("event JSON"));
+        }
+        assert_eq!(
+            start_events
+                .iter()
+                .map(|event| event["type"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec![
+                "response.output_item.added",
+                "response.mcp_call.in_progress",
+                "response.mcp_call_arguments.delta",
+                "response.mcp_call_arguments.done"
+            ]
+        );
+        assert_eq!(start_events[0]["item"]["type"], "mcp_call");
+        assert_eq!(start_events[0]["item"]["arguments"], "");
+        assert_eq!(start_events[2]["delta"], "{}");
+        assert_eq!(start_events[3]["arguments"], "{}");
+        assert_eq!(
+            start_events
+                .iter()
+                .map(|event| event["sequence_number"].as_u64().unwrap())
+                .collect::<Vec<_>>(),
+            vec![0, 1, 2, 3]
+        );
+
+        let final_item = OutputItem::McpCall(crate::types::io::McpCall::new(
+            "mcp_1",
+            "counter",
+            "increment",
+            "{}",
+            McpCallStatus::Completed,
+            Some("1".to_owned()),
+            None,
+        ));
+        let results = vec![GatewayCallResult {
+            call,
+            input_item: InputItem::FunctionCallOutput(
+                ToolOutput {
+                    call_id: "call_1".to_owned(),
+                    output: "1".to_owned(),
+                }
+                .into(),
+            ),
+            public_output: Some(final_item),
+        }];
+
+        super::emit_gateway_completed_events(&results, &plans, &mut stream_accumulator, &sender)
+            .expect("completed events");
+
+        let completed = receiver.try_recv().expect("mcp_call.completed");
+        let completed: Value = serde_json::from_str(completed.content.strip_prefix("data: ").expect("SSE data").trim())
+            .expect("event JSON");
+        assert_eq!(completed["type"], "response.mcp_call.completed");
+        assert_eq!(completed["sequence_number"], 4);
+        assert!(completed.get("item").is_none());
+
+        let done = receiver.try_recv().expect("output_item.done");
+        let done: Value =
+            serde_json::from_str(done.content.strip_prefix("data: ").expect("SSE data").trim()).expect("event JSON");
+        assert_eq!(done["type"], "response.output_item.done");
+        assert_eq!(done["sequence_number"], 5);
+        assert_eq!(done["item"]["type"], "mcp_call");
+        assert_eq!(done["item"]["output"], "1");
+    }
+
+    #[test]
+    fn failed_mcp_gateway_events_keep_contiguous_sequence_numbers() {
+        let call = FunctionToolCall {
+            id: "fc_1".to_owned(),
+            call_id: "call_1".to_owned(),
+            name: "mcp__counter__increment".to_owned(),
+            arguments: "{}".to_owned(),
+            status: crate::types::event::MessageStatus::Completed,
+            namespace: None,
+        };
+        let plans = vec![super::GatewayCallEventPlan {
+            call_id: call.call_id.clone(),
+            output_index: 0,
+            started_output: Some(OutputItem::McpCall(crate::types::io::McpCall::new(
+                "mcp_1",
+                "counter",
+                "increment",
+                "",
+                McpCallStatus::InProgress,
+                None,
+                None,
+            ))),
+            arguments: Some(call.arguments.clone()),
+        }];
+        let results = vec![GatewayCallResult {
+            call,
+            input_item: InputItem::FunctionCallOutput(
+                ToolOutput {
+                    call_id: "call_1".to_owned(),
+                    output: r#"{"error":"boom"}"#.to_owned(),
+                }
+                .into(),
+            ),
+            public_output: Some(OutputItem::McpCall(crate::types::io::McpCall::new(
+                "mcp_1",
+                "counter",
+                "increment",
+                "{}",
+                McpCallStatus::Failed,
+                None,
+                Some(crate::types::io::McpCallError::tool_execution("boom")),
+            ))),
+        }];
+        let (sender, mut receiver) = mpsc::unbounded_channel();
+        let mut stream_accumulator = crate::executor::gateway_accumulator::GatewayStreamAccumulator::new();
+
+        super::emit_gateway_start_events(&plans, &mut stream_accumulator, &sender).expect("start events");
+        super::emit_gateway_completed_events(&results, &plans, &mut stream_accumulator, &sender)
+            .expect("failed events");
+
+        let events = std::iter::from_fn(|| receiver.try_recv().ok())
+            .map(|event| {
+                serde_json::from_str::<Value>(event.content.strip_prefix("data: ").expect("SSE data").trim())
+                    .expect("event JSON")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event["type"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec![
+                "response.output_item.added",
+                "response.mcp_call.in_progress",
+                "response.mcp_call_arguments.delta",
+                "response.mcp_call_arguments.done",
+                "response.mcp_call.failed",
+                "response.output_item.done",
+            ]
+        );
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event["sequence_number"].as_u64().unwrap())
+                .collect::<Vec<_>>(),
+            vec![0, 1, 2, 3, 4, 5]
         );
     }
 }

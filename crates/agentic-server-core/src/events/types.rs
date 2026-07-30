@@ -10,7 +10,7 @@ pub enum SSEItemType {
     FunctionCall,
     CustomToolCall,
     WebSearchCall,
-    McpToolCall,
+    McpCall,
     Message,
 }
 
@@ -22,7 +22,7 @@ impl SSEItemType {
             Self::FunctionCall => "function_call",
             Self::CustomToolCall => "custom_tool_call",
             Self::WebSearchCall => "web_search_call",
-            Self::McpToolCall => "mcp_tool_call",
+            Self::McpCall => "mcp_call",
             Self::Message => "message",
         }
     }
@@ -35,7 +35,7 @@ impl From<&str> for SSEItemType {
             "function_call" => Self::FunctionCall,
             "custom_tool_call" => Self::CustomToolCall,
             "web_search_call" => Self::WebSearchCall,
-            "mcp_tool_call" => Self::McpToolCall,
+            "mcp_call" => Self::McpCall,
             _ => Self::Message,
         }
     }
@@ -103,8 +103,11 @@ pub enum SSEEventType {
     WebSearchCallInProgress,
     WebSearchCallSearching,
     WebSearchCallCompleted,
-    McpToolCallInProgress,
-    McpToolCallCompleted,
+    McpCallInProgress,
+    McpCallArgumentsDelta,
+    McpCallArgumentsDone,
+    McpCallCompleted,
+    McpCallFailed,
 
     // Catch-all for unrecognized events
     Other,
@@ -139,8 +142,11 @@ impl From<&str> for SSEEventType {
             "response.web_search_call.in_progress" => Self::WebSearchCallInProgress,
             "response.web_search_call.searching" => Self::WebSearchCallSearching,
             "response.web_search_call.completed" => Self::WebSearchCallCompleted,
-            "response.mcp_tool_call.in_progress" => Self::McpToolCallInProgress,
-            "response.mcp_tool_call.completed" => Self::McpToolCallCompleted,
+            "response.mcp_call.in_progress" => SSEEventType::McpCallInProgress,
+            "response.mcp_call_arguments.delta" => SSEEventType::McpCallArgumentsDelta,
+            "response.mcp_call_arguments.done" => SSEEventType::McpCallArgumentsDone,
+            "response.mcp_call.completed" => SSEEventType::McpCallCompleted,
+            "response.mcp_call.failed" => SSEEventType::McpCallFailed,
             _ => Self::Other,
         }
     }
@@ -177,8 +183,11 @@ impl TryFrom<SSEEventType> for &'static str {
             SSEEventType::WebSearchCallInProgress => Ok("response.web_search_call.in_progress"),
             SSEEventType::WebSearchCallSearching => Ok("response.web_search_call.searching"),
             SSEEventType::WebSearchCallCompleted => Ok("response.web_search_call.completed"),
-            SSEEventType::McpToolCallInProgress => Ok("response.mcp_tool_call.in_progress"),
-            SSEEventType::McpToolCallCompleted => Ok("response.mcp_tool_call.completed"),
+            SSEEventType::McpCallInProgress => Ok("response.mcp_call.in_progress"),
+            SSEEventType::McpCallArgumentsDelta => Ok("response.mcp_call_arguments.delta"),
+            SSEEventType::McpCallArgumentsDone => Ok("response.mcp_call_arguments.done"),
+            SSEEventType::McpCallCompleted => Ok("response.mcp_call.completed"),
+            SSEEventType::McpCallFailed => Ok("response.mcp_call.failed"),
             SSEEventType::Other => Err(()),
         }
     }
@@ -362,8 +371,11 @@ mod tests {
             SSEEventType::WebSearchCallInProgress,
             SSEEventType::WebSearchCallSearching,
             SSEEventType::WebSearchCallCompleted,
-            SSEEventType::McpToolCallInProgress,
-            SSEEventType::McpToolCallCompleted,
+            SSEEventType::McpCallInProgress,
+            SSEEventType::McpCallArgumentsDelta,
+            SSEEventType::McpCallArgumentsDone,
+            SSEEventType::McpCallCompleted,
+            SSEEventType::McpCallFailed,
         ] {
             let wire_name = <&str>::try_from(event_type).expect("known event type has a wire name");
             assert_eq!(SSEEventType::from(wire_name), event_type);

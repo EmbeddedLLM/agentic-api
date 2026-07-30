@@ -8,7 +8,7 @@ use serde_json::Value;
 
 use crate::tool::{GatewayExecutor, ToolError, ToolHandler, ToolOutput, ToolType};
 use crate::types::io::FunctionTool;
-use crate::types::io::output::{FunctionToolCall, GatewayCallStatus, McpToolCall, OutputItem};
+use crate::types::io::output::{FunctionToolCall, GatewayCallStatus, McpCall, McpCallError, McpCallStatus, OutputItem};
 use crate::types::tools::{McpDiscoveredToolParam, ResponsesTool};
 use crate::utils::common::{
     deserialize_from_str, deserialize_from_str_opt, deserialize_from_value, serialize_to_string,
@@ -61,39 +61,32 @@ pub(crate) fn output_item(
     status: GatewayCallStatus,
     tool_ref: &McpToolRef,
 ) -> OutputItem {
-    let arguments =
-        deserialize_from_str_opt::<Value>(&call.arguments).unwrap_or_else(|| Value::Object(serde_json::Map::new()));
-    let parsed_output = deserialize_from_str_opt::<Value>(&output.output);
     let error = if status == GatewayCallStatus::Failed {
-        Some(error_text_from_output(&output.output))
+        Some(McpCallError::tool_execution(error_text_from_output(&output.output)))
     } else {
         None
     };
-    let result = (status == GatewayCallStatus::Completed)
-        .then(|| parsed_output.unwrap_or_else(|| Value::String(output.output.clone())));
+    let successful_output = (status == GatewayCallStatus::Completed).then(|| output.output.clone());
 
-    OutputItem::McpToolCall(McpToolCall::new(
+    OutputItem::McpCall(McpCall::new(
         call_output_id(call),
         tool_ref.server_label.clone(),
         tool_ref.tool_name.clone(),
-        arguments,
-        status,
-        result,
+        call.arguments.clone(),
+        status.into(),
+        successful_output,
         error,
     ))
 }
 
 #[must_use]
 pub(crate) fn started_output_item(call: &FunctionToolCall, tool_ref: &McpToolRef) -> OutputItem {
-    let arguments =
-        deserialize_from_str_opt::<Value>(&call.arguments).unwrap_or_else(|| Value::Object(serde_json::Map::new()));
-
-    OutputItem::McpToolCall(McpToolCall::new(
+    OutputItem::McpCall(McpCall::new(
         call_output_id(call),
         tool_ref.server_label.clone(),
         tool_ref.tool_name.clone(),
-        arguments,
-        GatewayCallStatus::InProgress,
+        "",
+        McpCallStatus::InProgress,
         None,
         None,
     ))
@@ -393,7 +386,8 @@ fn call_output_id(call: &FunctionToolCall) -> String {
     if let Some(suffix) = call.call_id.strip_prefix("call_").filter(|suffix| !suffix.is_empty()) {
         return format!("mcp_{suffix}");
     }
-    crate::utils::uuid7_str("mcp_")
+    let source_identity = format!("{}\0{}", call.id, call.call_id);
+    format!("mcp_{:016x}", stable_name_hash(&source_identity))
 }
 
 #[cfg(test)]
@@ -514,14 +508,82 @@ mod tests {
         };
         let tool_ref = McpToolRef::from(&discovered_param());
 
-        let OutputItem::McpToolCall(item) = output_item(&call, &output, GatewayCallStatus::Completed, &tool_ref) else {
-            panic!("expected mcp_tool_call");
+        let OutputItem::McpCall(item) = output_item(&call, &output, GatewayCallStatus::Completed, &tool_ref) else {
+            panic!("expected mcp_call");
         };
 
-        assert_eq!(item.server, "counter");
-        assert_eq!(item.tool, "increment");
-        assert_eq!(item.arguments, serde_json::json!({}));
-        assert_eq!(item.result, Some(serde_json::json!(1)));
+        assert_eq!(item.server_label, "counter");
+        assert_eq!(item.name, "increment");
+        assert_eq!(item.arguments, "{}");
+        assert_eq!(item.output.as_deref(), Some("1"));
+    }
+
+    #[test]
+    fn prefixless_function_ids_reuse_public_mcp_id_across_lifecycle() {
+        let call = FunctionToolCall {
+            id: "provider-item-1".to_owned(),
+            call_id: "provider-call-1".to_owned(),
+            name: "mcp__counter__increment".to_owned(),
+            arguments: "{}".to_owned(),
+            status: crate::types::event::MessageStatus::Completed,
+            namespace: None,
+        };
+        let output = ToolOutput {
+            call_id: call.call_id.clone(),
+            output: "1".to_owned(),
+        };
+        let tool_ref = McpToolRef::from(&discovered_param());
+
+        let OutputItem::McpCall(started) = started_output_item(&call, &tool_ref) else {
+            panic!("expected started mcp_call");
+        };
+        let OutputItem::McpCall(completed) = output_item(&call, &output, GatewayCallStatus::Completed, &tool_ref)
+        else {
+            panic!("expected completed mcp_call");
+        };
+
+        assert!(started.id.starts_with("mcp_"));
+        assert_eq!(started.id, completed.id);
+    }
+
+    #[test]
+    fn idless_parallel_calls_receive_distinct_public_mcp_ids() {
+        let calls = [
+            serde_json::from_value::<FunctionToolCall>(serde_json::json!({
+                "name": "mcp__counter__increment",
+                "arguments": "{}"
+            }))
+            .expect("valid first function call"),
+            serde_json::from_value::<FunctionToolCall>(serde_json::json!({
+                "name": "mcp__counter__increment",
+                "arguments": "{}"
+            }))
+            .expect("valid second function call"),
+        ];
+        let tool_ref = McpToolRef::from(&discovered_param());
+
+        let public_ids = calls
+            .iter()
+            .map(|call| {
+                let OutputItem::McpCall(started) = started_output_item(call, &tool_ref) else {
+                    panic!("expected started mcp_call");
+                };
+                let output = ToolOutput {
+                    call_id: call.call_id.clone(),
+                    output: "1".to_owned(),
+                };
+                let OutputItem::McpCall(completed) =
+                    output_item(call, &output, GatewayCallStatus::Completed, &tool_ref)
+                else {
+                    panic!("expected completed mcp_call");
+                };
+
+                assert_eq!(started.id, completed.id);
+                started.id
+            })
+            .collect::<Vec<_>>();
+
+        assert_ne!(public_ids[0], public_ids[1]);
     }
 
     #[test]
@@ -548,7 +610,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_mcp_output_uses_execution_error_text() {
+    fn failed_mcp_output_uses_openai_structured_error() {
         let call = FunctionToolCall {
             id: "fc_1".to_owned(),
             call_id: "call_1".to_owned(),
@@ -566,10 +628,14 @@ mod tests {
         let tool_ref = McpToolRef::from(&param);
 
         let item = output_item(&call, &output, GatewayCallStatus::Failed, &tool_ref);
-        let json = serde_json::to_value(item).expect("serializable mcp_tool_call");
+        let json = serde_json::to_value(item).expect("serializable mcp_call");
 
         assert_eq!(json["status"], "failed");
-        assert!(json["result"].is_null());
-        assert_eq!(json["error"], "missing field `b`");
+        assert!(json["output"].is_null());
+        assert_eq!(json["error"]["type"], "mcp_tool_execution_error");
+        assert_eq!(json["error"]["content"][0]["type"], "text");
+        assert_eq!(json["error"]["content"][0]["text"], "missing field `b`");
+        assert!(json["error"]["content"][0]["annotations"].is_null());
+        assert!(json["error"]["content"][0]["meta"].is_null());
     }
 }

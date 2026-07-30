@@ -137,7 +137,7 @@ Responses tool shapes and execution semantics, so it can be always on.
 | `namespace` | Client-owned Codex grouping for function tools. Flatten members only for upstream requests, then restore returned calls. |
 | `custom` | Client-owned freeform tool. Preserve its opaque format and forward it natively. |
 | `web_search_preview` | Gateway-owned when configured; normalized to the gateway web-search function tool. |
-| `mcp` | Gateway-owned. Normalize MCP declarations to model-visible function tools, execute calls with request-scoped MCP handlers, and expose `mcp_tool_call` results. |
+| `mcp` | Gateway-owned. Normalize MCP declarations to model-visible function tools, execute calls with request-scoped MCP handlers, and expose public `mcp_call` items. Streaming emits `response.output_item.added`, `response.mcp_call.in_progress`, `response.mcp_call_arguments.delta`/`.done`, `response.mcp_call.completed` or `.failed`, and `response.output_item.done`. |
 | `file_search`, `code_interpreter` | Accepted by the typed request parser but skipped during upstream normalization because no gateway handler is registered yet. |
 | Unknown tool | Recognized and skipped on the typed path; opaque fields are not preserved or executed. Eligible raw-proxy requests remain byte-transparent. |
 
@@ -148,7 +148,7 @@ For response items:
 | `function_call` | Preserve optional `namespace`; restore flat namespace calls before returning to Codex. |
 | `custom_tool_call` | Preserve raw `input`; return it to Codex for local execution. |
 | `web_search_call` | Gateway-owned result from the web-search executor. |
-| `mcp_tool_call` | Gateway-owned MCP execution result, including server/tool identity, arguments, status, and result or error. |
+| `mcp_call` | Gateway-owned MCP execution result with `server_label`, discovered tool `name`, JSON-string `arguments`, and `status`; successful calls contain `output`, while failures contain a structured `mcp_tool_execution_error`. |
 | Unknown output item | Recognized as an unknown unit variant on the typed path; opaque fields are not preserved or executed. |
 
 ---

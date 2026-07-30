@@ -63,8 +63,11 @@ fn extract_payload(event_type: SSEEventType, json: &Value) -> EventPayload {
         | SSEEventType::WebSearchCallInProgress
         | SSEEventType::WebSearchCallSearching
         | SSEEventType::WebSearchCallCompleted
-        | SSEEventType::McpToolCallInProgress
-        | SSEEventType::McpToolCallCompleted
+        | SSEEventType::McpCallInProgress
+        | SSEEventType::McpCallArgumentsDelta
+        | SSEEventType::McpCallArgumentsDone
+        | SSEEventType::McpCallCompleted
+        | SSEEventType::McpCallFailed
         | SSEEventType::Other => EventPayload::Raw(json.clone()),
     }
 }

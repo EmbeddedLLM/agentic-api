@@ -60,6 +60,8 @@ The gateway exposes execution through the `mcp_call` lifecycle. Emitting the sep
 lifecycle is an additional public representation of the same discovery step and does not change the tool execution
 design described here.
 
+Until that discovery lifecycle is implemented, gateway streams are a strict subset of OpenAI's MCP stream: they do not emit an `mcp_list_tools` output item before `mcp_call`.
+
 ## Components
 
 ### `McpClient`

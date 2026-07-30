@@ -1,0 +1,131 @@
+turns:
+- filename: t1
+  request:
+    body:
+      input: Call counter__say_hello exactly once with {}. Do not call any other tool.
+        Return exactly MCP_SAYS=hello.
+      max_output_tokens: 4096
+      model: gpt-4o
+      store: true
+      stream: false
+      tool_choice: required
+      tools:
+      - allowed_tools:
+        - say_hello
+        require_approval: never
+        server_label: counter
+        server_url: https://gabriel-displays-manufacturers-structures.trycloudflare.com/mcp
+        type: mcp
+    headers:
+      accept: '*/*'
+      authorization: Bearer ***
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      background: false
+      billing:
+        payer: developer
+      completed_at: 1785401949
+      created_at: 1785401946
+      error: null
+      frequency_penalty: 0.0
+      id: resp_0e3fe24990ca0d3e006a6b125ae484819b9ccba17536891953
+      incomplete_details: null
+      instructions: null
+      max_output_tokens: 4096
+      max_tool_calls: null
+      metadata: {}
+      model: gpt-4o-2024-08-06
+      moderation: null
+      object: response
+      output:
+      - id: mcpl_0e3fe24990ca0d3e006a6b125b02b8819b85656b1528326216
+        server_label: counter
+        tools:
+        - annotations:
+            read_only: false
+          description: Say hello to the client
+          input_schema:
+            properties: {}
+            type: object
+          name: say_hello
+        type: mcp_list_tools
+      - approval_request_id: null
+        arguments: '{}'
+        error: null
+        id: mcp_0e3fe24990ca0d3e006a6b125cb0e4819bb4e6ce6bf14fdb4a
+        name: say_hello
+        output: hello
+        server_label: counter
+        status: completed
+        type: mcp_call
+      - content:
+        - annotations: []
+          logprobs: []
+          text: MCP_SAYS=hello
+          type: output_text
+        id: msg_0e3fe24990ca0d3e006a6b125d62b8819ba94430a4f73a8cc1
+        role: assistant
+        status: completed
+        type: message
+      parallel_tool_calls: true
+      presence_penalty: 0.0
+      previous_response_id: null
+      prompt_cache_key: null
+      prompt_cache_retention: in_memory
+      reasoning:
+        context: null
+        effort: null
+        summary: null
+      safety_identifier: null
+      service_tier: default
+      status: completed
+      store: true
+      temperature: 1.0
+      text:
+        format:
+          type: text
+        verbosity: medium
+      tool_choice: required
+      tool_usage:
+        image_gen:
+          input_tokens: 0
+          input_tokens_details:
+            image_tokens: 0
+            text_tokens: 0
+          output_tokens: 0
+          output_tokens_details:
+            image_tokens: 0
+            text_tokens: 0
+          total_tokens: 0
+        web_search:
+          num_requests: 0
+      tools:
+      - allowed_tools:
+        - say_hello
+        headers: null
+        require_approval: never
+        server_description: null
+        server_label: counter
+        server_url: https://gabriel-displays-manufacturers-structures.trycloudflare.com/mcp
+        type: mcp
+      top_logprobs: 0
+      top_p: 1.0
+      truncation: disabled
+      usage:
+        input_tokens: 92
+        input_tokens_details:
+          cache_write_tokens: 0
+          cached_tokens: 0
+        output_tokens: 21
+        output_tokens_details:
+          reasoning_tokens: 0
+        total_tokens: 113
+      user: null
+    headers:
+      content-type: application/json
+    status_code: 200
