@@ -386,7 +386,8 @@ fn call_output_id(call: &FunctionToolCall) -> String {
     if let Some(suffix) = call.call_id.strip_prefix("call_").filter(|suffix| !suffix.is_empty()) {
         return format!("mcp_{suffix}");
     }
-    crate::utils::uuid7_str("mcp_")
+    let source_identity = format!("{}\0{}", call.id, call.call_id);
+    format!("mcp_{:016x}", stable_name_hash(&source_identity))
 }
 
 #[cfg(test)]
@@ -515,6 +516,34 @@ mod tests {
         assert_eq!(item.name, "increment");
         assert_eq!(item.arguments, "{}");
         assert_eq!(item.output.as_deref(), Some("1"));
+    }
+
+    #[test]
+    fn prefixless_function_ids_reuse_public_mcp_id_across_lifecycle() {
+        let call = FunctionToolCall {
+            id: "provider-item-1".to_owned(),
+            call_id: "provider-call-1".to_owned(),
+            name: "mcp__counter__increment".to_owned(),
+            arguments: "{}".to_owned(),
+            status: crate::types::event::MessageStatus::Completed,
+            namespace: None,
+        };
+        let output = ToolOutput {
+            call_id: call.call_id.clone(),
+            output: "1".to_owned(),
+        };
+        let tool_ref = McpToolRef::from(&discovered_param());
+
+        let OutputItem::McpCall(started) = started_output_item(&call, &tool_ref) else {
+            panic!("expected started mcp_call");
+        };
+        let OutputItem::McpCall(completed) = output_item(&call, &output, GatewayCallStatus::Completed, &tool_ref)
+        else {
+            panic!("expected completed mcp_call");
+        };
+
+        assert!(started.id.starts_with("mcp_"));
+        assert_eq!(started.id, completed.id);
     }
 
     #[test]
