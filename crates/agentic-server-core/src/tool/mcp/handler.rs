@@ -547,6 +547,46 @@ mod tests {
     }
 
     #[test]
+    fn idless_parallel_calls_receive_distinct_public_mcp_ids() {
+        let calls = [
+            serde_json::from_value::<FunctionToolCall>(serde_json::json!({
+                "name": "mcp__counter__increment",
+                "arguments": "{}"
+            }))
+            .expect("valid first function call"),
+            serde_json::from_value::<FunctionToolCall>(serde_json::json!({
+                "name": "mcp__counter__increment",
+                "arguments": "{}"
+            }))
+            .expect("valid second function call"),
+        ];
+        let tool_ref = McpToolRef::from(&discovered_param());
+
+        let public_ids = calls
+            .iter()
+            .map(|call| {
+                let OutputItem::McpCall(started) = started_output_item(call, &tool_ref) else {
+                    panic!("expected started mcp_call");
+                };
+                let output = ToolOutput {
+                    call_id: call.call_id.clone(),
+                    output: "1".to_owned(),
+                };
+                let OutputItem::McpCall(completed) =
+                    output_item(call, &output, GatewayCallStatus::Completed, &tool_ref)
+                else {
+                    panic!("expected completed mcp_call");
+                };
+
+                assert_eq!(started.id, completed.id);
+                started.id
+            })
+            .collect::<Vec<_>>();
+
+        assert_ne!(public_ids[0], public_ids[1]);
+    }
+
+    #[test]
     fn successful_mcp_result_exposes_text_instead_of_protocol_envelope() {
         let result = serde_json::from_value::<rmcp::model::CallToolResult>(serde_json::json!({
             "content": [{"type": "text", "text": "42"}],

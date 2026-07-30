@@ -85,7 +85,8 @@ impl From<OutputMessage> for InputMessage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionToolCall {
-    #[serde(default)]
+    #[serde(default = "default_function_call_id")]
+    #[serde(deserialize_with = "deserialize_function_call_id")]
     pub id: String,
     #[serde(default)]
     pub call_id: String,
@@ -120,6 +121,19 @@ pub struct CustomToolCall {
 
 fn default_completed_status() -> MessageStatus {
     MessageStatus::Completed
+}
+
+fn default_function_call_id() -> String {
+    uuid7_str("fc_")
+}
+
+fn deserialize_function_call_id<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(Option::<String>::deserialize(deserializer)?
+        .filter(|id| !id.is_empty())
+        .unwrap_or_else(default_function_call_id))
 }
 
 fn deserialize_status_or_default<'de, D>(deserializer: D) -> Result<MessageStatus, D::Error>

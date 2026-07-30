@@ -37,7 +37,7 @@ set -euo pipefail
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPTS_DIR/../../../.." && pwd)"
 BASE_DIR="$SCRIPTS_DIR/mcp"
-TOOLS_FILE="$BASE_DIR/tools.json"
+TOOLS_FILE=""
 GATEWAY_URL="${GATEWAY_URL:-http://localhost:9000}"
 MODEL="${MODEL:-Qwen/Qwen3.5-35B-A3B-FP8}"
 MODEL_SLUG="$(echo "$MODEL" | tr '/: ' '---')"
@@ -293,6 +293,8 @@ if [[ "$MCP_RECORD_SET" == "gateway" || "$MCP_RECORD_SET" == "all" ]]; then
 fi
 
 mkdir -p "$BASE_DIR"
+TOOLS_FILE="$(mktemp "$BASE_DIR/.mcp-tools.XXXXXX.json")"
+trap 'rm -f -- "$TOOLS_FILE"' EXIT
 
 if [[ "$MCP_RECORD_SET" == "openai" || "$MCP_RECORD_SET" == "all" ]]; then
   record_provider_suite \
@@ -313,7 +315,3 @@ if [[ "$MCP_RECORD_SET" == "gateway" || "$MCP_RECORD_SET" == "all" ]]; then
     mcp-gateway-counter \
     "mcp__${COUNTER_SERVER_LABEL}__"
 fi
-
-# Leave the reusable tools fixture in its local gateway configuration even
-# after an OpenAI or combined recording run.
-write_native_mcp_tools_file "$GATEWAY_COUNTER_MCP_SERVER_URL"

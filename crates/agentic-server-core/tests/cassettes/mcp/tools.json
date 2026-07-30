@@ -2,7 +2,7 @@
   {
     "type": "mcp",
     "server_label": "counter",
-    "server_url": "https://gabriel-displays-manufacturers-structures.trycloudflare.com/mcp",
+    "server_url": "http://127.0.0.1:8000/mcp",
 
     "require_approval": "never"
   }
