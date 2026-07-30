@@ -15,7 +15,7 @@ turns:
         - sum
         require_approval: never
         server_label: counter
-        server_url: https://discharge-exhibit-attempt-sponsored.trycloudflare.com/mcp
+        server_url: https://gabriel-displays-manufacturers-structures.trycloudflare.com/mcp
         type: mcp
     headers:
       accept: '*/*'
@@ -32,7 +32,7 @@ turns:
     - 'event: response.created
 
       '
-    - 'data: {"type":"response.created","response":{"id":"resp_0bad00ab028528c5006a61ee3d5f9c81998c6dc4519674f5a0","object":"response","created_at":1784802877,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":4096,"max_tool_calls":null,"model":"gpt-4o-2024-08-06","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"in_memory","reasoning":{"context":null,"effort":null,"summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"required","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[{"type":"mcp","allowed_tools":["sum"],"headers":null,"require_approval":"never","server_description":null,"server_label":"counter","server_url":"https://discharge-exhibit-attempt-sponsored.trycloudflare.com/mcp"}],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":0}
+    - 'data: {"type":"response.created","response":{"id":"resp_0d5961264f50ab12006a6b12501688819a946c3d10899e6a7d","object":"response","created_at":1785401936,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":4096,"max_tool_calls":null,"model":"gpt-4o-2024-08-06","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"in_memory","reasoning":{"context":null,"effort":null,"summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"required","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[{"type":"mcp","allowed_tools":["sum"],"headers":null,"require_approval":"never","server_description":null,"server_label":"counter","server_url":"https://gabriel-displays-manufacturers-structures.trycloudflare.com/mcp"}],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":0}
 
       '
     - '
@@ -41,7 +41,7 @@ turns:
     - 'event: response.in_progress
 
       '
-    - 'data: {"type":"response.in_progress","response":{"id":"resp_0bad00ab028528c5006a61ee3d5f9c81998c6dc4519674f5a0","object":"response","created_at":1784802877,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":4096,"max_tool_calls":null,"model":"gpt-4o-2024-08-06","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"in_memory","reasoning":{"context":null,"effort":null,"summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"required","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[{"type":"mcp","allowed_tools":["sum"],"headers":null,"require_approval":"never","server_description":null,"server_label":"counter","server_url":"https://discharge-exhibit-attempt-sponsored.trycloudflare.com/mcp"}],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":1}
+    - 'data: {"type":"response.in_progress","response":{"id":"resp_0d5961264f50ab12006a6b12501688819a946c3d10899e6a7d","object":"response","created_at":1785401936,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":4096,"max_tool_calls":null,"model":"gpt-4o-2024-08-06","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"in_memory","reasoning":{"context":null,"effort":null,"summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"required","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[{"type":"mcp","allowed_tools":["sum"],"headers":null,"require_approval":"never","server_description":null,"server_label":"counter","server_url":"https://gabriel-displays-manufacturers-structures.trycloudflare.com/mcp"}],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":1}
 
       '
     - '
@@ -50,7 +50,7 @@ turns:
     - 'event: response.output_item.added
 
       '
-    - 'data: {"type":"response.output_item.added","item":{"id":"mcpl_0bad00ab028528c5006a61ee3d6a1c8199b2b08f4a354be115","type":"mcp_list_tools","server_label":"counter","tools":[]},"output_index":0,"sequence_number":2}
+    - 'data: {"type":"response.output_item.added","item":{"id":"mcpl_0d5961264f50ab12006a6b125035bc819a9cdbdde81de8b36d","type":"mcp_list_tools","server_label":"counter","tools":[]},"output_index":0,"sequence_number":2}
 
       '
     - '
@@ -59,7 +59,7 @@ turns:
     - 'event: response.mcp_list_tools.in_progress
 
       '
-    - 'data: {"type":"response.mcp_list_tools.in_progress","item_id":"mcpl_0bad00ab028528c5006a61ee3d6a1c8199b2b08f4a354be115","output_index":0,"sequence_number":3}
+    - 'data: {"type":"response.mcp_list_tools.in_progress","item_id":"mcpl_0d5961264f50ab12006a6b125035bc819a9cdbdde81de8b36d","output_index":0,"sequence_number":3}
 
       '
     - '
@@ -68,7 +68,7 @@ turns:
     - 'event: response.mcp_list_tools.completed
 
       '
-    - 'data: {"type":"response.mcp_list_tools.completed","item_id":"mcpl_0bad00ab028528c5006a61ee3d6a1c8199b2b08f4a354be115","output_index":0,"sequence_number":4}
+    - 'data: {"type":"response.mcp_list_tools.completed","item_id":"mcpl_0d5961264f50ab12006a6b125035bc819a9cdbdde81de8b36d","output_index":0,"sequence_number":4}
 
       '
     - '
@@ -77,7 +77,7 @@ turns:
     - 'event: response.output_item.done
 
       '
-    - 'data: {"type":"response.output_item.done","item":{"id":"mcpl_0bad00ab028528c5006a61ee3d6a1c8199b2b08f4a354be115","type":"mcp_list_tools","server_label":"counter","tools":[{"annotations":{"read_only":false},"description":"Calculate
+    - 'data: {"type":"response.output_item.done","item":{"id":"mcpl_0d5961264f50ab12006a6b125035bc819a9cdbdde81de8b36d","type":"mcp_list_tools","server_label":"counter","tools":[{"annotations":{"read_only":false},"description":"Calculate
       the sum of two numbers","input_schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"a":{"format":"int32","type":"integer"},"b":{"format":"int32","type":"integer"}},"required":["a","b"],"type":"object"},"name":"sum"}]},"output_index":0,"sequence_number":5}
 
       '
@@ -87,7 +87,7 @@ turns:
     - 'event: response.output_item.added
 
       '
-    - 'data: {"type":"response.output_item.added","item":{"id":"mcp_0bad00ab028528c5006a61ee3faa9c819980216354dedfabcc","type":"mcp_call","status":"in_progress","approval_request_id":null,"arguments":"","error":null,"name":"sum","output":null,"server_label":"counter"},"output_index":1,"sequence_number":6}
+    - 'data: {"type":"response.output_item.added","item":{"id":"mcp_0d5961264f50ab12006a6b1251e340819ab672662a4814c12d","type":"mcp_call","status":"in_progress","approval_request_id":null,"arguments":"","error":null,"name":"sum","output":null,"server_label":"counter"},"output_index":1,"sequence_number":6}
 
       '
     - '
@@ -96,7 +96,7 @@ turns:
     - 'event: response.mcp_call.in_progress
 
       '
-    - 'data: {"type":"response.mcp_call.in_progress","item_id":"mcp_0bad00ab028528c5006a61ee3faa9c819980216354dedfabcc","output_index":1,"sequence_number":7}
+    - 'data: {"type":"response.mcp_call.in_progress","item_id":"mcp_0d5961264f50ab12006a6b1251e340819ab672662a4814c12d","output_index":1,"sequence_number":7}
 
       '
     - '
@@ -105,7 +105,7 @@ turns:
     - 'event: response.mcp_call_arguments.delta
 
       '
-    - 'data: {"type":"response.mcp_call_arguments.delta","delta":"{\"a\":40}","item_id":"mcp_0bad00ab028528c5006a61ee3faa9c819980216354dedfabcc","obfuscation":"1dzUqzBQ","output_index":1,"sequence_number":8}
+    - 'data: {"type":"response.mcp_call_arguments.delta","delta":"{\"a\":40}","item_id":"mcp_0d5961264f50ab12006a6b1251e340819ab672662a4814c12d","obfuscation":"w1bv7av1","output_index":1,"sequence_number":8}
 
       '
     - '
@@ -114,7 +114,7 @@ turns:
     - 'event: response.mcp_call_arguments.done
 
       '
-    - 'data: {"type":"response.mcp_call_arguments.done","arguments":"{\"a\":40}","item_id":"mcp_0bad00ab028528c5006a61ee3faa9c819980216354dedfabcc","output_index":1,"sequence_number":9}
+    - 'data: {"type":"response.mcp_call_arguments.done","arguments":"{\"a\":40}","item_id":"mcp_0d5961264f50ab12006a6b1251e340819ab672662a4814c12d","output_index":1,"sequence_number":9}
 
       '
     - '
@@ -123,7 +123,7 @@ turns:
     - 'event: response.mcp_call.failed
 
       '
-    - 'data: {"type":"response.mcp_call.failed","item_id":"mcp_0bad00ab028528c5006a61ee3faa9c819980216354dedfabcc","output_index":1,"sequence_number":10}
+    - 'data: {"type":"response.mcp_call.failed","item_id":"mcp_0d5961264f50ab12006a6b1251e340819ab672662a4814c12d","output_index":1,"sequence_number":10}
 
       '
     - '
@@ -132,7 +132,7 @@ turns:
     - 'event: response.output_item.done
 
       '
-    - 'data: {"type":"response.output_item.done","item":{"id":"mcp_0bad00ab028528c5006a61ee3faa9c819980216354dedfabcc","type":"mcp_call","status":"failed","approval_request_id":null,"arguments":"{\"a\":40}","error":{"type":"mcp_tool_execution_error","content":[{"type":"text","text":"failed
+    - 'data: {"type":"response.output_item.done","item":{"id":"mcp_0d5961264f50ab12006a6b1251e340819ab672662a4814c12d","type":"mcp_call","status":"failed","approval_request_id":null,"arguments":"{\"a\":40}","error":{"type":"mcp_tool_execution_error","content":[{"type":"text","text":"failed
       to deserialize parameters: missing field `b`","annotations":null,"meta":null}]},"name":"sum","output":null,"server_label":"counter"},"output_index":1,"sequence_number":11}
 
       '
@@ -142,7 +142,7 @@ turns:
     - 'event: response.output_item.added
 
       '
-    - 'data: {"type":"response.output_item.added","item":{"id":"msg_0bad00ab028528c5006a61ee40717481999398b64b74e63da4","type":"message","status":"in_progress","content":[],"role":"assistant"},"output_index":2,"sequence_number":12}
+    - 'data: {"type":"response.output_item.added","item":{"id":"msg_0d5961264f50ab12006a6b125267c4819a8b39e79b734aea83","type":"message","status":"in_progress","content":[],"role":"assistant"},"output_index":2,"sequence_number":12}
 
       '
     - '
@@ -151,7 +151,7 @@ turns:
     - 'event: response.content_part.added
 
       '
-    - 'data: {"type":"response.content_part.added","content_index":0,"item_id":"msg_0bad00ab028528c5006a61ee40717481999398b64b74e63da4","output_index":2,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":""},"sequence_number":13}
+    - 'data: {"type":"response.content_part.added","content_index":0,"item_id":"msg_0d5961264f50ab12006a6b125267c4819a8b39e79b734aea83","output_index":2,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":""},"sequence_number":13}
 
       '
     - '
@@ -160,7 +160,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"The","item_id":"msg_0bad00ab028528c5006a61ee40717481999398b64b74e63da4","logprobs":[],"obfuscation":"4oqHYJZ2CkL1Z","output_index":2,"sequence_number":14}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"The","item_id":"msg_0d5961264f50ab12006a6b125267c4819a8b39e79b734aea83","logprobs":[],"obfuscation":"LfLP2sGCyU5hL","output_index":2,"sequence_number":14}
 
       '
     - '
@@ -169,7 +169,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" MCP","item_id":"msg_0bad00ab028528c5006a61ee40717481999398b64b74e63da4","logprobs":[],"obfuscation":"5PQfpfCtnOma","output_index":2,"sequence_number":15}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" MCP","item_id":"msg_0d5961264f50ab12006a6b125267c4819a8b39e79b734aea83","logprobs":[],"obfuscation":"PTV8l8iXhh5t","output_index":2,"sequence_number":15}
 
       '
     - '
@@ -178,7 +178,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" call","item_id":"msg_0bad00ab028528c5006a61ee40717481999398b64b74e63da4","logprobs":[],"obfuscation":"bCC6LCbwlFT","output_index":2,"sequence_number":16}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" call","item_id":"msg_0d5961264f50ab12006a6b125267c4819a8b39e79b734aea83","logprobs":[],"obfuscation":"lac3XLZkS9y","output_index":2,"sequence_number":16}
 
       '
     - '
@@ -187,7 +187,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" failed","item_id":"msg_0bad00ab028528c5006a61ee40717481999398b64b74e63da4","logprobs":[],"obfuscation":"46aIBvhcU","output_index":2,"sequence_number":17}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" failed","item_id":"msg_0d5961264f50ab12006a6b125267c4819a8b39e79b734aea83","logprobs":[],"obfuscation":"Vm3KLW6Fa","output_index":2,"sequence_number":17}
 
       '
     - '
@@ -196,7 +196,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" with","item_id":"msg_0bad00ab028528c5006a61ee40717481999398b64b74e63da4","logprobs":[],"obfuscation":"UZ0jZNvzcA5","output_index":2,"sequence_number":18}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" with","item_id":"msg_0d5961264f50ab12006a6b125267c4819a8b39e79b734aea83","logprobs":[],"obfuscation":"1bRd3YQq4bb","output_index":2,"sequence_number":18}
 
       '
     - '
@@ -205,7 +205,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" the","item_id":"msg_0bad00ab028528c5006a61ee40717481999398b64b74e63da4","logprobs":[],"obfuscation":"S6RN6kWboQpi","output_index":2,"sequence_number":19}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" the","item_id":"msg_0d5961264f50ab12006a6b125267c4819a8b39e79b734aea83","logprobs":[],"obfuscation":"KPFcZ28akNi3","output_index":2,"sequence_number":19}
 
       '
     - '
@@ -214,7 +214,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" error","item_id":"msg_0bad00ab028528c5006a61ee40717481999398b64b74e63da4","logprobs":[],"obfuscation":"z2b43dcurk","output_index":2,"sequence_number":20}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" error","item_id":"msg_0d5961264f50ab12006a6b125267c4819a8b39e79b734aea83","logprobs":[],"obfuscation":"yXdKNjSCTl","output_index":2,"sequence_number":20}
 
       '
     - '
@@ -223,7 +223,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":":","item_id":"msg_0bad00ab028528c5006a61ee40717481999398b64b74e63da4","logprobs":[],"obfuscation":"IDEcJTJGp6jSbXw","output_index":2,"sequence_number":21}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":":","item_id":"msg_0d5961264f50ab12006a6b125267c4819a8b39e79b734aea83","logprobs":[],"obfuscation":"OASuOnbGVAT6ZAJ","output_index":2,"sequence_number":21}
 
       '
     - '
@@ -232,7 +232,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" \"","item_id":"msg_0bad00ab028528c5006a61ee40717481999398b64b74e63da4","logprobs":[],"obfuscation":"HB1Q4KXYb3ulgG","output_index":2,"sequence_number":22}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" \"","item_id":"msg_0d5961264f50ab12006a6b125267c4819a8b39e79b734aea83","logprobs":[],"obfuscation":"cfbQQami3SEQb3","output_index":2,"sequence_number":22}
 
       '
     - '
@@ -241,7 +241,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"failed","item_id":"msg_0bad00ab028528c5006a61ee40717481999398b64b74e63da4","logprobs":[],"obfuscation":"hIiWAGyAST","output_index":2,"sequence_number":23}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"failed","item_id":"msg_0d5961264f50ab12006a6b125267c4819a8b39e79b734aea83","logprobs":[],"obfuscation":"NPRkSP1Sro","output_index":2,"sequence_number":23}
 
       '
     - '
@@ -250,7 +250,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" to","item_id":"msg_0bad00ab028528c5006a61ee40717481999398b64b74e63da4","logprobs":[],"obfuscation":"f47aCltZGKequ","output_index":2,"sequence_number":24}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" to","item_id":"msg_0d5961264f50ab12006a6b125267c4819a8b39e79b734aea83","logprobs":[],"obfuscation":"jyboBZnwUdoz7","output_index":2,"sequence_number":24}
 
       '
     - '
@@ -259,7 +259,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" deserialize","item_id":"msg_0bad00ab028528c5006a61ee40717481999398b64b74e63da4","logprobs":[],"obfuscation":"f8hN","output_index":2,"sequence_number":25}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" deserialize","item_id":"msg_0d5961264f50ab12006a6b125267c4819a8b39e79b734aea83","logprobs":[],"obfuscation":"651f","output_index":2,"sequence_number":25}
 
       '
     - '
@@ -268,7 +268,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" parameters","item_id":"msg_0bad00ab028528c5006a61ee40717481999398b64b74e63da4","logprobs":[],"obfuscation":"qvYPn","output_index":2,"sequence_number":26}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" parameters","item_id":"msg_0d5961264f50ab12006a6b125267c4819a8b39e79b734aea83","logprobs":[],"obfuscation":"JvnKp","output_index":2,"sequence_number":26}
 
       '
     - '
@@ -277,7 +277,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":":","item_id":"msg_0bad00ab028528c5006a61ee40717481999398b64b74e63da4","logprobs":[],"obfuscation":"oiPdF4PHKSwiSvi","output_index":2,"sequence_number":27}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":":","item_id":"msg_0d5961264f50ab12006a6b125267c4819a8b39e79b734aea83","logprobs":[],"obfuscation":"TEgfc0ALGOC2WmS","output_index":2,"sequence_number":27}
 
       '
     - '
@@ -286,7 +286,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" missing","item_id":"msg_0bad00ab028528c5006a61ee40717481999398b64b74e63da4","logprobs":[],"obfuscation":"xZ80Z7Kq","output_index":2,"sequence_number":28}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" missing","item_id":"msg_0d5961264f50ab12006a6b125267c4819a8b39e79b734aea83","logprobs":[],"obfuscation":"OtnjXbbd","output_index":2,"sequence_number":28}
 
       '
     - '
@@ -295,7 +295,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" field","item_id":"msg_0bad00ab028528c5006a61ee40717481999398b64b74e63da4","logprobs":[],"obfuscation":"IUhCI8fbyl","output_index":2,"sequence_number":29}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" field","item_id":"msg_0d5961264f50ab12006a6b125267c4819a8b39e79b734aea83","logprobs":[],"obfuscation":"bgok4oSwH5","output_index":2,"sequence_number":29}
 
       '
     - '
@@ -304,7 +304,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" `","item_id":"msg_0bad00ab028528c5006a61ee40717481999398b64b74e63da4","logprobs":[],"obfuscation":"Gcfr3tIugz2Osv","output_index":2,"sequence_number":30}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":" `","item_id":"msg_0d5961264f50ab12006a6b125267c4819a8b39e79b734aea83","logprobs":[],"obfuscation":"Kl6YlOw6Ys0GKp","output_index":2,"sequence_number":30}
 
       '
     - '
@@ -313,7 +313,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"b","item_id":"msg_0bad00ab028528c5006a61ee40717481999398b64b74e63da4","logprobs":[],"obfuscation":"bpZqF70dMZazkbd","output_index":2,"sequence_number":31}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"b","item_id":"msg_0d5961264f50ab12006a6b125267c4819a8b39e79b734aea83","logprobs":[],"obfuscation":"PBmqgAWU6FPF3vJ","output_index":2,"sequence_number":31}
 
       '
     - '
@@ -322,7 +322,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"`","item_id":"msg_0bad00ab028528c5006a61ee40717481999398b64b74e63da4","logprobs":[],"obfuscation":"ts77npWVfsjuRgw","output_index":2,"sequence_number":32}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"`","item_id":"msg_0d5961264f50ab12006a6b125267c4819a8b39e79b734aea83","logprobs":[],"obfuscation":"bvNmueHmLBRS9iV","output_index":2,"sequence_number":32}
 
       '
     - '
@@ -331,7 +331,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"\".","item_id":"msg_0bad00ab028528c5006a61ee40717481999398b64b74e63da4","logprobs":[],"obfuscation":"WYsJ4ffbcVp5fc","output_index":2,"sequence_number":33}
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"\".","item_id":"msg_0d5961264f50ab12006a6b125267c4819a8b39e79b734aea83","logprobs":[],"obfuscation":"pZcRyMSgOviZnI","output_index":2,"sequence_number":33}
 
       '
     - '
@@ -340,7 +340,7 @@ turns:
     - 'event: response.output_text.done
 
       '
-    - 'data: {"type":"response.output_text.done","content_index":0,"item_id":"msg_0bad00ab028528c5006a61ee40717481999398b64b74e63da4","logprobs":[],"output_index":2,"sequence_number":34,"text":"The
+    - 'data: {"type":"response.output_text.done","content_index":0,"item_id":"msg_0d5961264f50ab12006a6b125267c4819a8b39e79b734aea83","logprobs":[],"output_index":2,"sequence_number":34,"text":"The
       MCP call failed with the error: \"failed to deserialize parameters: missing
       field `b`\"."}
 
@@ -351,7 +351,7 @@ turns:
     - 'event: response.content_part.done
 
       '
-    - 'data: {"type":"response.content_part.done","content_index":0,"item_id":"msg_0bad00ab028528c5006a61ee40717481999398b64b74e63da4","output_index":2,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":"The
+    - 'data: {"type":"response.content_part.done","content_index":0,"item_id":"msg_0d5961264f50ab12006a6b125267c4819a8b39e79b734aea83","output_index":2,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":"The
       MCP call failed with the error: \"failed to deserialize parameters: missing
       field `b`\"."},"sequence_number":35}
 
@@ -362,7 +362,7 @@ turns:
     - 'event: response.output_item.done
 
       '
-    - 'data: {"type":"response.output_item.done","item":{"id":"msg_0bad00ab028528c5006a61ee40717481999398b64b74e63da4","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"The
+    - 'data: {"type":"response.output_item.done","item":{"id":"msg_0d5961264f50ab12006a6b125267c4819a8b39e79b734aea83","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"The
       MCP call failed with the error: \"failed to deserialize parameters: missing
       field `b`\"."}],"role":"assistant"},"output_index":2,"sequence_number":36}
 
@@ -373,11 +373,11 @@ turns:
     - 'event: response.completed
 
       '
-    - 'data: {"type":"response.completed","response":{"id":"resp_0bad00ab028528c5006a61ee3d5f9c81998c6dc4519674f5a0","object":"response","created_at":1784802877,"status":"completed","background":false,"completed_at":1784802880,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":4096,"max_tool_calls":null,"model":"gpt-4o-2024-08-06","moderation":null,"output":[{"id":"mcpl_0bad00ab028528c5006a61ee3d6a1c8199b2b08f4a354be115","type":"mcp_list_tools","server_label":"counter","tools":[{"annotations":{"read_only":false},"description":"Calculate
-      the sum of two numbers","input_schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"a":{"format":"int32","type":"integer"},"b":{"format":"int32","type":"integer"}},"required":["a","b"],"type":"object"},"name":"sum"}]},{"id":"mcp_0bad00ab028528c5006a61ee3faa9c819980216354dedfabcc","type":"mcp_call","status":"failed","approval_request_id":null,"arguments":"{\"a\":40}","error":{"type":"mcp_tool_execution_error","content":[{"type":"text","text":"failed
-      to deserialize parameters: missing field `b`","annotations":null,"meta":null}]},"name":"sum","output":null,"server_label":"counter"},{"id":"msg_0bad00ab028528c5006a61ee40717481999398b64b74e63da4","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"The
+    - 'data: {"type":"response.completed","response":{"id":"resp_0d5961264f50ab12006a6b12501688819a946c3d10899e6a7d","object":"response","created_at":1785401936,"status":"completed","background":false,"completed_at":1785401938,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":4096,"max_tool_calls":null,"model":"gpt-4o-2024-08-06","moderation":null,"output":[{"id":"mcpl_0d5961264f50ab12006a6b125035bc819a9cdbdde81de8b36d","type":"mcp_list_tools","server_label":"counter","tools":[{"annotations":{"read_only":false},"description":"Calculate
+      the sum of two numbers","input_schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"a":{"format":"int32","type":"integer"},"b":{"format":"int32","type":"integer"}},"required":["a","b"],"type":"object"},"name":"sum"}]},{"id":"mcp_0d5961264f50ab12006a6b1251e340819ab672662a4814c12d","type":"mcp_call","status":"failed","approval_request_id":null,"arguments":"{\"a\":40}","error":{"type":"mcp_tool_execution_error","content":[{"type":"text","text":"failed
+      to deserialize parameters: missing field `b`","annotations":null,"meta":null}]},"name":"sum","output":null,"server_label":"counter"},{"id":"msg_0d5961264f50ab12006a6b125267c4819a8b39e79b734aea83","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"The
       MCP call failed with the error: \"failed to deserialize parameters: missing
-      field `b`\"."}],"role":"assistant"}],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"in_memory","reasoning":{"context":null,"effort":null,"summary":null},"safety_identifier":null,"service_tier":"default","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"required","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[{"type":"mcp","allowed_tools":["sum"],"headers":null,"require_approval":"never","server_description":null,"server_label":"counter","server_url":"https://discharge-exhibit-attempt-sponsored.trycloudflare.com/mcp"}],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":{"input_tokens":163,"input_tokens_details":{"cache_write_tokens":0,"cached_tokens":0},"output_tokens":37,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":200},"user":null,"metadata":{}},"sequence_number":37}
+      field `b`\"."}],"role":"assistant"}],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"in_memory","reasoning":{"context":null,"effort":null,"summary":null},"safety_identifier":null,"service_tier":"default","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"required","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[{"type":"mcp","allowed_tools":["sum"],"headers":null,"require_approval":"never","server_description":null,"server_label":"counter","server_url":"https://gabriel-displays-manufacturers-structures.trycloudflare.com/mcp"}],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":{"input_tokens":163,"input_tokens_details":{"cache_write_tokens":0,"cached_tokens":0},"output_tokens":37,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":200},"user":null,"metadata":{}},"sequence_number":37}
 
       '
     - '

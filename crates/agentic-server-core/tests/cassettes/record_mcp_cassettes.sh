@@ -18,11 +18,18 @@
 # The default records both providers so every gateway cassette has an OpenAI
 # ground-truth counterpart. OPENAI_API_KEY must be set for the default run.
 #
+# Recording disables MCP approval prompts, so the counter endpoint must be an
+# explicitly trusted, operator-controlled server. There is intentionally no
+# public endpoint default.
+#
 # Usage from the repository root:
-#   bash crates/agentic-server-core/tests/cassettes/record_mcp_cassettes.sh
+#   COUNTER_MCP_SERVER_URL=https://your-counter.example/mcp \
+#     bash crates/agentic-server-core/tests/cassettes/record_mcp_cassettes.sh
 #   MCP_RECORD_SET=gateway \
+#     GATEWAY_COUNTER_MCP_SERVER_URL=http://localhost:8000/mcp \
 #     bash crates/agentic-server-core/tests/cassettes/record_mcp_cassettes.sh
 #   MCP_RECORD_SET=openai \
+#     OPENAI_MCP_SERVER_URL=https://your-counter.example/mcp \
 #     bash crates/agentic-server-core/tests/cassettes/record_mcp_cassettes.sh
 
 set -euo pipefail
@@ -36,7 +43,7 @@ MODEL="${MODEL:-Qwen/Qwen3.5-35B-A3B-FP8}"
 MODEL_SLUG="$(echo "$MODEL" | tr '/: ' '---')"
 MCP_RECORD_SET="${MCP_RECORD_SET:-all}"
 COUNTER_SERVER_LABEL="${COUNTER_SERVER_LABEL:-counter}"
-COUNTER_MCP_SERVER_URL="${COUNTER_MCP_SERVER_URL:-https://discharge-exhibit-attempt-sponsored.trycloudflare.com/mcp}"
+COUNTER_MCP_SERVER_URL="${COUNTER_MCP_SERVER_URL:-}"
 GATEWAY_COUNTER_MCP_SERVER_URL="${GATEWAY_COUNTER_MCP_SERVER_URL:-$COUNTER_MCP_SERVER_URL}"
 OPENAI_MCP_SERVER_URL="${OPENAI_MCP_SERVER_URL:-$COUNTER_MCP_SERVER_URL}"
 OPENAI_MODEL="${OPENAI_MODEL:-gpt-4o}"
@@ -45,6 +52,51 @@ REPO_PLACEHOLDER="<AGENTIC_API_REPO>"
 
 green() { printf '\033[32m%s\033[0m\n' "$*"; }
 bold()  { printf '\033[1m%s\033[0m\n'  "$*"; }
+
+validate_mcp_server_url() {
+  local variable_name="$1"
+  local server_url="$2"
+  local require_https="$3"
+
+  if [[ -z "$server_url" ]]; then
+    echo "ERROR: $variable_name must be set to an explicitly trusted MCP endpoint" >&2
+    exit 1
+  fi
+
+  python - "$variable_name" "$server_url" "$require_https" <<'PY'
+import sys
+from urllib.parse import urlparse
+
+variable_name, server_url, require_https = sys.argv[1:]
+parsed = urlparse(server_url)
+errors = []
+if parsed.scheme not in {"http", "https"}:
+    errors.append("scheme must be http or https")
+if not parsed.hostname:
+    errors.append("hostname is required")
+if parsed.username or parsed.password:
+    errors.append("credentials must not be embedded in the URL")
+if parsed.fragment:
+    errors.append("fragments are not allowed")
+if require_https == "true" and parsed.scheme != "https":
+    errors.append("OpenAI recordings require a public HTTPS endpoint")
+if errors:
+    raise SystemExit(f"ERROR: invalid {variable_name}: {', '.join(errors)}")
+PY
+
+  if ! curl \
+    --silent \
+    --show-error \
+    --output /dev/null \
+    --head \
+    --connect-timeout 10 \
+    --max-time 15 \
+    "$server_url"
+  then
+    echo "ERROR: $variable_name is not reachable: $server_url" >&2
+    exit 1
+  fi
+}
 
 sanitize_cassette() {
   local file="$1"
@@ -128,21 +180,32 @@ record_single_turn() {
   local prompt="$5"
   local stream_flag="$6"
   local tool_choice="$7"
+  local temporary_output
 
-  printf '%s\n' "$prompt" \
-  | python "$SCRIPTS_DIR/record_cassette.py" \
-      --mode responses \
-      --turns 1 \
-      "$stream_flag" \
-      --model "$model" \
-      "$endpoint_flag" "$endpoint" \
-      --tools "$TOOLS_FILE" \
-      --tool-choice "$tool_choice" \
-      --max-output-tokens 4096 \
-      --output "$output"
+  temporary_output="$(mktemp "$BASE_DIR/.mcp-cassette.XXXXXX")"
 
-  validate_recorded_response "$output" "$stream_flag"
-  sanitize_cassette "$output"
+  if ! printf '%s\n' "$prompt" \
+    | python "$SCRIPTS_DIR/record_cassette.py" \
+        --mode responses \
+        --turns 1 \
+        "$stream_flag" \
+        --model "$model" \
+        "$endpoint_flag" "$endpoint" \
+        --tools "$TOOLS_FILE" \
+        --tool-choice "$tool_choice" \
+        --max-output-tokens 4096 \
+        --output "$temporary_output"
+  then
+    rm -f -- "$temporary_output"
+    return 1
+  fi
+
+  if ! validate_recorded_response "$temporary_output" "$stream_flag"; then
+    rm -f -- "$temporary_output"
+    return 1
+  fi
+  sanitize_cassette "$temporary_output"
+  mv -- "$temporary_output" "$output"
   green "✓ MCP cassette recorded -> $output"
 }
 
@@ -204,8 +267,6 @@ record_provider_suite() {
     --no-stream required
 }
 
-mkdir -p "$BASE_DIR"
-
 case "$MCP_RECORD_SET" in
   gateway|openai|all) ;;
   *)
@@ -221,11 +282,17 @@ if [[ "$MCP_RECORD_SET" == "openai" || "$MCP_RECORD_SET" == "all" ]]; then
     echo "ERROR: OPENAI_API_KEY must be set for MCP_RECORD_SET=$MCP_RECORD_SET" >&2
     exit 1
   fi
-  if [[ -z "$OPENAI_MCP_SERVER_URL" ]]; then
-    echo "ERROR: OPENAI_MCP_SERVER_URL must be the public HTTPS URL of the counter MCP server" >&2
-    exit 1
-  fi
+  validate_mcp_server_url OPENAI_MCP_SERVER_URL "$OPENAI_MCP_SERVER_URL" true
 fi
+
+if [[ "$MCP_RECORD_SET" == "gateway" || "$MCP_RECORD_SET" == "all" ]]; then
+  validate_mcp_server_url \
+    GATEWAY_COUNTER_MCP_SERVER_URL \
+    "$GATEWAY_COUNTER_MCP_SERVER_URL" \
+    false
+fi
+
+mkdir -p "$BASE_DIR"
 
 if [[ "$MCP_RECORD_SET" == "openai" || "$MCP_RECORD_SET" == "all" ]]; then
   record_provider_suite \

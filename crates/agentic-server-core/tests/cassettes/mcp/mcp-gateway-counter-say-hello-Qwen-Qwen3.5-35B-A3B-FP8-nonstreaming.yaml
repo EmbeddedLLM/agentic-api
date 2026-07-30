@@ -14,7 +14,7 @@ turns:
         - say_hello
         require_approval: never
         server_label: counter
-        server_url: https://discharge-exhibit-attempt-sponsored.trycloudflare.com/mcp
+        server_url: https://gabriel-displays-manufacturers-structures.trycloudflare.com/mcp
         type: mcp
     headers:
       accept: '*/*'
@@ -26,46 +26,51 @@ turns:
   response:
     body:
       conversation_id: null
-      created_at: 1784802908
+      created_at: 1785401857
       error: null
-      id: resp_019f8e8b-16a6-71a0-910f-ab7f69cbfcc1
+      id: resp_019fb23e-518b-7721-a068-5f69f2e77794
       incomplete_details: null
       instructions: null
       model: Qwen/Qwen3.5-35B-A3B-FP8
       object: response
       output:
       - content:
-        - text: 'The user wants me to call the mcp__counter__say_hello function exactly
-            once with an empty object {}, and they want me to return exactly "MCP_SAYS=hello".
-            I should not call any other tool.
+        - text: 'The user is asking me to:
+
+            1. Call the mcp__counter__say_hello function exactly once with {} (empty
+            parameters)
+
+            2. Not call any other tool
+
+            3. Return exactly "MCP_SAYS=hello"
 
 
-            Let me call the function with the empty object as requested.
+            Let me first call the function, then I''ll return the expected response.
 
             '
           type: reasoning_text
         encrypted_content: null
-        id: rs_be45d4bfa1669f08
+        id: rs_9a8b9df17bf3ed25
         status: null
         summary: []
         type: reasoning
       - approval_request_id: null
-        arguments: '{"arguments": "{}"}'
+        arguments: '{"parameters": "{}"}'
         error: null
-        id: mcp_b25d67adb1d842b3
+        id: mcp_bc1e3d2e147d920a
         name: say_hello
         output: hello
         server_label: counter
         status: completed
         type: mcp_call
       - content:
-        - text: 'The function returned "hello". Now I need to return exactly "MCP_SAYS=hello"
-            as the user requested.
+        - text: 'The function returned "hello" as expected. Now I need to return exactly
+            "MCP_SAYS=hello" as instructed by the user.
 
             '
           type: reasoning_text
         encrypted_content: null
-        id: rs_8318e3e200f60037
+        id: rs_8800d4cd3eaa2e7d
         status: null
         summary: []
         type: reasoning
@@ -76,20 +81,20 @@ turns:
 
             MCP_SAYS=hello'
           type: output_text
-        id: msg_a67e1c80628a8364
+        id: msg_aac4d1f985b91a87
         role: assistant
         status: completed
         type: message
       previous_response_id: null
       status: completed
       usage:
-        input_tokens: 734
+        input_tokens: 741
         input_tokens_details:
           cached_tokens: 0
-        output_tokens: 126
+        output_tokens: 137
         output_tokens_details:
           reasoning_tokens: 0
-        total_tokens: 860
+        total_tokens: 878
     headers:
       content-type: application/json
     status_code: 200

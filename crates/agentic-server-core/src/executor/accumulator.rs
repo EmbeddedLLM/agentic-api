@@ -17,6 +17,7 @@ use futures::{Stream, StreamExt};
 use crate::events::{EventFrame, EventPayload, SSEEventType, SSEItemType, normalize_sse_line};
 use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::types::event::{MessageStatus, ResponseStatus};
+use crate::types::io::McpCall;
 use crate::types::io::{
     ApplyDone, CustomToolCall, FunctionToolCall, OutputItem, OutputMessage, OutputTextContent, ReasoningOutput,
     ReasoningTextContent, ResponseUsage,
@@ -32,6 +33,7 @@ enum InFlight {
     Reasoning { item: ReasoningOutput, text: String },
     FunctionCall { item: FunctionToolCall, arguments: String },
     CustomToolCall { item: CustomToolCall, input: String },
+    McpCall { item: McpCall },
 }
 
 impl std::fmt::Debug for InFlight {
@@ -41,6 +43,7 @@ impl std::fmt::Debug for InFlight {
             Self::Reasoning { .. } => write!(f, "InFlight::Reasoning {{ .. }}"),
             Self::FunctionCall { .. } => write!(f, "InFlight::FunctionCall {{ .. }}"),
             Self::CustomToolCall { .. } => write!(f, "InFlight::CustomToolCall {{ .. }}"),
+            Self::McpCall { .. } => write!(f, "InFlight::McpCall {{ .. }}"),
         }
     }
 }
@@ -75,6 +78,7 @@ impl InFlight {
                 item.status = Some(MessageStatus::Completed);
                 output.push(OutputItem::CustomToolCall(item));
             }
+            Self::McpCall { item } => output.push(OutputItem::McpCall(item)),
         }
     }
 }
@@ -293,7 +297,8 @@ impl ResponseAccumulator {
                         item,
                         text: String::with_capacity(256),
                     }),
-                    SSEItemType::WebSearchCall | SSEItemType::McpCall => None,
+                    SSEItemType::WebSearchCall => None,
+                    SSEItemType::McpCall => McpCall::try_from(payload).ok().map(|item| InFlight::McpCall { item }),
                 };
                 if let Some(inflight) = entry {
                     self.in_flight.insert(item_id.clone(), inflight);
@@ -308,12 +313,8 @@ impl ResponseAccumulator {
                     ..
                 },
             ) => self.complete_custom_tool_call(item_id, item),
-            (SSEEventType::OutputItemDone, EventPayload::OutputItemDone { item, .. }) => {
-                if let Some(output_item @ (OutputItem::WebSearchCall(_) | OutputItem::McpCall(_))) =
-                    deserialize_from_value_opt::<OutputItem>(item.clone())
-                {
-                    self.output.push(output_item);
-                }
+            (SSEEventType::OutputItemDone, payload @ EventPayload::OutputItemDone { .. }) => {
+                self.complete_call_item(payload);
             }
             (SSEEventType::ReasoningTextDelta, EventPayload::ReasoningDelta { delta, item_id }) => {
                 if let Some(InFlight::Reasoning { text, .. }) = self.in_flight.get_mut(item_id) {
@@ -392,6 +393,29 @@ impl ResponseAccumulator {
         }
     }
 
+    fn complete_call_item(&mut self, payload: &EventPayload) {
+        let EventPayload::OutputItemDone {
+            item_id,
+            item_type,
+            item: raw_item,
+            ..
+        } = payload
+        else {
+            return;
+        };
+        if *item_type == SSEItemType::McpCall {
+            if let Some(InFlight::McpCall { item }) = self.in_flight.get_mut(item_id) {
+                item.apply_done(payload, &mut String::new());
+                return;
+            }
+        }
+        if let Some(output_item @ (OutputItem::WebSearchCall(_) | OutputItem::McpCall(_))) =
+            deserialize_from_value_opt::<OutputItem>(raw_item.clone())
+        {
+            self.output.push(output_item);
+        }
+    }
+
     /// Marks the response as incomplete due to an error or interruption.
     pub fn mark_incomplete(&mut self, reason: impl Into<String>) {
         self.status = ResponseStatus::Incomplete;
@@ -432,6 +456,7 @@ impl ResponseAccumulator {
 mod tests {
     use super::*;
     use crate::events::WireEvent;
+    use crate::types::io::{McpCallError, McpCallStatus};
 
     #[test]
     fn test_accumulator_new() {
@@ -624,6 +649,71 @@ mod tests {
     }
 
     #[test]
+    fn test_accumulator_reasoning_before_mcp_call_preserves_order() {
+        let lines = vec![
+            r#"data: {"type":"response.created","response":{"id":"resp_abc"}}"#.to_string(),
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[]}}"#.to_string(),
+            r#"data: {"type":"response.reasoning_text.done","text":"thinking...","item_id":"rs_1"}"#.to_string(),
+            r#"data: {"type":"response.output_item.added","output_index":1,"item":{"type":"mcp_call","id":"mcp_1","server_label":"counter","name":"increment","arguments":"","status":"in_progress","approval_request_id":null,"output":null,"error":null}}"#.to_string(),
+            r#"data: {"type":"response.mcp_call.completed","item_id":"mcp_1","output_index":1}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":1,"item":{"type":"mcp_call","id":"mcp_1","server_label":"counter","name":"increment","arguments":"{}","status":"completed","approval_request_id":null,"output":"1","error":null}}"#.to_string(),
+            r#"data: {"type":"response.done","response":{"id":"resp_abc","status":"completed","usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert_eq!(acc.output.len(), 2);
+        assert!(matches!(acc.output[0], OutputItem::Reasoning(_)));
+        assert!(matches!(acc.output[1], OutputItem::McpCall(_)));
+    }
+
+    #[test]
+    fn test_unknown_mcp_call_error_shape_is_not_dropped() {
+        let lines = vec![
+            r#"data: {"type":"response.created","response":{"id":"resp_abc"}}"#.to_string(),
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"mcp_call","id":"mcp_1","server_label":"counter","name":"increment","arguments":"","status":"in_progress","approval_request_id":null,"output":null,"error":null}}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"mcp_call","id":"mcp_1","server_label":"counter","name":"increment","arguments":"{}","status":"failed","approval_request_id":null,"output":null,"error":{"type":"mcp_protocol_error","code":-32000,"message":"boom"}}}"#.to_string(),
+            r#"data: {"type":"response.done","response":{"id":"resp_abc","status":"completed","usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert_eq!(acc.output.len(), 1);
+        let OutputItem::McpCall(call) = &acc.output[0] else {
+            panic!("expected mcp_call");
+        };
+        let Some(McpCallError::Unknown(error)) = &call.error else {
+            panic!("expected unknown MCP error payload");
+        };
+        assert_eq!(error["type"], "mcp_protocol_error");
+        assert_eq!(error["code"], -32000);
+        assert_eq!(error["message"], "boom");
+    }
+
+    #[test]
+    fn test_streaming_preserves_all_documented_mcp_call_statuses() {
+        let lines = vec![
+            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"mcp_call","id":"mcp_calling","server_label":"counter","name":"increment","arguments":"{}","status":"calling","approval_request_id":null,"output":null,"error":null}}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":1,"item":{"type":"mcp_call","id":"mcp_incomplete","server_label":"counter","name":"increment","arguments":"{}","status":"incomplete","approval_request_id":null,"output":null,"error":null}}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":2,"item":{"type":"mcp_call","id":"mcp_omitted","server_label":"counter","name":"increment","arguments":"{}","approval_request_id":null,"output":"1","error":null}}"#.to_string(),
+            r#"data: {"type":"response.done","response":{"id":"resp_1","status":"completed","usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        let statuses = acc
+            .output
+            .iter()
+            .map(|item| match item {
+                OutputItem::McpCall(call) => call.status,
+                _ => panic!("expected mcp_call"),
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            statuses,
+            vec![Some(McpCallStatus::Calling), Some(McpCallStatus::Incomplete), None]
+        );
+    }
+
+    #[test]
     fn test_process_event_web_search_done_accumulates_output() {
         let lines = vec![
             r#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"web_search_call","id":"ws_1","status":"in_progress","action":{"type":"search","query":"rust","sources":[]}}}"#.to_string(),
@@ -801,6 +891,44 @@ mod tests {
         assert_eq!(acc.output.len(), 2);
         assert!(matches!(acc.output[0], OutputItem::Reasoning(_)));
         assert!(matches!(acc.output[1], OutputItem::Message(_)));
+    }
+
+    #[test]
+    fn test_blocking_preserves_all_documented_mcp_call_statuses() {
+        let cases: [(Option<&str>, Option<McpCallStatus>); 3] = [
+            (Some("calling"), Some(McpCallStatus::Calling)),
+            (Some("incomplete"), Some(McpCallStatus::Incomplete)),
+            (None, None),
+        ];
+
+        for (status, expected) in cases {
+            let mut item = serde_json::json!({
+                "type": "mcp_call",
+                "id": "mcp_1",
+                "server_label": "counter",
+                "name": "increment",
+                "arguments": "{}",
+                "approval_request_id": null,
+                "output": null,
+                "error": null
+            });
+            if let Some(status) = status {
+                item["status"] = serde_json::json!(status);
+            }
+            let body = serde_json::json!({
+                "id": "resp_1",
+                "status": "completed",
+                "output": [item],
+                "usage": {"input_tokens": 5, "output_tokens": 2, "total_tokens": 7}
+            });
+
+            let acc = ResponseAccumulator::from_json(&body.to_string(), None).unwrap();
+            assert_eq!(acc.output.len(), 1);
+            let OutputItem::McpCall(call) = &acc.output[0] else {
+                panic!("expected mcp_call");
+            };
+            assert_eq!(call.status, expected);
+        }
     }
 
     #[test]

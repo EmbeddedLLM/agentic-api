@@ -7,7 +7,7 @@ pub mod tools;
 pub use io::{
     CompactionItem, CustomToolCall, CustomToolCallOutputMessage, FunctionTool, FunctionToolCall,
     FunctionToolResultMessage, GatewayCallStatus, InputContent, InputFunctionToolCall, InputImageContent, InputItem,
-    InputMessage, InputMessageContent, InputTextContent, InputTokenDetails, McpCall, McpCallError,
+    InputMessage, InputMessageContent, InputTextContent, InputTokenDetails, McpCall, McpCallError, McpCallStatus,
     McpToolExecutionError, McpToolExecutionErrorContent, OutputItem, OutputMessage, OutputTextContent,
     OutputTokenDetails, ReasoningOutput, ReasoningTextContent, ResponseUsage, ResponsesInput, ToolChoice,
     WebSearchActionSearch, WebSearchCall, WebSearchCallStatus, WebSearchSource,

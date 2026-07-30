@@ -8,7 +8,7 @@ use serde_json::Value;
 
 use crate::tool::{GatewayExecutor, ToolError, ToolHandler, ToolOutput, ToolType};
 use crate::types::io::FunctionTool;
-use crate::types::io::output::{FunctionToolCall, GatewayCallStatus, McpCall, McpCallError, OutputItem};
+use crate::types::io::output::{FunctionToolCall, GatewayCallStatus, McpCall, McpCallError, McpCallStatus, OutputItem};
 use crate::types::tools::{McpDiscoveredToolParam, ResponsesTool};
 use crate::utils::common::{
     deserialize_from_str, deserialize_from_str_opt, deserialize_from_value, serialize_to_string,
@@ -73,7 +73,7 @@ pub(crate) fn output_item(
         tool_ref.server_label.clone(),
         tool_ref.tool_name.clone(),
         call.arguments.clone(),
-        status,
+        status.into(),
         successful_output,
         error,
     ))
@@ -86,7 +86,7 @@ pub(crate) fn started_output_item(call: &FunctionToolCall, tool_ref: &McpToolRef
         tool_ref.server_label.clone(),
         tool_ref.tool_name.clone(),
         "",
-        GatewayCallStatus::InProgress,
+        McpCallStatus::InProgress,
         None,
         None,
     ))

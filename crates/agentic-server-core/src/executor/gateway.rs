@@ -8,7 +8,7 @@ use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::executor::gateway_accumulator::{GatewayStreamAccumulator, StreamEvent, emit_sse_frame, synthetic_event};
 use crate::executor::request::RequestContext;
 use crate::tool::{GatewayDispatchResult, ToolError, ToolOutput, ToolRegistry, ToolType};
-use crate::types::io::output::{FunctionToolCall, GatewayCallStatus};
+use crate::types::io::output::{FunctionToolCall, GatewayCallStatus, McpCallStatus};
 use crate::types::io::{InputItem, OutputItem, ResponsesInput};
 use crate::utils::common::serialize_to_string;
 
@@ -371,7 +371,7 @@ pub(super) fn emit_gateway_completed_events(
                 (SSEEventType::WebSearchCallCompleted, web_search_call.id.as_str())
             }
             OutputItem::McpCall(mcp_call) => (
-                if mcp_call.status == GatewayCallStatus::Failed {
+                if mcp_call.status == Some(McpCallStatus::Failed) {
                     SSEEventType::McpCallFailed
                 } else {
                     SSEEventType::McpCallCompleted
@@ -479,7 +479,7 @@ pub(super) fn append_gateway_calls_to_new_input(
 mod tests {
     use super::{GatewayCallResult, LoopDecision, classify_round};
     use crate::types::io::output::FunctionToolCall;
-    use crate::types::io::{GatewayCallStatus, InputItem};
+    use crate::types::io::{InputItem, McpCallStatus};
     use tokio::sync::mpsc;
 
     const MAX: usize = 10;
@@ -682,7 +682,7 @@ mod tests {
             "counter",
             "increment",
             "",
-            GatewayCallStatus::InProgress,
+            McpCallStatus::InProgress,
             None,
             None,
         ));
@@ -731,7 +731,7 @@ mod tests {
             "counter",
             "increment",
             "{}",
-            GatewayCallStatus::Completed,
+            McpCallStatus::Completed,
             Some("1".to_owned()),
             None,
         ));

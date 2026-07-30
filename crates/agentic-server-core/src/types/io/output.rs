@@ -5,6 +5,7 @@ use crate::events::EventPayload;
 use crate::executor::error::ExecutorError;
 use crate::tool::ToolRegistry;
 use crate::types::event::MessageStatus;
+use crate::utils::common::deserialize_from_value_opt;
 use crate::utils::uuid7_str;
 
 use super::input::{
@@ -205,6 +206,26 @@ impl GatewayCallStatus {
 
 pub type WebSearchCallStatus = GatewayCallStatus;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum McpCallStatus {
+    InProgress,
+    Calling,
+    Completed,
+    Incomplete,
+    Failed,
+}
+
+impl From<GatewayCallStatus> for McpCallStatus {
+    fn from(status: GatewayCallStatus) -> Self {
+        match status {
+            GatewayCallStatus::InProgress => Self::InProgress,
+            GatewayCallStatus::Completed => Self::Completed,
+            GatewayCallStatus::Failed => Self::Failed,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSearchSource {
     pub url: String,
@@ -260,6 +281,7 @@ impl WebSearchCall {
 pub enum McpCallError {
     Text(String),
     ToolExecution(McpToolExecutionError),
+    Unknown(Value),
 }
 
 impl McpCallError {
@@ -299,7 +321,8 @@ pub struct McpCall {
     pub server_label: String,
     pub name: String,
     pub arguments: String,
-    pub status: GatewayCallStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<McpCallStatus>,
     pub approval_request_id: Option<String>,
     pub output: Option<String>,
     pub error: Option<McpCallError>,
@@ -312,7 +335,7 @@ impl McpCall {
         server_label: impl Into<String>,
         name: impl Into<String>,
         arguments: impl Into<String>,
-        status: GatewayCallStatus,
+        status: McpCallStatus,
         output: Option<String>,
         error: Option<McpCallError>,
     ) -> Self {
@@ -321,11 +344,35 @@ impl McpCall {
             server_label: server_label.into(),
             name: name.into(),
             arguments: arguments.into(),
-            status,
+            status: Some(status),
             approval_request_id: None,
             output,
             error,
         }
+    }
+}
+
+impl TryFrom<&EventPayload> for McpCall {
+    type Error = ExecutorError;
+
+    fn try_from(payload: &EventPayload) -> Result<Self, Self::Error> {
+        let EventPayload::OutputItemAdded { item_id, name, .. } = payload else {
+            return Err(ExecutorError::ParseError("expected OutputItemAdded payload".into()));
+        };
+        let id = if item_id.is_empty() {
+            uuid7_str("mcp_")
+        } else {
+            item_id.clone()
+        };
+        Ok(Self::new(
+            id,
+            "",
+            name.as_deref().unwrap_or_default(),
+            "",
+            McpCallStatus::InProgress,
+            None,
+            None,
+        ))
     }
 }
 
@@ -448,6 +495,17 @@ impl ApplyDone for CustomToolCall {
             buffer.clear();
             input.clone()
         };
+    }
+}
+
+impl ApplyDone for McpCall {
+    fn apply_done(&mut self, payload: &EventPayload, _buffer: &mut String) {
+        let EventPayload::OutputItemDone { item, .. } = payload else {
+            return;
+        };
+        if let Some(call) = deserialize_from_value_opt(item.clone()) {
+            *self = call;
+        }
     }
 }
 
@@ -578,7 +636,7 @@ mod tests {
             "counter",
             "increment",
             "{}",
-            GatewayCallStatus::Completed,
+            McpCallStatus::Completed,
             Some("1".to_owned()),
             None,
         ));

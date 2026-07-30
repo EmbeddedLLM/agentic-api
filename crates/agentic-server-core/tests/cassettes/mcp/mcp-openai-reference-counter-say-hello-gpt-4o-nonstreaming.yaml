@@ -14,7 +14,7 @@ turns:
         - say_hello
         require_approval: never
         server_label: counter
-        server_url: https://discharge-exhibit-attempt-sponsored.trycloudflare.com/mcp
+        server_url: https://gabriel-displays-manufacturers-structures.trycloudflare.com/mcp
         type: mcp
     headers:
       accept: '*/*'
@@ -29,11 +29,11 @@ turns:
       background: false
       billing:
         payer: developer
-      completed_at: 1784802889
-      created_at: 1784802887
+      completed_at: 1785401949
+      created_at: 1785401946
       error: null
       frequency_penalty: 0.0
-      id: resp_0caeec97187f477e006a61ee479cd88199835e339bb6cc2167
+      id: resp_0e3fe24990ca0d3e006a6b125ae484819b9ccba17536891953
       incomplete_details: null
       instructions: null
       max_output_tokens: 4096
@@ -43,7 +43,7 @@ turns:
       moderation: null
       object: response
       output:
-      - id: mcpl_0caeec97187f477e006a61ee47ab388199a61d10e96eb5bf14
+      - id: mcpl_0e3fe24990ca0d3e006a6b125b02b8819b85656b1528326216
         server_label: counter
         tools:
         - annotations:
@@ -57,7 +57,7 @@ turns:
       - approval_request_id: null
         arguments: '{}'
         error: null
-        id: mcp_0caeec97187f477e006a61ee48ee008199a9a49b951a77b46d
+        id: mcp_0e3fe24990ca0d3e006a6b125cb0e4819bb4e6ce6bf14fdb4a
         name: say_hello
         output: hello
         server_label: counter
@@ -68,7 +68,7 @@ turns:
           logprobs: []
           text: MCP_SAYS=hello
           type: output_text
-        id: msg_0caeec97187f477e006a61ee498a0881999a88daaae7da9597
+        id: msg_0e3fe24990ca0d3e006a6b125d62b8819ba94430a4f73a8cc1
         role: assistant
         status: completed
         type: message
@@ -111,7 +111,7 @@ turns:
         require_approval: never
         server_description: null
         server_label: counter
-        server_url: https://discharge-exhibit-attempt-sponsored.trycloudflare.com/mcp
+        server_url: https://gabriel-displays-manufacturers-structures.trycloudflare.com/mcp
         type: mcp
       top_logprobs: 0
       top_p: 1.0
