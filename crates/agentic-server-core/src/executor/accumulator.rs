@@ -17,11 +17,11 @@ use futures::{Stream, StreamExt};
 use crate::events::{EventFrame, EventPayload, SSEEventType, SSEItemType, normalize_sse_line};
 use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::types::event::{MessageStatus, ResponseStatus};
-use crate::types::io::McpCall;
 use crate::types::io::{
     ApplyDone, CustomToolCall, FunctionToolCall, OutputItem, OutputMessage, OutputTextContent, ReasoningOutput,
     ReasoningTextContent, ResponseUsage,
 };
+use crate::types::io::{McpCall, WebSearchCall};
 use crate::types::request_response::{IncompleteDetails, ResponsePayload};
 use crate::utils::common::{deserialize_from_str, deserialize_from_value_opt};
 use crate::utils::uuid7_str;
@@ -33,6 +33,7 @@ enum InFlight {
     Reasoning { item: ReasoningOutput, text: String },
     FunctionCall { item: FunctionToolCall, arguments: String },
     CustomToolCall { item: CustomToolCall, input: String },
+    WebSearchCall { item: WebSearchCall },
     McpCall { item: McpCall },
 }
 
@@ -43,6 +44,7 @@ impl std::fmt::Debug for InFlight {
             Self::Reasoning { .. } => write!(f, "InFlight::Reasoning {{ .. }}"),
             Self::FunctionCall { .. } => write!(f, "InFlight::FunctionCall {{ .. }}"),
             Self::CustomToolCall { .. } => write!(f, "InFlight::CustomToolCall {{ .. }}"),
+            Self::WebSearchCall { .. } => write!(f, "InFlight::WebSearchCall {{ .. }}"),
             Self::McpCall { .. } => write!(f, "InFlight::McpCall {{ .. }}"),
         }
     }
@@ -78,6 +80,7 @@ impl InFlight {
                 item.status = Some(MessageStatus::Completed);
                 OutputItem::CustomToolCall(item)
             }
+            Self::WebSearchCall { item } => OutputItem::WebSearchCall(item),
             Self::McpCall { item } => OutputItem::McpCall(item),
         }
     }
@@ -397,7 +400,9 @@ impl ResponseAccumulator {
                 item,
                 text: String::with_capacity(256),
             }),
-            SSEItemType::WebSearchCall => None,
+            SSEItemType::WebSearchCall => WebSearchCall::try_from(payload)
+                .ok()
+                .map(|item| InFlight::WebSearchCall { item }),
             SSEItemType::McpCall => McpCall::try_from(payload).ok().map(|item| InFlight::McpCall { item }),
         };
         if let Some(item) = item {
@@ -453,11 +458,16 @@ impl ResponseAccumulator {
         else {
             return;
         };
-        if *item_type == SSEItemType::McpCall {
-            if let Some(InFlight::McpCall { item }) = self.in_flight.get_mut(item_id).map(|entry| &mut entry.item) {
+        match (item_type, self.in_flight.get_mut(item_id).map(|entry| &mut entry.item)) {
+            (SSEItemType::WebSearchCall, Some(InFlight::WebSearchCall { item })) => {
                 item.apply_done(payload, &mut String::new());
                 return;
             }
+            (SSEItemType::McpCall, Some(InFlight::McpCall { item })) => {
+                item.apply_done(payload, &mut String::new());
+                return;
+            }
+            _ => {}
         }
         if let Some(output_item @ (OutputItem::WebSearchCall(_) | OutputItem::McpCall(_))) =
             deserialize_from_value_opt::<OutputItem>(raw_item.clone())
@@ -506,7 +516,7 @@ impl ResponseAccumulator {
 mod tests {
     use super::*;
     use crate::events::WireEvent;
-    use crate::types::io::{McpCallError, McpCallStatus};
+    use crate::types::io::{McpCallError, McpCallStatus, WebSearchCallStatus};
 
     #[test]
     fn test_accumulator_new() {
@@ -730,6 +740,28 @@ mod tests {
         assert_eq!(acc.output.len(), 2);
         assert!(matches!(acc.output[0], OutputItem::Reasoning(_)));
         assert!(matches!(acc.output[1], OutputItem::McpCall(_)));
+    }
+
+    #[test]
+    fn test_accumulator_reasoning_before_web_search_call_preserves_order() {
+        let lines = vec![
+            r#"data: {"type":"response.created","response":{"id":"resp_abc"}}"#.to_string(),
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[]}}"#.to_string(),
+            r#"data: {"type":"response.reasoning_text.done","text":"thinking...","item_id":"rs_1"}"#.to_string(),
+            r#"data: {"type":"response.output_item.added","output_index":1,"item":{"type":"web_search_call","id":"ws_1","status":"in_progress","action":{"type":"search","query":"","sources":[]}}}"#.to_string(),
+            r#"data: {"type":"response.web_search_call.in_progress","item_id":"ws_1","output_index":1}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":1,"item":{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","query":"rust","sources":[]}}}"#.to_string(),
+            r#"data: {"type":"response.done","response":{"id":"resp_abc","status":"completed","usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert_eq!(acc.output.len(), 2);
+        assert!(matches!(acc.output[0], OutputItem::Reasoning(_)));
+        let OutputItem::WebSearchCall(call) = &acc.output[1] else {
+            panic!("expected web_search_call");
+        };
+        assert_eq!(call.status, WebSearchCallStatus::Completed);
+        assert_eq!(call.action.query, "rust");
     }
 
     #[test]

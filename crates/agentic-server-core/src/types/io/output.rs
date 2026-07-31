@@ -290,6 +290,22 @@ impl WebSearchCall {
     }
 }
 
+impl TryFrom<&EventPayload> for WebSearchCall {
+    type Error = ExecutorError;
+
+    fn try_from(payload: &EventPayload) -> Result<Self, Self::Error> {
+        let EventPayload::OutputItemAdded { item_id, .. } = payload else {
+            return Err(ExecutorError::ParseError("expected OutputItemAdded payload".into()));
+        };
+        let id = if item_id.is_empty() {
+            uuid7_str("ws_")
+        } else {
+            item_id.clone()
+        };
+        Ok(Self::new(id, WebSearchCallStatus::InProgress, "", vec![]))
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum McpCallError {
@@ -513,6 +529,17 @@ impl ApplyDone for CustomToolCall {
 }
 
 impl ApplyDone for McpCall {
+    fn apply_done(&mut self, payload: &EventPayload, _buffer: &mut String) {
+        let EventPayload::OutputItemDone { item, .. } = payload else {
+            return;
+        };
+        if let Some(call) = deserialize_from_value_opt(item.clone()) {
+            *self = call;
+        }
+    }
+}
+
+impl ApplyDone for WebSearchCall {
     fn apply_done(&mut self, payload: &EventPayload, _buffer: &mut String) {
         let EventPayload::OutputItemDone { item, .. } = payload else {
             return;
