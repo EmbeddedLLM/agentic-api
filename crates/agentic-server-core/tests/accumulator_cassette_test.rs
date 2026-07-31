@@ -929,11 +929,13 @@ fn assert_matching_web_search_output(openai: &[OutputItem], gateway: &[OutputIte
     let gateway_call = assert_completed_potato_web_search(gateway);
     assert_eq!(gateway_call.status, openai_call.status);
     assert_eq!(gateway_call.action.type_str(), openai_call.action.type_str());
+
+    let openai_action = openai_call.action.as_search().unwrap();
+    let gateway_action = gateway_call.action.as_search().unwrap();
+    assert_eq!(gateway_action.query, openai_action.query);
+    assert_eq!(openai_action.queries, ["potato"]);
     assert!(
-        gateway_call
-            .action
-            .as_search()
-            .unwrap()
+        gateway_action
             .sources
             .iter()
             .any(|source| source.url == "https://en.wikipedia.org/wiki/Potato"),

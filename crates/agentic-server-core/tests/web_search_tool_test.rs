@@ -129,6 +129,25 @@ fn assert_recorded_web_search_output(output: &[serde_json::Value]) -> &serde_jso
     call
 }
 
+fn assert_matching_recorded_web_search_action(openai_call: &serde_json::Value, gateway_call: &serde_json::Value) {
+    let openai_action = &openai_call["action"];
+    let gateway_action = &gateway_call["action"];
+
+    assert_eq!(gateway_action["type"], openai_action["type"]);
+    assert_eq!(gateway_action["query"], openai_action["query"]);
+    assert_eq!(openai_action["queries"], serde_json::json!(["potato"]));
+
+    let gateway_sources = gateway_action["sources"]
+        .as_array()
+        .expect("gateway search action should contain resolved sources");
+    assert!(!gateway_sources.is_empty());
+    assert!(
+        gateway_sources
+            .iter()
+            .all(|source| { source["url"].as_str().is_some_and(|url| url.starts_with("https://")) })
+    );
+}
+
 fn assert_recorded_web_search_lifecycle(turn: &support::Turn) -> String {
     let events = recorded_sse_events(turn);
     let expected_types = [
@@ -215,7 +234,7 @@ fn recorded_web_search_nonstreaming_matches_openai_contract() {
     let openai_call = assert_recorded_web_search_output(&openai_output);
     let gateway_call = assert_recorded_web_search_output(&gateway_output);
     assert_eq!(gateway_call["status"], openai_call["status"]);
-    assert_eq!(gateway_call["action"]["type"], openai_call["action"]["type"]);
+    assert_matching_recorded_web_search_action(openai_call, gateway_call);
 }
 
 #[test]
@@ -236,7 +255,7 @@ fn recorded_web_search_streaming_matches_openai_contract() {
     assert_eq!(openai_call["id"], openai_id);
     assert_eq!(gateway_call["id"], gateway_id);
     assert_eq!(gateway_call["status"], openai_call["status"]);
-    assert_eq!(gateway_call["action"]["type"], openai_call["action"]["type"]);
+    assert_matching_recorded_web_search_action(openai_call, gateway_call);
 }
 
 #[derive(Debug)]

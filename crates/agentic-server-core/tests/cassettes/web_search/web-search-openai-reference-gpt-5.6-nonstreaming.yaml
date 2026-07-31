@@ -24,11 +24,11 @@ turns:
       background: false
       billing:
         payer: developer
-      completed_at: 1785474946
-      created_at: 1785474939
+      completed_at: 1785502355
+      created_at: 1785502347
       error: null
       frequency_penalty: 0.0
-      id: resp_05888f0e458f23c7006a6c2f7b01608199826145d89e55092a
+      id: resp_05b26e957aa7a7d7006a6c9a8bdc648199ba757441be02e7a6
       incomplete_details: null
       instructions: null
       max_output_tokens: 1024
@@ -39,8 +39,8 @@ turns:
       object: response
       output:
       - content: []
-        encrypted_content: gAAAAABqbC-CKdW9FfBHyXRtBHsIEMfV2ehMzEmzxkNC_oGzDeYmKSWc2OJoUOyXbr3Zq4UJClGMmwG6CRsjqraLnCHXRUl2ydi8CV760H9XOCz-Af-ekfnjKHW3fv-58xXAtn6YqlOPba33LZZKHGh1-IFBIoq8bU8OETl0o4toIeUxueM8OpwVUbJYnE7xv1ZOmNEyRyRdVpZ1gcYsnlVsql621mmyrOIjdyCcXSD0ZijqJikwlUFaDAbkDgWlRf_Wn4jahoZVvL_FUIuJg3fjVJNkrU9BUIMyBR-Zh3ylNa9oQFen83Q30BkaqUE4NcyzUeooI0IoXrDKnykizEDqyt2zVDqGyafeDPZY63AMLQ7IHi34T3ltmt8muJ6-V0Lto5M71o-76Cakbiadf8pPTryPvT3KWG6LKV1An5P4Vw3egT2a3NEv2VWSTSQr4xd-aDmD0oVdcq2nzxhGuppIx5WYZNBmYYG9q_sw5-g1rpDSR-Agj8dJaPb9wFk9Y_4FEWpyCG3wvYqXzJcdw0wvx7tFBx-rJu07bbMfkPQjL5ZFTrHV3-s0AFJbKjTDIO-8i42odVoA3N_c6XTY0pqmnd2UDbDaa-ddpnQoQvVk7nDZjTqTC7esgMivwRIvp-GNsYVWfhJODivLXfw1KmKnpkG_30-HRpsGRocxLbGWGGKcYc5WRznLVHmSnxuAY1CvAgtPHoCSEbVljoON3QSUQz3Zp1xIyLi5rTJ_raUHIDk2loZG2al1EMKzgbii3OjN8z-BxFeY9-zyAqHw-tkSnZwVWvCd8rbioxm3DxGoqh5dYKqmnUJb31cZmpmjRda9oLmzeYLwRKbvuPOG6qS0suvWHRoruGSMtyWXPD-TfcnJL0-JFKluUJfTOPlrNwkRIQdL3hV8jE_S065-044CL6aAa02oeidy_Vv7rLjCjGY7KxD2eDevFqOFCTQ77twpTz8ppw_lSKVrbyecIH-0udd8H4IiW126Efd3P0rSQGXegbudPD3zdrTKIdODQYYD4OtldqAgsST4xhwyQBfd-t0vP9sU5g==
-        id: rs_05888f0e458f23c7006a6c2f7ba99c8199b90dad9cf3a9333c
+        encrypted_content: gAAAAABqbJqT3jzQZaHOg1Wsz1ch-PsZdMKOBETTJuBoEWxvKF4Y1V6NzmWHE7zovHk_Xdevg5u1JDQszrvMKmvJMnlTREBqxR4bt9roowxwJj9M3TM1SJ__-ZzpzHtbk-d6_io_xscOxBtrzx8tvVxyCMBU-VvdBJC5CG4IWoEPdIUDAoyczGfRTSlZKDpVZLKJRxI_aw0G1UxBMl_W8UvGtCjfzs9XxiNp2CWA65YPZX2rGTmRN9_8AIJyEXMkm3d1Pvp45gYGZLYC-tRSrAiM9rD5F2Xej6LG_2rkcLRFLgWZBz5typRRWKAw9Yi0D3iuAn-Z4jx3EkK-gJWKKWy6_EWJw1pJbOsSLTu2wgItX5RGASQOpfgOtTpOcfoC1ci6yzM0DQ6ltEcoO8Uy66J3YXT83xTOMPxsvV7fmhGItVyr8SLqn9j8WzjQ7V1XHDNU3tOVMkqrEuyhiDbVIHri9bk--aaGE2E7evhMHfmZilx3GQ-2vX1zlkGCL4ooT7Udefqx8Ot7BmEC8uInPGo0AbmwXdKoucX_5sqEH6foLPSmr1yj6dDxUDzxhlsPkp_EohI1EBWv44YNUxv0Tz0NFgZp9BDQvLg6RBPOl1cjJNR7tw8VyBoHCBQ7bRbn8DPhgjnxWzsUmx0cdDkXmtI8umiaH7CcE688ns9MJBnRzEMeWSsoYszLGb1BTdT5m24eDD5wmNf27NFE_srdQUtQWQk7ZTrLUQAG9WnsNBTf29hGv478sT8fcW5DM9n1WQuf84quOc8HqOe6s2Mux3QVfJwHKFP6WEzqOFPKwTsX-5j_M-G4x0RWB4U_jjh2Smd-A6JoQf7pp1cTF-2I0pVSNl_WginPo1iSNE8NVQ2PAkl4rbiO-ee-jCW0BL46WNmZyNRDd9GxnVitwH2I1eQ3BldI5adaNHTIIxS5fH_KjRSp80T1wzJNSDARtrJ7wcAe9OpRwXbb0FFBYVeUJN0UeivYX5L6pcHE7nj0OPTGkRrWYxqiccSMETmiiLT0RSfPf0lkNZGg26cn724_W4ZtRBCEl8EpDg==
+        id: rs_05b26e957aa7a7d7006a6c9a8d1ad4819995cfa8e832d7f52b
         summary: []
         type: reasoning
       - action:
@@ -48,22 +48,22 @@ turns:
           - potato
           query: potato
           type: search
-        id: ws_05888f0e458f23c7006a6c2f7bfd008199abc6d93b844d667d
+        id: ws_05b26e957aa7a7d7006a6c9a8d934c8199b6e86ca1372c4621
         status: completed
         type: web_search_call
       - content:
         - annotations:
-          - end_index: 259
-            start_index: 167
+          - end_index: 265
+            start_index: 173
             title: POTATO Definition & Meaning - Merriam-Webster
             type: url_citation
             url: https://www.merriam-webster.com/dictionary/potato?utm_source=openai
           logprobs: []
           text: Search results for **“potato”** primarily define it as an edible,
-            starchy tuber and provide dictionary entries, cooking information, and
-            general facts about the crop. ([merriam-webster.com](https://www.merriam-webster.com/dictionary/potato?utm_source=openai))
+            starchy underground tuber, alongside cooking guides, recipes, agricultural
+            resources, and related content. ([merriam-webster.com](https://www.merriam-webster.com/dictionary/potato?utm_source=openai))
           type: output_text
-        id: msg_05888f0e458f23c7006a6c2f814ba48199a100941e4a676c40
+        id: msg_05b26e957aa7a7d7006a6c9a92bcc081998faad7bf98c9b051
         phase: final_answer
         role: assistant
         status: completed
@@ -116,14 +116,14 @@ turns:
       top_p: 0.98
       truncation: disabled
       usage:
-        input_tokens: 8800
+        input_tokens: 8775
         input_tokens_details:
           cache_write_tokens: 0
           cached_tokens: 4420
-        output_tokens: 113
+        output_tokens: 114
         output_tokens_details:
-          reasoning_tokens: 46
-        total_tokens: 8913
+          reasoning_tokens: 47
+        total_tokens: 8889
       user: null
     headers:
       content-type: application/json
