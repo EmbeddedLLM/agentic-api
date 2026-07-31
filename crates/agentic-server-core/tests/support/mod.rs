@@ -45,6 +45,8 @@ pub struct TurnRequest {
 #[derive(Debug, Deserialize, Default)]
 pub struct TurnBody {
     #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
     pub input: Value,
     #[serde(default = "default_true")]
     pub store: bool,
@@ -54,6 +56,8 @@ pub struct TurnBody {
     pub tools: Vec<Value>,
     #[serde(default)]
     pub tool_choice: Option<Value>,
+    #[serde(default)]
+    pub max_output_tokens: Option<u64>,
 }
 
 fn default_true() -> bool {

@@ -17,11 +17,11 @@ use futures::{Stream, StreamExt};
 use crate::events::{EventFrame, EventPayload, SSEEventType, SSEItemType, normalize_sse_line};
 use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::types::event::{MessageStatus, ResponseStatus};
-use crate::types::io::McpCall;
 use crate::types::io::{
     ApplyDone, CustomToolCall, FunctionToolCall, OutputItem, OutputMessage, OutputTextContent, ReasoningOutput,
     ReasoningTextContent, ResponseUsage,
 };
+use crate::types::io::{McpCall, WebSearchCall};
 use crate::types::request_response::{IncompleteDetails, ResponsePayload};
 use crate::utils::common::{deserialize_from_str, deserialize_from_value_opt};
 use crate::utils::uuid7_str;
@@ -33,6 +33,7 @@ enum InFlight {
     Reasoning { item: ReasoningOutput, text: String },
     FunctionCall { item: FunctionToolCall, arguments: String },
     CustomToolCall { item: CustomToolCall, input: String },
+    WebSearchCall { item: Option<WebSearchCall> },
     McpCall { item: McpCall },
 }
 
@@ -43,42 +44,44 @@ impl std::fmt::Debug for InFlight {
             Self::Reasoning { .. } => write!(f, "InFlight::Reasoning {{ .. }}"),
             Self::FunctionCall { .. } => write!(f, "InFlight::FunctionCall {{ .. }}"),
             Self::CustomToolCall { .. } => write!(f, "InFlight::CustomToolCall {{ .. }}"),
+            Self::WebSearchCall { .. } => write!(f, "InFlight::WebSearchCall {{ .. }}"),
             Self::McpCall { .. } => write!(f, "InFlight::McpCall {{ .. }}"),
         }
     }
 }
 
 impl InFlight {
-    fn finalize(self) -> OutputItem {
+    fn finalize(self) -> Option<OutputItem> {
         match self {
             Self::Reasoning { mut item, text } => {
                 if !text.is_empty() {
                     item.content.push(ReasoningTextContent::new(text));
                 }
-                OutputItem::Reasoning(item)
+                Some(OutputItem::Reasoning(item))
             }
             Self::FunctionCall { mut item, arguments } => {
                 if !arguments.is_empty() && item.arguments.is_empty() {
                     item.arguments = arguments;
                 }
                 item.status = MessageStatus::Completed;
-                OutputItem::FunctionCall(item)
+                Some(OutputItem::FunctionCall(item))
             }
             Self::Message { mut item, text } => {
                 if !text.is_empty() {
                     item.content.push(OutputTextContent::new(text));
                 }
                 item.status = MessageStatus::Completed;
-                OutputItem::Message(item)
+                Some(OutputItem::Message(item))
             }
             Self::CustomToolCall { mut item, input } => {
                 if item.input.is_empty() {
                     item.input = input;
                 }
                 item.status = Some(MessageStatus::Completed);
-                OutputItem::CustomToolCall(item)
+                Some(OutputItem::CustomToolCall(item))
             }
-            Self::McpCall { item } => OutputItem::McpCall(item),
+            Self::WebSearchCall { item } => item.map(OutputItem::WebSearchCall),
+            Self::McpCall { item } => Some(OutputItem::McpCall(item)),
         }
     }
 }
@@ -234,7 +237,7 @@ impl ResponseAccumulator {
         self.completed.extend(
             self.in_flight
                 .drain(..)
-                .map(|(_, entry)| (entry.output_index, entry.item.finalize())),
+                .filter_map(|(_, entry)| entry.item.finalize().map(|item| (entry.output_index, item))),
         );
         self.completed.sort_by_key(|(output_index, _)| *output_index);
         self.output
@@ -387,6 +390,7 @@ impl ResponseAccumulator {
                 item,
                 text: String::with_capacity(256),
             }),
+            SSEItemType::WebSearchCall if !item_id.is_empty() => Some(InFlight::WebSearchCall { item: None }),
             SSEItemType::WebSearchCall => None,
             SSEItemType::McpCall => McpCall::try_from(payload).ok().map(|item| InFlight::McpCall { item }),
         };
@@ -429,9 +433,41 @@ impl ResponseAccumulator {
             }
             _ => {}
         }
-        if let Some(
-            output_item @ (OutputItem::CustomToolCall(_) | OutputItem::WebSearchCall(_) | OutputItem::McpCall(_)),
-        ) = deserialize_from_value_opt::<OutputItem>(raw_item.clone())
+        if *item_type == SSEItemType::WebSearchCall {
+            let Some(OutputItem::WebSearchCall(mut call)) = deserialize_from_value_opt::<OutputItem>(raw_item.clone())
+            else {
+                return;
+            };
+            let in_flight_key = self
+                .in_flight
+                .get(item_id)
+                .filter(|entry| matches!(entry.item, InFlight::WebSearchCall { .. }))
+                .map(|_| item_id.to_owned())
+                .or_else(|| {
+                    self.in_flight.iter().find_map(|(key, entry)| {
+                        (entry.output_index == *output_index && matches!(entry.item, InFlight::WebSearchCall { .. }))
+                            .then(|| key.clone())
+                    })
+                });
+            if call.id.is_empty() {
+                call.id = in_flight_key
+                    .as_deref()
+                    .filter(|id| !id.is_empty())
+                    .map_or_else(|| uuid7_str("ws_"), str::to_owned);
+            }
+            if let Some(InFlight::WebSearchCall { item }) = in_flight_key
+                .as_deref()
+                .and_then(|key| self.in_flight.get_mut(key))
+                .map(|entry| &mut entry.item)
+            {
+                *item = Some(call);
+            } else {
+                self.completed.push((*output_index, OutputItem::WebSearchCall(call)));
+            }
+            return;
+        }
+        if let Some(output_item @ (OutputItem::CustomToolCall(_) | OutputItem::McpCall(_))) =
+            deserialize_from_value_opt::<OutputItem>(raw_item.clone())
         {
             self.completed.push((*output_index, output_item));
         }
@@ -477,7 +513,7 @@ impl ResponseAccumulator {
 mod tests {
     use super::*;
     use crate::events::WireEvent;
-    use crate::types::io::{McpCallError, McpCallStatus};
+    use crate::types::io::{McpCallError, McpCallStatus, WebSearchCallStatus};
 
     #[test]
     fn test_accumulator_new() {
@@ -701,6 +737,108 @@ mod tests {
         assert_eq!(acc.output.len(), 2);
         assert!(matches!(acc.output[0], OutputItem::Reasoning(_)));
         assert!(matches!(acc.output[1], OutputItem::McpCall(_)));
+    }
+
+    #[test]
+    fn test_accumulator_reasoning_before_web_search_call_preserves_order() {
+        let lines = vec![
+            r#"data: {"type":"response.created","response":{"id":"resp_abc"}}"#.to_string(),
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[]}}"#.to_string(),
+            r#"data: {"type":"response.reasoning_text.done","text":"thinking...","item_id":"rs_1"}"#.to_string(),
+            r#"data: {"type":"response.output_item.added","output_index":1,"item":{"type":"web_search_call","id":"ws_1","status":"in_progress","action":{"type":"search","query":"","sources":[]}}}"#.to_string(),
+            r#"data: {"type":"response.web_search_call.in_progress","item_id":"ws_1","output_index":1}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":1,"item":{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","query":"rust","sources":[]}}}"#.to_string(),
+            r#"data: {"type":"response.done","response":{"id":"resp_abc","status":"completed","usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert_eq!(acc.output.len(), 2);
+        assert!(matches!(acc.output[0], OutputItem::Reasoning(_)));
+        let OutputItem::WebSearchCall(call) = &acc.output[1] else {
+            panic!("expected web_search_call");
+        };
+        assert_eq!(call.status, WebSearchCallStatus::Completed);
+        assert_eq!(call.action.as_search().unwrap().query, "rust");
+    }
+
+    #[test]
+    fn test_accumulator_preserves_open_page_web_search_action() {
+        let lines = vec![
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"web_search_call","id":"ws_1","status":"in_progress"}}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"open_page","url":"https://example.com"}}}"#.to_string(),
+            r#"data: {"type":"response.done","response":{"id":"resp_1","status":"completed"}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert_eq!(acc.output.len(), 1);
+        let action = match &acc.output[0] {
+            OutputItem::WebSearchCall(call) => serde_json::to_value(&call.action).unwrap(),
+            _ => panic!("expected web_search_call"),
+        };
+        assert_eq!(action["type"], "open_page");
+        assert_eq!(action["url"], "https://example.com");
+    }
+
+    #[test]
+    fn test_accumulator_preserves_find_in_page_web_search_action() {
+        let lines = vec![
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"web_search_call","id":"ws_1","status":"in_progress"}}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"find_in_page","url":"https://example.com","pattern":"needle"}}}"#.to_string(),
+            r#"data: {"type":"response.done","response":{"id":"resp_1","status":"completed"}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert_eq!(acc.output.len(), 1);
+        let action = match &acc.output[0] {
+            OutputItem::WebSearchCall(call) => serde_json::to_value(&call.action).unwrap(),
+            _ => panic!("expected web_search_call"),
+        };
+        assert_eq!(action["type"], "find_in_page");
+        assert_eq!(action["url"], "https://example.com");
+        assert_eq!(action["pattern"], "needle");
+    }
+
+    #[test]
+    fn test_accumulator_drops_unfinished_web_search_placeholder() {
+        let lines = vec![
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"web_search_call","id":"ws_1","status":"in_progress"}}"#.to_string(),
+            r#"data: {"type":"response.done","response":{"id":"resp_1","status":"completed"}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert!(acc.output.is_empty());
+    }
+
+    #[test]
+    fn test_accumulator_empty_added_id_then_stable_done_does_not_duplicate() {
+        let lines = vec![
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"web_search_call","id":"","status":"in_progress"}}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","query":"rust","sources":[]}}}"#.to_string(),
+            r#"data: {"type":"response.done","response":{"id":"resp_1","status":"completed"}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert_eq!(acc.output.len(), 1);
+        let OutputItem::WebSearchCall(call) = &acc.output[0] else {
+            panic!("expected web_search_call");
+        };
+        assert_eq!(call.id, "ws_1");
+    }
+
+    #[test]
+    fn test_accumulator_stable_added_id_survives_empty_done_id() {
+        let lines = vec![
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"web_search_call","id":"ws_added","status":"in_progress"}}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"web_search_call","id":"","status":"completed","action":{"type":"search","query":"rust","sources":[]}}}"#.to_string(),
+            r#"data: {"type":"response.done","response":{"id":"resp_1","status":"completed"}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert_eq!(acc.output.len(), 1);
+        let OutputItem::WebSearchCall(call) = &acc.output[0] else {
+            panic!("expected web_search_call");
+        };
+        assert_eq!(call.id, "ws_added");
     }
 
     #[test]

@@ -168,6 +168,7 @@ turns:
 | `record_codex_cli_tool_call_cassettes.sh` | Codex function/namespace/custom-tool matrix | gateway, vLLM, and OpenAI |
 | `record_custom_tool_cassettes.sh` | Matching two-turn custom-tool flows (streaming + non-streaming) | gateway and OpenAI reference |
 | `record_mcp_cassettes.sh` | Native MCP counter tool discovery and calls (streaming + non-streaming) | gateway and OpenAI reference |
+| `record_web_search_cassettes.sh` | Matching web-search calls (streaming + non-streaming) | gateway and OpenAI reference |
 
 ### Text-only (OpenAI)
 
@@ -205,23 +206,14 @@ bash crates/agentic-server-core/tests/cassettes/record_custom_tool_cassettes.sh
 Use `CUSTOM_TOOL_RECORD_SET=gateway` or `CUSTOM_TOOL_RECORD_SET=openai` to
 record only one provider.
 
-### Codex custom tools (gateway, vLLM, and OpenAI)
+### Web search (gateway and OpenAI)
 
-The custom fixture uses a Lark grammar and records two turns: the model returns raw `custom_tool_call.input`, then the
-recorder submits the matching `custom_tool_call_output` before the follow-up user message.
+The default records both providers. Use `WEB_SEARCH_RECORD_SET=gateway` or
+`WEB_SEARCH_RECORD_SET=openai` to record only one side.
 
 ```bash
-GATEWAY_URL=http://127.0.0.1:3018 \
-V_MODEL=Qwen/Qwen3.6-35B-A3B \
-bash tests/cassettes/record_codex_cli_tool_call_cassettes.sh gateway-custom
-
-VLLM_URL=http://127.0.0.1:8000 \
-V_MODEL=Qwen/Qwen3.6-35B-A3B \
-bash tests/cassettes/record_codex_cli_tool_call_cassettes.sh direct-vllm-custom
-
 OPENAI_API_KEY=sk-... \
-OPENAI_CUSTOM_MODEL=gpt-5.6 \
-bash tests/cassettes/record_codex_cli_tool_call_cassettes.sh openai-custom
+bash crates/agentic-server-core/tests/cassettes/record_web_search_cassettes.sh
 ```
 
 ### Compaction replay (OpenAI)

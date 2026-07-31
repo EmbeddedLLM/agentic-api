@@ -10,7 +10,8 @@ pub use io::{
     InputMessage, InputMessageContent, InputTextContent, InputTokenDetails, McpCall, McpCallError, McpCallStatus,
     McpToolExecutionError, McpToolExecutionErrorContent, OutputItem, OutputMessage, OutputTextContent,
     OutputTokenDetails, ReasoningOutput, ReasoningTextContent, ResponseUsage, ResponsesInput, ToolChoice,
-    WebSearchActionSearch, WebSearchCall, WebSearchCallStatus, WebSearchSource,
+    WebSearchAction, WebSearchActionFindInPage, WebSearchActionOpenPage, WebSearchActionSearch, WebSearchCall,
+    WebSearchCallStatus, WebSearchSource,
 };
 pub use request_response::{
     CompactRequest, CompactedResponse, ContextManagement, IncompleteDetails, RequestPayload, ResponsePayload,
