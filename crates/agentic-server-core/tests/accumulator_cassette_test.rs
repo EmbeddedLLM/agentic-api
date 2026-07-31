@@ -16,6 +16,7 @@ const TOOL_CALLS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassett
 const REASONING_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/reasoning/responses");
 const CODEX_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/codex");
 const WEB_SEARCH_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/web_search");
+const CUSTOM_TOOL_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/custom_tool");
 
 // --- Legacy event cassette format ---
 
@@ -86,6 +87,10 @@ fn load_codex_cassette(filename: &str) -> TurnCassette {
 
 fn load_web_search_cassette(filename: &str) -> TurnCassette {
     load_turn_cassette_from(WEB_SEARCH_DIR, filename)
+}
+
+fn load_custom_tool_cassette(filename: &str) -> TurnCassette {
+    load_turn_cassette_from(CUSTOM_TOOL_DIR, filename)
 }
 
 /// Extracts `data: ...` lines from raw SSE entries (which may include
@@ -958,6 +963,90 @@ fn test_web_search_gateway_cassette_streaming() {
         "gpt-oss web_search cassette should include reasoning"
     );
     assert_completed_potato_web_search(&output);
+}
+
+#[test]
+fn test_custom_tool_cassettes_accumulate_public_streaming_shape() {
+    let cases = [
+        (
+            "gateway",
+            "custom-tool-gateway-Qwen-Qwen3.5-35B-A3B-FP8-streaming.yaml",
+            "Qwen/Qwen3.5-35B-A3B-FP8",
+        ),
+        (
+            "OpenAI",
+            "custom-tool-openai-reference-gpt-5.6-streaming.yaml",
+            "gpt-5.6",
+        ),
+    ];
+
+    for (provider, filename, model) in cases {
+        let cassette = load_custom_tool_cassette(filename);
+        assert_eq!(cassette.turns.len(), 2, "{provider} cassette should contain two turns");
+
+        let output = process_codex_streaming_turn(&cassette, 0, model);
+        assert!(
+            !output.iter().any(|item| matches!(item, OutputItem::FunctionCall(_))),
+            "{provider} must not expose the normalized function call"
+        );
+        let call = first_custom_tool_call(&output);
+        assert!(call.id.starts_with("ctc_"), "{provider} custom item ID");
+        assert!(!call.call_id.is_empty(), "{provider} custom call ID");
+        assert_eq!(call.name, "agentic_raw_echo", "{provider} custom tool name");
+        assert_eq!(call.input, "CUSTOM_CASSETTE_OK", "{provider} custom input");
+        assert_eq!(call.status, Some(MessageStatus::Completed), "{provider} custom status");
+
+        let continuation = process_codex_streaming_turn(&cassette, 1, model);
+        assert!(continuation.iter().any(|item| {
+            matches!(
+                item,
+                OutputItem::Message(message)
+                    if message.content.iter().any(|content| content.text.contains("CUSTOM_CASSETTE_OUTPUT_OK"))
+            )
+        }));
+    }
+}
+
+#[test]
+fn test_custom_tool_cassettes_accumulate_public_nonstreaming_shape() {
+    let cases = [
+        (
+            "gateway",
+            "custom-tool-gateway-Qwen-Qwen3.5-35B-A3B-FP8-nonstreaming.yaml",
+            "Qwen/Qwen3.5-35B-A3B-FP8",
+        ),
+        (
+            "OpenAI",
+            "custom-tool-openai-reference-gpt-5.6-nonstreaming.yaml",
+            "gpt-5.6",
+        ),
+    ];
+
+    for (provider, filename, model) in cases {
+        let cassette = load_custom_tool_cassette(filename);
+        assert_eq!(cassette.turns.len(), 2, "{provider} cassette should contain two turns");
+
+        let output = process_nonstreaming_turn(&cassette, 0, model);
+        assert!(
+            !output.iter().any(|item| matches!(item, OutputItem::FunctionCall(_))),
+            "{provider} must not expose the normalized function call"
+        );
+        let call = first_custom_tool_call(&output);
+        assert!(call.id.starts_with("ctc_"), "{provider} custom item ID");
+        assert!(!call.call_id.is_empty(), "{provider} custom call ID");
+        assert_eq!(call.name, "agentic_raw_echo", "{provider} custom tool name");
+        assert_eq!(call.input, "CUSTOM_CASSETTE_OK", "{provider} custom input");
+        assert_eq!(call.status, Some(MessageStatus::Completed), "{provider} custom status");
+
+        let continuation = process_nonstreaming_turn(&cassette, 1, model);
+        assert!(continuation.iter().any(|item| {
+            matches!(
+                item,
+                OutputItem::Message(message)
+                    if message.content.iter().any(|content| content.text.contains("CUSTOM_CASSETTE_OUTPUT_OK"))
+            )
+        }));
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════

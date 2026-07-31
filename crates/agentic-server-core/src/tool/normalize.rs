@@ -4,6 +4,7 @@ use crate::types::tools::ResponsesTool;
 use crate::utils::common::serialize_to_value_or_custom_default;
 
 use super::codex::CodexNamespaceHandler;
+use super::custom::CustomHandler;
 use super::function::FunctionHandler;
 use super::handler::{ToolHandler, ToolOutput};
 use super::mcp::McpHandler;
@@ -21,7 +22,8 @@ impl ResponsesTool {
             Self::FileSearch(_) => Some(ToolType::FileSearch),
             Self::CodeInterpreter(_) => Some(ToolType::CodeInterpreter),
             Self::Namespace(_) => Some(ToolType::CodexNamespace),
-            Self::Custom(_) | Self::Unknown => None,
+            Self::Custom(_) => Some(ToolType::Custom),
+            Self::Unknown => None,
         }
     }
 
@@ -36,15 +38,13 @@ impl ResponsesTool {
     ///   Returns an empty list and logs at `debug` level if the name is empty.
     /// - `Mcp` variants convert gateway MCP built-ins to the function specs
     ///   vLLM can call.
-    /// - `Custom` variants return no function tools because
-    ///   `RequestPayload::to_upstream_request()` forwards their native
-    ///   Responses declarations separately.
+    /// - `Custom` variants become function tools with one string `input`
+    ///   parameter; the gateway restores their public custom-call shape.
     /// - Unimplemented variants (`FileSearch`, `CodeInterpreter`) return
     ///   an empty list and emit a `tracing::debug!`.
     ///
     /// `RequestPayload::to_upstream_request()` uses this conversion for
-    /// function-like tools while preserving native custom declarations in its
-    /// heterogeneous upstream tool list.
+    /// all model-visible tools.
     #[must_use]
     pub fn to_function_tools(&self) -> Vec<FunctionTool> {
         match self {
@@ -77,10 +77,12 @@ impl ResponsesTool {
                 |param| CodexNamespaceHandler.normalize(&param),
                 vec![],
             ),
-            Self::Custom(p) => {
-                tracing::debug!(name = %p.name, "custom tool retained for native upstream forwarding");
-                vec![]
-            }
+            Self::Custom(p) => serialize_to_value_or_custom_default(
+                p,
+                "custom tool config serialization failed",
+                |param| CustomHandler.normalize(&param),
+                vec![],
+            ),
             Self::Unknown => {
                 tracing::debug!("unknown tool skipped in normalize");
                 vec![]

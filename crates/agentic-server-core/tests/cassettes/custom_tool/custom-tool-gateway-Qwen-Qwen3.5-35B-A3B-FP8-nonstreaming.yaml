@@ -1,0 +1,161 @@
+turns:
+- filename: t1
+  request:
+    body:
+      input: You must call the agentic_raw_echo custom tool exactly once with exactly
+        CUSTOM_CASSETTE_OK as its raw text input.
+      max_output_tokens: 2048
+      model: Qwen/Qwen3.5-35B-A3B-FP8
+      store: true
+      stream: false
+      tools:
+      - description: Emit the requested cassette token as raw text.
+        format:
+          definition: 'start: "CUSTOM_CASSETTE_OK"'
+          syntax: lark
+          type: grammar
+        name: agentic_raw_echo
+        type: custom
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      conversation_id: null
+      created_at: 1785495771
+      error: null
+      id: resp_019fb7d7-578f-7a61-be05-595ddfc4b6d0
+      incomplete_details: null
+      instructions: null
+      model: Qwen/Qwen3.5-35B-A3B-FP8
+      object: response
+      output:
+      - content:
+        - text: 'The user is asking me to call the agentic_raw_echo custom tool exactly
+            once with "CUSTOM_CASSETTE_OK" as the raw text input. This is a specific
+            instruction that I need to follow.
+
+
+            Let me check the tool definition:
+
+            - Name: agentic_raw_echo
+
+            - Parameters: input (required, type: string)
+
+            - Description: Emit the requested cassette token as raw text.
+
+
+            I need to call this function with the input parameter set to "CUSTOM_CASSETTE_OK".
+
+            '
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_bc44cd476b689b6a
+        status: null
+        summary: []
+        type: reasoning
+      - call_id: chatcmpl-tool-ae789b79ade9ed2c
+        id: ctc_8733a261cde63d0d
+        input: CUSTOM_CASSETTE_OK
+        name: agentic_raw_echo
+        status: completed
+        type: custom_tool_call
+      previous_response_id: null
+      status: completed
+      usage:
+        input_tokens: 345
+        input_tokens_details:
+          cached_tokens: 0
+        output_tokens: 140
+        output_tokens_details:
+          reasoning_tokens: 0
+        total_tokens: 485
+    headers:
+      content-type: application/json
+    status_code: 200
+- filename: t2
+  request:
+    body:
+      input:
+      - call_id: chatcmpl-tool-ae789b79ade9ed2c
+        output: CUSTOM_CASSETTE_OUTPUT_OK
+        type: custom_tool_call_output
+      - content: Use the custom tool output provided above. Do not call any tool again.
+          Reply with exactly CUSTOM_CASSETTE_OUTPUT_OK.
+        role: user
+        type: message
+      max_output_tokens: 2048
+      model: Qwen/Qwen3.5-35B-A3B-FP8
+      previous_response_id: resp_019fb7d7-578f-7a61-be05-595ddfc4b6d0
+      store: true
+      stream: false
+      tools:
+      - description: Emit the requested cassette token as raw text.
+        format:
+          definition: 'start: "CUSTOM_CASSETTE_OK"'
+          syntax: lark
+          type: grammar
+        name: agentic_raw_echo
+        type: custom
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      conversation_id: null
+      created_at: 1785495772
+      error: null
+      id: resp_019fb7d7-5b53-7700-9554-0583a5b5582b
+      incomplete_details: null
+      instructions: null
+      model: Qwen/Qwen3.5-35B-A3B-FP8
+      object: response
+      output:
+      - content:
+        - text: 'The user wants me to use the custom tool output I received above.
+            They are telling me not to call any tool again, and to reply with exactly
+            "CUSTOM_CASSETTE_OUTPUT_OK".
+
+
+            Looking at the tool call result, the output was "CUSTOM_CASSETTE_OUTPUT_OK".
+            So I should simply reply with that exact text.
+
+            '
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_9d9fd872f1a8ac64
+        status: null
+        summary: []
+        type: reasoning
+      - content:
+        - annotations: []
+          text: '
+
+
+            CUSTOM_CASSETTE_OUTPUT_OK'
+          type: output_text
+        id: msg_b75d898c95358c0d
+        role: assistant
+        status: completed
+        type: message
+      previous_response_id: resp_019fb7d7-578f-7a61-be05-595ddfc4b6d0
+      status: completed
+      usage:
+        input_tokens: 429
+        input_tokens_details:
+          cached_tokens: 0
+        output_tokens: 80
+        output_tokens_details:
+          reasoning_tokens: 0
+        total_tokens: 509
+    headers:
+      content-type: application/json
+    status_code: 200

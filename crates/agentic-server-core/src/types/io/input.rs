@@ -93,6 +93,19 @@ impl From<FunctionToolCall> for InputFunctionToolCall {
     }
 }
 
+impl From<CustomToolCall> for InputFunctionToolCall {
+    fn from(call: CustomToolCall) -> Self {
+        Self {
+            id: function_call_item_id(&call.id),
+            call_id: call.call_id,
+            name: call.name,
+            namespace: None,
+            arguments: serde_json::json!({ "input": call.input }).to_string(),
+            status: call.status,
+        }
+    }
+}
+
 /// An opaque compacted context checkpoint accepted as Responses input.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompactionItem {
@@ -110,6 +123,15 @@ pub struct CustomToolCallOutputMessage {
     pub output: Value,
 }
 
+impl From<CustomToolCallOutputMessage> for FunctionToolResultMessage {
+    fn from(output: CustomToolCallOutputMessage) -> Self {
+        Self {
+            call_id: output.call_id,
+            output: custom_output_text(output.output),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type")]
 pub enum InputItem {
@@ -121,8 +143,7 @@ pub enum InputItem {
     FunctionCall(InputFunctionToolCall),
     #[serde(rename = "function_call_output")]
     FunctionCallOutput(FunctionToolResultMessage),
-    /// The model's freeform invocation, retained when rehydrating the matching
-    /// client-provided `custom_tool_call_output` on the next turn.
+    /// The public freeform invocation accepted from a client request.
     #[serde(rename = "custom_tool_call")]
     CustomToolCall(CustomToolCall),
     #[serde(rename = "custom_tool_call_output")]
@@ -231,6 +252,7 @@ impl ResponsesInput {
         let Self::Items(items) = self else {
             return Cow::Borrowed(self);
         };
+
         let Some(window) = latest_compaction_window(items) else {
             return Cow::Borrowed(self);
         };
@@ -251,6 +273,23 @@ impl ResponsesInput {
             })
             .collect();
         Cow::Owned(Self::Items(model_items))
+    }
+}
+
+fn function_call_item_id(item_id: &str) -> Option<String> {
+    if item_id.is_empty() {
+        return None;
+    }
+    if let Some(suffix) = item_id.strip_prefix("ctc_").filter(|suffix| !suffix.is_empty()) {
+        return Some(format!("fc_{suffix}"));
+    }
+    Some(item_id.to_owned())
+}
+
+fn custom_output_text(output: Value) -> String {
+    match output {
+        Value::String(output) => output,
+        output => output.to_string(),
     }
 }
 
@@ -320,5 +359,36 @@ mod tests {
         assert_eq!(serialized[1]["role"], "assistant");
         assert_eq!(serialized[1]["content"][0]["text"], "latest summary");
         assert_eq!(serialized[2]["content"], "keep me");
+    }
+
+    #[test]
+    fn custom_items_convert_to_function_history() {
+        let input: ResponsesInput = serde_json::from_value(serde_json::json!([
+            {
+                "type": "custom_tool_call",
+                "id": "ctc_1",
+                "call_id": "call_1",
+                "name": "raw_echo",
+                "input": "hello",
+                "status": "completed"
+            },
+            {
+                "type": "custom_tool_call_output",
+                "call_id": "call_1",
+                "output": "done"
+            }
+        ]))
+        .expect("custom history");
+
+        let canonical_value = serde_json::to_value(Vec::<InputItem>::from(&input)).expect("canonical items");
+        assert_eq!(canonical_value[0]["type"], "function_call");
+        assert_eq!(canonical_value[0]["id"], "fc_1");
+        assert_eq!(canonical_value[0]["arguments"], r#"{"input":"hello"}"#);
+        assert_eq!(canonical_value[1]["type"], "function_call_output");
+        assert_eq!(canonical_value[1]["output"], "done");
+
+        let public_value = serde_json::to_value(input).expect("public input");
+        assert_eq!(public_value[0]["type"], "custom_tool_call");
+        assert_eq!(public_value[1]["type"], "custom_tool_call_output");
     }
 }

@@ -577,7 +577,7 @@ impl OutputItem {
             Self::Message(message) => Some(InputItem::Message(message.clone().into())),
             Self::Reasoning(reasoning) => Some(InputItem::Reasoning(reasoning.clone())),
             Self::FunctionCall(call) => Some(InputItem::FunctionCall(InputFunctionToolCall::from(call.clone()))),
-            Self::CustomToolCall(call) => Some(InputItem::CustomToolCall(call.clone())),
+            Self::CustomToolCall(call) => Some(InputItem::FunctionCall(call.clone().into())),
             Self::WebSearchCall(_) | Self::McpCall(_) | Self::Unknown => None,
         }
     }
@@ -606,11 +606,11 @@ mod tests {
         };
         assert_eq!(call.status, Some(MessageStatus::Completed));
 
-        let Some(InputItem::CustomToolCall(call)) = item.to_input_item() else {
-            panic!("custom call should rehydrate as input");
+        let Some(InputItem::FunctionCall(call)) = item.to_input_item() else {
+            panic!("custom call should rehydrate as a function call");
         };
         assert_eq!(call.name, "apply_patch");
-        assert_eq!(call.input, "*** Begin Patch\n*** End Patch");
+        assert_eq!(call.arguments, r#"{"input":"*** Begin Patch\n*** End Patch"}"#);
     }
 
     #[test]

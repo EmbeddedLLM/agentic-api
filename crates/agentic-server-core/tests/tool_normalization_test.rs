@@ -314,7 +314,7 @@ fn codex_request_payloads_parse_all_recorded_shapes() {
 }
 
 #[tokio::test]
-async fn codex_custom_cassettes_preserve_native_upstream_shape_and_client_ownership() {
+async fn codex_custom_cassettes_normalize_upstream_and_preserve_client_ownership() {
     for filename in CODEX_CUSTOM_CASSETTES {
         let cassette = load_codex_cassette(filename);
         assert_eq!(cassette.turns.len(), 2, "{filename} should have two turns");
@@ -340,7 +340,9 @@ async fn codex_custom_cassettes_preserve_native_upstream_shape_and_client_owners
                 .await
                 .unwrap_or_else(|err| panic!("{filename} turn {i}: registry failed: {err}"));
             assert!(
-                registry.lookup("agentic_raw_echo").is_none(),
+                registry
+                    .lookup("agentic_raw_echo")
+                    .is_some_and(|entry| entry.tool_type == ToolType::Custom && !entry.tool_type.is_gateway_owned()),
                 "{filename} turn {i}: custom tool must remain client-owned"
             );
 
@@ -351,15 +353,17 @@ async fn codex_custom_cassettes_preserve_native_upstream_shape_and_client_owners
                 .unwrap_or_else(|| panic!("{filename} turn {i}: upstream request should contain tools"));
             assert!(
                 upstream_tools.iter().any(|tool| {
-                    tool.get("type").and_then(Value::as_str) == Some("custom")
+                    tool.get("type").and_then(Value::as_str) == Some("function")
                         && tool.get("name").and_then(Value::as_str) == Some("agentic_raw_echo")
                         && tool
-                            .get("format")
-                            .and_then(|format| format.get("definition"))
+                            .get("parameters")
+                            .and_then(|parameters| parameters.get("properties"))
+                            .and_then(|properties| properties.get("input"))
+                            .and_then(|input| input.get("type"))
                             .and_then(Value::as_str)
-                            == Some("start: \"CUSTOM_CASSETTE_OK\"")
+                            == Some("string")
                 }),
-                "{filename} turn {i}: custom declaration must be forwarded natively"
+                "{filename} turn {i}: custom declaration must normalize to a function"
             );
         }
     }

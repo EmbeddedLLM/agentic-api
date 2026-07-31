@@ -10,7 +10,7 @@ use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::executor::gateway_accumulator::{GatewayStreamAccumulator, StreamEvent, emit_sse_frame};
 use crate::executor::inference::{call_inference, fetch_response_json};
 use crate::executor::request::{ExecutionContext, RequestContext};
-use crate::tool::ToolRegistry;
+use crate::tool::{ToolRegistry, ToolType};
 use crate::types::request_response::ResponsePayload;
 use crate::utils::common::serialize_to_string;
 
@@ -72,7 +72,7 @@ pub(super) async fn fetch_stream_payload(
         exec_ctx.streaming_timeout,
     ));
     let mut acc = ResponseAccumulator::new(ctx.response_id.clone(), ctx.conversation_id.clone());
-    let mut hidden_gateway_item_ids = HashSet::new();
+    let mut hidden_public_call_item_ids = HashSet::new();
     let mut pending_unnamed_function_events = HashMap::<String, Vec<EventFrame>>::new();
     let mut defer_from_output_index = None;
     let mut deferred_events = Vec::new();
@@ -91,7 +91,7 @@ pub(super) async fn fetch_stream_payload(
                 emit_upstream_stream_event(
                     frame,
                     &mut emit_ctx,
-                    &mut hidden_gateway_item_ids,
+                    &mut hidden_public_call_item_ids,
                     &mut pending_unnamed_function_events,
                     &mut defer_from_output_index,
                     &mut deferred_events,
@@ -143,17 +143,17 @@ fn log_upstream_failure(frame: &EventFrame, gateway_response_id: &str) {
 fn emit_upstream_stream_event(
     frame: EventFrame,
     emit_ctx: &mut StreamEmitContext<'_>,
-    hidden_gateway_item_ids: &mut HashSet<String>,
+    hidden_public_call_item_ids: &mut HashSet<String>,
     pending_unnamed_function_events: &mut HashMap<String, Vec<EventFrame>>,
     defer_from_output_index: &mut Option<u64>,
     deferred_events: &mut Vec<EventFrame>,
 ) -> ExecutorResult<()> {
-    defer_after_gateway_call(&frame, emit_ctx.registry, defer_from_output_index);
+    defer_after_public_call(&frame, emit_ctx.registry, defer_from_output_index);
     if should_hide_upstream_event(
         frame.event_type,
         &frame.payload,
         emit_ctx.registry,
-        hidden_gateway_item_ids,
+        hidden_public_call_item_ids,
     ) || is_terminal_response_event(frame.event_type)
     {
         drop_pending_function_events(&frame.payload, pending_unnamed_function_events);
@@ -162,7 +162,7 @@ fn emit_upstream_stream_event(
     let Some(frame) = defer_or_flush_function_event(
         frame,
         emit_ctx,
-        hidden_gateway_item_ids,
+        hidden_public_call_item_ids,
         pending_unnamed_function_events,
         defer_from_output_index,
         deferred_events,
@@ -195,7 +195,7 @@ pub(super) fn emit_deferred_stream_events(
     Ok(())
 }
 
-fn defer_after_gateway_call(frame: &EventFrame, registry: &ToolRegistry, defer_from_output_index: &mut Option<u64>) {
+fn defer_after_public_call(frame: &EventFrame, registry: &ToolRegistry, defer_from_output_index: &mut Option<u64>) {
     let EventPayload::OutputItemAdded {
         item_type: SSEItemType::FunctionCall,
         name: Some(name),
@@ -204,12 +204,12 @@ fn defer_after_gateway_call(frame: &EventFrame, registry: &ToolRegistry, defer_f
     else {
         return;
     };
-    if registry.is_gateway_owned_name(name) {
-        record_first_hidden_gateway_output_index(frame, defer_from_output_index);
+    if uses_public_call_shape(registry, name) {
+        record_first_hidden_public_output_index(frame, defer_from_output_index);
     }
 }
 
-fn record_first_hidden_gateway_output_index(frame: &EventFrame, defer_from_output_index: &mut Option<u64>) {
+fn record_first_hidden_public_output_index(frame: &EventFrame, defer_from_output_index: &mut Option<u64>) {
     let Some(output_index) = frame.wire.output_index else {
         return;
     };
@@ -252,7 +252,7 @@ fn emit_or_defer_stream_frame(
 fn defer_or_flush_function_event(
     frame: EventFrame,
     emit_ctx: &mut StreamEmitContext<'_>,
-    hidden_gateway_item_ids: &mut HashSet<String>,
+    hidden_public_call_item_ids: &mut HashSet<String>,
     pending_unnamed_function_events: &mut HashMap<String, Vec<EventFrame>>,
     defer_from_output_index: &mut Option<u64>,
     deferred_events: &mut Vec<EventFrame>,
@@ -276,9 +276,9 @@ fn defer_or_flush_function_event(
             Ok(None)
         }
         EventPayload::FunctionCallArgsDone { item_id, name, .. } => {
-            if emit_ctx.registry.is_gateway_owned_name(name) {
-                hidden_gateway_item_ids.insert(item_id.clone());
-                record_first_hidden_gateway_output_index(&frame, defer_from_output_index);
+            if uses_public_call_shape(emit_ctx.registry, name) {
+                hidden_public_call_item_ids.insert(item_id.clone());
+                record_first_hidden_public_output_index(&frame, defer_from_output_index);
                 pending_unnamed_function_events.remove(item_id);
                 return Ok(None);
             }
@@ -300,10 +300,10 @@ fn defer_or_flush_function_event(
             if item
                 .get("name")
                 .and_then(Value::as_str)
-                .is_some_and(|name| emit_ctx.registry.is_gateway_owned_name(name))
+                .is_some_and(|name| uses_public_call_shape(emit_ctx.registry, name))
             {
-                hidden_gateway_item_ids.insert(item_id.clone());
-                record_first_hidden_gateway_output_index(&frame, defer_from_output_index);
+                hidden_public_call_item_ids.insert(item_id.clone());
+                record_first_hidden_public_output_index(&frame, defer_from_output_index);
                 pending_unnamed_function_events.remove(item_id);
                 return Ok(None);
             }
@@ -363,7 +363,7 @@ fn should_hide_upstream_event(
     event_type: SSEEventType,
     payload: &EventPayload,
     registry: &ToolRegistry,
-    hidden_gateway_item_ids: &mut HashSet<String>,
+    hidden_public_call_item_ids: &mut HashSet<String>,
 ) -> bool {
     match (event_type, payload) {
         (
@@ -374,21 +374,27 @@ fn should_hide_upstream_event(
                 name: Some(name),
                 ..
             },
-        ) if *item_type == SSEItemType::FunctionCall && registry.is_gateway_owned_name(name) => {
-            hidden_gateway_item_ids.insert(item_id.clone());
+        ) if *item_type == SSEItemType::FunctionCall && uses_public_call_shape(registry, name) => {
+            hidden_public_call_item_ids.insert(item_id.clone());
             true
         }
         (SSEEventType::OutputItemDone, EventPayload::OutputItemDone { item_id, item_type, .. })
-            if *item_type == SSEItemType::FunctionCall && hidden_gateway_item_ids.contains(item_id) =>
+            if *item_type == SSEItemType::FunctionCall && hidden_public_call_item_ids.contains(item_id) =>
         {
             true
         }
         (
             SSEEventType::FunctionCallArgumentsDelta | SSEEventType::FunctionCallArgumentsDone,
             EventPayload::FunctionCallArgsDelta { item_id, .. } | EventPayload::FunctionCallArgsDone { item_id, .. },
-        ) => hidden_gateway_item_ids.contains(item_id),
+        ) => hidden_public_call_item_ids.contains(item_id),
         _ => false,
     }
+}
+
+fn uses_public_call_shape(registry: &ToolRegistry, name: &str) -> bool {
+    registry
+        .lookup(name)
+        .is_some_and(|entry| entry.tool_type == ToolType::Custom || entry.tool_type.is_gateway_owned())
 }
 
 fn is_terminal_response_event(event_type: SSEEventType) -> bool {

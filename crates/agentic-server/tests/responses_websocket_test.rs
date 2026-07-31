@@ -487,39 +487,40 @@ fn sse_custom_tool_call_response() -> String {
         "sequence_number": 1,
         "output_index": 0,
         "item": {
-            "id": "ctc_upstream_1",
-            "type": "custom_tool_call",
+            "id": "fc_upstream_1",
+            "type": "function_call",
             "status": "in_progress",
             "name": "apply_patch",
             "call_id": "call_custom_1",
-            "input": ""
+            "arguments": ""
         }
     });
     let delta = json!({
-        "type": "response.custom_tool_call_input.delta",
+        "type": "response.function_call_arguments.delta",
         "sequence_number": 2,
         "output_index": 0,
-        "item_id": "ctc_upstream_1",
-        "delta": "*** Begin Patch\n*** End Patch"
+        "item_id": "fc_upstream_1",
+        "delta": "{\"input\":\"*** Begin Patch\\n*** End Patch\"}"
     });
     let input_done = json!({
-        "type": "response.custom_tool_call_input.done",
+        "type": "response.function_call_arguments.done",
         "sequence_number": 3,
         "output_index": 0,
-        "item_id": "ctc_upstream_1",
-        "input": "*** Begin Patch\n*** End Patch"
+        "item_id": "fc_upstream_1",
+        "name": "apply_patch",
+        "arguments": "{\"input\":\"*** Begin Patch\\n*** End Patch\"}"
     });
     let item_done = json!({
         "type": "response.output_item.done",
         "sequence_number": 4,
         "output_index": 0,
         "item": {
-            "id": "ctc_upstream_1",
-            "type": "custom_tool_call",
+            "id": "fc_upstream_1",
+            "type": "function_call",
             "status": "completed",
             "name": "apply_patch",
             "call_id": "call_custom_1",
-            "input": "*** Begin Patch\n*** End Patch"
+            "arguments": "{\"input\":\"*** Begin Patch\\n*** End Patch\"}"
         }
     });
     let completed = json!({
@@ -633,8 +634,12 @@ async fn test_websocket_generate_false_prewarm_persists_context_without_inferenc
     assert_eq!(requests[0]["instructions"], "Follow the warmup rules.");
     assert_eq!(requests[0]["input"][0]["content"], "warmup prefix");
     assert_eq!(requests[0]["input"][1]["content"], "first turn");
-    assert_eq!(requests[0]["tools"][0]["type"], "custom");
+    assert_eq!(requests[0]["tools"][0]["type"], "function");
     assert_eq!(requests[0]["tools"][0]["name"], "apply_patch");
+    assert_eq!(
+        requests[0]["tools"][0]["parameters"]["properties"]["input"]["type"],
+        "string"
+    );
     assert!(requests[0].get("generate").is_none());
 }
 
@@ -1054,18 +1059,21 @@ async fn test_websocket_custom_tool_round_trip_and_continuation() {
 
     let requests = mock.request_bodies().await;
     assert_eq!(requests.len(), 2);
-    assert_eq!(requests[0]["tools"][0]["type"], "custom");
-    assert_eq!(requests[0]["tools"][0]["format"]["syntax"], "lark");
+    assert_eq!(requests[0]["tools"][0]["type"], "function");
+    assert_eq!(
+        requests[0]["tools"][0]["parameters"]["properties"]["input"]["type"],
+        "string"
+    );
     let continuation = requests[1]["input"].as_array().unwrap();
     assert!(continuation.iter().any(|item| {
-        item["type"] == "custom_tool_call"
+        item["type"] == "function_call"
             && item["call_id"] == "call_custom_1"
-            && item["input"] == "*** Begin Patch\n*** End Patch"
+            && item["arguments"] == "{\"input\":\"*** Begin Patch\\n*** End Patch\"}"
     }));
     assert!(continuation.iter().any(|item| {
-        item["type"] == "custom_tool_call_output" && item["call_id"] == "call_custom_1" && item["output"] == "Done!"
+        item["type"] == "function_call_output" && item["call_id"] == "call_custom_1" && item["output"] == "Done!"
     }));
-    assert_eq!(requests[1]["tools"][0]["type"], "custom");
+    assert_eq!(requests[1]["tools"][0]["type"], "function");
 }
 
 #[tokio::test]

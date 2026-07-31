@@ -23,9 +23,6 @@ pub enum ToolChoice {
         namespace: Option<String>,
         name: NonEmptyToolName,
     },
-    Custom {
-        name: NonEmptyToolName,
-    },
 }
 
 impl Serialize for ToolChoice {
@@ -43,12 +40,6 @@ impl Serialize for ToolChoice {
                 if let Some(namespace) = namespace {
                     map.serialize_entry("namespace", namespace)?;
                 }
-                map.serialize_entry("name", name.as_str())?;
-                map.end()
-            }
-            Self::Custom { name } => {
-                let mut map = serializer.serialize_map(Some(2))?;
-                map.serialize_entry("type", "custom")?;
                 map.serialize_entry("name", name.as_str())?;
                 map.end()
             }
@@ -89,7 +80,7 @@ impl<'de> Deserialize<'de> for ToolChoice {
                         .and_then(Value::as_str)
                         .ok_or_else(|| de::Error::missing_field("name"))?;
                     let name = NonEmptyToolName::try_from(name).map_err(de::Error::custom)?;
-                    return Ok(Self::Custom { name });
+                    return Ok(Self::Function { namespace: None, name });
                 }
 
                 if let Some(function) = object.get("function").and_then(Value::as_object) {
@@ -167,20 +158,27 @@ mod tests {
     }
 
     #[test]
-    fn custom_tool_choice_round_trips() {
-        let expected = serde_json::json!({
+    fn custom_tool_choice_normalizes_to_function() {
+        let custom = serde_json::json!({
             "type": "custom",
             "name": "apply_patch"
         });
 
-        let choice: ToolChoice = serde_json::from_value(expected.clone()).unwrap();
+        let choice: ToolChoice = serde_json::from_value(custom).unwrap();
         assert_eq!(
             choice,
-            ToolChoice::Custom {
+            ToolChoice::Function {
+                namespace: None,
                 name: NonEmptyToolName::try_from("apply_patch").unwrap()
             }
         );
-        assert_eq!(serde_json::to_value(choice).unwrap(), expected);
+        assert_eq!(
+            serde_json::to_value(choice).unwrap(),
+            serde_json::json!({
+                "type": "function",
+                "name": "apply_patch"
+            })
+        );
     }
 
     #[test]

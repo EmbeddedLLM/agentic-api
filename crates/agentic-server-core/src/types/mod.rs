@@ -14,7 +14,7 @@ pub use io::{
 };
 pub use request_response::{
     CompactRequest, CompactedResponse, ContextManagement, IncompleteDetails, RequestPayload, ResponsePayload,
-    UpstreamRequest, UpstreamTool,
+    UpstreamRequest,
 };
 pub use tools::{
     CodeInterpreterToolParam, CodexNamespaceMember, CodexNamespaceToolParam, CustomToolParam, EmptyToolNameError,
