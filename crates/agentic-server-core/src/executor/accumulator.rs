@@ -289,16 +289,6 @@ impl ResponseAccumulator {
             (SSEEventType::OutputItemAdded, payload @ EventPayload::OutputItemAdded { .. }) => {
                 self.start_output_item(payload);
             }
-            (
-                SSEEventType::OutputItemDone,
-                EventPayload::OutputItemDone {
-                    item_id,
-                    item_type: SSEItemType::CustomToolCall,
-                    output_index,
-                    item,
-                    ..
-                },
-            ) => self.complete_custom_tool_call(item_id, *output_index, item),
             (SSEEventType::OutputItemDone, payload @ EventPayload::OutputItemDone { .. }) => {
                 self.complete_call_item(payload);
             }
@@ -417,31 +407,6 @@ impl ResponseAccumulator {
         self.usage = usage;
     }
 
-    fn complete_custom_tool_call(&mut self, item_id: &str, output_index: u32, raw_item: &serde_json::Value) {
-        let Some(OutputItem::CustomToolCall(mut call)) = deserialize_from_value_opt::<OutputItem>(raw_item.clone())
-        else {
-            return;
-        };
-
-        if let Some(InFlight::CustomToolCall { item, input }) =
-            self.in_flight.get_mut(item_id).map(|entry| &mut entry.item)
-        {
-            if call.input.is_empty() {
-                call.input = if item.input.is_empty() {
-                    std::mem::take(input)
-                } else {
-                    std::mem::take(&mut item.input)
-                };
-            } else {
-                input.clear();
-            }
-            *item = call;
-        } else {
-            // Some Responses-compatible providers omit `output_item.added`.
-            self.completed.push((output_index, OutputItem::CustomToolCall(call)));
-        }
-    }
-
     fn complete_call_item(&mut self, payload: &EventPayload) {
         let EventPayload::OutputItemDone {
             item_id,
@@ -453,14 +418,20 @@ impl ResponseAccumulator {
         else {
             return;
         };
-        if *item_type == SSEItemType::McpCall {
-            if let Some(InFlight::McpCall { item }) = self.in_flight.get_mut(item_id).map(|entry| &mut entry.item) {
+        match (item_type, self.in_flight.get_mut(item_id).map(|entry| &mut entry.item)) {
+            (SSEItemType::CustomToolCall, Some(InFlight::CustomToolCall { item, input })) => {
+                item.apply_done(payload, input);
+                return;
+            }
+            (SSEItemType::McpCall, Some(InFlight::McpCall { item })) => {
                 item.apply_done(payload, &mut String::new());
                 return;
             }
+            _ => {}
         }
-        if let Some(output_item @ (OutputItem::WebSearchCall(_) | OutputItem::McpCall(_))) =
-            deserialize_from_value_opt::<OutputItem>(raw_item.clone())
+        if let Some(
+            output_item @ (OutputItem::CustomToolCall(_) | OutputItem::WebSearchCall(_) | OutputItem::McpCall(_)),
+        ) = deserialize_from_value_opt::<OutputItem>(raw_item.clone())
         {
             self.completed.push((*output_index, output_item));
         }
@@ -1425,7 +1396,7 @@ mod tests {
     fn test_custom_tool_call_accumulates_freeform_input() {
         let lines = vec![
             r#"data: {"type":"response.created","response":{"id":"resp_custom"}}"#.to_string(),
-            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"id":"ctc_1","type":"custom_tool_call","call_id":"call_1","name":"apply_patch","input":"","status":"in_progress"}}"#.to_string(),
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"id":"ctc_1","type":"custom_tool_call","call_id":"","name":"","input":"","status":"in_progress"}}"#.to_string(),
             r#"data: {"type":"response.custom_tool_call_input.delta","item_id":"ctc_1","output_index":0,"delta":"*** Begin"}"#.to_string(),
             r#"data: {"type":"response.custom_tool_call_input.delta","item_id":"ctc_1","output_index":0,"delta":" Patch"}"#.to_string(),
             r#"data: {"type":"response.custom_tool_call_input.done","item_id":"ctc_1","output_index":0,"input":""}"#.to_string(),

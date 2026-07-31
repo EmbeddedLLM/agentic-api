@@ -500,15 +500,32 @@ impl ApplyDone for FunctionToolCall {
 
 impl ApplyDone for CustomToolCall {
     fn apply_done(&mut self, payload: &EventPayload, buffer: &mut String) {
-        let EventPayload::CustomToolCallInputDone { input, .. } = payload else {
-            return;
-        };
-        self.input = if input.is_empty() {
-            std::mem::take(buffer)
-        } else {
-            buffer.clear();
-            input.clone()
-        };
+        match payload {
+            EventPayload::CustomToolCallInputDone { input, .. } => {
+                self.input = if input.is_empty() {
+                    std::mem::take(buffer)
+                } else {
+                    buffer.clear();
+                    input.clone()
+                };
+            }
+            EventPayload::OutputItemDone { item, .. } => {
+                let Some(mut call) = deserialize_from_value_opt::<Self>(item.clone()) else {
+                    return;
+                };
+                if call.input.is_empty() {
+                    call.input = if self.input.is_empty() {
+                        std::mem::take(buffer)
+                    } else {
+                        std::mem::take(&mut self.input)
+                    };
+                } else {
+                    buffer.clear();
+                }
+                *self = call;
+            }
+            _ => {}
+        }
     }
 }
 
