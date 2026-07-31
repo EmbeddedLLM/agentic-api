@@ -897,8 +897,8 @@ fn assert_completed_potato_web_search(output: &[OutputItem]) -> &WebSearchCall {
         })
         .expect("cassette output should include a web_search_call item");
     assert_eq!(web_search.status.as_str(), "completed");
-    assert_eq!(web_search.action.query, "potato");
-    assert_eq!(web_search.action.type_, "search");
+    assert_eq!(web_search.action.as_search().unwrap().query, "potato");
+    assert_eq!(web_search.action.type_str(), "search");
     assert!(web_search.id.starts_with("ws_"));
     assert!(
         output.iter().any(|item| matches!(item, OutputItem::Message(_))),
@@ -928,10 +928,12 @@ fn assert_matching_web_search_output(openai: &[OutputItem], gateway: &[OutputIte
     let openai_call = assert_completed_potato_web_search(openai);
     let gateway_call = assert_completed_potato_web_search(gateway);
     assert_eq!(gateway_call.status, openai_call.status);
-    assert_eq!(gateway_call.action.type_, openai_call.action.type_);
+    assert_eq!(gateway_call.action.type_str(), openai_call.action.type_str());
     assert!(
         gateway_call
             .action
+            .as_search()
+            .unwrap()
             .sources
             .iter()
             .any(|source| source.url == "https://en.wikipedia.org/wiki/Potato"),
