@@ -1,0 +1,130 @@
+turns:
+- filename: t1
+  request:
+    body:
+      input: Use web search to search for the exact query "potato", then summarize
+        the result in one sentence.
+      max_output_tokens: 1024
+      model: gpt-5.6
+      store: true
+      stream: false
+      tool_choice: auto
+      tools:
+      - type: web_search_preview
+    headers:
+      accept: '*/*'
+      authorization: Bearer ***
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      background: false
+      billing:
+        payer: developer
+      completed_at: 1785474946
+      created_at: 1785474939
+      error: null
+      frequency_penalty: 0.0
+      id: resp_05888f0e458f23c7006a6c2f7b01608199826145d89e55092a
+      incomplete_details: null
+      instructions: null
+      max_output_tokens: 1024
+      max_tool_calls: null
+      metadata: {}
+      model: gpt-5.6-sol
+      moderation: null
+      object: response
+      output:
+      - content: []
+        encrypted_content: gAAAAABqbC-CKdW9FfBHyXRtBHsIEMfV2ehMzEmzxkNC_oGzDeYmKSWc2OJoUOyXbr3Zq4UJClGMmwG6CRsjqraLnCHXRUl2ydi8CV760H9XOCz-Af-ekfnjKHW3fv-58xXAtn6YqlOPba33LZZKHGh1-IFBIoq8bU8OETl0o4toIeUxueM8OpwVUbJYnE7xv1ZOmNEyRyRdVpZ1gcYsnlVsql621mmyrOIjdyCcXSD0ZijqJikwlUFaDAbkDgWlRf_Wn4jahoZVvL_FUIuJg3fjVJNkrU9BUIMyBR-Zh3ylNa9oQFen83Q30BkaqUE4NcyzUeooI0IoXrDKnykizEDqyt2zVDqGyafeDPZY63AMLQ7IHi34T3ltmt8muJ6-V0Lto5M71o-76Cakbiadf8pPTryPvT3KWG6LKV1An5P4Vw3egT2a3NEv2VWSTSQr4xd-aDmD0oVdcq2nzxhGuppIx5WYZNBmYYG9q_sw5-g1rpDSR-Agj8dJaPb9wFk9Y_4FEWpyCG3wvYqXzJcdw0wvx7tFBx-rJu07bbMfkPQjL5ZFTrHV3-s0AFJbKjTDIO-8i42odVoA3N_c6XTY0pqmnd2UDbDaa-ddpnQoQvVk7nDZjTqTC7esgMivwRIvp-GNsYVWfhJODivLXfw1KmKnpkG_30-HRpsGRocxLbGWGGKcYc5WRznLVHmSnxuAY1CvAgtPHoCSEbVljoON3QSUQz3Zp1xIyLi5rTJ_raUHIDk2loZG2al1EMKzgbii3OjN8z-BxFeY9-zyAqHw-tkSnZwVWvCd8rbioxm3DxGoqh5dYKqmnUJb31cZmpmjRda9oLmzeYLwRKbvuPOG6qS0suvWHRoruGSMtyWXPD-TfcnJL0-JFKluUJfTOPlrNwkRIQdL3hV8jE_S065-044CL6aAa02oeidy_Vv7rLjCjGY7KxD2eDevFqOFCTQ77twpTz8ppw_lSKVrbyecIH-0udd8H4IiW126Efd3P0rSQGXegbudPD3zdrTKIdODQYYD4OtldqAgsST4xhwyQBfd-t0vP9sU5g==
+        id: rs_05888f0e458f23c7006a6c2f7ba99c8199b90dad9cf3a9333c
+        summary: []
+        type: reasoning
+      - action:
+          queries:
+          - potato
+          query: potato
+          type: search
+        id: ws_05888f0e458f23c7006a6c2f7bfd008199abc6d93b844d667d
+        status: completed
+        type: web_search_call
+      - content:
+        - annotations:
+          - end_index: 259
+            start_index: 167
+            title: POTATO Definition & Meaning - Merriam-Webster
+            type: url_citation
+            url: https://www.merriam-webster.com/dictionary/potato?utm_source=openai
+          logprobs: []
+          text: Search results for **“potato”** primarily define it as an edible,
+            starchy tuber and provide dictionary entries, cooking information, and
+            general facts about the crop. ([merriam-webster.com](https://www.merriam-webster.com/dictionary/potato?utm_source=openai))
+          type: output_text
+        id: msg_05888f0e458f23c7006a6c2f814ba48199a100941e4a676c40
+        phase: final_answer
+        role: assistant
+        status: completed
+        type: message
+      parallel_tool_calls: true
+      presence_penalty: 0.0
+      previous_response_id: null
+      prompt_cache_key: null
+      prompt_cache_retention: 24h
+      reasoning:
+        context: all_turns
+        effort: medium
+        mode: standard
+        summary: null
+      safety_identifier: null
+      service_tier: default
+      status: completed
+      store: true
+      temperature: 1.0
+      text:
+        format:
+          type: text
+        verbosity: medium
+      tool_choice: auto
+      tool_usage:
+        image_gen:
+          input_tokens: 0
+          input_tokens_details:
+            image_tokens: 0
+            text_tokens: 0
+          output_tokens: 0
+          output_tokens_details:
+            image_tokens: 0
+            text_tokens: 0
+          total_tokens: 0
+        web_search:
+          num_requests: 1
+      tools:
+      - search_content_types:
+        - text
+        search_context_size: medium
+        type: web_search_preview
+        user_location:
+          city: null
+          country: US
+          region: null
+          timezone: null
+          type: approximate
+      top_logprobs: 0
+      top_p: 0.98
+      truncation: disabled
+      usage:
+        input_tokens: 8800
+        input_tokens_details:
+          cache_write_tokens: 0
+          cached_tokens: 4420
+        output_tokens: 113
+        output_tokens_details:
+          reasoning_tokens: 46
+        total_tokens: 8913
+      user: null
+    headers:
+      content-type: application/json
+    status_code: 200

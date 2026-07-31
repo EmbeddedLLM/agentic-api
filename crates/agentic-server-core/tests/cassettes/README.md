@@ -167,6 +167,7 @@ turns:
 | `record_tool_call_cassettes.sh` | 8 tool-call cassettes (4 tool_choice modes x streaming + non-streaming) | vLLM |
 | `record_codex_cli_tool_call_cassettes.sh` | Codex function/namespace/custom-tool matrix | gateway, vLLM, and OpenAI |
 | `record_mcp_cassettes.sh` | Native MCP counter tool discovery and calls (streaming + non-streaming) | gateway and OpenAI reference |
+| `record_web_search_cassettes.sh` | Matching web-search calls (streaming + non-streaming) | gateway and OpenAI reference |
 
 ### Text-only (OpenAI)
 
@@ -189,6 +190,16 @@ VLLM_URL=http://0.0.0.0:5050 MODEL=Qwen/Qwen3-30B-A3B-FP8 bash tests/cassettes/r
 vllm serve Qwen/Qwen3-30B-A3B-FP8 --tool-call-parser hermes --enable-auto-tool-choice --port 5050 > server.log 2>&1
 
 VLLM_URL=http://0.0.0.0:5050 MODEL=Qwen/Qwen3-30B-A3B-FP8 bash tests/cassettes/record_tool_call_cassettes.sh
+```
+
+### Web search (gateway and OpenAI)
+
+The default records both providers. Use `WEB_SEARCH_RECORD_SET=gateway` or
+`WEB_SEARCH_RECORD_SET=openai` to record only one side.
+
+```bash
+OPENAI_API_KEY=sk-... \
+bash crates/agentic-server-core/tests/cassettes/record_web_search_cassettes.sh
 ```
 
 ### Codex custom tools (gateway, vLLM, and OpenAI)

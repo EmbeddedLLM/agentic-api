@@ -9,13 +9,17 @@ use serde::Deserialize;
 
 use agentic_core::executor::accumulator::ResponseAccumulator;
 use agentic_core::types::event::MessageStatus;
-use agentic_core::types::io::{CustomToolCall, FunctionToolCall, OutputItem};
+use agentic_core::types::io::{CustomToolCall, FunctionToolCall, OutputItem, WebSearchCall};
 
 const CASSETTE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/events");
 const TOOL_CALLS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/tool_calls");
 const REASONING_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/reasoning/responses");
 const CODEX_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/codex");
 const WEB_SEARCH_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/web_search");
+const WEB_SEARCH_GATEWAY_MODEL: &str = "Qwen/Qwen3.5-35B-A3B-FP8";
+const WEB_SEARCH_GATEWAY_MODEL_SLUG: &str = "Qwen-Qwen3.5-35B-A3B-FP8";
+const WEB_SEARCH_OPENAI_MODEL: &str = "gpt-5.6";
+const WEB_SEARCH_OPENAI_MODEL_SLUG: &str = "gpt-5.6";
 
 // --- Legacy event cassette format ---
 
@@ -86,6 +90,17 @@ fn load_codex_cassette(filename: &str) -> TurnCassette {
 
 fn load_web_search_cassette(filename: &str) -> TurnCassette {
     load_turn_cassette_from(WEB_SEARCH_DIR, filename)
+}
+
+fn load_web_search_cassette_pair(streaming: bool) -> (TurnCassette, TurnCassette) {
+    let mode = if streaming { "streaming" } else { "nonstreaming" };
+    let openai = load_web_search_cassette(&format!(
+        "web-search-openai-reference-{WEB_SEARCH_OPENAI_MODEL_SLUG}-{mode}.yaml"
+    ));
+    let gateway = load_web_search_cassette(&format!(
+        "web-search-gateway-{WEB_SEARCH_GATEWAY_MODEL_SLUG}-{mode}.yaml"
+    ));
+    (openai, gateway)
 }
 
 /// Extracts `data: ...` lines from raw SSE entries (which may include
@@ -868,7 +883,7 @@ fn has_reasoning(output: &[OutputItem]) -> bool {
     output.iter().any(|item| matches!(item, OutputItem::Reasoning(_)))
 }
 
-fn assert_completed_potato_web_search(output: &[OutputItem]) {
+fn assert_completed_potato_web_search(output: &[OutputItem]) -> &WebSearchCall {
     assert_eq!(
         count_function_calls(output),
         0,
@@ -883,17 +898,44 @@ fn assert_completed_potato_web_search(output: &[OutputItem]) {
         .expect("cassette output should include a web_search_call item");
     assert_eq!(web_search.status.as_str(), "completed");
     assert_eq!(web_search.action.query, "potato");
+    assert_eq!(web_search.action.type_, "search");
+    assert!(web_search.id.starts_with("ws_"));
     assert!(
-        web_search
+        output.iter().any(|item| matches!(item, OutputItem::Message(_))),
+        "cassette output should include a final assistant message"
+    );
+    web_search
+}
+
+fn assert_matching_web_search_output(openai: &[OutputItem], gateway: &[OutputItem]) {
+    for (provider, output) in [("OpenAI", openai), ("gateway", gateway)] {
+        let public_types: Vec<&str> = output
+            .iter()
+            .filter_map(|item| match item {
+                OutputItem::Reasoning(_) => None,
+                OutputItem::WebSearchCall(_) => Some("web_search_call"),
+                OutputItem::Message(_) => Some("message"),
+                _ => Some("unexpected"),
+            })
+            .collect();
+        assert_eq!(
+            public_types,
+            ["web_search_call", "message"],
+            "{provider} output should preserve web_search_call before message"
+        );
+    }
+
+    let openai_call = assert_completed_potato_web_search(openai);
+    let gateway_call = assert_completed_potato_web_search(gateway);
+    assert_eq!(gateway_call.status, openai_call.status);
+    assert_eq!(gateway_call.action.type_, openai_call.action.type_);
+    assert!(
+        gateway_call
             .action
             .sources
             .iter()
             .any(|source| source.url == "https://en.wikipedia.org/wiki/Potato"),
-        "recorded web_search_call should include the Wikipedia potato source"
-    );
-    assert!(
-        output.iter().any(|item| matches!(item, OutputItem::Message(_))),
-        "cassette output should include a final assistant message"
+        "gateway web_search_call should retain its recorded sources"
     );
 }
 
@@ -912,52 +954,33 @@ fn get_first_fc_arguments(output: &[OutputItem]) -> String {
 }
 
 #[test]
-fn test_web_search_gateway_cassette_nonstreaming() {
-    let cassette = load_web_search_cassette("gpt_oss_web_search_nonstreaming.yaml");
-    assert_eq!(cassette.turns.len(), 1);
-    let body = cassette.turns[0].request.as_mapping().unwrap();
-    assert_eq!(body["body"]["tools"][0]["type"].as_str().unwrap(), "web_search_preview");
-    assert_eq!(body["body"]["max_output_tokens"].as_i64().unwrap(), 1024);
+fn test_web_search_accumulator_nonstreaming_matches_openai() {
+    let (openai, gateway) = load_web_search_cassette_pair(false);
+    let openai_output = process_nonstreaming_turn(&openai, 0, WEB_SEARCH_OPENAI_MODEL);
+    let gateway_output = process_nonstreaming_turn(&gateway, 0, WEB_SEARCH_GATEWAY_MODEL);
 
-    let output = process_nonstreaming_turn(&cassette, 0, "openai/gpt-oss-20b");
     assert!(
-        has_reasoning(&output),
-        "gpt-oss web_search cassette should include reasoning"
+        has_reasoning(&openai_output),
+        "reasoning-capable OpenAI reference should include reasoning"
     );
-    assert_completed_potato_web_search(&output);
+    assert!(
+        has_reasoning(&gateway_output),
+        "gateway output should include reasoning"
+    );
+    assert_matching_web_search_output(&openai_output, &gateway_output);
 }
 
 #[test]
-fn test_web_search_gateway_cassette_streaming() {
-    let cassette = load_web_search_cassette("gpt_oss_web_search_streaming.yaml");
-    assert_eq!(cassette.turns.len(), 1);
-    let body = cassette.turns[0].request.as_mapping().unwrap();
-    assert_eq!(body["body"]["tools"][0]["type"].as_str().unwrap(), "web_search_preview");
-    assert_eq!(body["body"]["max_output_tokens"].as_i64().unwrap(), 1024);
+fn test_web_search_accumulator_streaming_matches_openai() {
+    let (openai, gateway) = load_web_search_cassette_pair(true);
+    let openai_output = process_streaming_turn(&openai, 0, WEB_SEARCH_OPENAI_MODEL);
+    let gateway_output = process_streaming_turn(&gateway, 0, WEB_SEARCH_GATEWAY_MODEL);
 
-    let data_lines = extract_data_lines(&cassette.turns[0].response.sse);
-    let events: Vec<serde_json::Value> = data_lines
-        .iter()
-        .filter_map(|line| line.strip_prefix("data: "))
-        .filter(|data| *data != "[DONE]")
-        .filter_map(|data| serde_json::from_str(data).ok())
-        .collect();
-    let event_types: Vec<&str> = events.iter().filter_map(|event| event["type"].as_str()).collect();
-    assert!(event_types.contains(&"response.web_search_call.in_progress"));
-    assert!(event_types.contains(&"response.web_search_call.searching"));
-    assert!(event_types.contains(&"response.web_search_call.completed"));
-
-    let final_payload = events
-        .iter()
-        .find(|event| event["object"] == "response")
-        .expect("streaming web_search cassette should include final response payload");
-    let output: Vec<OutputItem> = serde_json::from_value(final_payload["output"].clone())
-        .expect("final response payload output should deserialize");
     assert!(
-        has_reasoning(&output),
-        "gpt-oss web_search cassette should include reasoning"
+        has_reasoning(&gateway_output),
+        "gateway output should preserve reasoning around web_search_call"
     );
-    assert_completed_potato_web_search(&output);
+    assert_matching_web_search_output(&openai_output, &gateway_output);
 }
 
 // ═══════════════════════════════════════════════════════════════════
