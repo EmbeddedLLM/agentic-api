@@ -249,20 +249,67 @@ pub struct WebSearchSource {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSearchActionSearch {
-    #[serde(rename = "type")]
+    #[serde(skip, default = "default_web_search_action_search_type")]
     pub type_: String,
     pub query: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub queries: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sources: Vec<WebSearchSource>,
+}
+
+fn default_web_search_action_search_type() -> String {
+    "search".to_owned()
 }
 
 impl WebSearchActionSearch {
     #[must_use]
     pub fn new(query: impl Into<String>, sources: Vec<WebSearchSource>) -> Self {
         Self {
-            type_: "search".to_owned(),
+            type_: default_web_search_action_search_type(),
             query: query.into(),
+            queries: Vec::new(),
             sources,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSearchActionOpenPage {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSearchActionFindInPage {
+    pub pattern: String,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum WebSearchAction {
+    Search(WebSearchActionSearch),
+    OpenPage(WebSearchActionOpenPage),
+    FindInPage(WebSearchActionFindInPage),
+}
+
+impl WebSearchAction {
+    #[must_use]
+    pub const fn type_str(&self) -> &'static str {
+        match self {
+            Self::Search(_) => "search",
+            Self::OpenPage(_) => "open_page",
+            Self::FindInPage(_) => "find_in_page",
+        }
+    }
+
+    #[must_use]
+    pub const fn as_search(&self) -> Option<&WebSearchActionSearch> {
+        match self {
+            Self::Search(action) => Some(action),
+            Self::OpenPage(_) | Self::FindInPage(_) => None,
         }
     }
 }
@@ -271,7 +318,7 @@ impl WebSearchActionSearch {
 pub struct WebSearchCall {
     pub id: String,
     pub status: WebSearchCallStatus,
-    pub action: WebSearchActionSearch,
+    pub action: WebSearchAction,
 }
 
 impl WebSearchCall {
@@ -285,7 +332,7 @@ impl WebSearchCall {
         Self {
             id: id.into(),
             status,
-            action: WebSearchActionSearch::new(query, sources),
+            action: WebSearchAction::Search(WebSearchActionSearch::new(query, sources)),
         }
     }
 }

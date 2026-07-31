@@ -1,0 +1,125 @@
+turns:
+- filename: t1
+  request:
+    body:
+      input: Use web search to search for the exact query "potato", then summarize
+        the result in one sentence.
+      max_output_tokens: 1024
+      model: Qwen/Qwen3.5-35B-A3B-FP8
+      store: true
+      stream: false
+      tool_choice: auto
+      tools:
+      - type: web_search_preview
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      conversation_id: null
+      created_at: 1785502364
+      error: null
+      id: resp_019fb83b-e9f3-71a0-a1c9-17c377ce823e
+      incomplete_details: null
+      instructions: null
+      model: Qwen/Qwen3.5-35B-A3B-FP8
+      object: response
+      output:
+      - content:
+        - text: 'The user wants me to search for the exact query "potato" using web
+            search and then summarize the results in one sentence. Let me perform
+            this search.
+
+            '
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_982cee05b6d2bfe9
+        status: null
+        summary: []
+        type: reasoning
+      - action:
+          query: potato
+          sources:
+          - title: Potato - Wikipedia
+            url: https://en.wikipedia.org/wiki/Potato
+          - title: Potatoes | Potato Nutrition | Types of Potatoes | Recipes
+            url: https://potatogoodness.com/
+          - title: Potato Facts
+            url: https://www.idahopotatomuseum.com/potato-facts/
+          - title: 16 Types of Potatoes (And How to Use Them in Your Cooking!)
+            url: https://www.thekitchn.com/potato-varieties-64061
+          - title: Potato Facts and Figures - International Potato Center
+            url: https://cipotato.org/potato/potato-facts-and-figures/
+          - title: Understanding Potatoes
+            url: https://www.thechoppingblock.com/blog/understanding-potatoes
+          - title: Home of U.S. Potato Farmers | Potatoes USA
+            url: https://potatoesusa.com/
+          - title: Growing potatoes in home gardens | UMN Extension
+            url: https://extension.umn.edu/vegetables/growing-potatoes
+          - title: 'Potatoes 101: Nutrition Facts, Health Benefits, and Types'
+            url: https://www.healthline.com/nutrition/foods/potatoes
+          - title: Potato | Definition, Plant, Origin, & Facts | Britannica
+            url: https://www.britannica.com/plant/potato
+          type: search
+        id: ws_9f91b89f8e3e1b7d
+        status: completed
+        type: web_search_call
+      - content:
+        - text: 'Now I have the search results for "potato". Let me summarize them
+            in one sentence. The key information includes:
+
+            - Potatoes are starchy tuberous vegetables native to the Americas (Peru/Bolivia
+            area)
+
+            - They are a staple food worldwide with over 5,000 varieties
+
+            - They belong to the Solanum tuberosum plant in the nightshade family
+
+            - They are grown in many countries and are the third most important food
+            crop after rice and wheat
+
+            - They are high in nutrients like potassium and vitamin C
+
+
+            Let me create a concise one-sentence summary.
+
+            '
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_803ae55ccd27866f
+        status: null
+        summary: []
+        type: reasoning
+      - content:
+        - annotations: []
+          text: '
+
+
+            Based on the search results, **potato** is a starchy tuberous vegetable
+            native to the Peruvian-Bolivian Andes, cultivated for thousands of years,
+            now grown in over 125 countries worldwide with more than 5,000 varieties,
+            making it the third most important food crop after rice and wheat, rich
+            in nutrients like vitamin C and potassium, and commonly consumed boiled,
+            baked, or fried.'
+          type: output_text
+        id: msg_8c98283e5c66ff1e
+        role: assistant
+        status: completed
+        type: message
+      previous_response_id: null
+      status: completed
+      usage:
+        input_tokens: 4674
+        input_tokens_details:
+          cached_tokens: 0
+        output_tokens: 277
+        output_tokens_details:
+          reasoning_tokens: 0
+        total_tokens: 4951
+    headers:
+      content-type: application/json
+    status_code: 200
