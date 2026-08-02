@@ -46,34 +46,34 @@ impl std::fmt::Debug for InFlight {
 }
 
 impl InFlight {
-    fn finalize(self) -> OutputItem {
+    fn finalize(self, output: &mut Vec<OutputItem>) {
         match self {
             Self::Reasoning { mut item, text } => {
                 if !text.is_empty() {
                     item.content.push(ReasoningTextContent::new(text));
                 }
-                OutputItem::Reasoning(item)
+                output.push(OutputItem::Reasoning(item));
             }
             Self::FunctionCall { mut item, arguments } => {
                 if !arguments.is_empty() && item.arguments.is_empty() {
                     item.arguments = arguments;
                 }
                 item.status = MessageStatus::Completed;
-                OutputItem::FunctionCall(item)
+                output.push(OutputItem::FunctionCall(item));
             }
             Self::Message { mut item, text } => {
                 if !text.is_empty() {
                     item.content.push(OutputTextContent::new(text));
                 }
                 item.status = MessageStatus::Completed;
-                OutputItem::Message(item)
+                output.push(OutputItem::Message(item));
             }
             Self::CustomToolCall { mut item, input } => {
                 if item.input.is_empty() {
                     item.input = input;
                 }
                 item.status = Some(MessageStatus::Completed);
-                OutputItem::CustomToolCall(item)
+                output.push(OutputItem::CustomToolCall(item));
             }
         }
     }
@@ -215,10 +215,10 @@ impl ResponseAccumulator {
         acc
     }
 
-    /// Finalizes all in-flight items in insertion order, appending them to completed output.
+    /// Finalizes all in-flight items in insertion order, pushing them to `output`.
     pub(crate) fn finalize_all(&mut self) {
-        for (_, item) in self.in_flight.drain(..) {
-            self.output.push(item.finalize());
+        for (_, entry) in self.in_flight.drain(..) {
+            entry.finalize(&mut self.output);
         }
     }
 
@@ -267,8 +267,41 @@ impl ResponseAccumulator {
             (SSEEventType::ResponseCreated, EventPayload::Response { id, .. }) if !id.is_empty() => {
                 self.response_id.clone_from(id);
             }
-            (SSEEventType::OutputItemAdded, payload @ EventPayload::OutputItemAdded { .. }) => {
-                self.begin_output_item(payload);
+            (SSEEventType::OutputItemAdded, payload @ EventPayload::OutputItemAdded { item_id, item_type, .. }) => {
+                let entry = match item_type {
+                    SSEItemType::Reasoning => ReasoningOutput::try_from(payload).ok().map(|item| InFlight::Reasoning {
+                        item,
+                        text: String::with_capacity(256),
+                    }),
+                    SSEItemType::FunctionCall => {
+                        FunctionToolCall::try_from(payload)
+                            .ok()
+                            .map(|item| InFlight::FunctionCall {
+                                item,
+                                arguments: String::with_capacity(128),
+                            })
+                    }
+                    SSEItemType::CustomToolCall => {
+                        CustomToolCall::try_from(payload)
+                            .ok()
+                            .map(|item| InFlight::CustomToolCall {
+                                item,
+                                input: String::with_capacity(256),
+                            })
+                    }
+                    SSEItemType::Message => OutputMessage::try_from(payload).ok().map(|item| InFlight::Message {
+                        item,
+                        text: String::with_capacity(256),
+                    }),
+                    SSEItemType::ToolSearchCall
+                    | SSEItemType::ToolSearchOutput
+                    | SSEItemType::WebSearchCall
+                    | SSEItemType::McpToolCall
+                    | SSEItemType::Unknown => None,
+                };
+                if let Some(inflight) = entry {
+                    self.in_flight.insert(item_id.clone(), inflight);
+                }
             }
             (
                 SSEEventType::OutputItemDone,
@@ -327,44 +360,6 @@ impl ResponseAccumulator {
                 self.finish_response(ResponseStatus::Incomplete, *usage);
             }
             _ => {}
-        }
-    }
-
-    fn begin_output_item(&mut self, payload: &EventPayload) {
-        let EventPayload::OutputItemAdded { item_id, item_type, .. } = payload else {
-            return;
-        };
-        let entry = match item_type {
-            SSEItemType::Reasoning => ReasoningOutput::try_from(payload).ok().map(|item| InFlight::Reasoning {
-                item,
-                text: String::with_capacity(256),
-            }),
-            SSEItemType::FunctionCall => FunctionToolCall::try_from(payload)
-                .ok()
-                .map(|item| InFlight::FunctionCall {
-                    item,
-                    arguments: String::with_capacity(128),
-                }),
-            SSEItemType::CustomToolCall => {
-                CustomToolCall::try_from(payload)
-                    .ok()
-                    .map(|item| InFlight::CustomToolCall {
-                        item,
-                        input: String::with_capacity(256),
-                    })
-            }
-            SSEItemType::Message => OutputMessage::try_from(payload).ok().map(|item| InFlight::Message {
-                item,
-                text: String::with_capacity(256),
-            }),
-            SSEItemType::ToolSearchCall
-            | SSEItemType::ToolSearchOutput
-            | SSEItemType::WebSearchCall
-            | SSEItemType::McpToolCall
-            | SSEItemType::Unknown => None,
-        };
-        if let Some(inflight) = entry {
-            self.in_flight.insert(item_id.clone(), inflight);
         }
     }
 
