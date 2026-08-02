@@ -7,7 +7,6 @@
 //! runs on a blocking thread while the async task continues reading from the
 //! network — keeping the tokio executor thread free between chunk arrivals.
 
-use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::mpsc;
 
@@ -86,15 +85,12 @@ pub struct ResponseAccumulator {
     response_id: String,
     conversation_id: Option<String>,
     output: Vec<OutputItem>,
-    /// Streaming output indexes parallel to `output`; sorted on finalization.
-    output_indices: Vec<u32>,
     usage: Option<ResponseUsage>,
     status: ResponseStatus,
     incomplete_details: Option<IncompleteDetails>,
     error: Option<serde_json::Value>,
     /// In-flight output items keyed by `item_id`, in insertion order.
     in_flight: IndexMap<String, InFlight>,
-    in_flight_indices: HashMap<String, u32>,
 }
 
 impl ResponseAccumulator {
@@ -105,13 +101,11 @@ impl ResponseAccumulator {
             response_id,
             conversation_id,
             output: Vec::new(),
-            output_indices: Vec::new(),
             usage: None,
             status: ResponseStatus::InProgress,
             incomplete_details: None,
             error: None,
             in_flight: IndexMap::new(),
-            in_flight_indices: HashMap::new(),
         }
     }
 
@@ -134,9 +128,6 @@ impl ResponseAccumulator {
                 out
             })
             .unwrap_or_default();
-        let output_indices = (0..output.len())
-            .map(|index| u32::try_from(index).unwrap_or(u32::MAX))
-            .collect();
 
         let status = json["status"]
             .as_str()
@@ -150,13 +141,11 @@ impl ResponseAccumulator {
             response_id,
             conversation_id: conversation_id.map(str::to_string),
             output,
-            output_indices,
             usage,
             status,
             incomplete_details,
             error,
             in_flight: IndexMap::new(),
-            in_flight_indices: HashMap::new(),
         })
     }
 
@@ -226,14 +215,11 @@ impl ResponseAccumulator {
         acc
     }
 
-    /// Finalizes all in-flight items and restores upstream output-index order.
+    /// Finalizes all in-flight items in insertion order, appending them to completed output.
     pub(crate) fn finalize_all(&mut self) {
-        for (item_id, entry) in self.in_flight.drain(..) {
-            let output_index = self.in_flight_indices.remove(&item_id).unwrap_or(u32::MAX);
-            self.output_indices.push(output_index);
-            self.output.push(entry.finalize());
+        for (_, item) in self.in_flight.drain(..) {
+            self.output.push(item.finalize());
         }
-        self.sort_output_by_index();
     }
 
     pub(crate) fn process_sse_line(&mut self, line: &str) {
@@ -289,13 +275,12 @@ impl ResponseAccumulator {
                 EventPayload::OutputItemDone {
                     item_id,
                     item_type: SSEItemType::CustomToolCall,
-                    output_index,
                     item,
                     ..
                 },
-            ) => self.complete_custom_tool_call(item_id, *output_index, item),
-            (SSEEventType::OutputItemDone, EventPayload::OutputItemDone { output_index, item, .. }) => {
-                self.complete_non_delta_output_item(*output_index, item);
+            ) => self.complete_custom_tool_call(item_id, item),
+            (SSEEventType::OutputItemDone, EventPayload::OutputItemDone { item, .. }) => {
+                self.complete_non_delta_output_item(item);
             }
             (SSEEventType::ReasoningTextDelta, EventPayload::ReasoningDelta { delta, item_id }) => {
                 if let Some(InFlight::Reasoning { text, .. }) = self.in_flight.get_mut(item_id) {
@@ -346,13 +331,7 @@ impl ResponseAccumulator {
     }
 
     fn begin_output_item(&mut self, payload: &EventPayload) {
-        let EventPayload::OutputItemAdded {
-            item_id,
-            item_type,
-            output_index,
-            ..
-        } = payload
-        else {
+        let EventPayload::OutputItemAdded { item_id, item_type, .. } = payload else {
             return;
         };
         let entry = match item_type {
@@ -386,7 +365,6 @@ impl ResponseAccumulator {
         };
         if let Some(inflight) = entry {
             self.in_flight.insert(item_id.clone(), inflight);
-            self.in_flight_indices.insert(item_id.clone(), *output_index);
         }
     }
 
@@ -396,7 +374,7 @@ impl ResponseAccumulator {
         self.usage = usage;
     }
 
-    fn complete_custom_tool_call(&mut self, item_id: &str, output_index: u32, raw_item: &serde_json::Value) {
+    fn complete_custom_tool_call(&mut self, item_id: &str, raw_item: &serde_json::Value) {
         let Some(OutputItem::CustomToolCall(mut call)) = deserialize_from_value_opt::<OutputItem>(raw_item.clone())
         else {
             return;
@@ -415,11 +393,11 @@ impl ResponseAccumulator {
             *item = call;
         } else {
             // Some Responses-compatible providers omit `output_item.added`.
-            self.push_output(output_index, OutputItem::CustomToolCall(call));
+            self.output.push(OutputItem::CustomToolCall(call));
         }
     }
 
-    fn complete_non_delta_output_item(&mut self, output_index: u32, raw_item: &serde_json::Value) {
+    fn complete_non_delta_output_item(&mut self, raw_item: &serde_json::Value) {
         let Some(output_item) = deserialize_from_value_opt::<OutputItem>(raw_item.clone()) else {
             return;
         };
@@ -430,24 +408,7 @@ impl ResponseAccumulator {
                 | OutputItem::WebSearchCall(_)
                 | OutputItem::McpToolCall(_)
         ) {
-            self.push_output(output_index, output_item);
-        }
-    }
-
-    fn push_output(&mut self, output_index: u32, item: OutputItem) {
-        self.output_indices.push(output_index);
-        self.output.push(item);
-    }
-
-    fn sort_output_by_index(&mut self) {
-        let mut indexed = std::mem::take(&mut self.output_indices)
-            .into_iter()
-            .zip(std::mem::take(&mut self.output))
-            .collect::<Vec<_>>();
-        indexed.sort_by_key(|(output_index, _)| *output_index);
-        for (output_index, item) in indexed {
-            self.output_indices.push(output_index);
-            self.output.push(item);
+            self.output.push(output_item);
         }
     }
 
@@ -984,7 +945,7 @@ mod tests {
     }
 
     #[test]
-    fn test_function_call_multiple_parallel() {
+    fn test_function_call_multiple_parallel_finalize_in_insertion_order() {
         let mut acc = ResponseAccumulator::new("resp_1".into(), None);
 
         acc.process_event(&EventFrame {
@@ -992,7 +953,7 @@ mod tests {
             payload: EventPayload::OutputItemAdded {
                 item_id: "fc_1".into(),
                 item_type: "function_call".into(),
-                output_index: 0,
+                output_index: 1,
                 name: Some("get_weather".into()),
                 namespace: None,
                 call_id: Some("call_1".into()),
@@ -1006,7 +967,7 @@ mod tests {
                 call_id: Some("call_1".into()),
                 item_id: "fc_1".into(),
                 name: "get_weather".into(),
-                output_index: 0,
+                output_index: 1,
             },
             sequence_number: Some(2),
         });
@@ -1016,7 +977,7 @@ mod tests {
             payload: EventPayload::OutputItemAdded {
                 item_id: "fc_2".into(),
                 item_type: "function_call".into(),
-                output_index: 1,
+                output_index: 0,
                 name: Some("get_time".into()),
                 namespace: None,
                 call_id: Some("call_2".into()),
@@ -1030,7 +991,7 @@ mod tests {
                 call_id: Some("call_2".into()),
                 item_id: "fc_2".into(),
                 name: "get_time".into(),
-                output_index: 1,
+                output_index: 0,
             },
             sequence_number: Some(4),
         });
@@ -1365,7 +1326,7 @@ mod tests {
     }
 
     #[test]
-    fn test_reasoning_precedes_completed_native_tool_search_item_by_output_index() {
+    fn test_completed_tool_search_precedes_in_flight_reasoning_on_finalization() {
         let lines = vec![
             r#"data: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning"}}"#.to_string(),
             r#"data: {"type":"response.reasoning_summary_text.delta","item_id":"rs_1","output_index":0,"delta":"Need a tool."}"#.to_string(),
@@ -1374,12 +1335,12 @@ mod tests {
         ];
 
         let acc = ResponseAccumulator::from_sse_lines(lines, None);
-        assert!(matches!(acc.output[0], OutputItem::Reasoning(_)));
-        assert!(matches!(acc.output[1], OutputItem::ToolSearchCall(_)));
+        assert!(matches!(acc.output[0], OutputItem::ToolSearchCall(_)));
+        assert!(matches!(acc.output[1], OutputItem::Reasoning(_)));
     }
 
     #[test]
-    fn test_hosted_search_call_output_and_function_follow_output_index_order() {
+    fn test_completed_search_items_precede_later_finalized_function_call() {
         let lines = vec![
             r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"tool_search_call","execution":"server","call_id":null,"status":"completed","arguments":{"paths":["crm"]}}}"#.to_string(),
             r#"data: {"type":"response.output_item.done","output_index":1,"item":{"type":"tool_search_output","execution":"server","call_id":null,"status":"completed","tools":[{"type":"function","name":"lookup"}]}}"#.to_string(),
