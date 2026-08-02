@@ -15,7 +15,7 @@ use tracing::{debug, warn};
 use agentic_core::ResponseUsage;
 use agentic_core::executor::{BoxStream, ExecuteRequest, ExecutorError, RequestContext, rehydrate_conversation};
 use agentic_core::types::request_response::RequestPayload;
-use agentic_core::utils::common::{deserialize_from_str, deserialize_from_value, utcnow_str};
+use agentic_core::utils::common::utcnow_str;
 
 use super::super::common::{MAX_BODY_SIZE, extract_bearer};
 use super::error::WsError;
@@ -119,19 +119,14 @@ async fn handle_ws_text(
     shutdown_token: &CancellationToken,
     queue: &mut VecDeque<String>,
 ) -> Result<(), WsError> {
-    let value = deserialize_from_str::<Value>(text).map_err(WsError::InvalidJson)?;
+    let value = serde_json::from_str::<Value>(text).map_err(WsError::InvalidJson)?;
 
     if value.get("type").and_then(Value::as_str) != Some("response.create") {
         return Err(WsError::UnexpectedType);
     }
 
     let generate = value.get("generate").and_then(Value::as_bool);
-    let Value::Object(mut request) = value else {
-        return Err(WsError::UnexpectedType);
-    };
-    request.remove("type");
-    request.remove("generate");
-    let mut payload = deserialize_from_value::<RequestPayload>(Value::Object(request)).map_err(ExecutorError::from)?;
+    let mut payload = serde_json::from_value::<RequestPayload>(value).map_err(ExecutorError::from)?;
     let requested_stream = payload.stream;
     let requested_store = payload.store;
     payload.stream = true;

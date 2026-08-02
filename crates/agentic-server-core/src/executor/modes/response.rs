@@ -95,8 +95,6 @@ impl ResponseHandler {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use super::*;
     use crate::types::io::ResponsesInput;
     use crate::types::request_response::RequestPayload;
@@ -124,9 +122,6 @@ mod tests {
             metadata: None,
             parallel_tool_calls: None,
             cache_salt: None,
-            reasoning: None,
-            prompt_cache_key: None,
-            extra: HashMap::new(),
         };
         RequestContext {
             enriched_request: req.clone(),

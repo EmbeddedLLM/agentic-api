@@ -1,6 +1,5 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
-use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -33,18 +32,7 @@ pub struct RequestPayload {
     pub metadata: Option<Value>,
     pub parallel_tool_calls: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning: Option<Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prompt_cache_key: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_salt: Option<String>,
-    /// Top-level Responses fields not yet modeled by the gateway.
-    ///
-    /// Preserving them keeps the typed executor forward-compatible with newer
-    /// clients while modeled fields remain authoritative during forwarding.
-    #[serde(default)]
-    #[serde(flatten)]
-    pub extra: HashMap<String, Value>,
 }
 
 fn default_true() -> bool {
@@ -80,36 +68,7 @@ pub struct UpstreamRequest<'a> {
     pub metadata: Option<&'a Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parallel_tool_calls: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reasoning: Option<&'a Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub prompt_cache_key: Option<&'a str>,
     pub cache_salt: Option<&'a str>,
-    #[serde(flatten)]
-    extra: FilteredRequestFields<'a>,
-}
-
-/// Borrowed view of unmodeled Responses request fields that omits keys owned
-/// by [`UpstreamRequest`].
-///
-/// The custom map serializer avoids cloning potentially large JSON values on
-/// every inference round while keeping modeled fields authoritative.
-#[derive(Debug)]
-struct FilteredRequestFields<'a>(&'a HashMap<String, Value>);
-
-impl Serialize for FilteredRequestFields<'_> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let mut map = serializer.serialize_map(None)?;
-        for (field, value) in self.0 {
-            if !is_modeled_request_field(field) {
-                map.serialize_entry(field, value)?;
-            }
-        }
-        map.end()
-    }
 }
 
 /// A tool declaration supported by the upstream Responses endpoint.
@@ -221,10 +180,7 @@ impl RequestPayload {
             truncation: self.truncation.as_deref(),
             metadata: self.metadata.as_ref(),
             parallel_tool_calls,
-            reasoning: self.reasoning.as_ref(),
-            prompt_cache_key: self.prompt_cache_key.as_deref(),
             cache_salt: self.cache_salt.as_deref(),
-            extra: FilteredRequestFields(&self.extra),
         })
     }
 
@@ -253,31 +209,6 @@ impl RequestPayload {
             .transpose()?;
         Ok(renamed_tools.into_iter().flatten().flat_map(upstream_tools).collect())
     }
-}
-
-fn is_modeled_request_field(field: &str) -> bool {
-    matches!(
-        field,
-        "model"
-            | "input"
-            | "instructions"
-            | "previous_response_id"
-            | "conversation_id"
-            | "tools"
-            | "tool_choice"
-            | "stream"
-            | "store"
-            | "include"
-            | "temperature"
-            | "top_p"
-            | "max_output_tokens"
-            | "truncation"
-            | "metadata"
-            | "parallel_tool_calls"
-            | "reasoning"
-            | "prompt_cache_key"
-            | "cache_salt"
-    )
 }
 
 fn promote_loaded_function_tools(input: &ResponsesInput, tools: &mut Vec<UpstreamTool>) -> bool {
@@ -419,75 +350,6 @@ mod tests {
             .expect("upstream request should serialize");
 
         assert_eq!(upstream["cache_salt"], "tenant-a");
-    }
-
-    #[test]
-    fn request_payload_forwards_codex_and_unknown_fields_upstream() {
-        let payload: RequestPayload = serde_json::from_value(serde_json::json!({
-            "model": "test-model",
-            "input": "find a tool",
-            "tools": [{"type": "tool_search", "execution": "client"}],
-            "reasoning": {"effort": "low", "summary": "auto"},
-            "prompt_cache_key": "codex-session-42",
-            "x-codex-sentinel": {"preserved": true}
-        }))
-        .expect("request should deserialize");
-
-        assert_eq!(
-            payload.reasoning.as_ref().and_then(|value| value["effort"].as_str()),
-            Some("low")
-        );
-        assert_eq!(payload.prompt_cache_key.as_deref(), Some("codex-session-42"));
-        assert_eq!(payload.extra["x-codex-sentinel"]["preserved"], true);
-
-        let upstream = serde_json::to_value(payload.to_upstream_request(false).expect("request should normalize"))
-            .expect("upstream request should serialize");
-
-        assert_eq!(upstream["reasoning"]["effort"], "low");
-        assert_eq!(upstream["reasoning"]["summary"], "auto");
-        assert_eq!(upstream["prompt_cache_key"], "codex-session-42");
-        assert_eq!(upstream["x-codex-sentinel"]["preserved"], true);
-    }
-
-    #[test]
-    fn modeled_request_fields_cannot_be_shadowed_by_extra_fields() {
-        let mut payload: RequestPayload = serde_json::from_value(serde_json::json!({
-            "model": "authoritative-model",
-            "input": "hello",
-            "reasoning": {"effort": "low"},
-            "prompt_cache_key": "authoritative-cache-key"
-        }))
-        .expect("request should deserialize");
-        payload
-            .extra
-            .insert("model".to_owned(), serde_json::json!("shadow-model"));
-        payload
-            .extra
-            .insert("input".to_owned(), serde_json::json!("shadow-input"));
-        payload.extra.insert("stream".to_owned(), serde_json::json!(true));
-        payload
-            .extra
-            .insert("reasoning".to_owned(), serde_json::json!({"effort": "high"}));
-        payload
-            .extra
-            .insert("prompt_cache_key".to_owned(), serde_json::json!("shadow-cache-key"));
-
-        let encoded = serde_json::to_string(&payload.to_upstream_request(false).expect("request should normalize"))
-            .expect("upstream request should serialize");
-        let upstream: Value = serde_json::from_str(&encoded).expect("upstream request should be valid JSON");
-
-        assert_eq!(upstream["model"], "authoritative-model");
-        assert_eq!(upstream["input"], "hello");
-        assert_eq!(upstream["stream"], false);
-        assert_eq!(upstream["reasoning"]["effort"], "low");
-        assert_eq!(upstream["prompt_cache_key"], "authoritative-cache-key");
-        for field in ["model", "input", "stream", "reasoning", "prompt_cache_key"] {
-            assert_eq!(
-                encoded.matches(&format!("\"{field}\":")).count(),
-                1,
-                "{field} should be serialized exactly once"
-            );
-        }
     }
 
     #[test]

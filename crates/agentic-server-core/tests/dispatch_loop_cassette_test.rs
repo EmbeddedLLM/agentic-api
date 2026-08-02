@@ -12,7 +12,6 @@
 //! feedback, the round-cap `incomplete` path) live in `web_search_tool_test.rs`;
 //! this file focuses on coverage against recorded `OpenAI` wire bodies.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use agentic_core::executor::{ConversationHandler, ExecuteRequest, ExecutionContext, ResponseHandler};
@@ -130,9 +129,6 @@ fn request(text: &str, tools: Option<Vec<ResponsesTool>>) -> RequestPayload {
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
-        reasoning: None,
-        prompt_cache_key: None,
-        extra: HashMap::new(),
     }
 }
 
@@ -144,35 +140,6 @@ fn function_call_names(output: &[OutputItem]) -> Vec<&str> {
             _ => None,
         })
         .collect()
-}
-
-#[tokio::test]
-async fn codex_request_fields_pass_through_typed_executor() {
-    let llm = support::MockServer::start_deque(vec![support::text_response("done")]).await;
-    let exec_ctx = build_exec_ctx(llm.url()).await;
-    let payload: RequestPayload = serde_json::from_value(serde_json::json!({
-        "model": "test-model",
-        "input": "find a tool",
-        "tools": [{"type": "tool_search", "execution": "client"}],
-        "reasoning": {"effort": "low", "summary": "auto"},
-        "prompt_cache_key": "codex-session-42",
-        "x-codex-sentinel": {"preserved": true}
-    }))
-    .expect("Codex request should deserialize");
-
-    let result = ExecuteRequest::new(payload, exec_ctx)
-        .run()
-        .await
-        .expect("executor should complete");
-    assert!(matches!(result, Either::Left(_)));
-
-    let requests = llm.request_bodies().await;
-    assert_eq!(requests.len(), 1);
-    let upstream = &requests[0];
-    assert_eq!(upstream["reasoning"]["effort"], "low");
-    assert_eq!(upstream["reasoning"]["summary"], "auto");
-    assert_eq!(upstream["prompt_cache_key"], "codex-session-42");
-    assert_eq!(upstream["x-codex-sentinel"]["preserved"], true);
 }
 
 /// `OpenAI` cassette, turn 1 emits a single client-owned `get_job_status`

@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
@@ -587,9 +586,6 @@ async fn execute_runs_web_search_and_sends_tool_output_back_to_model() {
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
-        reasoning: None,
-        prompt_cache_key: None,
-        extra: HashMap::new(),
     };
 
     let result = ExecuteRequest::new(payload, Arc::clone(&exec_ctx)).run().await.unwrap();
@@ -675,9 +671,6 @@ async fn execute_relaxes_forced_tool_choice_after_web_search_result() {
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
-        reasoning: None,
-        prompt_cache_key: None,
-        extra: HashMap::new(),
     };
 
     let result = ExecuteRequest::new(payload, Arc::clone(&exec_ctx)).run().await.unwrap();
@@ -709,9 +702,25 @@ async fn execute_returns_mixed_client_tool_calls_without_followup_model_request(
         }
     }))
     .unwrap();
-    let mut payload = support::make_request("look up rust async and weather", true, false, None, None);
-    payload.tools = Some(vec![web_search, client_function]);
-    payload.max_output_tokens = Some(1024);
+    let payload = RequestPayload {
+        model: "test-model".to_owned(),
+        input: ResponsesInput::Text("look up rust async and weather".to_owned()),
+        instructions: None,
+        previous_response_id: None,
+        conversation_id: None,
+        tools: Some(vec![web_search, client_function]),
+        tool_choice: None,
+        stream: false,
+        store: true,
+        include: None,
+        temperature: None,
+        top_p: None,
+        max_output_tokens: Some(1024),
+        truncation: None,
+        metadata: None,
+        parallel_tool_calls: None,
+        cache_salt: None,
+    };
 
     let result = ExecuteRequest::new(payload, Arc::clone(&exec_ctx)).run().await.unwrap();
     let Either::Left(response) = result else {
@@ -741,8 +750,25 @@ async fn execute_returns_mixed_client_tool_calls_without_followup_model_request(
         .collect();
     assert_eq!(function_names, ["get_weather"]);
 
-    let mut continuation_payload = support::make_request("continue", true, false, Some(response.id), None);
-    continuation_payload.max_output_tokens = Some(1024);
+    let continuation_payload = RequestPayload {
+        model: "test-model".to_owned(),
+        input: ResponsesInput::Text("continue".to_owned()),
+        instructions: None,
+        previous_response_id: Some(response.id),
+        conversation_id: None,
+        tools: None,
+        tool_choice: None,
+        stream: false,
+        store: true,
+        include: None,
+        temperature: None,
+        top_p: None,
+        max_output_tokens: Some(1024),
+        truncation: None,
+        metadata: None,
+        parallel_tool_calls: None,
+        cache_salt: None,
+    };
     let continuation = ExecuteRequest::new(continuation_payload, exec_ctx).run().await.unwrap();
     assert!(matches!(continuation, Either::Left(_)));
     let request_bodies = llm.request_bodies().await;
@@ -813,9 +839,6 @@ async fn execute_accumulates_usage_across_web_search_model_rounds() {
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
-        reasoning: None,
-        prompt_cache_key: None,
-        extra: HashMap::new(),
     };
 
     let result = ExecuteRequest::new(payload, exec_ctx).run().await.unwrap();
@@ -860,9 +883,6 @@ async fn stream_emits_web_search_lifecycle_events_before_final_payload() {
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
-        reasoning: None,
-        prompt_cache_key: None,
-        extra: HashMap::new(),
     };
 
     let result = ExecuteRequest::new(payload, Arc::clone(&exec_ctx)).run().await.unwrap();
@@ -946,9 +966,6 @@ async fn stream_hides_web_search_function_events_when_name_arrives_on_done() {
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
-        reasoning: None,
-        prompt_cache_key: None,
-        extra: HashMap::new(),
     };
 
     let result = ExecuteRequest::new(payload, Arc::clone(&exec_ctx)).run().await.unwrap();
@@ -1016,9 +1033,6 @@ async fn execute_runs_multiple_web_search_calls_concurrently() {
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
-        reasoning: None,
-        prompt_cache_key: None,
-        extra: HashMap::new(),
     };
 
     let result = tokio::time::timeout(Duration::from_secs(2), ExecuteRequest::new(payload, exec_ctx).run())
@@ -1068,9 +1082,6 @@ async fn execute_feeds_web_search_execution_errors_back_to_model() {
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
-        reasoning: None,
-        prompt_cache_key: None,
-        extra: HashMap::new(),
     };
 
     let result = ExecuteRequest::new(payload, exec_ctx).run().await.unwrap();
@@ -1122,9 +1133,6 @@ async fn execute_returns_incomplete_after_max_gateway_tool_rounds() {
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
-        reasoning: None,
-        prompt_cache_key: None,
-        extra: HashMap::new(),
     };
 
     // Budget exhausted while the model keeps requesting tools → the response is
@@ -1176,9 +1184,6 @@ async fn execute_feeds_invalid_web_search_arguments_back_to_model() {
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
-        reasoning: None,
-        prompt_cache_key: None,
-        extra: HashMap::new(),
     };
 
     let result = ExecuteRequest::new(payload, exec_ctx).run().await.unwrap();
@@ -1237,9 +1242,6 @@ async fn execute_runs_large_gateway_fanout_without_hard_cap() {
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
-        reasoning: None,
-        prompt_cache_key: None,
-        extra: HashMap::new(),
     };
 
     let result = ExecuteRequest::new(payload, exec_ctx)
@@ -1304,9 +1306,6 @@ async fn stream_error_events_escape_error_messages() {
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
-        reasoning: None,
-        prompt_cache_key: None,
-        extra: HashMap::new(),
     };
 
     let result = ExecuteRequest::new(payload, exec_ctx).run().await.unwrap();
@@ -1383,9 +1382,6 @@ async fn incomplete_turn_persists_a_consistent_conversation_for_continuation() {
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
-        reasoning: None,
-        prompt_cache_key: None,
-        extra: HashMap::new(),
     };
 
     let result = ExecuteRequest::new(payload, Arc::clone(&exec_ctx)).run().await.unwrap();
@@ -1413,9 +1409,6 @@ async fn incomplete_turn_persists_a_consistent_conversation_for_continuation() {
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
-        reasoning: None,
-        prompt_cache_key: None,
-        extra: HashMap::new(),
     };
     let _ = ExecuteRequest::new(continuation_payload, exec_ctx).run().await.unwrap();
 
@@ -1487,9 +1480,6 @@ async fn stream_returns_incomplete_after_max_gateway_tool_rounds() {
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
-        reasoning: None,
-        prompt_cache_key: None,
-        extra: HashMap::new(),
     };
 
     let result = ExecuteRequest::new(payload, exec_ctx).run().await.unwrap();
