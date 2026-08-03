@@ -11,6 +11,7 @@ use agentic_core::config::{
     PostgresConfig, SqliteConfig, SqliteTempStore, normalize_base_url,
 };
 use agentic_core::error::Error;
+use agentic_server::auth::OidcConfig;
 
 mod server;
 
@@ -18,6 +19,14 @@ mod server;
 struct CommonArgs {
     #[arg(long, env = "OPENAI_API_KEY", hide_env_values = true, global = true)]
     openai_api_key: Option<String>,
+
+    /// OIDC issuer for optional inbound bearer-token authentication.
+    #[arg(long, env = "OIDC_ISSUER", global = true)]
+    oidc_issuer: Option<String>,
+
+    /// Required bearer-token audience when `OIDC_ISSUER` is configured.
+    #[arg(long, env = "OIDC_AUDIENCE", global = true)]
+    oidc_audience: Option<String>,
 
     #[arg(long, env = "GATEWAY_HOST", default_value = "0.0.0.0", global = true)]
     gateway_host: String,
@@ -45,6 +54,17 @@ struct CommonArgs {
         global = true
     )]
     db_url: String,
+}
+
+fn oidc_config_from_values(
+    issuer: Option<&str>,
+    audience: Option<&str>,
+) -> Result<Option<OidcConfig>, server::ServerError> {
+    match (issuer, audience) {
+        (None, None) => Ok(None),
+        (Some(issuer), Some(audience)) => Ok(Some(OidcConfig::new(issuer, audience)?)),
+        _ => Err(Error::Config("OIDC_ISSUER and OIDC_AUDIENCE must be configured together".to_owned()).into()),
+    }
 }
 
 #[derive(Parser)]
@@ -223,7 +243,7 @@ fn build_config(llm_api_base: String, common: &CommonArgs) -> Result<Config, Err
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Error> {
+async fn main() -> Result<(), server::ServerError> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -236,6 +256,7 @@ async fn main() -> Result<(), Error> {
         llm_api_base,
         common,
     } = Cli::parse();
+    let oidc_config = oidc_config_from_values(common.oidc_issuer.as_deref(), common.oidc_audience.as_deref())?;
 
     match command {
         None => {
@@ -246,20 +267,21 @@ async fn main() -> Result<(), Error> {
                 )
             })?;
             let config = build_config(normalize_base_url(&base), &common)?;
-            server::run(config, &common.gateway_host, common.gateway_port).await
+            server::run(config, &common.gateway_host, common.gateway_port, oidc_config).await
         }
         Some(Commands::Serve { model, port, llm_args }) => {
             if llm_api_base.is_some() {
                 return Err(Error::Config(
                     "--llm-api-base is only valid in standalone mode; remove it when using `serve`".to_owned(),
-                ));
+                )
+                .into());
             }
             let config = build_config(normalize_base_url(&format!("http://127.0.0.1:{port}")), &common)?;
             let mut args = vec!["--model".to_owned(), model];
             args.push("--port".to_owned());
             args.push(port.to_string());
             args.extend(llm_args);
-            server::run_with_llm(config, &common.gateway_host, common.gateway_port, args).await
+            server::run_with_llm(config, &common.gateway_host, common.gateway_port, args, oidc_config).await
         }
     }
 }
@@ -271,8 +293,8 @@ mod tests {
     use clap::{CommandFactory, Parser};
 
     use super::{
-        Cli, Commands, database_configs_from_env, parse_env_duration_value, parse_env_optional_duration_value,
-        parse_env_temp_store_value, parse_env_u32_value, parse_env_u64_value,
+        Cli, Commands, database_configs_from_env, oidc_config_from_values, parse_env_duration_value,
+        parse_env_optional_duration_value, parse_env_temp_store_value, parse_env_u32_value, parse_env_u64_value,
     };
     use agentic_core::config::{
         DEFAULT_POSTGRES_ACQUIRE_TIMEOUT_SECONDS, DEFAULT_POSTGRES_IDLE_TIMEOUT_SECONDS,
@@ -307,6 +329,18 @@ mod tests {
     }
 
     #[test]
+    fn oidc_configuration_requires_issuer_and_audience_together() {
+        assert!(oidc_config_from_values(None, None).expect("disabled OIDC").is_none());
+        assert!(oidc_config_from_values(Some("https://issuer.example"), None).is_err());
+        assert!(oidc_config_from_values(None, Some("agentic-api")).is_err());
+        assert!(
+            oidc_config_from_values(Some("https://issuer.example"), Some("agentic-api"))
+                .expect("complete OIDC configuration")
+                .is_some()
+        );
+    }
+
+    #[test]
     fn container_runtime_options_are_bound_to_environment_variables() {
         let command = Cli::command();
 
@@ -314,6 +348,8 @@ mod tests {
             ("llm_api_base", "LLM_API_BASE"),
             ("gateway_host", "GATEWAY_HOST"),
             ("gateway_port", "GATEWAY_PORT"),
+            ("oidc_issuer", "OIDC_ISSUER"),
+            ("oidc_audience", "OIDC_AUDIENCE"),
         ] {
             let env = command
                 .get_arguments()

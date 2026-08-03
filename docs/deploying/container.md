@@ -37,6 +37,8 @@ The image starts `agentic-server` in standalone mode. At minimum, set `LLM_API_B
 | `POSTGRES_IDLE_TIMEOUT_SECONDS` | `600` | Recycle idle PostgreSQL connections; `0` disables |
 | `POSTGRES_MAX_LIFETIME_SECONDS` | `1800` | Recycle PostgreSQL connections after this lifetime; `0` disables |
 | `OPENAI_API_KEY` | none | Credential sent to the upstream service when the client does not supply one |
+| `OIDC_ISSUER` | none | Optional OIDC issuer for inbound bearer-token authentication |
+| `OIDC_AUDIENCE` | none | Required token audience when `OIDC_ISSUER` is set |
 | `SKIP_LLM_READY_CHECK` | `false` | Skip the startup probe for hosted providers without `/health` |
 | `CORS_ALLOWED_ORIGINS` | none | Comma-separated browser origins |
 
@@ -53,7 +55,26 @@ docker run --rm --name agentic-api \
   agentic-api:dev
 ```
 
-The gateway does not provide inbound client authentication. `OPENAI_API_KEY` is an upstream credential, not a password for callers, so keep the port bound to loopback unless an authenticated ingress or proxy protects it.
+Inbound authentication is disabled by default. `OPENAI_API_KEY` is an upstream credential, not a password for callers,
+so keep the port bound to loopback unless an authenticated ingress protects it or OIDC is enabled.
+
+To enable OIDC bearer authentication, configure both variables:
+
+```console
+docker run --rm --name agentic-api \
+  --publish 127.0.0.1:9000:9000 \
+  --env LLM_API_BASE=https://vllm.example.com \
+  --env OPENAI_API_KEY \
+  --env OIDC_ISSUER=https://identity.example.com \
+  --env OIDC_AUDIENCE=agentic-api \
+  agentic-api:dev
+```
+
+The gateway discovers the provider and its JSON Web Key Set before listening. `/health` and `/ready` remain public;
+all `/v1/*` routes then require an OIDC `Authorization: Bearer` token. The identity token is consumed by the gateway,
+and `OPENAI_API_KEY` supplies the upstream inference credential. See
+[OIDC bearer authentication](../design/oidc-bearer-authentication.md) for the validation and key-rotation contract.
+For a runnable GitHub-backed setup, follow [GitHub authentication with Dex](github-oidc.md).
 
 If the upstream is running on the Docker host, use `http://host.docker.internal:<port>` on Docker Desktop. On Linux, add `--add-host host.docker.internal:host-gateway`.
 

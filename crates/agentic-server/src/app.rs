@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use axum::Router;
+use axum::middleware;
 use axum::routing::{get, post};
 use http::HeaderValue;
 use tokio::sync::Notify;
@@ -11,8 +12,9 @@ use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use agentic_core::executor::ExecutionContext;
 use agentic_core::proxy::ProxyState;
 
+use crate::auth::{ANTHROPIC_COUNT_TOKENS_PATH, ANTHROPIC_MESSAGES_PATH, OidcAuthenticator, require_oidc};
 use crate::handler::{
-    compact_response, conversations, count_tokens, health, messages, models, ready, responses, responses_ws,
+    compact_response, conversations, count_tokens, health, messages, models, ready, responses, responses_ws_with_auth,
 };
 
 #[derive(Clone, Default)]
@@ -121,15 +123,31 @@ pub struct AppState {
 }
 
 pub fn build_router(state: AppState, server_config: &ServerConfig) -> Router {
-    Router::new()
-        .route("/health", get(health))
-        .route("/ready", get(ready))
+    build_router_with_auth(state, server_config, None)
+}
+
+pub fn build_router_with_auth(
+    state: AppState,
+    server_config: &ServerConfig,
+    authenticator: Option<OidcAuthenticator>,
+) -> Router {
+    let public_routes = Router::new().route("/health", get(health)).route("/ready", get(ready));
+    let protected_routes = Router::new()
         .route("/v1/conversations", post(conversations))
         .route("/v1/models", get(models))
-        .route("/v1/messages", post(messages))
-        .route("/v1/messages/count_tokens", post(count_tokens))
-        .route("/v1/responses", post(responses).get(responses_ws))
-        .route("/v1/responses/compact", post(compact_response))
+        .route(ANTHROPIC_MESSAGES_PATH, post(messages))
+        .route(ANTHROPIC_COUNT_TOKENS_PATH, post(count_tokens))
+        .route("/v1/responses", post(responses).get(responses_ws_with_auth))
+        .route("/v1/responses/compact", post(compact_response));
+    let protected_routes = match authenticator {
+        Some(authenticator) => {
+            protected_routes.route_layer(middleware::from_fn_with_state(authenticator, require_oidc))
+        }
+        None => protected_routes,
+    };
+
+    public_routes
+        .merge(protected_routes)
         .layer(server_config.cors_layer())
         .with_state(state)
 }

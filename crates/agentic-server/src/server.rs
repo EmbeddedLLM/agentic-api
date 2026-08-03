@@ -4,18 +4,35 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use agentic_core::config::Config;
-use agentic_core::error::Error;
+use agentic_core::error::Error as CoreError;
 use agentic_core::executor::ExecutionContext;
 use agentic_core::proxy::ProxyState;
 use agentic_core::readiness::wait_llm_ready;
-use agentic_server::app::{AppState, ServerConfig, WebSocketTracker, build_router};
+use agentic_server::app::{AppState, ServerConfig, WebSocketTracker, build_router_with_auth};
+use agentic_server::auth::{OidcAuthError, OidcAuthenticator, OidcConfig};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 const GATEWAY_DRAIN_TIMEOUT: Duration = Duration::from_secs(8);
 
-async fn build_state(config: &Config, shutdown_token: CancellationToken) -> Result<AppState, Error> {
+#[derive(Debug, thiserror::Error)]
+pub enum ServerError {
+    #[error(transparent)]
+    Core(#[from] CoreError),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error("failed to initialize OIDC authentication: {0}")]
+    Oidc(#[source] OidcAuthError),
+}
+
+impl From<OidcAuthError> for ServerError {
+    fn from(error: OidcAuthError) -> Self {
+        Self::Oidc(error)
+    }
+}
+
+async fn build_state(config: &Config, shutdown_token: CancellationToken) -> Result<AppState, ServerError> {
     let proxy_state = ProxyState::new(config.clone())?;
     let exec_ctx = Arc::new(ExecutionContext::from_config(config).await?);
 
@@ -29,12 +46,17 @@ async fn build_state(config: &Config, shutdown_token: CancellationToken) -> Resu
     })
 }
 
-async fn serve_gateway(state: AppState, host: &str, port: u16) -> Result<(), Error> {
+async fn serve_gateway(
+    state: AppState,
+    host: &str,
+    port: u16,
+    authenticator: Option<OidcAuthenticator>,
+) -> Result<(), ServerError> {
     let addr = format!("{host}:{port}");
     let server_config = ServerConfig::from_env();
     let shutdown_token = state.shutdown_token.clone();
     let websocket_tracker = state.websocket_tracker.clone();
-    let router = build_router(state, &server_config);
+    let router = build_router_with_auth(state, &server_config, authenticator);
     let listener = TcpListener::bind(&addr).await?;
     info!("gateway listening on {addr}");
     axum::serve(listener, router)
@@ -46,9 +68,14 @@ async fn serve_gateway(state: AppState, host: &str, port: u16) -> Result<(), Err
     Ok(())
 }
 
-async fn serve_gateway_until_signal(state: AppState, host: &str, port: u16) -> Result<(), Error> {
+async fn serve_gateway_until_signal(
+    state: AppState,
+    host: &str,
+    port: u16,
+    authenticator: Option<OidcAuthenticator>,
+) -> Result<(), ServerError> {
     let shutdown_token = state.shutdown_token.clone();
-    let gateway = serve_gateway(state, host, port);
+    let gateway = serve_gateway(state, host, port, authenticator);
     tokio::pin!(gateway);
 
     tokio::select! {
@@ -62,9 +89,9 @@ async fn serve_gateway_until_signal(state: AppState, host: &str, port: u16) -> R
     }
 }
 
-async fn drain_gateway<F>(gateway: Pin<&mut F>) -> Result<(), Error>
+async fn drain_gateway<F>(gateway: Pin<&mut F>) -> Result<(), ServerError>
 where
-    F: Future<Output = Result<(), Error>>,
+    F: Future<Output = Result<(), ServerError>>,
 {
     if let Ok(result) = tokio::time::timeout(GATEWAY_DRAIN_TIMEOUT, gateway).await {
         result
@@ -92,7 +119,7 @@ async fn shutdown_signal() -> Result<(), std::io::Error> {
     tokio::signal::ctrl_c().await
 }
 
-async fn wait_until_llm_ready(config: &Config) -> Result<(), Error> {
+async fn wait_until_llm_ready(config: &Config) -> Result<(), ServerError> {
     if config.skip_llm_ready_check {
         info!("skipping LLM readiness check: {}", config.llm_api_base);
         return Ok(());
@@ -107,21 +134,35 @@ async fn wait_until_llm_ready(config: &Config) -> Result<(), Error> {
 ///
 /// # Errors
 ///
-/// Returns an error if DB initialisation, LLM readiness polling, or the
-/// server binding fails.
-pub async fn run(config: Config, host: &str, port: u16) -> Result<(), Error> {
+/// Returns an error if OIDC discovery or verification-key loading, DB
+/// initialisation, LLM readiness polling, or the server binding fails.
+pub async fn run(config: Config, host: &str, port: u16, oidc_config: Option<OidcConfig>) -> Result<(), ServerError> {
+    let authenticator = match oidc_config {
+        Some(config) => Some(OidcAuthenticator::discover(config).await?),
+        None => None,
+    };
     wait_until_llm_ready(&config).await?;
     let state = build_state(&config, CancellationToken::new()).await?;
-    serve_gateway_until_signal(state, host, port).await
+    serve_gateway_until_signal(state, host, port, authenticator).await
 }
 
 /// Spawn vLLM as a subprocess and run the gateway in the foreground.
 ///
 /// # Errors
 ///
-/// Returns an error if vLLM fails to start, DB init fails, or the gateway
-/// errors.
-pub async fn run_with_llm(config: Config, host: &str, port: u16, llm_args: Vec<String>) -> Result<(), Error> {
+/// Returns an error if OIDC discovery or verification-key loading fails, vLLM
+/// fails to start, DB initialisation fails, or the gateway errors.
+pub async fn run_with_llm(
+    config: Config,
+    host: &str,
+    port: u16,
+    llm_args: Vec<String>,
+    oidc_config: Option<OidcConfig>,
+) -> Result<(), ServerError> {
+    let authenticator = match oidc_config {
+        Some(config) => Some(OidcAuthenticator::discover(config).await?),
+        None => None,
+    };
     let mut cmd = tokio::process::Command::new("python");
     cmd.arg("-m").arg("vllm.entrypoints.openai.api_server");
     cmd.args(&llm_args);
@@ -134,10 +175,10 @@ pub async fn run_with_llm(config: Config, host: &str, port: u16, llm_args: Vec<S
         Ok(false)
     } else {
         tokio::select! {
-            ready = wait_llm_ready(&config) => ready.map(|()| true),
+            ready = wait_llm_ready(&config) => ready.map(|()| true).map_err(ServerError::from),
             status = child.wait() => {
                 let status = status?;
-                Err(Error::LlmProcessExited { status: status.to_string() })
+                Err(ServerError::from(CoreError::LlmProcessExited { status: status.to_string() }))
             }
         }
     };
@@ -162,7 +203,7 @@ pub async fn run_with_llm(config: Config, host: &str, port: u16, llm_args: Vec<S
         }
     };
 
-    let gateway = serve_gateway(state, host, port);
+    let gateway = serve_gateway(state, host, port, authenticator);
     tokio::pin!(gateway);
 
     let result = tokio::select! {
@@ -170,7 +211,7 @@ pub async fn run_with_llm(config: Config, host: &str, port: u16, llm_args: Vec<S
         status = child.wait() => {
             shutdown_token.cancel();
             let status = status?;
-            Err(Error::LlmProcessExited { status: status.to_string() })
+            Err(ServerError::from(CoreError::LlmProcessExited { status: status.to_string() }))
         },
         signal = shutdown_signal() => {
             match signal {
@@ -191,12 +232,12 @@ pub async fn run_with_llm(config: Config, host: &str, port: u16, llm_args: Vec<S
 
 #[cfg(test)]
 mod tests {
-    use super::drain_gateway;
-    use agentic_core::error::Error;
+    use super::{ServerError, drain_gateway};
+    use agentic_core::error::Error as CoreError;
 
     #[tokio::test(start_paused = true)]
     async fn gateway_drain_is_bounded() {
-        let gateway = std::future::pending::<Result<(), Error>>();
+        let gateway = std::future::pending::<Result<(), ServerError>>();
         tokio::pin!(gateway);
 
         drain_gateway(gateway.as_mut()).await.unwrap();
@@ -204,7 +245,7 @@ mod tests {
 
     #[tokio::test]
     async fn gateway_drain_preserves_server_errors() {
-        let gateway = std::future::ready(Err(Error::Config("gateway failed".to_owned())));
+        let gateway = std::future::ready(Err(ServerError::from(CoreError::Config("gateway failed".to_owned()))));
         tokio::pin!(gateway);
 
         let error = drain_gateway(gateway.as_mut()).await.unwrap_err();
