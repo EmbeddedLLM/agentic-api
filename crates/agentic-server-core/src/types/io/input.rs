@@ -15,7 +15,25 @@ pub struct InputTextContent {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InputImageContent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InputFileContent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_data: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
 }
 
@@ -59,7 +77,50 @@ pub enum InputMessageContent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionToolResultMessage {
     pub call_id: String,
-    pub output: String,
+    pub output: ToolCallOutput,
+}
+
+/// Text or structured content returned by a client-owned tool call.
+///
+/// The Responses API accepts either a string or an array containing text,
+/// image, and file input content. Keeping the array structured preserves its
+/// media semantics when a custom-tool output is normalized to a function-tool
+/// output for the upstream model.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ToolCallOutput {
+    Text(String),
+    Content(Vec<ToolOutputContent>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ToolOutputContent {
+    InputText(InputTextContent),
+    InputImage(InputImageContent),
+    InputFile(InputFileContent),
+}
+
+impl ToolCallOutput {
+    #[must_use]
+    pub fn has_content(&self) -> bool {
+        match self {
+            Self::Text(text) => !text.trim().is_empty(),
+            Self::Content(content) => !content.is_empty(),
+        }
+    }
+}
+
+impl From<String> for ToolCallOutput {
+    fn from(output: String) -> Self {
+        Self::Text(output)
+    }
+}
+
+impl From<&str> for ToolCallOutput {
+    fn from(output: &str) -> Self {
+        Self::Text(output.to_owned())
+    }
 }
 
 /// A model-generated function call replayed as Responses input.
@@ -120,14 +181,14 @@ pub struct CustomToolCallOutputMessage {
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    pub output: Value,
+    pub output: ToolCallOutput,
 }
 
 impl From<CustomToolCallOutputMessage> for FunctionToolResultMessage {
     fn from(output: CustomToolCallOutputMessage) -> Self {
         Self {
             call_id: output.call_id,
-            output: custom_output_text(output.output),
+            output: output.output,
         }
     }
 }
@@ -286,13 +347,6 @@ fn function_call_item_id(item_id: &str) -> Option<String> {
     Some(item_id.to_owned())
 }
 
-fn custom_output_text(output: Value) -> String {
-    match output {
-        Value::String(output) => output,
-        output => output.to_string(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -323,6 +377,46 @@ mod tests {
         }));
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn structured_custom_tool_output_is_preserved_when_normalized() {
+        let content = serde_json::json!([
+            {"type": "input_text", "text": "diagram"},
+            {"type": "input_image", "image_url": "data:image/png;base64,abc", "detail": "low"},
+            {"type": "input_file", "file_id": "file_123", "filename": "report.pdf"}
+        ]);
+        let item: InputItem = serde_json::from_value(serde_json::json!({
+            "type": "custom_tool_call_output",
+            "call_id": "call_1",
+            "output": content
+        }))
+        .expect("valid structured custom-tool output");
+
+        let InputItem::CustomToolCallOutput(output) = item else {
+            panic!("expected custom-tool output");
+        };
+        let normalized = FunctionToolResultMessage::from(output);
+        let value = serde_json::to_value(normalized).expect("normalized output serializes");
+
+        assert_eq!(value["output"], content);
+    }
+
+    #[test]
+    fn custom_tool_output_rejects_unsupported_shapes() {
+        for output in [
+            serde_json::json!({"result": "not a supported top-level object"}),
+            serde_json::json!([{"type": "output_text", "text": "wrong content type"}]),
+            serde_json::json!(["content items must be objects"]),
+        ] {
+            let result = serde_json::from_value::<InputItem>(serde_json::json!({
+                "type": "custom_tool_call_output",
+                "call_id": "call_1",
+                "output": output
+            }));
+
+            assert!(result.is_err(), "unsupported custom-tool output should fail");
+        }
     }
 
     #[test]

@@ -95,7 +95,7 @@ impl From<ToolOutput> for FunctionToolResultMessage {
     fn from(o: ToolOutput) -> Self {
         Self {
             call_id: o.call_id,
-            output: o.output,
+            output: o.output.into(),
         }
     }
 }
