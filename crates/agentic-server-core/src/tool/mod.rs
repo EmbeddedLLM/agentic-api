@@ -19,5 +19,7 @@ pub use function::FunctionHandler;
 pub use handler::{GatewayExecutor, ToolError, ToolHandler, ToolOutput};
 pub use mcp::{McpClient, McpClientPool, McpDiscoveredHandler, McpError, McpHandler, McpOperation, McpServerEntry};
 pub use registry::{GatewayDispatchResult, ToolEntry, ToolRegistry, ToolType};
-pub(crate) use tool_search::{TOOL_SEARCH_NAME, loaded_function_names, loaded_function_tools};
+pub(crate) use tool_search::{
+    TOOL_SEARCH_NAME, loaded_function_identities, loaded_function_names, loaded_function_tools,
+};
 pub use web_search::WebSearchHandler;

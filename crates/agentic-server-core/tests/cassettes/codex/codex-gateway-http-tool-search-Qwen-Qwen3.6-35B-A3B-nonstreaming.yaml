@@ -1,0 +1,472 @@
+turns:
+- filename: t1
+  request:
+    body:
+      input: Call tool_search to load mcp__agentic_fixture.add_numbers for adding
+        [8, 13, 21]. Do not call add_numbers yet.
+      max_output_tokens: 4096
+      model: Qwen/Qwen3.6-35B-A3B
+      store: true
+      stream: false
+      tools:
+      - description: Find the project-specific function needed to continue the task.
+        execution: client
+        parameters:
+          additionalProperties: false
+          properties:
+            goal:
+              type: string
+          required:
+          - goal
+          type: object
+        type: tool_search
+      - description: Deferred Codex namespace fixture for tool-search recording.
+        name: mcp__agentic_fixture
+        tools:
+        - defer_loading: true
+          description: Add a list of numbers and return the total.
+          name: add_numbers
+          parameters:
+            additionalProperties: false
+            properties:
+              numbers:
+                items:
+                  type: number
+                minItems: 1
+                type: array
+            required:
+            - numbers
+            type: object
+          strict: false
+          type: function
+        type: namespace
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      conversation_id: null
+      created_at: 1785759519
+      error: null
+      id: resp_019fc78f-bf53-7660-8362-5931c6f2b73b
+      incomplete_details: null
+      instructions: null
+      model: Qwen/Qwen3.6-35B-A3B
+      object: response
+      output:
+      - content:
+        - text: "The user wants me to call `tool_search` to find/load the `mcp__agentic_fixture.add_numbers`\
+            \ function.\nThe goal for `tool_search` should be related to adding numbers\
+            \ or specifically finding `add_numbers`.\nI must not call `add_numbers`\
+            \ yet.\n\nParameters for `tool_search`:\n- goal: \"load mcp__agentic_fixture.add_numbers\
+            \ for adding [8, 13, 21]\" or simply \"find add_numbers tool\"\n\nLet's\
+            \ construct the call.\n`tool_search(goal=\"load mcp__agentic_fixture.add_numbers\
+            \ for adding [8, 13, 21]\")` or similar.\nThe prompt says: \"Call tool_search\
+            \ to load mcp__agentic_fixture.add_numbers for adding [8, 13, 21].\"\n\
+            I will use exactly that or a close variation for the goal.\nActually,\
+            \ the tool description says `tool_search` is \"Find the project-specific\
+            \ function needed to continue the task.\"\nSo I'll set goal to \"load\
+            \ mcp__agentic_fixture.add_numbers\".\nLet's proceed. \nWait, the prompt\
+            \ says \"Call tool_search to load mcp__agentic_fixture.add_numbers for\
+            \ adding [8, 13, 21].\"\nI will pass this exact phrase or a concise version.\n\
+            `tool_search(goal=\"load mcp__agentic_fixture.add_numbers for adding [8,\
+            \ 13, 21]\")`\nDone. \nCalling tool. \nProceeds. \nOutput matches expected.\n\
+            Let's generate. \nWait, checking the tool name: `tool_search`.\nParameters:\
+            \ `goal` (string).\nReady. \nI will call `tool_search` with goal=\"load\
+            \ mcp__agentic_fixture.add_numbers for adding [8, 13, 21]\".\nDone. \n\
+            Proceeding. \n[Self-Correction/Verification]\nThe instruction says \"\
+            Do not call add_numbers yet.\" So only `tool_search`.\nAll good. \nOutput\
+            \ matches tool call format. \nProceeds. \n`tool_search(goal=\"load mcp__agentic_fixture.add_numbers\
+            \ for adding [8, 13, 21]\")`\nDone. \nExecuting. \n[Output Generation]\
+            \ -> tool call. \nDone. \n(Self-Correction/Refinement during thought)\n\
+            Actually, the tool might just need a simple goal. I'll stick to the exact\
+            \ phrasing or a clear description.\n\"load mcp__agentic_fixture.add_numbers\
+            \ for adding [8, 13, 21]\" is fine.\nLet's output. \n[Done] \n`call: default_api:tool_search{\"\
+            goal\": \"load mcp__agentic_fixture.add_numbers for adding [8, 13, 21]\"\
+            }`\nWait, checking format: `tool_search` expects `goal`.\nAll good. \n\
+            Proceeds. \n[Final Check]\nUser: \"Call tool_search to load mcp__agentic_fixture.add_numbers\
+            \ for adding [8, 13, 21]. Do not call add_numbers yet.\"\nAction: Call\
+            \ `tool_search` with `goal` = \"load mcp__agentic_fixture.add_numbers\
+            \ for adding [8, 13, 21]\".\nMatches instructions.\nReady. \nOutput matches.\
+            \ \n[Proceeds] \n(Note: I will generate the tool call exactly as requested.)\
+            \ \n`call: default_api:tool_search{\"goal\": \"load mcp__agentic_fixture.add_numbers\
+            \ for adding [8, 13, 21]\"}` \nDone. \n(Self-Correction/Note during generation\
+            \ prep)\nActually, the prompt says \"Call tool_search to load mcp__agentic_fixture.add_numbers\
+            \ for adding [8, 13, 21].\"\nI'll just use that as the goal.\nProceeds.\
+            \ \n[Output Generation] -> Tool call.\n"
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_019fc78f-d0bf-7a41-a089-fecb0756fa47
+        status: null
+        summary: []
+        type: reasoning
+      - arguments:
+          goal: load mcp__agentic_fixture.add_numbers for adding [8, 13, 21]
+        call_id: chatcmpl-tool-af42afb5d9509721
+        execution: client
+        status: completed
+        type: tool_search_call
+      previous_response_id: null
+      status: completed
+      tools:
+      - description: Find the project-specific function needed to continue the task.
+        execution: client
+        parameters:
+          additionalProperties: false
+          properties:
+            goal:
+              type: string
+          required:
+          - goal
+          type: object
+        type: tool_search
+      - description: Deferred Codex namespace fixture for tool-search recording.
+        name: mcp__agentic_fixture
+        tools:
+        - defer_loading: true
+          description: Add a list of numbers and return the total.
+          name: add_numbers
+          parameters:
+            additionalProperties: false
+            properties:
+              numbers:
+                items:
+                  type: number
+                minItems: 1
+                type: array
+            required:
+            - numbers
+            type: object
+          strict: false
+          type: function
+        type: namespace
+      usage:
+        input_tokens: 392
+        input_tokens_details:
+          cached_tokens: 0
+        output_tokens: 876
+        output_tokens_details:
+          reasoning_tokens: 771
+        total_tokens: 1268
+    headers:
+      content-type: application/json
+    status_code: 200
+- filename: t2
+  request:
+    body:
+      input:
+      - call_id: chatcmpl-tool-af42afb5d9509721
+        execution: client
+        status: completed
+        tools:
+        - description: Loaded Codex namespace fixture.
+          name: mcp__agentic_fixture
+          tools:
+          - defer_loading: true
+            description: Add a list of numbers and return the total.
+            name: add_numbers
+            parameters:
+              additionalProperties: false
+              properties:
+                numbers:
+                  items:
+                    type: number
+                  minItems: 1
+                  type: array
+              required:
+              - numbers
+              type: object
+            strict: false
+            type: function
+          type: namespace
+        type: tool_search_output
+      - content: Call the loaded mcp__agentic_fixture.add_numbers function with numbers
+          [8, 13, 21].
+        role: user
+        type: message
+      max_output_tokens: 4096
+      model: Qwen/Qwen3.6-35B-A3B
+      previous_response_id: resp_019fc78f-bf53-7660-8362-5931c6f2b73b
+      store: true
+      stream: false
+      tools:
+      - description: Find the project-specific function needed to continue the task.
+        execution: client
+        parameters:
+          additionalProperties: false
+          properties:
+            goal:
+              type: string
+          required:
+          - goal
+          type: object
+        type: tool_search
+      - description: Deferred Codex namespace fixture for tool-search recording.
+        name: mcp__agentic_fixture
+        tools:
+        - defer_loading: true
+          description: Add a list of numbers and return the total.
+          name: add_numbers
+          parameters:
+            additionalProperties: false
+            properties:
+              numbers:
+                items:
+                  type: number
+                minItems: 1
+                type: array
+            required:
+            - numbers
+            type: object
+          strict: false
+          type: function
+        type: namespace
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      conversation_id: null
+      created_at: 1785759521
+      error: null
+      id: resp_019fc78f-d156-7432-84bc-84b98ce92f15
+      incomplete_details: null
+      instructions: null
+      model: Qwen/Qwen3.6-35B-A3B
+      object: response
+      output:
+      - content:
+        - text: 'The user wants to call the `mcp__agentic_fixture.add_numbers` function
+            with the numbers `[8, 13, 21]`.
+
+            I have already called `tool_search` to load it, and the result shows that
+            `mcp__agentic_fixture` namespace is loaded with `add_numbers` tool.
+
+            Now I will call `mcp__agentic_fixture.add_numbers` with the specified
+            numbers.
+
+            Wait, the available tools in the environment are:
+
+            1. `agentic_ns__mcp__agentic_fixture__add_numbers` (which corresponds
+            to `mcp__agentic_fixture.add_numbers`)
+
+            2. `add_numbers`
+
+
+            I will use `agentic_ns__mcp__agentic_fixture__add_numbers` with `numbers:
+            [8, 13, 21]`.
+
+            Let''s verify the tool name mapping. Usually, `mcp__agentic_fixture__add_numbers`
+            or `agentic_ns__mcp__agentic_fixture__add_numbers`.
+
+            Looking at the tools list provided in the prompt:
+
+            `agentic_ns__mcp__agentic_fixture__add_numbers`
+
+            `add_numbers`
+
+            I will use `agentic_ns__mcp__agentic_fixture__add_numbers`.
+
+            Parameters: `{"numbers": [8, 13, 21]}`
+
+            Let''s make the call.
+
+            '
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_019fc78f-d8e6-7751-b91a-658097acf2e5
+        status: null
+        summary: []
+        type: reasoning
+      - arguments: '{"numbers": [8, 13, 21]}'
+        call_id: chatcmpl-tool-8e2b71fa7650197a
+        id: fc_019fc78f-d90c-75e2-a3c5-7229100e775e
+        name: add_numbers
+        namespace: mcp__agentic_fixture
+        status: completed
+        type: function_call
+      previous_response_id: resp_019fc78f-bf53-7660-8362-5931c6f2b73b
+      status: completed
+      tools:
+      - description: Find the project-specific function needed to continue the task.
+        execution: client
+        parameters:
+          additionalProperties: false
+          properties:
+            goal:
+              type: string
+          required:
+          - goal
+          type: object
+        type: tool_search
+      - description: Deferred Codex namespace fixture for tool-search recording.
+        name: mcp__agentic_fixture
+        tools:
+        - description: Add a list of numbers and return the total.
+          name: add_numbers
+          parameters:
+            additionalProperties: false
+            properties:
+              numbers:
+                items:
+                  type: number
+                minItems: 1
+                type: array
+            required:
+            - numbers
+            type: object
+          strict: false
+          type: function
+        type: namespace
+      usage:
+        input_tokens: 688
+        input_tokens_details:
+          cached_tokens: 0
+        output_tokens: 339
+        output_tokens_details:
+          reasoning_tokens: 269
+        total_tokens: 1027
+    headers:
+      content-type: application/json
+    status_code: 200
+- filename: t3
+  request:
+    body:
+      input:
+      - call_id: chatcmpl-tool-8e2b71fa7650197a
+        output: '{"sum":42,"count":3}'
+        type: function_call_output
+      - content: Use the function output and return exactly TOOL_SEARCH_CODEX_OK_42.
+        role: user
+        type: message
+      max_output_tokens: 4096
+      model: Qwen/Qwen3.6-35B-A3B
+      previous_response_id: resp_019fc78f-d156-7432-84bc-84b98ce92f15
+      store: true
+      stream: false
+      tools:
+      - description: Find the project-specific function needed to continue the task.
+        execution: client
+        parameters:
+          additionalProperties: false
+          properties:
+            goal:
+              type: string
+          required:
+          - goal
+          type: object
+        type: tool_search
+      - description: Deferred Codex namespace fixture for tool-search recording.
+        name: mcp__agentic_fixture
+        tools:
+        - defer_loading: true
+          description: Add a list of numbers and return the total.
+          name: add_numbers
+          parameters:
+            additionalProperties: false
+            properties:
+              numbers:
+                items:
+                  type: number
+                minItems: 1
+                type: array
+            required:
+            - numbers
+            type: object
+          strict: false
+          type: function
+        type: namespace
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      conversation_id: null
+      created_at: 1785759522
+      error: null
+      id: resp_019fc78f-d96c-79d0-b6a7-a0775450f3cd
+      incomplete_details: null
+      instructions: null
+      model: Qwen/Qwen3.6-35B-A3B
+      object: response
+      output:
+      - content:
+        - text: "The user wants me to return the string \"TOOL_SEARCH_CODEX_OK_42\"\
+            \ based on the previous output.\nThe previous output from `mcp__agentic_fixtureadd_numbers`\
+            \ was `{\"sum\":42,\"count\":3}`.\nThe user explicitly instructs: \"return\
+            \ exactly TOOL_SEARCH_CODEX_OK_42.\"\nI will just output this string.\n\
+            I don't need to call any tools.\nI'll just output the text.\nCheck format:\
+            \ \"TOOL_SEARCH_CODEX_OK_42\"\nDone. \nProceeding. \nOutput: TOOL_SEARCH_CODEX_OK_42\n"
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_019fc78f-dd83-7172-979b-dbdaaa92a606
+        status: null
+        summary: []
+        type: reasoning
+      - content:
+        - annotations: []
+          text: '
+
+
+            TOOL_SEARCH_CODEX_OK_42'
+          type: output_text
+        id: msg_019fc78f-dd9b-7e40-823a-de6c7791dc6b
+        role: assistant
+        status: completed
+        type: message
+      previous_response_id: resp_019fc78f-d156-7432-84bc-84b98ce92f15
+      status: completed
+      tools:
+      - description: Find the project-specific function needed to continue the task.
+        execution: client
+        parameters:
+          additionalProperties: false
+          properties:
+            goal:
+              type: string
+          required:
+          - goal
+          type: object
+        type: tool_search
+      - description: Deferred Codex namespace fixture for tool-search recording.
+        name: mcp__agentic_fixture
+        tools:
+        - description: Add a list of numbers and return the total.
+          name: add_numbers
+          parameters:
+            additionalProperties: false
+            properties:
+              numbers:
+                items:
+                  type: number
+                minItems: 1
+                type: array
+            required:
+            - numbers
+            type: object
+          strict: false
+          type: function
+        type: namespace
+      usage:
+        input_tokens: 774
+        input_tokens_details:
+          cached_tokens: 0
+        output_tokens: 144
+        output_tokens_details:
+          reasoning_tokens: 120
+        total_tokens: 918
+    headers:
+      content-type: application/json
+    status_code: 200

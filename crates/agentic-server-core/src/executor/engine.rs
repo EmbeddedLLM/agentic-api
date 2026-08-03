@@ -129,7 +129,7 @@ async fn run_until_gateway_tools_complete(
         } else {
             (fetch_blocking_payload(&ctx, exec_ctx, auth).await?, Vec::new())
         };
-        registry.restore_final_payload_output(&mut payload.output);
+        registry.restore_final_payload(&mut payload);
         accumulate_usage(&mut combined_usage, payload.usage.take());
         let current_output = std::mem::take(&mut payload.output);
         log_client_execution_items(&ctx.response_id, &current_output);

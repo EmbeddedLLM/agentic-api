@@ -6,11 +6,11 @@ set -euo pipefail
 # Records YAML replay cassettes for Codex CLI-shaped tool calls.
 #
 # Default matrix:
-#   - gateway HTTP/SSE: function + Codex namespace + custom tools
-#   - gateway WebSocket: function + Codex namespace + custom tools
+#   - gateway HTTP: function + Codex namespace + custom + client tool search
+#   - gateway WebSocket: function + Codex namespace + custom + client tool search
 #   - direct vLLM HTTP/SSE: function + flattened namespace function + custom tool
-#   - direct OpenAI HTTPS/SSE: function + Codex namespace + custom tools
-#   - direct OpenAI WebSocket: function + Codex namespace + custom tools
+#   - direct OpenAI HTTPS: function + Codex namespace + custom + client tool search
+#   - direct OpenAI WebSocket: function + Codex namespace + custom + client tool search
 #
 # Direct vLLM expects the flattened function shape. Set VLLM_URL or V_API_BASE
 # explicitly before recording direct vLLM cassettes.
@@ -33,8 +33,9 @@ GATEWAY_CASSETTE_MODEL="${GATEWAY_CASSETTE_MODEL:-$V_MODEL}"
 OPENAI_URL="${OPENAI_URL:-https://api.openai.com}"
 OPENAI_MODEL="${OPENAI_MODEL:-gpt-4o}"
 OPENAI_CUSTOM_MODEL="${OPENAI_CUSTOM_MODEL:-gpt-5.6}"
+OPENAI_TOOL_SEARCH_MODEL="${OPENAI_TOOL_SEARCH_MODEL:-gpt-5.6}"
 
-TOOL_TURNS="${TOOL_TURNS:-2}"
+LEGACY_TOOL_TURNS="${TOOL_TURNS:-2}"
 PROXY_PORT_BASE="${PROXY_PORT_BASE:-7070}"
 TARGET="${1:-all}"
 
@@ -43,6 +44,8 @@ NAMESPACE_TOOL="${TOOLS_DIR}/namespace_tool.json"
 CUSTOM_TOOL="${TOOLS_DIR}/custom_tool.json"
 DIRECT_VLLM_FLAT_NAMESPACE_TOOL="${TOOLS_DIR}/direct_vllm_flat_namespace_tool.json"
 TOOL_OUTPUTS="${TOOLS_DIR}/tool_outputs.json"
+TOOL_SEARCH_NAMESPACE_TOOL="${TOOLS_DIR}/tool_search_namespace_tool.json"
+TOOL_SEARCH_OUTPUTS="${TOOLS_DIR}/tool_search_outputs.json"
 
 model_slug() {
   printf '%s\n' "$1" | tr '/: ' '---'
@@ -52,6 +55,7 @@ GATEWAY_MODEL_SLUG="$(model_slug "$GATEWAY_CASSETTE_MODEL")"
 V_MODEL_SLUG="$(model_slug "$V_MODEL")"
 OPENAI_MODEL_SLUG="$(model_slug "$OPENAI_MODEL")"
 OPENAI_CUSTOM_MODEL_SLUG="$(model_slug "$OPENAI_CUSTOM_MODEL")"
+OPENAI_TOOL_SEARCH_MODEL_SLUG="$(model_slug "$OPENAI_TOOL_SEARCH_MODEL")"
 
 next_proxy_port="$PROXY_PORT_BASE"
 
@@ -61,9 +65,20 @@ Usage: $(basename "$0") [target]
 
 Targets:
   all                  all cassettes used by Codex cassette tests
-  gateway              gateway-http + gateway-ws
-  gateway-http         gateway HTTP/SSE function + namespace + custom
-  gateway-ws           gateway WebSocket function + namespace + custom
+  gateway              gateway-http + gateway-ws, including client tool search
+  gateway-http         gateway HTTP function + namespace + custom + client tool search
+  gateway-ws           gateway WebSocket function + namespace + custom + client tool search
+  tool-search          all gateway + OpenAI client tool-search continuations
+  gateway-tool-search  gateway HTTP streaming/non-streaming + WebSocket tool search
+  gateway-http-tool-search
+                        gateway HTTP streaming + non-streaming tool search
+  gateway-ws-tool-search
+                        gateway WebSocket client tool-search continuation flow
+  openai-tool-search   OpenAI HTTPS streaming/non-streaming + WebSocket tool search
+  openai-https-tool-search
+                        OpenAI HTTPS streaming + non-streaming tool search
+  openai-ws-tool-search
+                        OpenAI WebSocket client tool-search continuation flow
   gateway-custom       gateway HTTP/SSE + WebSocket custom only
   gateway-http-custom  gateway HTTP/SSE custom only
   gateway-ws-custom    gateway WebSocket custom only
@@ -72,8 +87,8 @@ Targets:
   direct-vllm-custom   direct vLLM HTTP/SSE custom only
   direct-vllm-ws       direct vLLM WebSocket function + flattened namespace
   openai               same as openai-https
-  openai-https         direct OpenAI HTTPS/SSE function + custom
-  openai-ws            direct OpenAI WebSocket function + custom
+  openai-https         direct OpenAI HTTPS function + custom + client tool search
+  openai-ws            direct OpenAI WebSocket function + custom + client tool search
   openai-custom        direct OpenAI HTTPS/SSE + WebSocket custom only
   openai-https-custom  direct OpenAI HTTPS/SSE custom only
   openai-ws-custom     direct OpenAI WebSocket custom only
@@ -91,8 +106,9 @@ Environment:
   OPENAI_URL             OpenAI base URL, default: ${OPENAI_URL}
   OPENAI_MODEL           OpenAI model, default: ${OPENAI_MODEL}
   OPENAI_CUSTOM_MODEL    OpenAI custom-tool model, default: ${OPENAI_CUSTOM_MODEL}
+  OPENAI_TOOL_SEARCH_MODEL OpenAI tool-search model, default: ${OPENAI_TOOL_SEARCH_MODEL}
   OPENAI_API_KEY         required for openai* targets
-  TOOL_TURNS             1 or 2, default: ${TOOL_TURNS}
+  TOOL_TURNS             1 or 2 for legacy scenarios, default: ${LEGACY_TOOL_TURNS}; tool search is always 3
   PROXY_PORT_BASE        first embedded recorder proxy port, default: ${PROXY_PORT_BASE}
 USAGE
 }
@@ -127,18 +143,23 @@ alloc_proxy_port() {
 }
 
 emit_prompts() {
-  local first_prompt="$1"
-  local second_prompt="$2"
+  local turns="$1"
+  local first_prompt="$2"
+  local second_prompt="$3"
+  local third_prompt="${4:-}"
 
-  case "$TOOL_TURNS" in
+  case "$turns" in
     1)
       printf '%s\n' "$first_prompt"
       ;;
     2)
       printf '%s\n' "$first_prompt" "$second_prompt"
       ;;
+    3)
+      printf '%s\n' "$first_prompt" "$second_prompt" "$third_prompt"
+      ;;
     *)
-      echo "error: TOOL_TURNS must be 1 or 2, got ${TOOL_TURNS}" >&2
+      echo "error: recording turn count must be 1, 2, or 3, got ${turns}" >&2
       exit 2
       ;;
   esac
@@ -154,10 +175,31 @@ run_recording() {
   local tools_file="$7"
   local first_prompt="$8"
   local second_prompt="$9"
+  local third_prompt="${10:-}"
+  local tool_outputs_file="${11:-$TOOL_OUTPUTS}"
+  local turns="${12:-}"
+  local stream_flag="${13:---stream}"
+  local max_output_tokens="${14:-1024}"
+
+  if [[ -z "$turns" ]]; then
+    case "$LEGACY_TOOL_TURNS" in
+      1 | 2)
+        turns="$LEGACY_TOOL_TURNS"
+        ;;
+      *)
+        echo "error: TOOL_TURNS must be 1 or 2 for legacy scenarios, got ${LEGACY_TOOL_TURNS}" >&2
+        exit 2
+        ;;
+    esac
+  fi
+  if [[ "$stream_flag" != "--stream" && "$stream_flag" != "--no-stream" ]]; then
+    echo "error: recording stream flag must be --stream or --no-stream, got ${stream_flag}" >&2
+    exit 2
+  fi
 
   require_file "$RECORDER"
   require_file "$tools_file"
-  require_file "$TOOL_OUTPUTS"
+  require_file "$tool_outputs_file"
   mkdir -p "$OUT"
 
   local output_path="${OUT%/}/${output_name}"
@@ -171,18 +213,46 @@ run_recording() {
   echo "    model:  ${model}"
   echo "    wire:   ${transport}"
 
-  emit_prompts "$first_prompt" "$second_prompt" |
+  emit_prompts "$turns" "$first_prompt" "$second_prompt" "$third_prompt" |
     "$PYTHON" "$RECORDER" \
-      --turns "$TOOL_TURNS" \
+      --turns "$turns" \
       --mode responses \
       --transport "$transport" \
-      --stream \
+      "$stream_flag" \
       --proxy-port "$proxy_port" \
       "$backend_flag" "$backend_url" \
       --model "$model" \
       --tools "$tools_file" \
-      --tool-outputs "$TOOL_OUTPUTS" \
+      --tool-outputs "$tool_outputs_file" \
+      --max-output-tokens "$max_output_tokens" \
       --output "$output_path"
+}
+
+run_tool_search_recording() {
+  local label="$1"
+  local output_name="$2"
+  local transport="$3"
+  local backend_flag="$4"
+  local backend_url="$5"
+  local model="$6"
+  local stream_flag="$7"
+  local max_output_tokens="${8:-1024}"
+
+  run_recording \
+    "$label" \
+    "$output_name" \
+    "$transport" \
+    "$backend_flag" \
+    "$backend_url" \
+    "$model" \
+    "$TOOL_SEARCH_NAMESPACE_TOOL" \
+    'Call tool_search to load mcp__agentic_fixture.add_numbers for adding [8, 13, 21]. Do not call add_numbers yet.' \
+    'Call the loaded mcp__agentic_fixture.add_numbers function with numbers [8, 13, 21].' \
+    'Use the function output and return exactly TOOL_SEARCH_CODEX_OK_42.' \
+    "$TOOL_SEARCH_OUTPUTS" \
+    3 \
+    "$stream_flag" \
+    "$max_output_tokens"
 }
 
 record_gateway_http_custom() {
@@ -222,6 +292,30 @@ record_gateway_http() {
     'Use the tool output. Return only the sum.'
 
   record_gateway_http_custom
+  record_gateway_http_tool_search
+}
+
+record_gateway_http_tool_search() {
+  # Multi-turn Qwen reasoning can exhaust the recorder's general 1024-token default.
+  run_tool_search_recording \
+    "gateway HTTP/SSE client tool search" \
+    "codex-gateway-http-tool-search-${GATEWAY_MODEL_SLUG}-streaming.yaml" \
+    "http" \
+    "--vllm" \
+    "$GATEWAY_URL" \
+    "$GATEWAY_MODEL" \
+    "--stream" \
+    4096
+
+  run_tool_search_recording \
+    "gateway HTTP client tool search" \
+    "codex-gateway-http-tool-search-${GATEWAY_MODEL_SLUG}-nonstreaming.yaml" \
+    "http" \
+    "--vllm" \
+    "$GATEWAY_URL" \
+    "$GATEWAY_MODEL" \
+    "--no-stream" \
+    4096
 }
 
 record_gateway_ws_custom() {
@@ -261,6 +355,24 @@ record_gateway_ws() {
     'Use the tool output. Return only the sum.'
 
   record_gateway_ws_custom
+  record_gateway_ws_tool_search
+}
+
+record_gateway_ws_tool_search() {
+  run_tool_search_recording \
+    "gateway WebSocket client tool search" \
+    "codex-gateway-websocket-tool-search-${GATEWAY_MODEL_SLUG}-streaming.yaml" \
+    "websocket" \
+    "--vllm" \
+    "$GATEWAY_URL" \
+    "$GATEWAY_MODEL" \
+    "--stream" \
+    4096
+}
+
+record_gateway_tool_search() {
+  record_gateway_http_tool_search
+  record_gateway_ws_tool_search
 }
 
 record_direct_vllm_http_custom() {
@@ -347,6 +459,29 @@ record_openai_https() {
     'Use the tool output. Return only the echo string.'
 
   record_openai_https_custom
+  record_openai_https_tool_search
+}
+
+record_openai_https_tool_search() {
+  require_openai_key
+
+  run_tool_search_recording \
+    "direct OpenAI HTTPS/SSE client tool search" \
+    "codex-openai-https-tool-search-${OPENAI_TOOL_SEARCH_MODEL_SLUG}-streaming.yaml" \
+    "http" \
+    "--openai" \
+    "$OPENAI_URL" \
+    "$OPENAI_TOOL_SEARCH_MODEL" \
+    "--stream"
+
+  run_tool_search_recording \
+    "direct OpenAI HTTPS client tool search" \
+    "codex-openai-https-tool-search-${OPENAI_TOOL_SEARCH_MODEL_SLUG}-nonstreaming.yaml" \
+    "http" \
+    "--openai" \
+    "$OPENAI_URL" \
+    "$OPENAI_TOOL_SEARCH_MODEL" \
+    "--no-stream"
 }
 
 record_openai_https_custom() {
@@ -379,6 +514,25 @@ record_openai_ws() {
     'Use the tool output. Return only the echo string.'
 
   record_openai_ws_custom
+  record_openai_ws_tool_search
+}
+
+record_openai_ws_tool_search() {
+  require_openai_key
+
+  run_tool_search_recording \
+    "direct OpenAI WebSocket client tool search" \
+    "codex-openai-websocket-tool-search-${OPENAI_TOOL_SEARCH_MODEL_SLUG}-streaming.yaml" \
+    "websocket" \
+    "--openai" \
+    "$OPENAI_URL" \
+    "$OPENAI_TOOL_SEARCH_MODEL" \
+    "--stream"
+}
+
+record_openai_tool_search() {
+  record_openai_https_tool_search
+  record_openai_ws_tool_search
 }
 
 record_openai_ws_custom() {
@@ -451,6 +605,20 @@ case "$TARGET" in
   gateway-ws)
     record_gateway_ws
     ;;
+  tool-search)
+    require_openai_key
+    record_gateway_tool_search
+    record_openai_tool_search
+    ;;
+  gateway-tool-search)
+    record_gateway_tool_search
+    ;;
+  gateway-http-tool-search)
+    record_gateway_http_tool_search
+    ;;
+  gateway-ws-tool-search)
+    record_gateway_ws_tool_search
+    ;;
   gateway-custom)
     record_gateway_http_custom
     record_gateway_ws_custom
@@ -475,6 +643,15 @@ case "$TARGET" in
     ;;
   openai-ws)
     record_openai_ws
+    ;;
+  openai-tool-search)
+    record_openai_tool_search
+    ;;
+  openai-https-tool-search)
+    record_openai_https_tool_search
+    ;;
+  openai-ws-tool-search)
+    record_openai_ws_tool_search
     ;;
   openai-custom)
     record_openai_https_custom

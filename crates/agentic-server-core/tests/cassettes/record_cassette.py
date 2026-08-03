@@ -654,7 +654,7 @@ def _inject_tools(body: dict, tools: list | None, tool_choice: Any) -> None:
 
 
 def _extract_tool_calls(response_data: dict | None) -> list[dict]:
-    """Extract client-owned function and custom tool calls from a response."""
+    """Extract client-executed calls that can receive output on the next turn."""
     if not response_data:
         return []
     output = response_data.get("output", [])
@@ -662,19 +662,26 @@ def _extract_tool_calls(response_data: dict | None) -> list[dict]:
         item
         for item in output
         if item.get("type") in {"function_call", "custom_tool_call"}
+        or (
+            item.get("type") == "tool_search_call"
+            and item.get("execution") == "client"
+            and isinstance(item.get("call_id"), str)
+            and bool(item["call_id"])
+        )
     ]
 
 
 def _build_tool_output_input(
     tool_calls: list[dict],
-    tool_outputs: dict[str, str],
+    tool_outputs: dict[str, Any],
     user_prompt: str | None,
 ) -> list[dict]:
     """Build tool output items followed by an optional user message.
 
     Args:
-        tool_calls: function_call or custom_tool_call items from the previous response.
-        tool_outputs: mapping of tool name -> fake JSON output string.
+        tool_calls: client-executed call items from the previous response.
+        tool_outputs: mapping of tool name -> fake output, with ``tool_search`` mapped to a
+            ``tool_search_output`` object for client-executed search.
         user_prompt: the next user message (None for tool-output-only turns).
 
     Returns:
@@ -683,6 +690,18 @@ def _build_tool_output_input(
     input_items: list[dict] = []
     for call in tool_calls:
         call_id = call.get("call_id", "")
+        if call.get("type") == "tool_search_call":
+            configured = tool_outputs.get("tool_search")
+            if not isinstance(configured, dict):
+                raise ValueError("tool_outputs.tool_search must be a tool_search_output object")
+            output_item = dict(configured)
+            output_item["type"] = "tool_search_output"
+            output_item["call_id"] = call_id
+            output_item.setdefault("execution", "client")
+            output_item.setdefault("status", "completed")
+            input_items.append(output_item)
+            continue
+
         name = call.get("name", "")
         output = tool_outputs.get(
             name, json.dumps({"result": f"mock output for {name}"})
@@ -856,7 +875,7 @@ def run_messages(
     proxy_url: str,
     tools: list | None,
     tool_choice: Any,
-    tool_outputs: dict[str, str] | None,
+    tool_outputs: dict[str, Any] | None,
     max_tokens: int,
 ) -> None:
     """Record Anthropic Messages turns.
@@ -926,7 +945,7 @@ def run_responses(
     output_file: Path | None = None,
     tools: list | None = None,
     tool_choice: Any = None,
-    tool_outputs: dict[str, str] | None = None,
+    tool_outputs: dict[str, Any] | None = None,
     max_output_tokens: int | None = None,
     preset_input: str | list | None = None,
 ) -> None:
@@ -960,7 +979,7 @@ def run_responses(
         else:
             prompt = _prompt(f"Turn {turn}/{turns} — enter prompt: ")
 
-            # Inject matching function/custom output items before the user message.
+            # Inject output items for matching client-executed calls before the user message.
             pending_calls = _extract_tool_calls(last_response) if tool_outputs else []
             if pending_calls and tool_outputs:
                 input_value = _build_tool_output_input(
@@ -1142,9 +1161,8 @@ def run_responses(
     metavar="FILE",
     default=None,
     type=click.Path(exists=True),
-    help="Path to a JSON file mapping tool names to fake output strings. "
-    "When provided, matching function_call_output or custom_tool_call_output items are injected "
-    "between turns (required for OpenAI Responses API).",
+    help="Path to a JSON file mapping call keys to fake outputs. Function and custom values are strings; "
+    "the tool_search value is a tool_search_output object. Matching output items are injected between turns.",
 )
 @click.option(
     "--input-file",
@@ -1224,12 +1242,12 @@ def main(
         else:
             tool_choice = stripped
 
-    tool_outputs: dict[str, str] | None = None
+    tool_outputs: dict[str, Any] | None = None
     if tool_outputs_file:
         with open(tool_outputs_file, encoding="utf-8") as f:
             tool_outputs = json.load(f)
         if not isinstance(tool_outputs, dict):
-            raise click.UsageError("--tool-outputs file must contain a JSON object (name -> output string).")
+            raise click.UsageError("--tool-outputs file must contain a JSON object (call key -> output).")
         click.echo(f"Tool outputs: {list(tool_outputs.keys())}")
 
     if gateway_url:

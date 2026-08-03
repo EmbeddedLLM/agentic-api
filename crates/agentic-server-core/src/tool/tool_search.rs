@@ -83,6 +83,74 @@ fn top_level_function_names(outputs: &[&ToolSearchOutput]) -> HashSet<String> {
         .collect()
 }
 
+#[derive(Debug, Default)]
+pub(crate) struct LoadedFunctionIdentities {
+    top_level: HashSet<String>,
+    namespaced: HashMap<String, HashSet<String>>,
+}
+
+impl LoadedFunctionIdentities {
+    pub(crate) fn contains_top_level(&self, name: &str) -> bool {
+        self.top_level.contains(name)
+    }
+
+    pub(crate) fn contains_namespaced(&self, namespace: &str, name: &str) -> bool {
+        self.namespaced
+            .get(namespace)
+            .is_some_and(|members| members.contains(name))
+    }
+}
+
+/// Return the exact public identities loaded by completed client tool-search
+/// outputs. Top-level functions and namespace members are kept separate so a
+/// same-named declaration in another scope is not marked as loaded.
+pub(crate) fn loaded_function_identities(input: &ResponsesInput) -> LoadedFunctionIdentities {
+    let outputs = valid_client_tool_search_outputs(input);
+    let mut identities = LoadedFunctionIdentities {
+        top_level: top_level_function_names(&outputs),
+        namespaced: HashMap::new(),
+    };
+
+    for output in outputs {
+        for tool in &output.tools {
+            let Some(tool) = tool.as_object() else {
+                continue;
+            };
+            let Some(namespace) = tool
+                .get("type")
+                .and_then(Value::as_str)
+                .filter(|tool_type| *tool_type == "namespace")
+                .and_then(|_| tool.get("name"))
+                .and_then(Value::as_str)
+                .filter(|namespace| !namespace.is_empty())
+            else {
+                continue;
+            };
+            let Some(members) = tool.get("tools").and_then(Value::as_array) else {
+                continue;
+            };
+            for member in members {
+                let Some(name) = member
+                    .as_object()
+                    .filter(|member| member.get("type").and_then(Value::as_str) == Some("function"))
+                    .and_then(|member| member.get("name"))
+                    .and_then(Value::as_str)
+                    .filter(|name| !name.is_empty())
+                else {
+                    continue;
+                };
+                identities
+                    .namespaced
+                    .entry(namespace.to_owned())
+                    .or_default()
+                    .insert(name.to_owned());
+            }
+        }
+    }
+
+    identities
+}
+
 /// Build an unqualified member-name to namespace map from client-provided
 /// `tool_search_output` items.
 ///

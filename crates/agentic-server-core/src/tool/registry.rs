@@ -17,7 +17,10 @@ use crate::events::WireEvent;
 
 use crate::types::io::OutputItem;
 use crate::types::io::output::FunctionToolCall;
-use crate::types::tools::{CodeInterpreterToolParam, FileSearchToolParam, ResponsesTool, ToolSearchExecution};
+use crate::types::request_response::ResponsePayload;
+use crate::types::tools::{
+    CodeInterpreterToolParam, CodexNamespaceMember, FileSearchToolParam, ResponsesTool, ToolSearchExecution,
+};
 use crate::utils::common::serialize_to_value_or_custom_default;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -171,9 +174,48 @@ pub struct ToolRegistry {
     /// Tool-search identity is request-scoped: only a declared client search
     /// may restore the provider's ordinary function fallback.
     client_tool_search: bool,
-    client_tool_search_declarations: Option<Value>,
+    client_tool_search_declarations: Option<ClientToolSearchDeclarations>,
     loaded_tool_namespaces: HashMap<String, String>,
     tool_search_name_owned: bool,
+}
+
+#[derive(Debug)]
+struct ClientToolSearchDeclarations {
+    typed: Vec<ResponsesTool>,
+    wire: Value,
+}
+
+impl ClientToolSearchDeclarations {
+    fn mark_loaded(&mut self, loaded: &tool_search::LoadedFunctionIdentities) {
+        for declaration in &mut self.typed {
+            match declaration {
+                ResponsesTool::Function(function)
+                    if function.defer_loading == Some(true) && loaded.contains_top_level(function.name.as_ref()) =>
+                {
+                    function.defer_loading = None;
+                }
+                ResponsesTool::Namespace(namespace) => {
+                    for member in &mut namespace.tools {
+                        let CodexNamespaceMember::Function(function) = member else {
+                            continue;
+                        };
+                        if function.defer_loading == Some(true)
+                            && loaded.contains_namespaced(&namespace.name, function.name.as_ref())
+                        {
+                            function.defer_loading = None;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        self.wire = serialize_to_value_or_custom_default(
+            &self.typed,
+            "failed to update loaded client tool-search response declarations",
+            |wire| wire,
+            self.wire.clone(),
+        );
+    }
 }
 
 impl ToolRegistry {
@@ -207,12 +249,16 @@ impl ToolRegistry {
             declarations
                 .iter_mut()
                 .for_each(ResponsesTool::sanitize_for_persistence);
-            serialize_to_value_or_custom_default(
+            let wire = serialize_to_value_or_custom_default(
                 &declarations,
                 "failed to preserve client tool-search response declarations",
                 Some,
                 None,
-            )
+            );
+            wire.map(|wire| ClientToolSearchDeclarations {
+                typed: declarations,
+                wire,
+            })
         } else {
             None
         };
@@ -313,12 +359,23 @@ impl ToolRegistry {
         tool_search::restore_output_items(output, self.can_restore_tool_search_fallback());
     }
 
+    pub fn restore_final_payload(&self, payload: &mut ResponsePayload) {
+        self.restore_final_payload_output(&mut payload.output);
+        if let Some(declarations) = &self.client_tool_search_declarations {
+            payload.tools = Some(declarations.typed.clone());
+        }
+    }
+
     pub fn restore_stream_event_wire(&self, wire: &mut WireEvent) -> bool {
         let mut changed = CodexNamespaceHandler.restore_response_wire(wire, self.namespace_map.as_ref());
         changed |= tool_search::restore_loaded_namespace_response_wire(wire, &self.loaded_tool_namespaces);
         changed |= tool_search::restore_response_wire(wire, self.can_restore_tool_search_fallback());
-        changed |=
-            tool_search::restore_response_tool_declarations_wire(wire, self.client_tool_search_declarations.as_ref());
+        changed |= tool_search::restore_response_tool_declarations_wire(
+            wire,
+            self.client_tool_search_declarations
+                .as_ref()
+                .map(|declarations| &declarations.wire),
+        );
         changed
     }
 
@@ -329,6 +386,10 @@ impl ToolRegistry {
 
     /// Load request-scoped identities returned by a completed client search.
     pub(crate) fn load_tool_search_output(&mut self, input: &crate::types::io::ResponsesInput) {
+        let loaded_function_identities = tool_search::loaded_function_identities(input);
+        if let Some(declarations) = &mut self.client_tool_search_declarations {
+            declarations.mark_loaded(&loaded_function_identities);
+        }
         self.loaded_tool_namespaces = tool_search::loaded_namespace_members(input);
         self.loaded_tool_namespaces
             .retain(|name, _| !self.entries.contains_key(name));
@@ -745,6 +806,187 @@ mod tests {
             assert!(registry.restore_stream_event_wire(&mut wire));
             assert_eq!(wire.rest["response"]["tools"], declarations);
         }
+
+        let mut payload: ResponsePayload = serde_json::from_value(serde_json::json!({
+            "id": "resp_1",
+            "object": "response",
+            "created_at": 0,
+            "model": "test",
+            "status": "completed",
+            "output": [{
+                "type": "function_call",
+                "id": "fc_1",
+                "call_id": "call_1",
+                "name": "tool_search",
+                "arguments": "{\"goal\":\"find deferred tool\"}",
+                "status": "completed"
+            }],
+            "usage": null,
+            "incomplete_details": null,
+            "error": null,
+            "previous_response_id": null,
+            "conversation_id": null,
+            "instructions": null
+        }))
+        .expect("valid response payload");
+        registry.restore_final_payload(&mut payload);
+
+        assert_eq!(serde_json::to_value(&payload.tools).unwrap(), declarations);
+        assert!(matches!(payload.output.as_slice(), [OutputItem::ToolSearchCall(_)]));
+    }
+
+    #[tokio::test]
+    async fn client_tool_search_marks_only_loaded_response_declarations_non_deferred() {
+        let declarations = serde_json::json!([
+            {"type": "tool_search", "execution": "client", "parameters": {"type": "object"}},
+            {"type": "function", "name": "top_loaded", "defer_loading": true},
+            {"type": "function", "name": "top_still_deferred", "defer_loading": true},
+            {
+                "type": "namespace",
+                "name": "fixture",
+                "tools": [
+                    {"type": "function", "name": "add_numbers", "defer_loading": true},
+                    {"type": "function", "name": "still_deferred", "defer_loading": true}
+                ]
+            },
+            {
+                "type": "namespace",
+                "name": "other_fixture",
+                "tools": [{"type": "function", "name": "add_numbers", "defer_loading": true}]
+            }
+        ]);
+        let expected_loaded = serde_json::json!([
+            {"type": "tool_search", "execution": "client", "parameters": {"type": "object"}},
+            {"type": "function", "name": "top_loaded"},
+            {"type": "function", "name": "top_still_deferred", "defer_loading": true},
+            {
+                "type": "namespace",
+                "name": "fixture",
+                "tools": [
+                    {"type": "function", "name": "add_numbers"},
+                    {"type": "function", "name": "still_deferred", "defer_loading": true}
+                ]
+            },
+            {
+                "type": "namespace",
+                "name": "other_fixture",
+                "tools": [{"type": "function", "name": "add_numbers", "defer_loading": true}]
+            }
+        ]);
+        let mut tools: Vec<ResponsesTool> =
+            serde_json::from_value(declarations.clone()).expect("valid client tool-search declarations");
+        let mut executors = GatewayExecutors::default();
+        let mut registry = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
+            .await
+            .expect("valid registry");
+
+        let mut initial_wire = WireEvent::new("response.created");
+        initial_wire
+            .rest
+            .insert("response".to_owned(), serde_json::json!({"tools": []}));
+        assert!(registry.restore_stream_event_wire(&mut initial_wire));
+        assert_eq!(initial_wire.rest["response"]["tools"], declarations);
+
+        let loaded_input = serde_json::from_value(serde_json::json!([
+            {
+                "type": "tool_search_call",
+                "execution": "client",
+                "call_id": "call_search",
+                "status": "completed",
+                "arguments": {"goal": "load tools"}
+            },
+            {
+                "type": "tool_search_output",
+                "execution": "client",
+                "call_id": "call_search",
+                "status": "completed",
+                "tools": [
+                    {"type": "function", "name": "top_loaded", "defer_loading": true},
+                    {
+                        "type": "namespace",
+                        "name": "fixture",
+                        "tools": [{"type": "function", "name": "add_numbers", "defer_loading": true}]
+                    }
+                ]
+            }
+        ]))
+        .expect("valid loaded client tool-search output");
+        registry.load_tool_search_output(&loaded_input);
+
+        let mut loaded_wire = WireEvent::new("response.completed");
+        loaded_wire
+            .rest
+            .insert("response".to_owned(), serde_json::json!({"tools": []}));
+        assert!(registry.restore_stream_event_wire(&mut loaded_wire));
+        assert_eq!(loaded_wire.rest["response"]["tools"], expected_loaded);
+
+        let mut payload: ResponsePayload = serde_json::from_value(serde_json::json!({
+            "id": "resp_loaded",
+            "object": "response",
+            "created_at": 0,
+            "model": "test",
+            "status": "completed",
+            "output": [],
+            "usage": null,
+            "incomplete_details": null,
+            "error": null,
+            "previous_response_id": null,
+            "conversation_id": null,
+            "instructions": null
+        }))
+        .expect("valid response payload");
+        registry.restore_final_payload(&mut payload);
+        assert_eq!(serde_json::to_value(payload.tools).unwrap(), expected_loaded);
+    }
+
+    #[tokio::test]
+    async fn client_tool_search_preserves_explicit_false_defer_loading() {
+        let declarations = serde_json::json!([
+            {"type": "tool_search", "execution": "client", "parameters": {"type": "object"}},
+            {"type": "function", "name": "top_level", "defer_loading": false},
+            {
+                "type": "namespace",
+                "name": "fixture",
+                "tools": [{"type": "function", "name": "member", "defer_loading": false}]
+            }
+        ]);
+        let mut tools: Vec<ResponsesTool> =
+            serde_json::from_value(declarations.clone()).expect("valid client tool-search declarations");
+        let mut executors = GatewayExecutors::default();
+        let mut registry = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
+            .await
+            .expect("valid registry");
+        let loaded_input = serde_json::from_value(serde_json::json!([
+            {
+                "type": "tool_search_call",
+                "execution": "client",
+                "call_id": "call_search",
+                "status": "completed",
+                "arguments": {"goal": "load names"}
+            },
+            {
+                "type": "tool_search_output",
+                "execution": "client",
+                "call_id": "call_search",
+                "status": "completed",
+                "tools": [
+                    {"type": "function", "name": "top_level"},
+                    {
+                        "type": "namespace",
+                        "name": "fixture",
+                        "tools": [{"type": "function", "name": "member"}]
+                    }
+                ]
+            }
+        ]))
+        .expect("valid loaded client tool-search output");
+        registry.load_tool_search_output(&loaded_input);
+
+        let mut wire = WireEvent::new("response.completed");
+        wire.rest
+            .insert("response".to_owned(), serde_json::json!({"tools": []}));
+        assert!(registry.restore_stream_event_wire(&mut wire));
+        assert_eq!(wire.rest["response"]["tools"], declarations);
     }
 
     #[tokio::test]
@@ -761,6 +1003,23 @@ mod tests {
                 .expect("valid registry");
 
             assert!(!registry.can_restore_tool_search_fallback());
+            let mut payload: ResponsePayload = serde_json::from_value(serde_json::json!({
+                "id": "resp_hosted",
+                "object": "response",
+                "created_at": 0,
+                "model": "test",
+                "status": "completed",
+                "output": [],
+                "usage": null,
+                "incomplete_details": null,
+                "error": null,
+                "previous_response_id": null,
+                "conversation_id": null,
+                "instructions": null
+            }))
+            .expect("valid response payload");
+            registry.restore_final_payload(&mut payload);
+            assert!(payload.tools.is_none());
         }
     }
 

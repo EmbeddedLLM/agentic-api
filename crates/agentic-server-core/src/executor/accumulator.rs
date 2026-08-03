@@ -538,6 +538,7 @@ impl ResponseAccumulator {
             model: model.to_string(),
             status: self.status.as_str().to_string(),
             output: self.output,
+            tools: None,
             usage: self.usage,
             incomplete_details: self.incomplete_details,
             error: self.error,

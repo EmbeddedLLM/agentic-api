@@ -191,10 +191,9 @@ read `response.websocket` so they validate the recorded transport directly.
 | `record_text_only_cassettes.sh` | 10 text-only cassettes (responses + conv modes, streaming + non-streaming) | OpenAI (`OPENAI_API_KEY`) |
 | `record_reasoning_cassettes.sh` | 2 reasoning cassettes (single turn, streaming + non-streaming) | vLLM |
 | `record_tool_call_cassettes.sh` | 8 tool-call cassettes (4 tool_choice modes x streaming + non-streaming) | vLLM |
-| `record_codex_cli_tool_call_cassettes.sh` | Codex function/namespace/custom-tool matrix | gateway, vLLM, and OpenAI |
+| `record_codex_cli_tool_call_cassettes.sh` | Codex function/namespace/custom-tool matrix plus full client tool-search flows | gateway, vLLM, and OpenAI |
 | `record_mcp_cassettes.sh` | Native MCP counter tool discovery and calls (streaming + non-streaming) | gateway and OpenAI reference |
 | `record_web_search_cassettes.sh` | Matching web-search calls (streaming + non-streaming) | gateway and OpenAI reference |
-| `record_tool_search_cassettes.sh` | Client tool-search calls (HTTP streaming/non-streaming + Responses WebSocket) | gateway and OpenAI reference |
 
 ### Text-only (OpenAI)
 
@@ -229,28 +228,7 @@ OPENAI_API_KEY=sk-... \
 bash crates/agentic-server-core/tests/cassettes/record_web_search_cassettes.sh
 ```
 
-### Tool search (gateway and OpenAI)
-
-The wrapper defaults to both providers and both transport modes, producing six live recordings: HTTP streaming,
-HTTP non-streaming, and Responses WebSocket for OpenAI `gpt-5.6`, plus the same three scenarios for the configured
-gateway model. The default therefore calls the paid OpenAI API and the configured remote gateway/upstream. Use
-`TOOL_SEARCH_RECORD_SET=gateway` or `TOOL_SEARCH_RECORD_SET=openai` for one provider, and use
-`TOOL_SEARCH_TRANSPORT_SET=http` or `TOOL_SEARCH_TRANSPORT_SET=websocket` for one transport mode.
-
-```bash
-OPENAI_API_KEY=sk-... GATEWAY_URL=http://127.0.0.1:3018 \
-bash crates/agentic-server-core/tests/cassettes/record_tool_search_cassettes.sh
-```
-
-Record only the Responses WebSocket cassettes:
-
-```bash
-TOOL_SEARCH_TRANSPORT_SET=websocket OPENAI_API_KEY=sk-... \
-GATEWAY_URL=http://127.0.0.1:3018 \
-bash crates/agentic-server-core/tests/cassettes/record_tool_search_cassettes.sh
-```
-
-### Codex custom tools (gateway, vLLM, and OpenAI)
+### Codex tools (gateway, vLLM, and OpenAI)
 
 The custom fixture uses a Lark grammar and records two turns: the model returns raw `custom_tool_call.input`, then the
 recorder submits the matching `custom_tool_call_output` before the follow-up user message.
@@ -267,6 +245,30 @@ bash tests/cassettes/record_codex_cli_tool_call_cassettes.sh direct-vllm-custom
 OPENAI_API_KEY=sk-... \
 OPENAI_CUSTOM_MODEL=gpt-5.6 \
 bash tests/cassettes/record_codex_cli_tool_call_cassettes.sh openai-custom
+```
+
+The Codex tool-search matrix records the full three-turn client continuation against the gateway and OpenAI using
+HTTP streaming, HTTP non-streaming, and Responses WebSocket. The `all` and `experimental-all` targets include all six
+recordings. Record only the tool-search matrix with:
+
+```bash
+OPENAI_API_KEY=sk-... \
+GATEWAY_URL=http://127.0.0.1:3018 \
+V_MODEL=Qwen/Qwen3.6-35B-A3B \
+OPENAI_TOOL_SEARCH_MODEL=gpt-5.6 \
+bash crates/agentic-server-core/tests/cassettes/record_codex_cli_tool_call_cassettes.sh \
+  tool-search
+```
+
+Provider-focused targets are `gateway-tool-search` and `openai-tool-search`. Transport-focused targets are
+`gateway-http-tool-search`, `gateway-ws-tool-search`, `openai-https-tool-search`, and `openai-ws-tool-search`. For
+example, record only the gateway WebSocket flow with:
+
+```bash
+GATEWAY_URL=http://127.0.0.1:3018 \
+V_MODEL=Qwen/Qwen3.6-35B-A3B \
+bash crates/agentic-server-core/tests/cassettes/record_codex_cli_tool_call_cassettes.sh \
+  gateway-ws-tool-search
 ```
 
 ### Compaction replay (OpenAI)

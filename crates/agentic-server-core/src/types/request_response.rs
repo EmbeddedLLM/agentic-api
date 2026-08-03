@@ -8,7 +8,10 @@ use super::io::{
     FunctionTool, InputItem, InputMessage, InputMessageContent, OutputItem, ResponseUsage, ResponsesInput, ToolChoice,
 };
 use super::tools::{CustomToolParam, ResponsesTool, ToolSearchExecution, ToolSearchToolParam};
-use crate::tool::{CodexNamespaceHandler, TOOL_SEARCH_NAME, ToolError, loaded_function_names, loaded_function_tools};
+use crate::tool::{
+    CodexNamespaceHandler, TOOL_SEARCH_NAME, ToolError, loaded_function_identities, loaded_function_names,
+    loaded_function_tools,
+};
 use crate::utils::common::serialize_to_string;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -170,7 +173,8 @@ impl RequestPayload {
             .as_deref()
             .map(|tools| CodexNamespaceHandler.resolve_namespace_members(tools))
             .transpose()?;
-        let loaded_tools: Vec<FunctionTool> = loaded_function_tools(&self.input);
+        let loaded_function_identities = loaded_function_identities(&self.input);
+        let mut loaded_tools: Vec<FunctionTool> = loaded_function_tools(&self.input);
         let tool_search_name_is_owned = renamed_tools.as_deref().is_some_and(|tools| {
             tools.iter().any(
                 |tool| matches!(tool, ResponsesTool::Function(function) if function.name.as_str() == TOOL_SEARCH_NAME),
@@ -189,11 +193,34 @@ impl RequestPayload {
                 tracing::debug!("omitting provider tool_search fallback because the function name is already owned");
                 continue;
             }
-            tools.extend(
-                upstream_tools(tool).into_iter().filter(|tool| {
-                    provider_function_name(tool).is_none_or(|name| provider_names.insert(name.to_owned()))
-                }),
+            let loaded_replacement = match &tool {
+                ResponsesTool::Function(function)
+                    if function.defer_loading == Some(true)
+                        && loaded_function_identities.contains_top_level(function.name.as_str()) =>
+                {
+                    loaded_tools
+                        .iter()
+                        .position(|loaded| loaded.name == function.name.as_str())
+                        .map(|index| loaded_tools.remove(index))
+                }
+                _ => None,
+            };
+            let upstream = loaded_replacement.map_or_else(
+                || upstream_tools(tool),
+                |loaded| {
+                    tracing::debug!(
+                        name = %loaded.name,
+                        "replacing deferred top-level declaration with client-loaded tool"
+                    );
+                    vec![UpstreamTool::Function(loaded)]
+                },
             );
+            for upstream_tool in upstream {
+                if let Some(name) = provider_function_name(&upstream_tool) {
+                    provider_names.insert(name.to_owned());
+                }
+                tools.push(upstream_tool);
+            }
         }
         for loaded in loaded_tools {
             if provider_names.insert(loaded.name.clone()) {
@@ -302,8 +329,7 @@ fn upstream_tools(tool: ResponsesTool) -> Vec<UpstreamTool> {
 fn provider_function_name(tool: &UpstreamTool) -> Option<&str> {
     match tool {
         UpstreamTool::Function(tool) => Some(&tool.name),
-        UpstreamTool::Custom(tool) => Some(tool.name.as_str()),
-        UpstreamTool::ToolSearch(_) => None,
+        UpstreamTool::Custom(_) | UpstreamTool::ToolSearch(_) => None,
     }
 }
 
@@ -321,6 +347,8 @@ pub struct ResponsePayload {
     pub status: String,
     #[serde(default)]
     pub output: Vec<OutputItem>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<ResponsesTool>>,
     pub usage: Option<ResponseUsage>,
     pub incomplete_details: Option<IncompleteDetails>,
     pub error: Option<Value>,
@@ -884,6 +912,113 @@ mod tests {
     }
 
     #[test]
+    fn completed_client_search_replaces_matching_deferred_top_level_function() {
+        let payload: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test",
+            "input": [
+                {
+                    "type": "tool_search_call",
+                    "execution": "client",
+                    "call_id": "call_search",
+                    "status": "completed",
+                    "arguments": {"goal": "load current definition"}
+                },
+                {
+                    "type": "tool_search_output",
+                    "execution": "client",
+                    "call_id": "call_search",
+                    "status": "completed",
+                    "tools": [{
+                        "type": "function",
+                        "name": "shared_tool",
+                        "description": "Loaded definition.",
+                        "parameters": {"type": "object", "properties": {"fresh": {"type": "boolean"}}}
+                    }]
+                }
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "shared_tool",
+                    "description": "Deferred stale definition.",
+                    "parameters": {"type": "object", "properties": {"stale": {"type": "boolean"}}},
+                    "defer_loading": true
+                },
+                {
+                    "type": "tool_search",
+                    "execution": "client",
+                    "parameters": {"type": "object"}
+                }
+            ]
+        }))
+        .expect("valid deferred replacement request");
+
+        let upstream = serde_json::to_value(payload.to_upstream_request(false).expect("valid upstream request"))
+            .expect("serializable upstream request");
+        let tools = upstream["tools"].as_array().expect("upstream tools");
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0]["name"], "shared_tool");
+        assert_eq!(tools[0]["description"], "Loaded definition.");
+        assert_eq!(tools[0]["parameters"]["properties"]["fresh"]["type"], "boolean");
+        assert!(tools[0].get("defer_loading").is_none());
+        assert_eq!(tools[1]["name"], TOOL_SEARCH_NAME);
+    }
+
+    #[test]
+    fn same_name_original_declarations_survive_loaded_tool_deduplication() {
+        let payload: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test",
+            "input": [
+                {
+                    "type": "tool_search_call",
+                    "execution": "client",
+                    "call_id": "call_search",
+                    "status": "completed",
+                    "arguments": {"goal": "load tools"}
+                },
+                {
+                    "type": "tool_search_output",
+                    "execution": "client",
+                    "call_id": "call_search",
+                    "status": "completed",
+                    "tools": [
+                        {"type": "function", "name": "shared_tool", "description": "Loaded duplicate."},
+                        {"type": "function", "name": "custom_only", "description": "Loaded alongside custom."}
+                    ]
+                }
+            ],
+            "tools": [
+                {"type": "function", "name": "shared_tool", "description": "Original function."},
+                {"type": "custom", "name": "shared_tool", "description": "Original custom."},
+                {"type": "custom", "name": "custom_only", "description": "Custom does not claim function name."},
+                {"type": "tool_search", "execution": "client", "parameters": {"type": "object"}}
+            ]
+        }))
+        .expect("valid same-name request");
+
+        let upstream = serde_json::to_value(payload.to_upstream_request(false).expect("valid upstream request"))
+            .expect("serializable upstream request");
+        let tools = upstream["tools"].as_array().expect("upstream tools");
+        assert_eq!(tools.len(), 5);
+        assert_eq!(tools[0]["type"], "function");
+        assert_eq!(tools[0]["name"], "shared_tool");
+        assert_eq!(tools[0]["description"], "Original function.");
+        assert_eq!(tools[1]["type"], "custom");
+        assert_eq!(tools[1]["name"], "shared_tool");
+        assert_eq!(tools[2]["type"], "custom");
+        assert_eq!(tools[2]["name"], "custom_only");
+        assert_eq!(tools[3]["name"], TOOL_SEARCH_NAME);
+        assert_eq!(tools[4]["type"], "function");
+        assert_eq!(tools[4]["name"], "custom_only");
+        assert_eq!(tools[4]["description"], "Loaded alongside custom.");
+        assert_eq!(
+            tools.iter().filter(|tool| tool["name"] == "shared_tool").count(),
+            2,
+            "loaded duplicate should not replace or duplicate original declarations"
+        );
+    }
+
+    #[test]
     fn responses_input_discards_unknown_items_when_converted_for_storage() {
         let input: ResponsesInput = serde_json::from_value(serde_json::json!([
             {"type": "message", "role": "user", "content": "hi"},
@@ -905,6 +1040,7 @@ mod tests {
             model: "test-model".to_string(),
             status: "completed".to_string(),
             output: Vec::new(),
+            tools: None,
             usage: None,
             incomplete_details: None,
             error: None,
@@ -938,6 +1074,7 @@ mod tests {
             model: "test-model".to_string(),
             status: "completed".to_string(),
             output: Vec::new(),
+            tools: None,
             usage: None,
             incomplete_details: None,
             error: None,

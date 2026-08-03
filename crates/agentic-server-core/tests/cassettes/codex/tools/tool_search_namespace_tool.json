@@ -1,0 +1,45 @@
+[
+  {
+    "type": "tool_search",
+    "execution": "client",
+    "description": "Find the project-specific function needed to continue the task.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "goal": {
+          "type": "string"
+        }
+      },
+      "required": ["goal"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "namespace",
+    "name": "mcp__agentic_fixture",
+    "description": "Deferred Codex namespace fixture for tool-search recording.",
+    "tools": [
+      {
+        "type": "function",
+        "name": "add_numbers",
+        "description": "Add a list of numbers and return the total.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "numbers": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 1
+            }
+          },
+          "required": ["numbers"],
+          "additionalProperties": false
+        },
+        "strict": false,
+        "defer_loading": true
+      }
+    ]
+  }
+]

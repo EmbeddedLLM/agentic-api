@@ -1,0 +1,553 @@
+turns:
+- filename: t1
+  request:
+    body:
+      input: Call tool_search to load mcp__agentic_fixture.add_numbers for adding
+        [8, 13, 21]. Do not call add_numbers yet.
+      max_output_tokens: 1024
+      model: gpt-5.6
+      store: true
+      stream: true
+      tools:
+      - description: Find the project-specific function needed to continue the task.
+        execution: client
+        parameters:
+          additionalProperties: false
+          properties:
+            goal:
+              type: string
+          required:
+          - goal
+          type: object
+        type: tool_search
+      - description: Deferred Codex namespace fixture for tool-search recording.
+        name: mcp__agentic_fixture
+        tools:
+        - defer_loading: true
+          description: Add a list of numbers and return the total.
+          name: add_numbers
+          parameters:
+            additionalProperties: false
+            properties:
+              numbers:
+                items:
+                  type: number
+                minItems: 1
+                type: array
+            required:
+            - numbers
+            type: object
+          strict: false
+          type: function
+        type: namespace
+    headers:
+      accept: '*/*'
+      authorization: Bearer ***
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    headers:
+      content-type: text/event-stream; charset=utf-8
+    sse:
+    - 'event: response.created
+
+      '
+    - 'data: {"type":"response.created","response":{"id":"resp_0572a70e741183f7006a708202c21c819a98c66db95ade9669","object":"response","created_at":1785758210,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":1024,"max_tool_calls":null,"model":"gpt-5.6-sol","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"24h","reasoning":{"context":"all_turns","effort":"medium","mode":"standard","summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[{"type":"tool_search","description":"Find
+      the project-specific function needed to continue the task.","execution":"client","parameters":{"type":"object","properties":{"goal":{"type":"string"}},"required":["goal"],"additionalProperties":false}},{"type":"namespace","description":"Deferred
+      Codex namespace fixture for tool-search recording.","name":"mcp__agentic_fixture","tools":[{"type":"function","defer_loading":true,"description":"Add
+      a list of numbers and return the total.","name":"add_numbers","output_schema":null,"parameters":{"type":"object","properties":{"numbers":{"type":"array","items":{"type":"number"},"minItems":1}},"required":["numbers"],"additionalProperties":false},"strict":false}]}],"top_logprobs":0,"top_p":0.98,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":0}
+
+      '
+    - '
+
+      '
+    - 'event: response.in_progress
+
+      '
+    - 'data: {"type":"response.in_progress","response":{"id":"resp_0572a70e741183f7006a708202c21c819a98c66db95ade9669","object":"response","created_at":1785758210,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":1024,"max_tool_calls":null,"model":"gpt-5.6-sol","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"24h","reasoning":{"context":"all_turns","effort":"medium","mode":"standard","summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[{"type":"tool_search","description":"Find
+      the project-specific function needed to continue the task.","execution":"client","parameters":{"type":"object","properties":{"goal":{"type":"string"}},"required":["goal"],"additionalProperties":false}},{"type":"namespace","description":"Deferred
+      Codex namespace fixture for tool-search recording.","name":"mcp__agentic_fixture","tools":[{"type":"function","defer_loading":true,"description":"Add
+      a list of numbers and return the total.","name":"add_numbers","output_schema":null,"parameters":{"type":"object","properties":{"numbers":{"type":"array","items":{"type":"number"},"minItems":1}},"required":["numbers"],"additionalProperties":false},"strict":false}]}],"top_logprobs":0,"top_p":0.98,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":1}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.added
+
+      '
+    - 'data: {"type":"response.output_item.added","item":{"id":"tsc_0572a70e741183f7006a7082036128819ab8ba2afb8e99778a","type":"tool_search_call","status":"in_progress","arguments":{},"call_id":"call_OMQ9XoiTfBDEgokH73oJlCK6","execution":"client"},"output_index":0,"sequence_number":2}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.done
+
+      '
+    - 'data: {"type":"response.output_item.done","item":{"id":"tsc_0572a70e741183f7006a7082036128819ab8ba2afb8e99778a","type":"tool_search_call","status":"completed","arguments":{"goal":"Load
+      the project-specific function mcp__agentic_fixture.add_numbers for adding the
+      numbers [8, 13, 21], but do not execute it."},"call_id":"call_OMQ9XoiTfBDEgokH73oJlCK6","execution":"client"},"output_index":0,"sequence_number":3}
+
+      '
+    - '
+
+      '
+    - 'event: response.completed
+
+      '
+    - 'data: {"type":"response.completed","response":{"id":"resp_0572a70e741183f7006a708202c21c819a98c66db95ade9669","object":"response","created_at":1785758210,"status":"completed","background":false,"completed_at":1785758211,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":1024,"max_tool_calls":null,"model":"gpt-5.6-sol","moderation":null,"output":[{"id":"tsc_0572a70e741183f7006a7082036128819ab8ba2afb8e99778a","type":"tool_search_call","status":"completed","arguments":{"goal":"Load
+      the project-specific function mcp__agentic_fixture.add_numbers for adding the
+      numbers [8, 13, 21], but do not execute it."},"call_id":"call_OMQ9XoiTfBDEgokH73oJlCK6","execution":"client"}],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":null,"prompt_cache_retention":"24h","reasoning":{"context":"all_turns","effort":"medium","mode":"standard","summary":null},"safety_identifier":null,"service_tier":"default","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[{"type":"tool_search","description":"Find
+      the project-specific function needed to continue the task.","execution":"client","parameters":{"type":"object","properties":{"goal":{"type":"string"}},"required":["goal"],"additionalProperties":false}},{"type":"namespace","description":"Deferred
+      Codex namespace fixture for tool-search recording.","name":"mcp__agentic_fixture","tools":[{"type":"function","defer_loading":true,"description":"Add
+      a list of numbers and return the total.","name":"add_numbers","output_schema":null,"parameters":{"type":"object","properties":{"numbers":{"type":"array","items":{"type":"number"},"minItems":1}},"required":["numbers"],"additionalProperties":false},"strict":false}]}],"top_logprobs":0,"top_p":0.98,"truncation":"disabled","usage":{"input_tokens":80,"input_tokens_details":{"cache_write_tokens":0,"cached_tokens":0},"output_tokens":51,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":131},"user":null,"metadata":{}},"sequence_number":4}
+
+      '
+    - '
+
+      '
+    status_code: 200
+- filename: t2
+  request:
+    body:
+      input:
+      - call_id: call_OMQ9XoiTfBDEgokH73oJlCK6
+        execution: client
+        status: completed
+        tools:
+        - description: Loaded Codex namespace fixture.
+          name: mcp__agentic_fixture
+          tools:
+          - defer_loading: true
+            description: Add a list of numbers and return the total.
+            name: add_numbers
+            parameters:
+              additionalProperties: false
+              properties:
+                numbers:
+                  items:
+                    type: number
+                  minItems: 1
+                  type: array
+              required:
+              - numbers
+              type: object
+            strict: false
+            type: function
+          type: namespace
+        type: tool_search_output
+      - content: Call the loaded mcp__agentic_fixture.add_numbers function with numbers
+          [8, 13, 21].
+        role: user
+        type: message
+      max_output_tokens: 1024
+      model: gpt-5.6
+      previous_response_id: resp_0572a70e741183f7006a708202c21c819a98c66db95ade9669
+      store: true
+      stream: true
+      tools:
+      - description: Find the project-specific function needed to continue the task.
+        execution: client
+        parameters:
+          additionalProperties: false
+          properties:
+            goal:
+              type: string
+          required:
+          - goal
+          type: object
+        type: tool_search
+      - description: Deferred Codex namespace fixture for tool-search recording.
+        name: mcp__agentic_fixture
+        tools:
+        - defer_loading: true
+          description: Add a list of numbers and return the total.
+          name: add_numbers
+          parameters:
+            additionalProperties: false
+            properties:
+              numbers:
+                items:
+                  type: number
+                minItems: 1
+                type: array
+            required:
+            - numbers
+            type: object
+          strict: false
+          type: function
+        type: namespace
+    headers:
+      accept: '*/*'
+      authorization: Bearer ***
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    headers:
+      content-type: text/event-stream; charset=utf-8
+    sse:
+    - 'event: response.created
+
+      '
+    - 'data: {"type":"response.created","response":{"id":"resp_0572a70e741183f7006a7082045410819a9d83c64892da665f","object":"response","created_at":1785758212,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":1024,"max_tool_calls":null,"model":"gpt-5.6-sol","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":"resp_0572a70e741183f7006a708202c21c819a98c66db95ade9669","prompt_cache_key":null,"prompt_cache_retention":"24h","reasoning":{"context":"all_turns","effort":"medium","mode":"standard","summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[{"type":"tool_search","description":"Find
+      the project-specific function needed to continue the task.","execution":"client","parameters":{"type":"object","properties":{"goal":{"type":"string"}},"required":["goal"],"additionalProperties":false}},{"type":"namespace","description":"Deferred
+      Codex namespace fixture for tool-search recording.","name":"mcp__agentic_fixture","tools":[{"type":"function","description":"Add
+      a list of numbers and return the total.","name":"add_numbers","output_schema":null,"parameters":{"type":"object","properties":{"numbers":{"type":"array","items":{"type":"number"},"minItems":1}},"required":["numbers"],"additionalProperties":false},"strict":false}]}],"top_logprobs":0,"top_p":0.98,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":0}
+
+      '
+    - '
+
+      '
+    - 'event: response.in_progress
+
+      '
+    - 'data: {"type":"response.in_progress","response":{"id":"resp_0572a70e741183f7006a7082045410819a9d83c64892da665f","object":"response","created_at":1785758212,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":1024,"max_tool_calls":null,"model":"gpt-5.6-sol","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":"resp_0572a70e741183f7006a708202c21c819a98c66db95ade9669","prompt_cache_key":null,"prompt_cache_retention":"24h","reasoning":{"context":"all_turns","effort":"medium","mode":"standard","summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[{"type":"tool_search","description":"Find
+      the project-specific function needed to continue the task.","execution":"client","parameters":{"type":"object","properties":{"goal":{"type":"string"}},"required":["goal"],"additionalProperties":false}},{"type":"namespace","description":"Deferred
+      Codex namespace fixture for tool-search recording.","name":"mcp__agentic_fixture","tools":[{"type":"function","description":"Add
+      a list of numbers and return the total.","name":"add_numbers","output_schema":null,"parameters":{"type":"object","properties":{"numbers":{"type":"array","items":{"type":"number"},"minItems":1}},"required":["numbers"],"additionalProperties":false},"strict":false}]}],"top_logprobs":0,"top_p":0.98,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":1}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.added
+
+      '
+    - 'data: {"type":"response.output_item.added","item":{"id":"fc_0572a70e741183f7006a7082050120819aa04c73d0ad59d867","type":"function_call","status":"in_progress","arguments":"","call_id":"call_8r5PktQD3f2ziqRcCkbpTjZP","name":"add_numbers","namespace":"mcp__agentic_fixture"},"output_index":0,"sequence_number":2}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"type":"response.function_call_arguments.delta","delta":"{\"","item_id":"fc_0572a70e741183f7006a7082050120819aa04c73d0ad59d867","obfuscation":"Da3xWumiDzcmP7","output_index":0,"sequence_number":3}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"type":"response.function_call_arguments.delta","delta":"numbers","item_id":"fc_0572a70e741183f7006a7082050120819aa04c73d0ad59d867","obfuscation":"khHNITKJe","output_index":0,"sequence_number":4}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"type":"response.function_call_arguments.delta","delta":"\":[","item_id":"fc_0572a70e741183f7006a7082050120819aa04c73d0ad59d867","obfuscation":"EpzCxJgSCl3dr","output_index":0,"sequence_number":5}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"type":"response.function_call_arguments.delta","delta":"8","item_id":"fc_0572a70e741183f7006a7082050120819aa04c73d0ad59d867","obfuscation":"sTtL8V75NPWNzsR","output_index":0,"sequence_number":6}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"type":"response.function_call_arguments.delta","delta":",","item_id":"fc_0572a70e741183f7006a7082050120819aa04c73d0ad59d867","obfuscation":"LgshIhoYB9fN39f","output_index":0,"sequence_number":7}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"type":"response.function_call_arguments.delta","delta":"13","item_id":"fc_0572a70e741183f7006a7082050120819aa04c73d0ad59d867","obfuscation":"owvGzC68Y90I1q","output_index":0,"sequence_number":8}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"type":"response.function_call_arguments.delta","delta":",","item_id":"fc_0572a70e741183f7006a7082050120819aa04c73d0ad59d867","obfuscation":"RKzlPOuMifmZx4G","output_index":0,"sequence_number":9}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"type":"response.function_call_arguments.delta","delta":"21","item_id":"fc_0572a70e741183f7006a7082050120819aa04c73d0ad59d867","obfuscation":"o8f6FTu2tRsKTK","output_index":0,"sequence_number":10}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"type":"response.function_call_arguments.delta","delta":"]}","item_id":"fc_0572a70e741183f7006a7082050120819aa04c73d0ad59d867","obfuscation":"8l6T12SkhpvmYS","output_index":0,"sequence_number":11}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.done
+
+      '
+    - 'data: {"type":"response.function_call_arguments.done","arguments":"{\"numbers\":[8,13,21]}","item_id":"fc_0572a70e741183f7006a7082050120819aa04c73d0ad59d867","output_index":0,"sequence_number":12}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.done
+
+      '
+    - 'data: {"type":"response.output_item.done","item":{"id":"fc_0572a70e741183f7006a7082050120819aa04c73d0ad59d867","type":"function_call","status":"completed","arguments":"{\"numbers\":[8,13,21]}","call_id":"call_8r5PktQD3f2ziqRcCkbpTjZP","name":"add_numbers","namespace":"mcp__agentic_fixture"},"output_index":0,"sequence_number":13}
+
+      '
+    - '
+
+      '
+    - 'event: response.completed
+
+      '
+    - 'data: {"type":"response.completed","response":{"id":"resp_0572a70e741183f7006a7082045410819a9d83c64892da665f","object":"response","created_at":1785758212,"status":"completed","background":false,"completed_at":1785758213,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":1024,"max_tool_calls":null,"model":"gpt-5.6-sol","moderation":null,"output":[{"id":"fc_0572a70e741183f7006a7082050120819aa04c73d0ad59d867","type":"function_call","status":"completed","arguments":"{\"numbers\":[8,13,21]}","call_id":"call_8r5PktQD3f2ziqRcCkbpTjZP","name":"add_numbers","namespace":"mcp__agentic_fixture"}],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":"resp_0572a70e741183f7006a708202c21c819a98c66db95ade9669","prompt_cache_key":null,"prompt_cache_retention":"24h","reasoning":{"context":"all_turns","effort":"medium","mode":"standard","summary":null},"safety_identifier":null,"service_tier":"default","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[{"type":"tool_search","description":"Find
+      the project-specific function needed to continue the task.","execution":"client","parameters":{"type":"object","properties":{"goal":{"type":"string"}},"required":["goal"],"additionalProperties":false}},{"type":"namespace","description":"Deferred
+      Codex namespace fixture for tool-search recording.","name":"mcp__agentic_fixture","tools":[{"type":"function","description":"Add
+      a list of numbers and return the total.","name":"add_numbers","output_schema":null,"parameters":{"type":"object","properties":{"numbers":{"type":"array","items":{"type":"number"},"minItems":1}},"required":["numbers"],"additionalProperties":false},"strict":false}]}],"top_logprobs":0,"top_p":0.98,"truncation":"disabled","usage":{"input_tokens":326,"input_tokens_details":{"cache_write_tokens":0,"cached_tokens":0},"output_tokens":26,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":352},"user":null,"metadata":{}},"sequence_number":14}
+
+      '
+    - '
+
+      '
+    status_code: 200
+- filename: t3
+  request:
+    body:
+      input:
+      - call_id: call_8r5PktQD3f2ziqRcCkbpTjZP
+        output: '{"sum":42,"count":3}'
+        type: function_call_output
+      - content: Use the function output and return exactly TOOL_SEARCH_CODEX_OK_42.
+        role: user
+        type: message
+      max_output_tokens: 1024
+      model: gpt-5.6
+      previous_response_id: resp_0572a70e741183f7006a7082045410819a9d83c64892da665f
+      store: true
+      stream: true
+      tools:
+      - description: Find the project-specific function needed to continue the task.
+        execution: client
+        parameters:
+          additionalProperties: false
+          properties:
+            goal:
+              type: string
+          required:
+          - goal
+          type: object
+        type: tool_search
+      - description: Deferred Codex namespace fixture for tool-search recording.
+        name: mcp__agentic_fixture
+        tools:
+        - defer_loading: true
+          description: Add a list of numbers and return the total.
+          name: add_numbers
+          parameters:
+            additionalProperties: false
+            properties:
+              numbers:
+                items:
+                  type: number
+                minItems: 1
+                type: array
+            required:
+            - numbers
+            type: object
+          strict: false
+          type: function
+        type: namespace
+    headers:
+      accept: '*/*'
+      authorization: Bearer ***
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    headers:
+      content-type: text/event-stream; charset=utf-8
+    sse:
+    - 'event: response.created
+
+      '
+    - 'data: {"type":"response.created","response":{"id":"resp_0572a70e741183f7006a70820603a0819a9966aeb91bb7881a","object":"response","created_at":1785758214,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":1024,"max_tool_calls":null,"model":"gpt-5.6-sol","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":"resp_0572a70e741183f7006a7082045410819a9d83c64892da665f","prompt_cache_key":null,"prompt_cache_retention":"24h","reasoning":{"context":"all_turns","effort":"medium","mode":"standard","summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[{"type":"tool_search","description":"Find
+      the project-specific function needed to continue the task.","execution":"client","parameters":{"type":"object","properties":{"goal":{"type":"string"}},"required":["goal"],"additionalProperties":false}},{"type":"namespace","description":"Deferred
+      Codex namespace fixture for tool-search recording.","name":"mcp__agentic_fixture","tools":[{"type":"function","description":"Add
+      a list of numbers and return the total.","name":"add_numbers","output_schema":null,"parameters":{"type":"object","properties":{"numbers":{"type":"array","items":{"type":"number"},"minItems":1}},"required":["numbers"],"additionalProperties":false},"strict":false}]}],"top_logprobs":0,"top_p":0.98,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":0}
+
+      '
+    - '
+
+      '
+    - 'event: response.in_progress
+
+      '
+    - 'data: {"type":"response.in_progress","response":{"id":"resp_0572a70e741183f7006a70820603a0819a9966aeb91bb7881a","object":"response","created_at":1785758214,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":1024,"max_tool_calls":null,"model":"gpt-5.6-sol","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":"resp_0572a70e741183f7006a7082045410819a9d83c64892da665f","prompt_cache_key":null,"prompt_cache_retention":"24h","reasoning":{"context":"all_turns","effort":"medium","mode":"standard","summary":null},"safety_identifier":null,"service_tier":"auto","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[{"type":"tool_search","description":"Find
+      the project-specific function needed to continue the task.","execution":"client","parameters":{"type":"object","properties":{"goal":{"type":"string"}},"required":["goal"],"additionalProperties":false}},{"type":"namespace","description":"Deferred
+      Codex namespace fixture for tool-search recording.","name":"mcp__agentic_fixture","tools":[{"type":"function","description":"Add
+      a list of numbers and return the total.","name":"add_numbers","output_schema":null,"parameters":{"type":"object","properties":{"numbers":{"type":"array","items":{"type":"number"},"minItems":1}},"required":["numbers"],"additionalProperties":false},"strict":false}]}],"top_logprobs":0,"top_p":0.98,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":1}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.added
+
+      '
+    - 'data: {"type":"response.output_item.added","item":{"id":"msg_0572a70e741183f7006a708206a1f8819aa435c825a57781a9","type":"message","status":"in_progress","content":[],"phase":"final_answer","role":"assistant"},"output_index":0,"sequence_number":2}
+
+      '
+    - '
+
+      '
+    - 'event: response.content_part.added
+
+      '
+    - 'data: {"type":"response.content_part.added","content_index":0,"item_id":"msg_0572a70e741183f7006a708206a1f8819aa435c825a57781a9","output_index":0,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":""},"sequence_number":3}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"TO","item_id":"msg_0572a70e741183f7006a708206a1f8819aa435c825a57781a9","logprobs":[],"obfuscation":"UxtGVRpKMF2MRm","output_index":0,"sequence_number":4}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"OL","item_id":"msg_0572a70e741183f7006a708206a1f8819aa435c825a57781a9","logprobs":[],"obfuscation":"K2oohEK9xdXEi2","output_index":0,"sequence_number":5}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"_SEARCH","item_id":"msg_0572a70e741183f7006a708206a1f8819aa435c825a57781a9","logprobs":[],"obfuscation":"iADlWZOwe","output_index":0,"sequence_number":6}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"_CODE","item_id":"msg_0572a70e741183f7006a708206a1f8819aa435c825a57781a9","logprobs":[],"obfuscation":"SJhaNyMqcaa","output_index":0,"sequence_number":7}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"X","item_id":"msg_0572a70e741183f7006a708206a1f8819aa435c825a57781a9","logprobs":[],"obfuscation":"0XhOSUBG44ZMRuC","output_index":0,"sequence_number":8}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"_OK","item_id":"msg_0572a70e741183f7006a708206a1f8819aa435c825a57781a9","logprobs":[],"obfuscation":"BAILWMBb0PPAF","output_index":0,"sequence_number":9}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"_","item_id":"msg_0572a70e741183f7006a708206a1f8819aa435c825a57781a9","logprobs":[],"obfuscation":"43sZaC48Deaak1B","output_index":0,"sequence_number":10}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","content_index":0,"delta":"42","item_id":"msg_0572a70e741183f7006a708206a1f8819aa435c825a57781a9","logprobs":[],"obfuscation":"mDO78D32tAF12Z","output_index":0,"sequence_number":11}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.done
+
+      '
+    - 'data: {"type":"response.output_text.done","content_index":0,"item_id":"msg_0572a70e741183f7006a708206a1f8819aa435c825a57781a9","logprobs":[],"output_index":0,"sequence_number":12,"text":"TOOL_SEARCH_CODEX_OK_42"}
+
+      '
+    - '
+
+      '
+    - 'event: response.content_part.done
+
+      '
+    - 'data: {"type":"response.content_part.done","content_index":0,"item_id":"msg_0572a70e741183f7006a708206a1f8819aa435c825a57781a9","output_index":0,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":"TOOL_SEARCH_CODEX_OK_42"},"sequence_number":13}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.done
+
+      '
+    - 'data: {"type":"response.output_item.done","item":{"id":"msg_0572a70e741183f7006a708206a1f8819aa435c825a57781a9","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"TOOL_SEARCH_CODEX_OK_42"}],"phase":"final_answer","role":"assistant"},"output_index":0,"sequence_number":14}
+
+      '
+    - '
+
+      '
+    - 'event: response.completed
+
+      '
+    - 'data: {"type":"response.completed","response":{"id":"resp_0572a70e741183f7006a70820603a0819a9966aeb91bb7881a","object":"response","created_at":1785758214,"status":"completed","background":false,"completed_at":1785758214,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":1024,"max_tool_calls":null,"model":"gpt-5.6-sol","moderation":null,"output":[{"id":"msg_0572a70e741183f7006a708206a1f8819aa435c825a57781a9","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"TOOL_SEARCH_CODEX_OK_42"}],"phase":"final_answer","role":"assistant"}],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":"resp_0572a70e741183f7006a7082045410819a9d83c64892da665f","prompt_cache_key":null,"prompt_cache_retention":"24h","reasoning":{"context":"all_turns","effort":"medium","mode":"standard","summary":null},"safety_identifier":null,"service_tier":"default","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[{"type":"tool_search","description":"Find
+      the project-specific function needed to continue the task.","execution":"client","parameters":{"type":"object","properties":{"goal":{"type":"string"}},"required":["goal"],"additionalProperties":false}},{"type":"namespace","description":"Deferred
+      Codex namespace fixture for tool-search recording.","name":"mcp__agentic_fixture","tools":[{"type":"function","description":"Add
+      a list of numbers and return the total.","name":"add_numbers","output_schema":null,"parameters":{"type":"object","properties":{"numbers":{"type":"array","items":{"type":"number"},"minItems":1}},"required":["numbers"],"additionalProperties":false},"strict":false}]}],"top_logprobs":0,"top_p":0.98,"truncation":"disabled","usage":{"input_tokens":396,"input_tokens_details":{"cache_write_tokens":0,"cached_tokens":0},"output_tokens":12,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":408},"user":null,"metadata":{}},"sequence_number":15}
+
+      '
+    - '
+
+      '
+    status_code: 200
