@@ -1,5 +1,6 @@
 use crate::events::{EventFrame, EventPayload, SSEEventType, WireEvent, normalize_sse_line};
 use crate::executor::error::{ExecutorError, ExecutorResult};
+use crate::tool::ToolRegistry;
 use crate::types::request_response::ResponsePayload;
 use crate::utils::common::{serialize_to_string, serialize_to_value};
 use serde_json::Value;
@@ -44,8 +45,13 @@ impl GatewayStreamAccumulator {
         rebase_output_index(&mut frame.wire, output_offset);
     }
 
-    pub(crate) fn terminal_response_chunk(&mut self, payload: &ResponsePayload) -> ExecutorResult<String> {
+    pub(crate) fn terminal_response_chunk(
+        &mut self,
+        payload: &ResponsePayload,
+        registry: &ToolRegistry,
+    ) -> ExecutorResult<String> {
         let mut frame = terminal_response_frame(payload)?;
+        registry.restore_stream_event_wire(&mut frame.wire);
         self.stamp_event(&mut frame, 0);
         serialize_sse_frame(&frame)
     }
@@ -164,6 +170,8 @@ fn serialize_sse_frame(frame: &EventFrame) -> ExecutorResult<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tool::GatewayExecutors;
+    use crate::types::tools::ResponsesTool;
 
     #[test]
     fn process_sse_line_numbers_and_rebases_output_index() {
@@ -218,10 +226,79 @@ mod tests {
         }))
         .expect("valid response payload");
 
+        let registry = ToolRegistry::default();
         let chunk = accumulator
-            .terminal_response_chunk(&payload)
+            .terminal_response_chunk(&payload, &registry)
             .expect("terminal event serializes");
         assert!(chunk.contains("\"type\":\"response.in_progress\""));
         assert!(chunk.contains("\"sequence_number\":1"));
+    }
+
+    #[tokio::test]
+    async fn completed_terminal_response_restores_client_tool_search_declarations() {
+        let mut tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([
+            {
+                "type": "tool_search",
+                "execution": "client",
+                "description": "search deferred tools",
+                "parameters": {"type": "object"}
+            },
+            {
+                "type": "function",
+                "name": "get_shipping_eta",
+                "strict": false,
+                "defer_loading": true
+            }
+        ]))
+        .expect("valid client tool-search declarations");
+        let mut executors = GatewayExecutors::default();
+        let registry = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
+            .await
+            .expect("valid tool registry");
+        let payload: ResponsePayload = serde_json::from_value(serde_json::json!({
+            "id": "resp_1",
+            "object": "response",
+            "created_at": 0,
+            "model": "test",
+            "status": "completed",
+            "output": [],
+            "usage": null,
+            "incomplete_details": null,
+            "error": null,
+            "previous_response_id": null,
+            "conversation_id": null,
+            "instructions": null
+        }))
+        .expect("valid response payload");
+
+        let chunk = GatewayStreamAccumulator::new()
+            .terminal_response_chunk(&payload, &registry)
+            .expect("terminal event serializes");
+        let data = chunk
+            .trim_end_matches('\n')
+            .strip_prefix("data: ")
+            .expect("SSE data prefix");
+        let event: serde_json::Value = serde_json::from_str(data).expect("valid terminal event JSON");
+        let response_tools = event["response"]["tools"]
+            .as_array()
+            .expect("terminal response should expose tools");
+
+        assert_eq!(event["type"], "response.completed");
+        assert!(
+            response_tools
+                .iter()
+                .any(|tool| { tool["type"] == "tool_search" && tool["execution"] == "client" })
+        );
+        assert!(response_tools.iter().any(|tool| {
+            tool["type"] == "function"
+                && tool["name"] == "get_shipping_eta"
+                && tool["defer_loading"] == true
+                && tool["strict"] == false
+        }));
+        assert!(
+            !response_tools
+                .iter()
+                .any(|tool| { tool["type"] == "function" && tool["name"] == "tool_search" })
+        );
     }
 }

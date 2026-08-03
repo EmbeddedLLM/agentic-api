@@ -9,17 +9,25 @@ use serde::Deserialize;
 
 use agentic_core::executor::accumulator::ResponseAccumulator;
 use agentic_core::types::event::MessageStatus;
-use agentic_core::types::io::{CustomToolCall, FunctionToolCall, OutputItem, WebSearchCall};
+use agentic_core::types::io::{
+    CustomToolCall, FunctionToolCall, OutputItem, ToolSearchCall, ToolSearchStatus, WebSearchCall,
+};
+use agentic_core::types::tools::ToolSearchExecution;
 
 const CASSETTE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/events");
 const TOOL_CALLS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/tool_calls");
 const REASONING_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/reasoning/responses");
 const CODEX_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/codex");
 const WEB_SEARCH_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/web_search");
+const TOOL_SEARCH_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/tool_search");
 const WEB_SEARCH_GATEWAY_MODEL: &str = "Qwen/Qwen3.5-35B-A3B-FP8";
 const WEB_SEARCH_GATEWAY_MODEL_SLUG: &str = "Qwen-Qwen3.5-35B-A3B-FP8";
 const WEB_SEARCH_OPENAI_MODEL: &str = "gpt-5.6";
 const WEB_SEARCH_OPENAI_MODEL_SLUG: &str = "gpt-5.6";
+const TOOL_SEARCH_GATEWAY_MODEL: &str = "Qwen/Qwen3.6-35B-A3B";
+const TOOL_SEARCH_GATEWAY_MODEL_SLUG: &str = "Qwen-Qwen3.6-35B-A3B";
+const TOOL_SEARCH_OPENAI_MODEL: &str = "gpt-5.6";
+const TOOL_SEARCH_OPENAI_MODEL_SLUG: &str = "gpt-5.6";
 
 // --- Legacy event cassette format ---
 
@@ -67,6 +75,8 @@ struct TurnResponse {
     status_code: Option<u16>,
     #[serde(default)]
     sse: Vec<String>,
+    #[serde(default)]
+    websocket: Vec<String>,
     body: Option<serde_json::Value>,
 }
 
@@ -100,6 +110,31 @@ fn load_web_search_cassette_pair(streaming: bool) -> (TurnCassette, TurnCassette
     let gateway = load_web_search_cassette(&format!(
         "web-search-gateway-{WEB_SEARCH_GATEWAY_MODEL_SLUG}-{mode}.yaml"
     ));
+    (openai, gateway)
+}
+
+fn load_tool_search_cassette_pair(streaming: bool) -> (TurnCassette, TurnCassette) {
+    let mode = if streaming { "streaming" } else { "nonstreaming" };
+    let openai = load_turn_cassette_from(
+        TOOL_SEARCH_DIR,
+        &format!("tool-search-openai-reference-{TOOL_SEARCH_OPENAI_MODEL_SLUG}-{mode}.yaml"),
+    );
+    let gateway = load_turn_cassette_from(
+        TOOL_SEARCH_DIR,
+        &format!("tool-search-gateway-{TOOL_SEARCH_GATEWAY_MODEL_SLUG}-{mode}.yaml"),
+    );
+    (openai, gateway)
+}
+
+fn load_tool_search_websocket_cassette_pair() -> (TurnCassette, TurnCassette) {
+    let openai = load_turn_cassette_from(
+        TOOL_SEARCH_DIR,
+        &format!("tool-search-openai-reference-{TOOL_SEARCH_OPENAI_MODEL_SLUG}-websocket-streaming.yaml"),
+    );
+    let gateway = load_turn_cassette_from(
+        TOOL_SEARCH_DIR,
+        &format!("tool-search-gateway-{TOOL_SEARCH_GATEWAY_MODEL_SLUG}-websocket-streaming.yaml"),
+    );
     (openai, gateway)
 }
 
@@ -152,6 +187,24 @@ fn process_codex_streaming_turn(cassette: &TurnCassette, turn_idx: usize, model:
     assert!(
         !data_lines.is_empty(),
         "Codex cassette turn {} must have SSE data lines",
+        turn_idx + 1
+    );
+    let acc = ResponseAccumulator::from_sse_lines(data_lines, None);
+    let payload = acc.finalize(model, None, None);
+    assert_eq!(payload.status, "completed");
+    payload.output
+}
+
+fn process_websocket_turn(cassette: &TurnCassette, turn_idx: usize, model: &str) -> Vec<OutputItem> {
+    let data_lines = cassette.turns[turn_idx]
+        .response
+        .websocket
+        .iter()
+        .map(|message| format!("data: {message}"))
+        .collect::<Vec<_>>();
+    assert!(
+        !data_lines.is_empty(),
+        "WebSocket cassette turn {} must have messages",
         turn_idx + 1
     );
     let acc = ResponseAccumulator::from_sse_lines(data_lines, None);
@@ -943,6 +996,192 @@ fn assert_matching_web_search_output(openai: &[OutputItem], gateway: &[OutputIte
     );
 }
 
+fn assert_native_client_tool_search_request(provider: &str, cassette: &TurnCassette) {
+    assert_eq!(cassette.turns.len(), 1, "{provider} cassette should have one turn");
+    let request = serde_json::to_value(&cassette.turns[0].request).expect("request must convert to JSON");
+    let websocket = request["transport"] == "websocket";
+    assert_eq!(
+        cassette.turns[0].response.status_code,
+        Some(if websocket { 101 } else { 200 }),
+        "{provider} cassette should record a successful response"
+    );
+    let body = turn_request_body(&cassette.turns[0]);
+    if websocket {
+        assert_eq!(request["method"], "WEBSOCKET");
+        assert_eq!(body["type"], "response.create");
+        assert!(
+            body.get("stream").is_none(),
+            "WebSocket request must not contain stream"
+        );
+    }
+    assert_eq!(body["tool_choice"], "required");
+    let tools = body["tools"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{provider} cassette request should declare tools"));
+
+    let search_tools: Vec<_> = tools.iter().filter(|tool| tool["type"] == "tool_search").collect();
+    assert_eq!(
+        search_tools.len(),
+        1,
+        "{provider} request should contain one native tool_search declaration"
+    );
+    assert_eq!(search_tools[0]["execution"], "client");
+    assert!(
+        search_tools[0].get("name").is_none(),
+        "{provider} public request should not contain the internal function fallback"
+    );
+
+    let deferred = tools
+        .iter()
+        .find(|tool| tool["type"] == "function" && tool["name"] == "get_shipping_eta")
+        .unwrap_or_else(|| panic!("{provider} request should contain get_shipping_eta"));
+    assert_eq!(deferred["defer_loading"], true);
+    assert_eq!(deferred["strict"], false);
+}
+
+fn assert_completed_client_tool_search<'a>(provider: &str, output: &'a [OutputItem]) -> &'a ToolSearchCall {
+    assert_eq!(
+        count_function_calls(output),
+        0,
+        "{provider} public output must not leak the provider function fallback"
+    );
+    let calls: Vec<_> = output
+        .iter()
+        .filter_map(|item| match item {
+            OutputItem::ToolSearchCall(call) => Some(call),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(calls.len(), 1, "{provider} output should contain one tool_search_call");
+
+    let call = calls[0];
+    assert_eq!(call.execution, Some(ToolSearchExecution::Client));
+    assert_eq!(call.status, Some(ToolSearchStatus::Completed));
+    assert!(call.requires_client_execution());
+    assert!(
+        call.arguments
+            .get("goal")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|goal| !goal.is_empty()),
+        "{provider} tool_search_call should contain a nonempty goal"
+    );
+    call
+}
+
+fn tool_search_sse_events(cassette: &TurnCassette) -> Vec<serde_json::Value> {
+    extract_data_lines(&cassette.turns[0].response.sse)
+        .into_iter()
+        .filter_map(|line| {
+            let data = line.strip_prefix("data: ")?;
+            (data != "[DONE]").then(|| serde_json::from_str(data).expect("cassette SSE data should be JSON"))
+        })
+        .collect()
+}
+
+fn tool_search_websocket_events(cassette: &TurnCassette) -> Vec<serde_json::Value> {
+    cassette.turns[0]
+        .response
+        .websocket
+        .iter()
+        .map(|message| serde_json::from_str(message).expect("cassette WebSocket message should be JSON"))
+        .collect()
+}
+
+fn assert_tool_search_event_order(provider: &str, events: &[serde_json::Value]) {
+    let added_position = events
+        .iter()
+        .position(|event| event["type"] == "response.output_item.added" && event["item"]["type"] == "tool_search_call")
+        .unwrap_or_else(|| panic!("{provider} stream should add tool_search_call"));
+    let done_position = events
+        .iter()
+        .position(|event| event["type"] == "response.output_item.done" && event["item"]["type"] == "tool_search_call")
+        .unwrap_or_else(|| panic!("{provider} stream should complete tool_search_call"));
+    let completed_position = events
+        .iter()
+        .position(|event| event["type"] == "response.completed")
+        .unwrap_or_else(|| panic!("{provider} stream should complete the response"));
+    assert!(
+        added_position < done_position && done_position < completed_position,
+        "{provider} stream should add, finish, then publish the completed response"
+    );
+
+    let added = &events[added_position];
+    let done = &events[done_position];
+    assert_eq!(added["item"]["status"], "in_progress");
+    assert_eq!(done["item"]["status"], "completed");
+    assert_eq!(added["item"]["execution"], "client");
+    assert_eq!(done["item"]["execution"], "client");
+    assert_eq!(added["item"]["call_id"], done["item"]["call_id"]);
+    assert!(
+        added["item"]["call_id"]
+            .as_str()
+            .is_some_and(|call_id| !call_id.is_empty()),
+        "{provider} streaming tool_search_call should have a nonempty call_id"
+    );
+    let completed_calls: Vec<_> = events[completed_position]["response"]["output"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{provider} completed response should contain output"))
+        .iter()
+        .filter(|item| item["type"] == "tool_search_call")
+        .collect();
+    assert_eq!(
+        completed_calls.len(),
+        1,
+        "{provider} completed response should contain one tool_search_call"
+    );
+    assert_eq!(
+        completed_calls[0]["call_id"], added["item"]["call_id"],
+        "{provider} tool_search_call should preserve call_id through response.completed output"
+    );
+    assert_eq!(added["output_index"], done["output_index"]);
+    assert!(
+        !events
+            .iter()
+            .any(|event| { event["item"]["type"] == "function_call" && event["item"]["name"] == "tool_search" })
+    );
+}
+
+fn assert_streaming_tool_search_order(provider: &str, cassette: &TurnCassette) {
+    assert_tool_search_event_order(provider, &tool_search_sse_events(cassette));
+}
+
+fn response_tool_summary(events: &[serde_json::Value], event_type: &str) -> serde_json::Value {
+    let lifecycle = events
+        .iter()
+        .find(|event| event["type"] == event_type)
+        .unwrap_or_else(|| panic!("streaming cassette should contain {event_type}"));
+    let tools = lifecycle["response"]["tools"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{event_type} should expose tools"));
+    let search = tools
+        .iter()
+        .find(|tool| tool["type"] == "tool_search")
+        .unwrap_or_else(|| panic!("{event_type} should expose native tool_search"));
+    let deferred = tools
+        .iter()
+        .find(|tool| tool["type"] == "function" && tool["name"] == "get_shipping_eta")
+        .unwrap_or_else(|| panic!("{event_type} should expose get_shipping_eta"));
+
+    serde_json::json!({
+        "search": {
+            "execution": search["execution"],
+            "description": search["description"],
+            "parameters": search["parameters"],
+        },
+        "deferred": {
+            "name": deferred["name"],
+            "description": deferred["description"],
+            "parameters": deferred["parameters"],
+            "strict": deferred["strict"],
+            "defer_loading": deferred["defer_loading"],
+        }
+    })
+}
+
+fn response_created_tool_summary(cassette: &TurnCassette) -> serde_json::Value {
+    response_tool_summary(&tool_search_sse_events(cassette), "response.created")
+}
+
 /// Extracts the `arguments` JSON string from the first function call in output items.
 fn get_first_fc_arguments(output: &[OutputItem]) -> String {
     output
@@ -987,10 +1226,85 @@ fn test_web_search_accumulator_streaming_matches_openai() {
     assert_matching_web_search_output(&openai_output, &gateway_output);
 }
 
+#[test]
+fn test_tool_search_accumulator_nonstreaming_matches_openai_contract() {
+    let (openai, gateway) = load_tool_search_cassette_pair(false);
+    assert_native_client_tool_search_request("OpenAI", &openai);
+    assert_native_client_tool_search_request("gateway", &gateway);
+
+    let openai_output = process_nonstreaming_turn(&openai, 0, TOOL_SEARCH_OPENAI_MODEL);
+    let gateway_output = process_nonstreaming_turn(&gateway, 0, TOOL_SEARCH_GATEWAY_MODEL);
+    let openai_call = assert_completed_client_tool_search("OpenAI", &openai_output);
+    let gateway_call = assert_completed_client_tool_search("gateway", &gateway_output);
+
+    assert_eq!(gateway_call.execution, openai_call.execution);
+    assert_eq!(gateway_call.status, openai_call.status);
+}
+
+#[test]
+fn test_tool_search_accumulator_streaming_matches_openai_contract() {
+    let (openai, gateway) = load_tool_search_cassette_pair(true);
+    for (provider, cassette) in [("OpenAI", &openai), ("gateway", &gateway)] {
+        assert_native_client_tool_search_request(provider, cassette);
+        assert_streaming_tool_search_order(provider, cassette);
+    }
+    assert_eq!(
+        response_created_tool_summary(&gateway),
+        response_created_tool_summary(&openai),
+        "gateway response.created tools should match the OpenAI public surface"
+    );
+
+    let openai_output = process_streaming_turn(&openai, 0, TOOL_SEARCH_OPENAI_MODEL);
+    let gateway_output = process_streaming_turn(&gateway, 0, TOOL_SEARCH_GATEWAY_MODEL);
+    let openai_call = assert_completed_client_tool_search("OpenAI", &openai_output);
+    let gateway_call = assert_completed_client_tool_search("gateway", &gateway_output);
+
+    assert_eq!(gateway_call.execution, openai_call.execution);
+    assert_eq!(gateway_call.status, openai_call.status);
+}
+
 // ═══════════════════════════════════════════════════════════════════
+// Tool-search Responses WebSocket replay
+// Raw WebSocket messages, not the recorder's SSE compatibility mirror
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_tool_search_websocket_matches_openai_contract() {
+    let (openai, gateway) = load_tool_search_websocket_cassette_pair();
+    let openai_events = tool_search_websocket_events(&openai);
+    let gateway_events = tool_search_websocket_events(&gateway);
+
+    for (provider, cassette, events) in [
+        ("OpenAI", &openai, openai_events.as_slice()),
+        ("gateway", &gateway, gateway_events.as_slice()),
+    ] {
+        assert_native_client_tool_search_request(provider, cassette);
+        assert_tool_search_event_order(provider, events);
+        assert!(
+            !events.iter().any(|event| event["type"] == "error"),
+            "{provider} WebSocket recording must not contain an error event"
+        );
+    }
+
+    for event_type in ["response.created", "response.in_progress", "response.completed"] {
+        assert_eq!(
+            response_tool_summary(&gateway_events, event_type),
+            response_tool_summary(&openai_events, event_type),
+            "gateway {event_type} tools should match the OpenAI public surface"
+        );
+    }
+
+    let openai_output = process_websocket_turn(&openai, 0, TOOL_SEARCH_OPENAI_MODEL);
+    let gateway_output = process_websocket_turn(&gateway, 0, TOOL_SEARCH_GATEWAY_MODEL);
+    let openai_call = assert_completed_client_tool_search("OpenAI WebSocket", &openai_output);
+    let gateway_call = assert_completed_client_tool_search("gateway WebSocket", &gateway_output);
+
+    assert_eq!(gateway_call.execution, openai_call.execution);
+    assert_eq!(gateway_call.status, openai_call.status);
+}
+
 // Stateful 3-turn: get_job_status → get_error_logs → search_runbook
 // Non-streaming, store=true, previous_response_id chain
-// ═══════════════════════════════════════════════════════════════════
 
 #[test]
 fn test_stateful_responses_3turn_tool_calls() {

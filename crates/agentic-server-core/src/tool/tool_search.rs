@@ -320,6 +320,34 @@ pub(crate) fn restore_response_wire(wire: &mut WireEvent, enabled: bool) -> bool
     restore_response_map(&mut wire.rest)
 }
 
+/// Restore the request's public tool declarations on streamed response
+/// lifecycle envelopes after provider-facing normalization.
+pub(crate) fn restore_response_tool_declarations_wire(wire: &mut WireEvent, declarations: Option<&Value>) -> bool {
+    if !matches!(
+        wire.event_type.as_deref(),
+        Some(
+            "response.created"
+                | "response.in_progress"
+                | "response.completed"
+                | "response.incomplete"
+                | "response.failed"
+        )
+    ) {
+        return false;
+    }
+    let Some(declarations) = declarations else {
+        return false;
+    };
+    let Some(response) = wire.rest.get_mut("response").and_then(Value::as_object_mut) else {
+        return false;
+    };
+    if response.get("tools") == Some(declarations) {
+        return false;
+    }
+    response.insert("tools".to_owned(), declarations.clone());
+    true
+}
+
 pub(crate) fn restore_loaded_namespace_response_value(
     value: &mut Value,
     loaded_namespaces: &HashMap<String, String>,

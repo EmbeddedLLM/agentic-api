@@ -99,7 +99,7 @@ async fn run_until_gateway_tools_complete(
     auth: Option<&str>,
     stream_upstream: bool,
     mut stream: Option<(&mut GatewayStreamAccumulator, &mpsc::UnboundedSender<StreamEvent>)>,
-) -> ExecutorResult<(ResponsePayload, RequestContext)> {
+) -> ExecutorResult<(ResponsePayload, RequestContext, ToolRegistry)> {
     let mut executors = exec_ctx.gateway_executors.request_scoped();
     let mut registry: ToolRegistry = match ctx.enriched_request.tools.as_mut() {
         Some(tools) => ToolRegistry::build_with_handlers(tools, &mut executors).await?,
@@ -159,12 +159,12 @@ async fn run_until_gateway_tools_complete(
                     gateway_results.into_iter().map(|result| result.input_item).collect(),
                 );
                 finalize_loop(&mut payload, combined_output, combined_usage, &ctx);
-                return Ok((payload, ctx));
+                return Ok((payload, ctx, registry));
             }
             // No gateway work remains — this turn is the final response.
             LoopDecision::Done => {
                 finalize_loop(&mut payload, combined_output, combined_usage, &ctx);
-                return Ok((payload, ctx));
+                return Ok((payload, ctx, registry));
             }
             // Budget exhausted while the model was still requesting gateway
             // tools: surface the accumulated work as a partial
@@ -180,7 +180,7 @@ async fn run_until_gateway_tools_complete(
                 finalize_loop(&mut payload, combined_output, combined_usage, &ctx);
                 "incomplete".clone_into(&mut payload.status);
                 payload.incomplete_details = Some(IncompleteDetails { reason: Some(reason) });
-                return Ok((payload, ctx));
+                return Ok((payload, ctx, registry));
             }
             // Gateway tools ran and rounds remain; feed outputs back and loop.
             LoopDecision::Continue => {
@@ -347,7 +347,7 @@ async fn run_blocking(
     exec_ctx: &ExecutionContext,
     auth: Option<&str>,
 ) -> ExecutorResult<ResponsePayload> {
-    let (payload, ctx) = run_until_gateway_tools_complete(ctx, exec_ctx, auth, false, None).await?;
+    let (payload, ctx, _registry) = run_until_gateway_tools_complete(ctx, exec_ctx, auth, false, None).await?;
 
     let ch = exec_ctx.conv_handler.clone();
     let rh = exec_ctx.resp_handler.clone();
@@ -397,7 +397,7 @@ fn run_stream(ctx: RequestContext, exec_ctx: Arc<ExecutionContext>, auth: Option
                             yield stream_accumulator.error_chunk(&e.to_string());
                             yield DONE_MARKER.to_string();
                         }
-                        Ok((Ok((payload, ctx)), mut stream_accumulator)) => {
+                        Ok((Ok((payload, ctx, registry)), mut stream_accumulator)) => {
                             while let Ok(event) = event_rx.try_recv() {
                                 yield consume_stream_event(event, &mut next_sequence_number);
                             }
@@ -405,7 +405,7 @@ fn run_stream(ctx: RequestContext, exec_ctx: Arc<ExecutionContext>, auth: Option
                             // `response.completed`. Persist before exposing that
                             // event so a custom call/output continuation cannot be
                             // cancelled by the client disconnect.
-                            let terminal_chunk = stream_accumulator.terminal_response_chunk(&payload);
+                            let terminal_chunk = stream_accumulator.terminal_response_chunk(&payload, &registry);
                             let ch = exec_ctx.conv_handler.clone();
                             let rh = exec_ctx.resp_handler.clone();
                             if let Err(e) = persist_if_needed(payload, ctx, ch, rh).await {

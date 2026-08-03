@@ -47,6 +47,7 @@ The recorder scripts (`record_reasoning_cassettes.sh`, `record_tool_call_cassett
 --output PATH          Output YAML path
 --mode MODE            responses | conv | isolation | mixed | store_true_then_store_false  (default: conv)
 --stream / --no-stream Streaming or non-streaming (default: streaming)
+--transport TRANSPORT  http | websocket (default: http; WebSocket requires responses mode)
 --model NAME           Model name sent in requests
 --no-store             Set store=false
 --vllm URL             vLLM upstream, e.g. http://localhost:8000 (responses mode only)
@@ -158,6 +159,31 @@ turns:
     - "data: {...}\n"
 ```
 
+**Responses WebSocket turn -- `response.websocket` contains the raw JSON messages:**
+
+```yaml
+turns:
+- filename: t1
+  request:
+    method: WEBSOCKET
+    path: /v1/responses
+    transport: websocket
+    body:
+      type: response.create
+      model: gpt-5.6
+      input: Call tool_search.
+  response:
+    status_code: 101
+    headers:
+      transport: websocket
+    websocket:
+    - '{"type":"response.created","response":{"status":"in_progress"}}'
+    - '{"type":"response.completed","response":{"status":"completed"}}'
+```
+
+The recorder also writes an SSE-formatted compatibility mirror for replay helpers, but WebSocket contract tests should
+read `response.websocket` so they validate the recorded transport directly.
+
 ## Recorder scripts
 
 | Script | Cassettes | Backend |
@@ -168,6 +194,7 @@ turns:
 | `record_codex_cli_tool_call_cassettes.sh` | Codex function/namespace/custom-tool matrix | gateway, vLLM, and OpenAI |
 | `record_mcp_cassettes.sh` | Native MCP counter tool discovery and calls (streaming + non-streaming) | gateway and OpenAI reference |
 | `record_web_search_cassettes.sh` | Matching web-search calls (streaming + non-streaming) | gateway and OpenAI reference |
+| `record_tool_search_cassettes.sh` | Client tool-search calls (HTTP streaming/non-streaming + Responses WebSocket) | gateway and OpenAI reference |
 
 ### Text-only (OpenAI)
 
@@ -200,6 +227,27 @@ The default records both providers. Use `WEB_SEARCH_RECORD_SET=gateway` or
 ```bash
 OPENAI_API_KEY=sk-... \
 bash crates/agentic-server-core/tests/cassettes/record_web_search_cassettes.sh
+```
+
+### Tool search (gateway and OpenAI)
+
+The wrapper defaults to both providers and both transport modes, producing six live recordings: HTTP streaming,
+HTTP non-streaming, and Responses WebSocket for OpenAI `gpt-5.6`, plus the same three scenarios for the configured
+gateway model. The default therefore calls the paid OpenAI API and the configured remote gateway/upstream. Use
+`TOOL_SEARCH_RECORD_SET=gateway` or `TOOL_SEARCH_RECORD_SET=openai` for one provider, and use
+`TOOL_SEARCH_TRANSPORT_SET=http` or `TOOL_SEARCH_TRANSPORT_SET=websocket` for one transport mode.
+
+```bash
+OPENAI_API_KEY=sk-... GATEWAY_URL=http://127.0.0.1:3018 \
+bash crates/agentic-server-core/tests/cassettes/record_tool_search_cassettes.sh
+```
+
+Record only the Responses WebSocket cassettes:
+
+```bash
+TOOL_SEARCH_TRANSPORT_SET=websocket OPENAI_API_KEY=sk-... \
+GATEWAY_URL=http://127.0.0.1:3018 \
+bash crates/agentic-server-core/tests/cassettes/record_tool_search_cassettes.sh
 ```
 
 ### Codex custom tools (gateway, vLLM, and OpenAI)

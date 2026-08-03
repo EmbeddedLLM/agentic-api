@@ -1,0 +1,1387 @@
+turns:
+- filename: t1
+  request:
+    body:
+      input: Call tool_search now to find the shipping ETA tool for order_42. Do not
+        call get_shipping_eta yet and do not answer without calling tool_search.
+      max_output_tokens: 1024
+      model: Qwen/Qwen3.6-35B-A3B
+      store: true
+      stream: true
+      tool_choice: required
+      tools:
+      - description: Find the project-specific tools needed to continue the task.
+        execution: client
+        parameters:
+          additionalProperties: false
+          properties:
+            goal:
+              type: string
+          required:
+          - goal
+          type: object
+        type: tool_search
+      - defer_loading: true
+        description: Look up shipping ETA details for an order.
+        name: get_shipping_eta
+        parameters:
+          additionalProperties: false
+          properties:
+            order_id:
+              type: string
+          required:
+          - order_id
+          type: object
+        strict: false
+        type: function
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    headers:
+      content-type: text/event-stream; charset=utf-8
+    sse:
+    - 'data: {"type":"response.created","sequence_number":0,"response":{"background":false,"completed_at":null,"conversation":null,"created_at":1785748980,"error":null,"frequency_penalty":0.0,"id":"resp_019fc6ef-0379-72c3-8d97-7cd685cc7265","incomplete_details":null,"instructions":null,"max_output_tokens":1024,"max_tool_calls":null,"metadata":{},"model":"Qwen/Qwen3.6-35B-A3B","object":"response","output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt":null,"prompt_cache_key":null,"prompt_cache_retention":null,"reasoning":{"effort":"medium","summary":null},"safety_identifier":null,"service_tier":"default","status":"in_progress","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"required","tools":[{"description":"Find
+      the project-specific tools needed to continue the task.","execution":"client","parameters":{"additionalProperties":false,"properties":{"goal":{"type":"string"}},"required":["goal"],"type":"object"},"type":"tool_search"},{"defer_loading":true,"description":"Look
+      up shipping ETA details for an order.","name":"get_shipping_eta","parameters":{"additionalProperties":false,"properties":{"order_id":{"type":"string"}},"required":["order_id"],"type":"object"},"strict":false,"type":"function"}],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":null,"user":null}}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.in_progress","sequence_number":1,"response":{"background":false,"completed_at":null,"conversation":null,"created_at":1785748980,"error":null,"frequency_penalty":0.0,"id":"resp_019fc6ef-0379-72c3-8d97-7cd685cc7265","incomplete_details":null,"instructions":null,"max_output_tokens":1024,"max_tool_calls":null,"metadata":{},"model":"Qwen/Qwen3.6-35B-A3B","object":"response","output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt":null,"prompt_cache_key":null,"prompt_cache_retention":null,"reasoning":{"effort":"medium","summary":null},"safety_identifier":null,"service_tier":"default","status":"in_progress","store":true,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"required","tools":[{"description":"Find
+      the project-specific tools needed to continue the task.","execution":"client","parameters":{"additionalProperties":false,"properties":{"goal":{"type":"string"}},"required":["goal"],"type":"object"},"type":"tool_search"},{"defer_loading":true,"description":"Look
+      up shipping ETA details for an order.","name":"get_shipping_eta","parameters":{"additionalProperties":false,"properties":{"order_id":{"type":"string"}},"required":["order_id"],"type":"object"},"strict":false,"type":"function"}],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":null,"user":null}}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"content":[],"id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e","summary":[],"type":"reasoning"}}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":3,"output_index":0,"content_index":0,"delta":"The","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":4,"output_index":0,"content_index":0,"delta":"
+      user wants me","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":5,"output_index":0,"content_index":0,"delta":"
+      to call `","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":6,"output_index":0,"content_index":0,"delta":"tool_search`","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":7,"output_index":0,"content_index":0,"delta":"
+      with","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":8,"output_index":0,"content_index":0,"delta":"
+      the goal \"","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":9,"output_index":0,"content_index":0,"delta":"find
+      the shipping","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":10,"output_index":0,"content_index":0,"delta":"
+      ETA tool for","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":11,"output_index":0,"content_index":0,"delta":"
+      order_4","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":12,"output_index":0,"content_index":0,"delta":"2\".\n","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":13,"output_index":0,"content_index":0,"delta":"I","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":14,"output_index":0,"content_index":0,"delta":"
+      must","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":15,"output_index":0,"content_index":0,"delta":"
+      not call `","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":16,"output_index":0,"content_index":0,"delta":"get_shipping_eta","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":17,"output_index":0,"content_index":0,"delta":"`
+      yet.","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":18,"output_index":0,"content_index":0,"delta":"\nI
+      must","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":19,"output_index":0,"content_index":0,"delta":"
+      call `tool","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":20,"output_index":0,"content_index":0,"delta":"_search`
+      first","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":21,"output_index":0,"content_index":0,"delta":".\n\nLet","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":22,"output_index":0,"content_index":0,"delta":"''s
+      construct","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":23,"output_index":0,"content_index":0,"delta":"
+      the `","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":24,"output_index":0,"content_index":0,"delta":"tool_search`","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":25,"output_index":0,"content_index":0,"delta":"
+      call.\n","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":26,"output_index":0,"content_index":0,"delta":"`","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":27,"output_index":0,"content_index":0,"delta":"goal`:
+      \"","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":28,"output_index":0,"content_index":0,"delta":"find
+      the shipping","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":29,"output_index":0,"content_index":0,"delta":"
+      ETA tool for","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":30,"output_index":0,"content_index":0,"delta":"
+      order_4","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":31,"output_index":0,"content_index":0,"delta":"2\"\n","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":32,"output_index":0,"content_index":0,"delta":"Then","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":33,"output_index":0,"content_index":0,"delta":",","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":34,"output_index":0,"content_index":0,"delta":"
+      I will proceed","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":35,"output_index":0,"content_index":0,"delta":".","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":36,"output_index":0,"content_index":0,"delta":"\n\nWait,","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":37,"output_index":0,"content_index":0,"delta":"
+      the prompt says","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":38,"output_index":0,"content_index":0,"delta":":","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":39,"output_index":0,"content_index":0,"delta":"
+      \"Call tool","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":40,"output_index":0,"content_index":0,"delta":"_search
+      now to","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":41,"output_index":0,"content_index":0,"delta":"
+      find the shipping","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":42,"output_index":0,"content_index":0,"delta":"
+      ETA tool for","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":43,"output_index":0,"content_index":0,"delta":"
+      order_4","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":44,"output_index":0,"content_index":0,"delta":"2.
+      Do","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":45,"output_index":0,"content_index":0,"delta":"
+      not call get","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":46,"output_index":0,"content_index":0,"delta":"_shipping_eta
+      yet","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":47,"output_index":0,"content_index":0,"delta":"
+      and do not","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":48,"output_index":0,"content_index":0,"delta":"
+      answer without calling","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":49,"output_index":0,"content_index":0,"delta":"
+      tool_search.\"","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":50,"output_index":0,"content_index":0,"delta":"\n\nI","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":51,"output_index":0,"content_index":0,"delta":"
+      will call `","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":52,"output_index":0,"content_index":0,"delta":"tool_search`","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":53,"output_index":0,"content_index":0,"delta":"
+      with the exact","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":54,"output_index":0,"content_index":0,"delta":"
+      goal.","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":55,"output_index":0,"content_index":0,"delta":"\nParameters","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":56,"output_index":0,"content_index":0,"delta":":\n","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":57,"output_index":0,"content_index":0,"delta":"-","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":58,"output_index":0,"content_index":0,"delta":"
+      goal: \"","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":59,"output_index":0,"content_index":0,"delta":"find
+      the shipping","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":60,"output_index":0,"content_index":0,"delta":"
+      ETA tool for","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":61,"output_index":0,"content_index":0,"delta":"
+      order_4","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":62,"output_index":0,"content_index":0,"delta":"2\"\n","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":63,"output_index":0,"content_index":0,"delta":"Type","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":64,"output_index":0,"content_index":0,"delta":":
+      object","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":65,"output_index":0,"content_index":0,"delta":".","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":66,"output_index":0,"content_index":0,"delta":"\nDone","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":67,"output_index":0,"content_index":0,"delta":".
+      \n","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":68,"output_index":0,"content_index":0,"delta":"I","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":69,"output_index":0,"content_index":0,"delta":"
+      will generate","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":70,"output_index":0,"content_index":0,"delta":"
+      the tool call","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":71,"output_index":0,"content_index":0,"delta":"
+      now. \n","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":72,"output_index":0,"content_index":0,"delta":"Checking","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":73,"output_index":0,"content_index":0,"delta":"
+      constraints","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":74,"output_index":0,"content_index":0,"delta":":
+      \"You","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":75,"output_index":0,"content_index":0,"delta":"
+      must call at","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":76,"output_index":0,"content_index":0,"delta":"
+      least one available","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":77,"output_index":0,"content_index":0,"delta":"
+      tool before producing","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":78,"output_index":0,"content_index":0,"delta":"
+      the final answer","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":79,"output_index":0,"content_index":0,"delta":".","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":80,"output_index":0,"content_index":0,"delta":"
+      Do not answer","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":81,"output_index":0,"content_index":0,"delta":"
+      directly without a","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":82,"output_index":0,"content_index":0,"delta":"
+      tool call.\"","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":83,"output_index":0,"content_index":0,"delta":"
+      -> S","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":84,"output_index":0,"content_index":0,"delta":"atisfied.\n","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":85,"output_index":0,"content_index":0,"delta":"Proceed.
+      \n","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":86,"output_index":0,"content_index":0,"delta":"Output","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":87,"output_index":0,"content_index":0,"delta":"
+      matches the","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":88,"output_index":0,"content_index":0,"delta":"
+      tool schema","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":89,"output_index":0,"content_index":0,"delta":".\n`","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":90,"output_index":0,"content_index":0,"delta":"tool_search(goal","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":91,"output_index":0,"content_index":0,"delta":"=\"find
+      the","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":92,"output_index":0,"content_index":0,"delta":"
+      shipping ETA tool","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":93,"output_index":0,"content_index":0,"delta":"
+      for order_","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":94,"output_index":0,"content_index":0,"delta":"42\")","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":95,"output_index":0,"content_index":0,"delta":"`\nDone","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":96,"output_index":0,"content_index":0,"delta":".
+      \nWait","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":97,"output_index":0,"content_index":0,"delta":",
+      should","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":98,"output_index":0,"content_index":0,"delta":"
+      I include","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":99,"output_index":0,"content_index":0,"delta":"
+      order","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":100,"output_index":0,"content_index":0,"delta":"_","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":101,"output_index":0,"content_index":0,"delta":"42
+      in","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":102,"output_index":0,"content_index":0,"delta":"
+      the goal?","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":103,"output_index":0,"content_index":0,"delta":"
+      Yes, the","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":104,"output_index":0,"content_index":0,"delta":"
+      prompt says \"","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":105,"output_index":0,"content_index":0,"delta":"find","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":106,"output_index":0,"content_index":0,"delta":"
+      the shipping ETA","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":107,"output_index":0,"content_index":0,"delta":"
+      tool for order","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":108,"output_index":0,"content_index":0,"delta":"_42","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":109,"output_index":0,"content_index":0,"delta":"\".
+      I","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":110,"output_index":0,"content_index":0,"delta":"''ll
+      just pass","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":111,"output_index":0,"content_index":0,"delta":"
+      that string","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":112,"output_index":0,"content_index":0,"delta":".\nLet","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":113,"output_index":0,"content_index":0,"delta":"''s
+      call","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":114,"output_index":0,"content_index":0,"delta":"
+      it. \n","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":115,"output_index":0,"content_index":0,"delta":"Proceed","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":116,"output_index":0,"content_index":0,"delta":".","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":117,"output_index":0,"content_index":0,"delta":"
+      \n[Tool","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":118,"output_index":0,"content_index":0,"delta":"
+      Call Generation","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":119,"output_index":0,"content_index":0,"delta":"]\n`","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":120,"output_index":0,"content_index":0,"delta":"{\"","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":121,"output_index":0,"content_index":0,"delta":"name\":
+      \"","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":122,"output_index":0,"content_index":0,"delta":"tool_search\",","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":123,"output_index":0,"content_index":0,"delta":"
+      \"arguments\":","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":124,"output_index":0,"content_index":0,"delta":"
+      {\"goal\":","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":125,"output_index":0,"content_index":0,"delta":"
+      \"find the","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":126,"output_index":0,"content_index":0,"delta":"
+      shipping ETA tool","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":127,"output_index":0,"content_index":0,"delta":"
+      for order_","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":128,"output_index":0,"content_index":0,"delta":"42\"}}","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":129,"output_index":0,"content_index":0,"delta":"`\nI","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":130,"output_index":0,"content_index":0,"delta":"
+      will output this","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":131,"output_index":0,"content_index":0,"delta":".
+      \nDone","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":132,"output_index":0,"content_index":0,"delta":".
+      \n(Self","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":133,"output_index":0,"content_index":0,"delta":"-Correction","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":134,"output_index":0,"content_index":0,"delta":"/Verification
+      during","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":135,"output_index":0,"content_index":0,"delta":"
+      thought)\n","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":136,"output_index":0,"content_index":0,"delta":"Is","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":137,"output_index":0,"content_index":0,"delta":"
+      there","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":138,"output_index":0,"content_index":0,"delta":"
+      any specific","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":139,"output_index":0,"content_index":0,"delta":"
+      format?","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":140,"output_index":0,"content_index":0,"delta":"
+      Standard","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":141,"output_index":0,"content_index":0,"delta":"
+      JSON for","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":142,"output_index":0,"content_index":0,"delta":"
+      function","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":143,"output_index":0,"content_index":0,"delta":"
+      calling","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":144,"output_index":0,"content_index":0,"delta":".\nThe","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":145,"output_index":0,"content_index":0,"delta":"
+      goal","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":146,"output_index":0,"content_index":0,"delta":"
+      is exactly","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":147,"output_index":0,"content_index":0,"delta":"
+      as requested.","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":148,"output_index":0,"content_index":0,"delta":"\nReady.","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":149,"output_index":0,"content_index":0,"delta":"
+      \nProceeds","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":150,"output_index":0,"content_index":0,"delta":".
+      \n[","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":151,"output_index":0,"content_index":0,"delta":"Output
+      Generation]","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":152,"output_index":0,"content_index":0,"delta":"
+      -> calls","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":153,"output_index":0,"content_index":0,"delta":"
+      tool_search.","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":154,"output_index":0,"content_index":0,"delta":"\n","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":155,"output_index":0,"content_index":0,"delta":"Wait","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":156,"output_index":0,"content_index":0,"delta":",
+      let","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":157,"output_index":0,"content_index":0,"delta":"''s
+      verify","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":158,"output_index":0,"content_index":0,"delta":"
+      the `","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":159,"output_index":0,"content_index":0,"delta":"get","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":160,"output_index":0,"content_index":0,"delta":"_shipping_eta`","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":161,"output_index":0,"content_index":0,"delta":"
+      tool","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":162,"output_index":0,"content_index":0,"delta":"
+      description.","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":163,"output_index":0,"content_index":0,"delta":"
+      It takes","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":164,"output_index":0,"content_index":0,"delta":"
+      `order_id","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":165,"output_index":0,"content_index":0,"delta":"`.\nThe","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":166,"output_index":0,"content_index":0,"delta":"
+      user specifically","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":167,"output_index":0,"content_index":0,"delta":"
+      says \"Call","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":168,"output_index":0,"content_index":0,"delta":"
+      tool_search now","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":169,"output_index":0,"content_index":0,"delta":"
+      to","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":170,"output_index":0,"content_index":0,"delta":"
+      find the shipping","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":171,"output_index":0,"content_index":0,"delta":"
+      ETA tool for","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":172,"output_index":0,"content_index":0,"delta":"
+      order_4","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":173,"output_index":0,"content_index":0,"delta":"2.\"","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":174,"output_index":0,"content_index":0,"delta":"\nSo
+      the","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":175,"output_index":0,"content_index":0,"delta":"
+      goal string is","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":176,"output_index":0,"content_index":0,"delta":"
+      fine","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":177,"output_index":0,"content_index":0,"delta":".\nAll","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":178,"output_index":0,"content_index":0,"delta":"
+      good. \n","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":179,"output_index":0,"content_index":0,"delta":"Proceeds","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":180,"output_index":0,"content_index":0,"delta":".
+      \n[","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":181,"output_index":0,"content_index":0,"delta":"Output]
+      ->","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":182,"output_index":0,"content_index":0,"delta":"
+      tool_call","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":183,"output_index":0,"content_index":0,"delta":".\n","item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.reasoning_text.done","sequence_number":184,"output_index":0,"content_index":0,"item_id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e","text":"The
+      user wants me to call `tool_search` with the goal \"find the shipping ETA tool
+      for order_42\".\nI must not call `get_shipping_eta` yet.\nI must call `tool_search`
+      first.\n\nLet''s construct the `tool_search` call.\n`goal`: \"find the shipping
+      ETA tool for order_42\"\nThen, I will proceed.\n\nWait, the prompt says: \"Call
+      tool_search now to find the shipping ETA tool for order_42. Do not call get_shipping_eta
+      yet and do not answer without calling tool_search.\"\n\nI will call `tool_search`
+      with the exact goal.\nParameters:\n- goal: \"find the shipping ETA tool for
+      order_42\"\nType: object.\nDone. \nI will generate the tool call now. \nChecking
+      constraints: \"You must call at least one available tool before producing the
+      final answer. Do not answer directly without a tool call.\" -> Satisfied.\nProceed.
+      \nOutput matches the tool schema.\n`tool_search(goal=\"find the shipping ETA
+      tool for order_42\")`\nDone. \nWait, should I include order_42 in the goal?
+      Yes, the prompt says \"find the shipping ETA tool for order_42\". I''ll just
+      pass that string.\nLet''s call it. \nProceed. \n[Tool Call Generation]\n`{\"name\":
+      \"tool_search\", \"arguments\": {\"goal\": \"find the shipping ETA tool for
+      order_42\"}}`\nI will output this. \nDone. \n(Self-Correction/Verification during
+      thought)\nIs there any specific format? Standard JSON for function calling.\nThe
+      goal is exactly as requested.\nReady. \nProceeds. \n[Output Generation] -> calls
+      tool_search.\nWait, let''s verify the `get_shipping_eta` tool description. It
+      takes `order_id`.\nThe user specifically says \"Call tool_search now to find
+      the shipping ETA tool for order_42.\"\nSo the goal string is fine.\nAll good.
+      \nProceeds. \n[Output] -> tool_call.\n"}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.output_item.done","sequence_number":185,"output_index":0,"item":{"content":[{"text":"The
+      user wants me to call `tool_search` with the goal \"find the shipping ETA tool
+      for order_42\".\nI must not call `get_shipping_eta` yet.\nI must call `tool_search`
+      first.\n\nLet''s construct the `tool_search` call.\n`goal`: \"find the shipping
+      ETA tool for order_42\"\nThen, I will proceed.\n\nWait, the prompt says: \"Call
+      tool_search now to find the shipping ETA tool for order_42. Do not call get_shipping_eta
+      yet and do not answer without calling tool_search.\"\n\nI will call `tool_search`
+      with the exact goal.\nParameters:\n- goal: \"find the shipping ETA tool for
+      order_42\"\nType: object.\nDone. \nI will generate the tool call now. \nChecking
+      constraints: \"You must call at least one available tool before producing the
+      final answer. Do not answer directly without a tool call.\" -> Satisfied.\nProceed.
+      \nOutput matches the tool schema.\n`tool_search(goal=\"find the shipping ETA
+      tool for order_42\")`\nDone. \nWait, should I include order_42 in the goal?
+      Yes, the prompt says \"find the shipping ETA tool for order_42\". I''ll just
+      pass that string.\nLet''s call it. \nProceed. \n[Tool Call Generation]\n`{\"name\":
+      \"tool_search\", \"arguments\": {\"goal\": \"find the shipping ETA tool for
+      order_42\"}}`\nI will output this. \nDone. \n(Self-Correction/Verification during
+      thought)\nIs there any specific format? Standard JSON for function calling.\nThe
+      goal is exactly as requested.\nReady. \nProceeds. \n[Output Generation] -> calls
+      tool_search.\nWait, let''s verify the `get_shipping_eta` tool description. It
+      takes `order_id`.\nThe user specifically says \"Call tool_search now to find
+      the shipping ETA tool for order_42.\"\nSo the goal string is fine.\nAll good.
+      \nProceeds. \n[Output] -> tool_call.\n","type":"reasoning_text"}],"id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e","summary":[],"type":"reasoning"}}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.output_item.added","sequence_number":186,"output_index":1,"item":{"arguments":{},"call_id":"chatcmpl-tool-829878a979789c2f","execution":"client","status":"in_progress","type":"tool_search_call"}}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.output_item.done","sequence_number":187,"output_index":1,"item":{"arguments":{"goal":"find
+      the shipping ETA tool for order_42"},"call_id":"chatcmpl-tool-829878a979789c2f","execution":"client","status":"completed","type":"tool_search_call"}}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.completed","sequence_number":188,"response":{"conversation_id":null,"created_at":1785748983,"error":null,"id":"resp_019fc6ef-0379-72c3-8d97-7cd685cc7265","incomplete_details":null,"instructions":null,"model":"Qwen/Qwen3.6-35B-A3B","object":"response","output":[{"content":[{"text":"The
+      user wants me to call `tool_search` with the goal \"find the shipping ETA tool
+      for order_42\".\nI must not call `get_shipping_eta` yet.\nI must call `tool_search`
+      first.\n\nLet''s construct the `tool_search` call.\n`goal`: \"find the shipping
+      ETA tool for order_42\"\nThen, I will proceed.\n\nWait, the prompt says: \"Call
+      tool_search now to find the shipping ETA tool for order_42. Do not call get_shipping_eta
+      yet and do not answer without calling tool_search.\"\n\nI will call `tool_search`
+      with the exact goal.\nParameters:\n- goal: \"find the shipping ETA tool for
+      order_42\"\nType: object.\nDone. \nI will generate the tool call now. \nChecking
+      constraints: \"You must call at least one available tool before producing the
+      final answer. Do not answer directly without a tool call.\" -> Satisfied.\nProceed.
+      \nOutput matches the tool schema.\n`tool_search(goal=\"find the shipping ETA
+      tool for order_42\")`\nDone. \nWait, should I include order_42 in the goal?
+      Yes, the prompt says \"find the shipping ETA tool for order_42\". I''ll just
+      pass that string.\nLet''s call it. \nProceed. \n[Tool Call Generation]\n`{\"name\":
+      \"tool_search\", \"arguments\": {\"goal\": \"find the shipping ETA tool for
+      order_42\"}}`\nI will output this. \nDone. \n(Self-Correction/Verification during
+      thought)\nIs there any specific format? Standard JSON for function calling.\nThe
+      goal is exactly as requested.\nReady. \nProceeds. \n[Output Generation] -> calls
+      tool_search.\nWait, let''s verify the `get_shipping_eta` tool description. It
+      takes `order_id`.\nThe user specifically says \"Call tool_search now to find
+      the shipping ETA tool for order_42.\"\nSo the goal string is fine.\nAll good.
+      \nProceeds. \n[Output] -> tool_call.\n","type":"reasoning_text"}],"encrypted_content":null,"id":"rs_019fc6ef-0e55-7452-bd29-af97de23429e","status":null,"summary":[],"type":"reasoning"},{"arguments":{"goal":"find
+      the shipping ETA tool for order_42"},"call_id":"chatcmpl-tool-829878a979789c2f","execution":"client","status":"completed","type":"tool_search_call"}],"previous_response_id":null,"status":"completed","tools":[{"description":"Find
+      the project-specific tools needed to continue the task.","execution":"client","parameters":{"additionalProperties":false,"properties":{"goal":{"type":"string"}},"required":["goal"],"type":"object"},"type":"tool_search"},{"defer_loading":true,"description":"Look
+      up shipping ETA details for an order.","name":"get_shipping_eta","parameters":{"additionalProperties":false,"properties":{"order_id":{"type":"string"}},"required":["order_id"],"type":"object"},"strict":false,"type":"function"}],"usage":{"input_tokens":390,"input_tokens_details":{"cached_tokens":0},"output_tokens":477,"output_tokens_details":{"reasoning_tokens":405},"total_tokens":867}}}
+
+      '
+    - '
+
+      '
+    - 'data: [DONE]
+
+      '
+    - '
+
+      '
+    status_code: 200

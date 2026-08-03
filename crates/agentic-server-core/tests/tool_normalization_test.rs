@@ -17,6 +17,7 @@ use agentic_core::utils::common::serialize_to_string;
 
 const MULTI_TURN_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/tool_calls/multi_turn");
 const CODEX_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/codex");
+const TOOL_SEARCH_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/tool_search");
 
 const CODEX_CASSETTES: &[&str] = &[
     "codex-direct-vllm-http-custom-tool-Qwen-Qwen3.6-35B-A3B-streaming.yaml",
@@ -503,4 +504,44 @@ fn web_search_preview_normalizes_to_gateway_function() {
     assert_eq!(tools[0].get("type").and_then(Value::as_str), Some("function"));
     assert_eq!(tools[0].get("name").and_then(Value::as_str), Some("web_search"));
     assert_eq!(tools[0]["parameters"]["required"], serde_json::json!(["query"]));
+}
+
+#[test]
+fn tool_search_gateway_cassette_normalizes_client_declaration_to_strict_function() {
+    let filename = "tool-search-gateway-Qwen-Qwen3.6-35B-A3B-streaming.yaml";
+    let cassette = load_cassette_from(TOOL_SEARCH_DIR, filename);
+    assert_eq!(cassette.turns.len(), 1);
+
+    let request = request_body_from_turn(&cassette.turns[0]);
+    let public_tools = request["tools"]
+        .as_array()
+        .expect("cassette request should declare tools");
+    assert!(
+        public_tools.iter().any(|tool| {
+            tool["type"] == "tool_search" && tool["execution"] == "client" && tool.get("name").is_none()
+        })
+    );
+
+    let payload: RequestPayload = serde_json::from_value(request).expect("cassette request should parse");
+    let upstream = upstream_request_value(payload, true);
+    let upstream_tools = upstream["tools"]
+        .as_array()
+        .expect("upstream request should declare tools");
+    assert!(!upstream_tools.iter().any(|tool| tool["type"] == "tool_search"));
+
+    let search_fallbacks: Vec<_> = upstream_tools
+        .iter()
+        .filter(|tool| tool["name"] == "tool_search")
+        .collect();
+    assert_eq!(search_fallbacks.len(), 1);
+    assert_eq!(search_fallbacks[0]["type"], "function");
+    assert_eq!(search_fallbacks[0]["strict"], false);
+
+    let deferred = upstream_tools
+        .iter()
+        .find(|tool| tool["name"] == "get_shipping_eta")
+        .expect("upstream request should preserve the deferred tool");
+    assert_eq!(deferred["type"], "function");
+    assert_eq!(deferred["strict"], false);
+    assert_eq!(deferred["defer_loading"], true);
 }

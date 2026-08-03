@@ -21,6 +21,7 @@
     "name": "get_shipping_eta",
     "description": "Look up shipping ETA details for an order.",
     "defer_loading": true,
+    "strict": false,
     "parameters": {
       "type": "object",
       "properties": {

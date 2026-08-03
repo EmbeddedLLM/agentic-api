@@ -171,6 +171,7 @@ pub struct ToolRegistry {
     /// Tool-search identity is request-scoped: only a declared client search
     /// may restore the provider's ordinary function fallback.
     client_tool_search: bool,
+    client_tool_search_declarations: Option<Value>,
     loaded_tool_namespaces: HashMap<String, String>,
     tool_search_name_owned: bool,
 }
@@ -194,6 +195,27 @@ impl ToolRegistry {
     ) -> Result<Self, ToolError> {
         let mut entries = HashMap::with_capacity(tools.len());
         let mut mcp_tool_map = McpToolMap::default();
+        let client_tool_search = tools.iter().any(|tool| {
+            matches!(
+                tool,
+                ResponsesTool::ToolSearch(search)
+                    if search.execution == Some(ToolSearchExecution::Client)
+            )
+        });
+        let client_tool_search_declarations = if client_tool_search {
+            let mut declarations = tools.to_vec();
+            declarations
+                .iter_mut()
+                .for_each(ResponsesTool::sanitize_for_persistence);
+            serialize_to_value_or_custom_default(
+                &declarations,
+                "failed to preserve client tool-search response declarations",
+                Some,
+                None,
+            )
+        } else {
+            None
+        };
         // Namespace members must be keyed by the same flat, model-visible name
         // the model will call, so resolve them first — the same pure pass used
         // to build the upstream request.
@@ -248,13 +270,6 @@ impl ToolRegistry {
         }
 
         let namespace_map = CodexNamespaceHandler.build_namespace_map((!tools.is_empty()).then_some(tools))?;
-        let client_tool_search = tools.iter().any(|tool| {
-            matches!(
-                tool,
-                ResponsesTool::ToolSearch(search)
-                    if search.execution == Some(ToolSearchExecution::Client)
-            )
-        });
         let tool_search_name_owned = entries.contains_key(tool_search::TOOL_SEARCH_NAME);
 
         Ok(Self {
@@ -262,6 +277,7 @@ impl ToolRegistry {
             namespace_map,
             mcp_tool_map,
             client_tool_search,
+            client_tool_search_declarations,
             loaded_tool_namespaces: HashMap::new(),
             tool_search_name_owned,
         })
@@ -301,6 +317,8 @@ impl ToolRegistry {
         let mut changed = CodexNamespaceHandler.restore_response_wire(wire, self.namespace_map.as_ref());
         changed |= tool_search::restore_loaded_namespace_response_wire(wire, &self.loaded_tool_namespaces);
         changed |= tool_search::restore_response_wire(wire, self.can_restore_tool_search_fallback());
+        changed |=
+            tool_search::restore_response_tool_declarations_wire(wire, self.client_tool_search_declarations.as_ref());
         changed
     }
 
@@ -681,6 +699,52 @@ mod tests {
         .expect("valid loaded function input");
         search_registry.load_tool_search_output(&loaded_input);
         assert!(!search_registry.can_restore_tool_search_fallback());
+    }
+
+    #[tokio::test]
+    async fn client_tool_search_restores_public_tools_on_response_lifecycle_events() {
+        let declarations = serde_json::json!([
+            {
+                "type": "tool_search",
+                "execution": "client",
+                "description": "search deferred tools",
+                "parameters": {"type": "object"}
+            },
+            {
+                "type": "function",
+                "name": "get_shipping_eta",
+                "strict": false,
+                "defer_loading": true
+            }
+        ]);
+        let mut tools: Vec<ResponsesTool> =
+            serde_json::from_value(declarations.clone()).expect("valid client tool-search declarations");
+        let mut executors = GatewayExecutors::default();
+        let registry = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
+            .await
+            .expect("valid registry");
+
+        for event_type in [
+            "response.created",
+            "response.in_progress",
+            "response.completed",
+            "response.incomplete",
+            "response.failed",
+        ] {
+            let mut wire = WireEvent::new(event_type);
+            wire.rest.insert(
+                "response".to_owned(),
+                serde_json::json!({
+                    "tools": [
+                        {"type": "function", "name": "tool_search", "strict": false},
+                        {"type": "function", "name": "get_shipping_eta", "strict": false}
+                    ]
+                }),
+            );
+
+            assert!(registry.restore_stream_event_wire(&mut wire));
+            assert_eq!(wire.rest["response"]["tools"], declarations);
+        }
     }
 
     #[tokio::test]
