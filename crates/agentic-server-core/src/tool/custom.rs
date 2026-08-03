@@ -21,13 +21,13 @@ impl CustomHandler {
         FunctionTool {
             type_: "function".to_owned(),
             name: param.name.as_str().to_owned(),
-            description: param.description.clone(),
+            description: Some(model_visible_description(param)),
             parameters: Some(serde_json::json!({
                 "type": "object",
                 "properties": {
                     "input": {
                         "type": "string",
-                        "description": "Raw input for the custom tool."
+                        "description": "Raw custom tool input. Follow the tool description and declared format exactly."
                     }
                 },
                 "required": ["input"],
@@ -58,6 +58,53 @@ impl CustomHandler {
             input: String::new(),
         })
     }
+}
+
+fn model_visible_description(param: &CustomToolParam) -> String {
+    let mut fragments = Vec::new();
+    if let Some(description) = param
+        .description
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        fragments.push(description.to_owned());
+    }
+
+    fragments.push("Provide the raw tool input in the `input` string field.".to_owned());
+
+    if let Some(format) = &param.format {
+        let format_type = format.get("type").and_then(serde_json::Value::as_str);
+        let syntax = format.get("syntax").and_then(serde_json::Value::as_str);
+        let definition = format
+            .get("definition")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+
+        if format_type == Some("grammar")
+            && matches!(syntax, Some("lark" | "regex"))
+            && let (Some(syntax), Some(definition)) = (syntax, definition)
+        {
+            fragments.push(format!(
+                "The string must match this {syntax} grammar exactly:\n{definition}"
+            ));
+        } else {
+            fragments.push(format!(
+                "The string must conform to this custom tool format declaration exactly:\n{format}"
+            ));
+        }
+    }
+
+    if !param.extra.is_empty()
+        && let Ok(extra) = serde_json::to_string(&param.extra)
+    {
+        fragments.push(format!(
+            "Additional custom tool declaration fields that must be respected:\n{extra}"
+        ));
+    }
+
+    fragments.join("\n\n")
 }
 
 impl ToolHandler for CustomHandler {
@@ -166,7 +213,13 @@ mod tests {
     fn custom_declaration_normalizes_to_function_with_raw_input() {
         let param = serde_json::from_value::<CustomToolParam>(serde_json::json!({
             "name": "raw_echo",
-            "description": "Echo raw input."
+            "description": "Echo raw input.",
+            "format": {
+                "type": "grammar",
+                "syntax": "lark",
+                "definition": "start: \"CUSTOM_OK\""
+            },
+            "x-provider-field": {"mode": "strict"}
         }))
         .expect("custom tool");
 
@@ -179,5 +232,31 @@ mod tests {
             "string"
         );
         assert_eq!(tool.parameters.as_ref().unwrap()["required"][0], "input");
+        let description = tool.description.as_deref().expect("model-visible description");
+        assert!(description.contains("Echo raw input."));
+        assert!(description.contains("raw tool input in the `input` string field"));
+        assert!(description.contains("lark grammar exactly"));
+        assert!(description.contains("start: \"CUSTOM_OK\""));
+        assert!(description.contains("x-provider-field"));
+        assert!(description.contains("strict"));
+    }
+
+    #[test]
+    fn regex_grammar_is_preserved_in_model_visible_description() {
+        let param = serde_json::from_value::<CustomToolParam>(serde_json::json!({
+            "name": "timestamp",
+            "description": "Save a timestamp.",
+            "format": {
+                "type": "grammar",
+                "syntax": "regex",
+                "definition": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+            }
+        }))
+        .expect("custom tool");
+
+        let tool = CustomHandler::to_function_call(&param);
+        let description = tool.description.as_deref().expect("model-visible description");
+        assert!(description.contains("regex grammar exactly"));
+        assert!(description.contains("^[0-9]{4}-[0-9]{2}-[0-9]{2}$"));
     }
 }

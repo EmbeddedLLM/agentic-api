@@ -580,7 +580,14 @@ mod tests {
         assert_eq!(upstream["tools"][0]["name"], "read_file");
         assert_eq!(upstream["tools"][1]["type"], "function");
         assert_eq!(upstream["tools"][1]["name"], "apply_patch");
-        assert_eq!(upstream["tools"][1]["description"], "Apply a patch.");
+        let custom_description = upstream["tools"][1]["description"]
+            .as_str()
+            .expect("custom tool description");
+        assert!(custom_description.contains("Apply a patch."));
+        assert!(custom_description.contains("raw tool input in the `input` string field"));
+        assert!(custom_description.contains("lark grammar exactly"));
+        assert!(custom_description.contains("start: patch"));
+        assert!(custom_description.contains("x-provider-field"));
         assert_eq!(
             upstream["tools"][1]["parameters"]["properties"]["input"]["type"],
             "string"
