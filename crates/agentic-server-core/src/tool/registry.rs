@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::codex::insert_namespace_entries;
-use super::custom::insert_custom_entry;
+use super::custom::{CustomHandler, CustomToolMap, insert_custom_entry};
 use super::executors::GatewayExecutors;
 use super::function::insert_function_entry;
 use super::mcp::handler::{McpToolMap, McpToolRef};
@@ -166,6 +166,10 @@ pub struct ToolRegistry {
     /// restoration don't rebuild it on every call.
     namespace_map: Option<NamespaceMap>,
 
+    /// Maps normalized custom function names back to their public declarations
+    /// for response lifecycle metadata restoration.
+    custom_tool_map: Option<CustomToolMap>,
+
     /// Maps model-visible MCP function names back to their public server and
     /// tool identities without reparsing executor configuration.
     mcp_tool_map: McpToolMap,
@@ -241,10 +245,12 @@ impl ToolRegistry {
         }
 
         let namespace_map = CodexNamespaceHandler.build_namespace_map((!tools.is_empty()).then_some(tools))?;
+        let custom_tool_map = CustomHandler::build_tool_map(tools);
 
         Ok(Self {
             entries,
             namespace_map,
+            custom_tool_map,
             mcp_tool_map,
         })
     }
@@ -278,7 +284,8 @@ impl ToolRegistry {
     }
 
     pub fn restore_stream_event_wire(&self, wire: &mut WireEvent) -> bool {
-        CodexNamespaceHandler.restore_response_wire(wire, self.namespace_map.as_ref())
+        let custom_restored = CustomHandler::restore_response_wire(wire, self.custom_tool_map.as_ref());
+        CodexNamespaceHandler.restore_response_wire(wire, self.namespace_map.as_ref()) | custom_restored
     }
 
     /// Returns the subset of `calls` whose names map to gateway-owned tools.

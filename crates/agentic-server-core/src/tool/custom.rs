@@ -1,11 +1,38 @@
 use std::collections::HashMap;
 
+use serde_json::{Map, Value};
+
+use crate::events::WireEvent;
 use crate::types::event::MessageStatus;
 use crate::types::io::{CustomToolCall, FunctionTool, FunctionToolCall, OutputItem};
-use crate::types::tools::CustomToolParam;
+use crate::types::tools::{CustomToolParam, ResponsesTool};
 use crate::utils::common::serialize_to_value_or_custom_default;
 
 use super::{ToolEntry, ToolError, ToolHandler, ToolType};
+
+/// Request-scoped mapping from normalized function names to their original
+/// public custom-tool declarations.
+#[derive(Debug, Default)]
+pub(crate) struct CustomToolMap {
+    declarations: HashMap<String, CustomToolParam>,
+}
+
+impl CustomToolMap {
+    fn from_tools(tools: &[ResponsesTool]) -> Option<Self> {
+        let declarations = tools
+            .iter()
+            .filter_map(|tool| match tool {
+                ResponsesTool::Custom(param) => Some((param.name.as_str().to_owned(), param.clone())),
+                _ => None,
+            })
+            .collect::<HashMap<_, _>>();
+        (!declarations.is_empty()).then_some(Self { declarations })
+    }
+
+    fn declaration(&self, name: &str) -> Option<&CustomToolParam> {
+        self.declarations.get(name)
+    }
+}
 
 /// Handler for client-owned `type: "custom"` tools.
 ///
@@ -16,6 +43,11 @@ use super::{ToolEntry, ToolError, ToolHandler, ToolType};
 pub struct CustomHandler;
 
 impl CustomHandler {
+    #[must_use]
+    pub(crate) fn build_tool_map(tools: &[ResponsesTool]) -> Option<CustomToolMap> {
+        CustomToolMap::from_tools(tools)
+    }
+
     #[must_use]
     pub fn to_function_call(param: &CustomToolParam) -> FunctionTool {
         FunctionTool {
@@ -58,6 +90,95 @@ impl CustomHandler {
             input: String::new(),
         })
     }
+
+    /// Restores normalized custom-tool declarations in response lifecycle
+    /// metadata before the event is emitted to the client.
+    pub(crate) fn restore_response_wire(wire: &mut WireEvent, map: Option<&CustomToolMap>) -> bool {
+        let Some(map) = map else {
+            return false;
+        };
+        restore_response_map(&mut wire.rest, map)
+    }
+}
+
+fn restore_response_map(object: &mut Map<String, Value>, map: &CustomToolMap) -> bool {
+    let mut changed = restore_response_metadata(object, map);
+    for key in ["response", "payload"] {
+        if let Some(nested) = object.get_mut(key).and_then(Value::as_object_mut) {
+            changed |= restore_response_map(nested, map);
+        }
+    }
+    changed
+}
+
+fn restore_response_metadata(object: &mut Map<String, Value>, map: &CustomToolMap) -> bool {
+    let mut changed = false;
+    if let Some(tools) = object.get_mut("tools").and_then(Value::as_array_mut) {
+        for tool in tools {
+            changed |= restore_custom_declaration(tool, map);
+        }
+    }
+    if let Some(tool_choice) = object.get_mut("tool_choice") {
+        changed |= restore_custom_tool_choice(tool_choice, map);
+    }
+    changed
+}
+
+fn restore_custom_declaration(tool: &mut Value, map: &CustomToolMap) -> bool {
+    let Some(name) = normalized_custom_name(tool, map) else {
+        return false;
+    };
+    let Some(param) = map.declaration(&name) else {
+        return false;
+    };
+    let Some(mut declaration) =
+        serialize_to_value_or_custom_default(param, "custom tool metadata serialization failed", Some, None)
+    else {
+        return false;
+    };
+    let Some(object) = declaration.as_object_mut() else {
+        return false;
+    };
+    object.insert("type".to_owned(), Value::String("custom".to_owned()));
+    *tool = declaration;
+    true
+}
+
+fn restore_custom_tool_choice(choice: &mut Value, map: &CustomToolMap) -> bool {
+    let Some(object) = choice.as_object_mut() else {
+        return false;
+    };
+    if object.get("type").and_then(Value::as_str) == Some("allowed_tools") {
+        let Some(tools) = object.get_mut("tools").and_then(Value::as_array_mut) else {
+            return false;
+        };
+        return tools
+            .iter_mut()
+            .map(|tool| restore_custom_choice_type(tool, map))
+            .fold(false, |changed, restored| changed | restored);
+    }
+    restore_custom_choice_type(choice, map)
+}
+
+fn restore_custom_choice_type(choice: &mut Value, map: &CustomToolMap) -> bool {
+    if normalized_custom_name(choice, map).is_none() {
+        return false;
+    }
+    let Some(object) = choice.as_object_mut() else {
+        return false;
+    };
+    object.insert("type".to_owned(), Value::String("custom".to_owned()));
+    object.remove("namespace");
+    true
+}
+
+fn normalized_custom_name(value: &Value, map: &CustomToolMap) -> Option<String> {
+    let object = value.as_object()?;
+    if object.get("type").and_then(Value::as_str) != Some("function") {
+        return None;
+    }
+    let name = object.get("name")?.as_str()?;
+    map.declaration(name).map(|_| name.to_owned())
 }
 
 fn model_visible_description(param: &CustomToolParam) -> String {
@@ -258,5 +379,72 @@ mod tests {
         let description = tool.description.as_deref().expect("model-visible description");
         assert!(description.contains("regex grammar exactly"));
         assert!(description.contains("^[0-9]{4}-[0-9]{2}-[0-9]{2}$"));
+    }
+
+    #[test]
+    fn response_lifecycle_metadata_restores_public_custom_tool_shape() {
+        let param = serde_json::from_value::<CustomToolParam>(serde_json::json!({
+            "name": "raw_echo",
+            "description": "Echo raw input.",
+            "format": {
+                "type": "grammar",
+                "syntax": "lark",
+                "definition": "start: echo"
+            }
+        }))
+        .expect("custom tool");
+        let tools = vec![ResponsesTool::Custom(param)];
+        let map = CustomHandler::build_tool_map(&tools);
+        let mut wire = WireEvent::new("response.created");
+        wire.rest.insert(
+            "response".to_owned(),
+            serde_json::json!({
+                "tools": [{
+                    "type": "function",
+                    "name": "raw_echo",
+                    "description": "normalized description",
+                    "parameters": {"type": "object"}
+                }],
+                "tool_choice": {"type": "function", "name": "raw_echo"}
+            }),
+        );
+
+        assert!(CustomHandler::restore_response_wire(&mut wire, map.as_ref()));
+        let response = &wire.rest["response"];
+        assert_eq!(response["tools"][0]["type"], "custom");
+        assert_eq!(response["tools"][0]["description"], "Echo raw input.");
+        assert_eq!(response["tools"][0]["format"]["syntax"], "lark");
+        assert!(response["tools"][0].get("parameters").is_none());
+        assert_eq!(response["tool_choice"]["type"], "custom");
+        assert_eq!(response["tool_choice"]["name"], "raw_echo");
+    }
+
+    #[test]
+    fn allowed_tools_metadata_restores_custom_selector_type() {
+        let param = serde_json::from_value::<CustomToolParam>(serde_json::json!({
+            "name": "raw_echo"
+        }))
+        .expect("custom tool");
+        let tools = vec![ResponsesTool::Custom(param)];
+        let map = CustomHandler::build_tool_map(&tools);
+        let mut wire = WireEvent::new("response.in_progress");
+        wire.rest.insert(
+            "response".to_owned(),
+            serde_json::json!({
+                "tool_choice": {
+                    "type": "allowed_tools",
+                    "mode": "required",
+                    "tools": [
+                        {"type": "function", "name": "ordinary"},
+                        {"type": "function", "name": "raw_echo"}
+                    ]
+                }
+            }),
+        );
+
+        assert!(CustomHandler::restore_response_wire(&mut wire, map.as_ref()));
+        let tools = &wire.rest["response"]["tool_choice"]["tools"];
+        assert_eq!(tools[0]["type"], "function");
+        assert_eq!(tools[1]["type"], "custom");
     }
 }
