@@ -12,6 +12,13 @@ pub enum ExecutorError {
     #[error("storage error: {0}")]
     Storage(#[from] StorageError),
 
+    /// Persistence failed after inference completed.
+    ///
+    /// The source is retained for internal diagnostics while the display
+    /// message remains safe to send to API clients.
+    #[error("failed to persist response")]
+    Persistence(#[source] Box<ExecutorError>),
+
     /// The LLM backend returned a non-2xx status or was unreachable.
     #[error("LLM request failed ({status}): {body}")]
     LLMRequest { status: StatusCode, body: String },

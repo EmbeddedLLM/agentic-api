@@ -1,12 +1,18 @@
 //! Conversation history item stored in the database.
 
 use serde_json::Value;
+use std::fmt::Write;
 use tracing::warn;
 
 use super::super::pool::{DbPool, DbResult, DbTransaction};
 use super::super::types::item::{InOutItem, ItemKind, STORED_ITEM_KIND_KEY};
 use crate::types::io::{InputItem, OutputItem};
 use crate::utils::common::{deserialize_from_str_opt, utcnow_str};
+
+const ITEM_COLUMN_COUNT: usize = 5;
+const SEQUENCE_COLUMN_INDEX: usize = 4;
+const MAX_BIND_PARAMETERS: usize = 999;
+const MAX_ITEMS_PER_INSERT: usize = MAX_BIND_PARAMETERS / ITEM_COLUMN_COUNT;
 
 /// Conversation history item stored in the database.
 ///
@@ -88,6 +94,32 @@ impl Item {
     }
 }
 
+fn item_values_clause(row_count: usize, first_bind_index: usize, sequence_from_cte: bool) -> String {
+    let mut clause = String::new();
+    let mut bind_index = first_bind_index;
+
+    for row_index in 0..row_count {
+        if row_index > 0 {
+            clause.push_str(", ");
+        }
+        clause.push('(');
+        for column_index in 0..ITEM_COLUMN_COUNT {
+            if column_index > 0 {
+                clause.push_str(", ");
+            }
+            if sequence_from_cte && column_index == SEQUENCE_COLUMN_INDEX {
+                write!(clause, "(SELECT start + ${bind_index} FROM next_seq)").expect("writing to String cannot fail");
+            } else {
+                write!(clause, "${bind_index}").expect("writing to String cannot fail");
+            }
+            bind_index += 1;
+        }
+        clause.push(')');
+    }
+
+    clause
+}
+
 /// Create items in a transaction with optional conversation context.
 ///
 /// If `conversation_id` is provided, the next sequence range is computed in the insert statement so
@@ -104,18 +136,29 @@ pub async fn create_in_tx(
         return Ok(Vec::new());
     }
 
-    if let Some(conversation_id) = conversation_id {
-        return create_in_tx_with_next_conversation_seq(tx, items, conversation_id).await;
+    let mut created = Vec::with_capacity(items.len());
+    for batch in items.chunks(MAX_ITEMS_PER_INSERT) {
+        let mut rows = if let Some(conversation_id) = conversation_id {
+            create_in_tx_with_next_conversation_seq(tx, batch, conversation_id).await?
+        } else {
+            create_in_tx_without_conversation(tx, batch).await?
+        };
+        created.append(&mut rows);
     }
+    Ok(created)
+}
 
+async fn create_in_tx_without_conversation(
+    tx: &mut DbTransaction<'_>,
+    items: &[(String, String)],
+) -> DbResult<Vec<Item>> {
     let now = utcnow_str();
-    let placeholders: Vec<&str> = vec!["(?, ?, ?, ?, ?)"; items.len()];
-    let values_clause = placeholders.join(", ");
+    let values_clause = item_values_clause(items.len(), 1, false);
     let sql =
         format!("INSERT INTO items (id, data, created_at, conversation_id, seq) VALUES {values_clause} RETURNING *");
 
     let mut query = sqlx::query_as::<_, Item>(&sql);
-    for (id, data) in &items {
+    for (id, data) in items {
         query = query.bind(id).bind(data).bind(now).bind(None::<&str>).bind(None::<i64>);
     }
 
@@ -124,17 +167,16 @@ pub async fn create_in_tx(
 
 async fn create_in_tx_with_next_conversation_seq(
     tx: &mut DbTransaction<'_>,
-    items: Vec<(String, String)>,
+    items: &[(String, String)],
     conversation_id: &str,
 ) -> DbResult<Vec<Item>> {
     let now = utcnow_str();
-    let placeholders: Vec<&str> = vec!["(?, ?, ?, ?, (SELECT start + ? FROM next_seq))"; items.len()];
-    let values_clause = placeholders.join(", ");
+    let values_clause = item_values_clause(items.len(), 2, true);
     let sql = format!(
         "WITH next_seq AS ( \
              SELECT COALESCE(MAX(seq), -1) + 1 AS start \
              FROM items \
-             WHERE conversation_id = ? \
+             WHERE conversation_id = $1 \
          ) \
          INSERT INTO items (id, data, created_at, conversation_id, seq) \
          VALUES {values_clause} \
@@ -163,13 +205,20 @@ pub async fn get_items(pool: &DbPool, ids: &[String]) -> DbResult<Vec<Item>> {
     if ids.is_empty() {
         return Ok(vec![]);
     }
-    let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
-    let sql = format!("SELECT * FROM items WHERE id IN ({placeholders})");
-    let mut q = sqlx::query_as::<_, Item>(&sql);
-    for id in ids {
-        q = q.bind(id);
+    let mut rows = Vec::with_capacity(ids.len());
+    for batch in ids.chunks(MAX_BIND_PARAMETERS) {
+        let placeholders = (1..=batch.len())
+            .map(|index| format!("${index}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!("SELECT * FROM items WHERE id IN ({placeholders})");
+        let mut query = sqlx::query_as::<_, Item>(&sql);
+        for id in batch {
+            query = query.bind(id);
+        }
+        rows.extend(query.fetch_all(pool).await?);
     }
-    q.fetch_all(pool).await
+    Ok(rows)
 }
 
 /// Get items by conversation ID ordered by sequence.
@@ -177,7 +226,7 @@ pub async fn get_items(pool: &DbPool, ids: &[String]) -> DbResult<Vec<Item>> {
 /// # Errors
 /// Returns `DbResult::Err` if the database query fails.
 pub async fn get_items_by_conversation(pool: &DbPool, conversation_id: &str) -> DbResult<Vec<Item>> {
-    sqlx::query_as::<_, Item>("SELECT * FROM items WHERE conversation_id = ? ORDER BY seq ASC")
+    sqlx::query_as::<_, Item>("SELECT * FROM items WHERE conversation_id = $1 ORDER BY seq ASC")
         .bind(conversation_id)
         .fetch_all(pool)
         .await
@@ -188,6 +237,82 @@ mod tests {
     use super::*;
     use crate::types::event::MessageStatus;
     use crate::types::io::{InputItem, OutputItem, ReasoningOutput, ReasoningTextContent};
+
+    #[test]
+    fn item_values_clause_numbers_plain_rows() {
+        assert_eq!(
+            item_values_clause(2, 1, false),
+            "($1, $2, $3, $4, $5), ($6, $7, $8, $9, $10)"
+        );
+    }
+
+    #[test]
+    fn item_values_clause_numbers_conversation_rows_after_cte_bind() {
+        assert_eq!(
+            item_values_clause(2, 2, true),
+            "($2, $3, $4, $5, (SELECT start + $6 FROM next_seq)), \
+             ($7, $8, $9, $10, (SELECT start + $11 FROM next_seq))"
+        );
+    }
+
+    #[tokio::test]
+    async fn item_queries_chunk_above_portable_bind_limit() {
+        let pool = crate::storage::create_pool_with_schema(Some("sqlite://?mode=memory"))
+            .await
+            .expect("create in-memory database");
+        let items = (0..=MAX_BIND_PARAMETERS)
+            .map(|index| (format!("item_{index}"), "{}".to_owned()))
+            .collect::<Vec<_>>();
+        let ids = items.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>();
+        let mut transaction = pool.begin().await.expect("begin transaction");
+        let created = create_in_tx(&mut transaction, items, None)
+            .await
+            .expect("insert item batches");
+        transaction.commit().await.expect("commit item batches");
+        let loaded = get_items(&pool, &ids).await.expect("load item batches");
+
+        assert_eq!(created.len(), MAX_BIND_PARAMETERS + 1);
+        assert_eq!(loaded.len(), MAX_BIND_PARAMETERS + 1);
+    }
+
+    #[tokio::test]
+    async fn conversation_item_batches_keep_contiguous_sequences() {
+        let pool = crate::storage::create_pool_with_schema(Some("sqlite://?mode=memory"))
+            .await
+            .expect("create in-memory database");
+        let conversation_id = "conv_batch";
+        crate::storage::models::conversation::create(&pool, conversation_id)
+            .await
+            .expect("create conversation");
+        let item_count = MAX_ITEMS_PER_INSERT + 1;
+        let items = (0..item_count)
+            .map(|index| (format!("conversation_item_{index}"), "{}".to_owned()))
+            .collect::<Vec<_>>();
+        let mut transaction = pool.begin().await.expect("begin transaction");
+        let created = create_in_tx(&mut transaction, items, Some(conversation_id))
+            .await
+            .expect("insert conversation item batches");
+        transaction.commit().await.expect("commit item batches");
+        let stored = get_items_by_conversation(&pool, conversation_id)
+            .await
+            .expect("load conversation item batches");
+        let expected_sequences = (0..i64::try_from(item_count).expect("item count fits in i64")).collect::<Vec<_>>();
+
+        assert_eq!(
+            created
+                .iter()
+                .map(|item| item.seq.expect("created sequence"))
+                .collect::<Vec<_>>(),
+            expected_sequences
+        );
+        assert_eq!(
+            stored
+                .iter()
+                .map(|item| item.seq.expect("stored sequence"))
+                .collect::<Vec<_>>(),
+            expected_sequences
+        );
+    }
 
     #[test]
     fn test_item_basic() {

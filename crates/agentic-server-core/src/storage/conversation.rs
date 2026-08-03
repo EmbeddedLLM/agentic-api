@@ -113,6 +113,13 @@ impl ConversationStore {
 
         let mut tx = pool.begin().await?;
 
+        match conversation::lock_in_tx(&mut tx, conversation_id).await {
+            Ok(()) => {}
+            Err(sqlx::Error::RowNotFound) => {
+                return Err(StorageError::not_found("Conversation", conversation_id));
+            }
+            Err(error) => return Err(error.into()),
+        }
         item::create_in_tx(&mut tx, items_, Some(conversation_id)).await?;
 
         response::create_in_tx(

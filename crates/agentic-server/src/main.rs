@@ -1,8 +1,14 @@
+use std::time::Duration;
+
 use clap::{Args, Parser, Subcommand};
 
+use agentic_core::DatabaseBackend;
 use agentic_core::config::{
-    Config, DEFAULT_SQLITE_JOURNAL_SIZE_LIMIT_BYTES, DEFAULT_SQLITE_MAX_CONNECTIONS, DEFAULT_SQLITE_MMAP_SIZE_BYTES,
-    SqliteConfig, SqliteTempStore, normalize_base_url,
+    Config, DEFAULT_POSTGRES_ACQUIRE_TIMEOUT_SECONDS, DEFAULT_POSTGRES_IDLE_TIMEOUT_SECONDS,
+    DEFAULT_POSTGRES_LOCK_TIMEOUT_SECONDS, DEFAULT_POSTGRES_MAX_CONNECTIONS, DEFAULT_POSTGRES_MAX_LIFETIME_SECONDS,
+    DEFAULT_POSTGRES_MIGRATION_TIMEOUT_SECONDS, DEFAULT_POSTGRES_STATEMENT_TIMEOUT_SECONDS,
+    DEFAULT_SQLITE_JOURNAL_SIZE_LIMIT_BYTES, DEFAULT_SQLITE_MAX_CONNECTIONS, DEFAULT_SQLITE_MMAP_SIZE_BYTES,
+    PostgresConfig, SqliteConfig, SqliteTempStore, normalize_base_url,
 };
 use agentic_core::error::Error;
 
@@ -34,6 +40,7 @@ struct CommonArgs {
     #[arg(
         long,
         env = "DATABASE_URL",
+        hide_env_values = true,
         default_value = "sqlite://./agentic_api.db",
         global = true
     )]
@@ -104,6 +111,35 @@ fn parse_env_u32_value(name: &str, value: Result<String, std::env::VarError>, de
     }
 }
 
+fn parse_env_duration(name: &str, default_seconds: u64) -> Result<Duration, Error> {
+    parse_env_duration_value(name, std::env::var(name), default_seconds)
+}
+
+fn parse_env_duration_value(
+    name: &str,
+    value: Result<String, std::env::VarError>,
+    default_seconds: u64,
+) -> Result<Duration, Error> {
+    let seconds = parse_env_u64_value(name, value, default_seconds)?;
+    if seconds == 0 {
+        return Err(Error::Config(format!("{name} must be greater than 0")));
+    }
+    Ok(Duration::from_secs(seconds))
+}
+
+fn parse_env_optional_duration(name: &str, default_seconds: u64) -> Result<Option<Duration>, Error> {
+    parse_env_optional_duration_value(name, std::env::var(name), default_seconds)
+}
+
+fn parse_env_optional_duration_value(
+    name: &str,
+    value: Result<String, std::env::VarError>,
+    default_seconds: u64,
+) -> Result<Option<Duration>, Error> {
+    let seconds = parse_env_u64_value(name, value, default_seconds)?;
+    Ok((seconds > 0).then(|| Duration::from_secs(seconds)))
+}
+
 fn parse_env_temp_store() -> Result<SqliteTempStore, Error> {
     parse_env_temp_store_value(std::env::var("SQLITE_TEMP_STORE"))
 }
@@ -135,7 +171,45 @@ fn sqlite_config_from_env() -> Result<SqliteConfig, Error> {
     })
 }
 
+fn postgres_config_from_env() -> Result<PostgresConfig, Error> {
+    Ok(PostgresConfig {
+        max_connections: parse_env_u32("POSTGRES_MAX_CONNECTIONS", DEFAULT_POSTGRES_MAX_CONNECTIONS)?,
+        acquire_timeout: parse_env_duration(
+            "POSTGRES_ACQUIRE_TIMEOUT_SECONDS",
+            DEFAULT_POSTGRES_ACQUIRE_TIMEOUT_SECONDS,
+        )?,
+        lock_timeout: parse_env_duration("POSTGRES_LOCK_TIMEOUT_SECONDS", DEFAULT_POSTGRES_LOCK_TIMEOUT_SECONDS)?,
+        migration_timeout: parse_env_duration(
+            "POSTGRES_MIGRATION_TIMEOUT_SECONDS",
+            DEFAULT_POSTGRES_MIGRATION_TIMEOUT_SECONDS,
+        )?,
+        statement_timeout: parse_env_duration(
+            "POSTGRES_STATEMENT_TIMEOUT_SECONDS",
+            DEFAULT_POSTGRES_STATEMENT_TIMEOUT_SECONDS,
+        )?,
+        idle_timeout: parse_env_optional_duration(
+            "POSTGRES_IDLE_TIMEOUT_SECONDS",
+            DEFAULT_POSTGRES_IDLE_TIMEOUT_SECONDS,
+        )?,
+        max_lifetime: parse_env_optional_duration(
+            "POSTGRES_MAX_LIFETIME_SECONDS",
+            DEFAULT_POSTGRES_MAX_LIFETIME_SECONDS,
+        )?,
+    })
+}
+
+fn database_configs_from_env(database_url: &str) -> Result<(PostgresConfig, SqliteConfig), Error> {
+    let backend = DatabaseBackend::from_url(database_url)
+        .map_err(|error| Error::Config(format!("invalid DATABASE_URL: {error}")))?;
+    match backend {
+        DatabaseBackend::Postgres => Ok((postgres_config_from_env()?, SqliteConfig::default())),
+        DatabaseBackend::Sqlite => Ok((PostgresConfig::default(), sqlite_config_from_env()?)),
+        DatabaseBackend::Other => Ok((PostgresConfig::default(), SqliteConfig::default())),
+    }
+}
+
 fn build_config(llm_api_base: String, common: &CommonArgs) -> Result<Config, Error> {
+    let (postgres, sqlite) = database_configs_from_env(&common.db_url)?;
     Ok(Config {
         llm_api_base,
         openai_api_key: common.openai_api_key.clone(),
@@ -143,7 +217,8 @@ fn build_config(llm_api_base: String, common: &CommonArgs) -> Result<Config, Err
         llm_ready_interval_s: common.llm_ready_interval_s,
         skip_llm_ready_check: common.skip_llm_ready_check,
         db_url: Some(common.db_url.clone()),
-        sqlite: sqlite_config_from_env()?,
+        postgres,
+        sqlite,
     })
 }
 
@@ -191,10 +266,20 @@ async fn main() -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use clap::{CommandFactory, Parser};
 
-    use super::{Cli, Commands, parse_env_temp_store_value, parse_env_u32_value, parse_env_u64_value};
-    use agentic_core::config::{DEFAULT_SQLITE_MAX_CONNECTIONS, SqliteTempStore};
+    use super::{
+        Cli, Commands, database_configs_from_env, parse_env_duration_value, parse_env_optional_duration_value,
+        parse_env_temp_store_value, parse_env_u32_value, parse_env_u64_value,
+    };
+    use agentic_core::config::{
+        DEFAULT_POSTGRES_ACQUIRE_TIMEOUT_SECONDS, DEFAULT_POSTGRES_IDLE_TIMEOUT_SECONDS,
+        DEFAULT_POSTGRES_LOCK_TIMEOUT_SECONDS, DEFAULT_POSTGRES_MAX_CONNECTIONS,
+        DEFAULT_POSTGRES_MIGRATION_TIMEOUT_SECONDS, DEFAULT_POSTGRES_STATEMENT_TIMEOUT_SECONDS,
+        DEFAULT_SQLITE_MAX_CONNECTIONS, SqliteTempStore,
+    };
 
     #[test]
     fn serve_uses_common_args_before_subcommand() {
@@ -324,5 +409,94 @@ mod tests {
             SqliteTempStore::Memory
         );
         assert!(parse_env_temp_store_value(Ok("invalid".to_owned())).is_err());
+    }
+
+    #[test]
+    fn postgres_timeout_parser_uses_defaults_and_allows_disabling_recycling() {
+        assert_eq!(
+            parse_env_duration_value(
+                "POSTGRES_ACQUIRE_TIMEOUT_SECONDS",
+                Err(std::env::VarError::NotPresent),
+                DEFAULT_POSTGRES_ACQUIRE_TIMEOUT_SECONDS,
+            )
+            .expect("default acquire timeout"),
+            Duration::from_secs(DEFAULT_POSTGRES_ACQUIRE_TIMEOUT_SECONDS)
+        );
+        assert_eq!(
+            parse_env_duration_value(
+                "POSTGRES_ACQUIRE_TIMEOUT_SECONDS",
+                Ok("9".to_owned()),
+                DEFAULT_POSTGRES_ACQUIRE_TIMEOUT_SECONDS,
+            )
+            .expect("explicit acquire timeout"),
+            Duration::from_secs(9)
+        );
+        assert!(
+            parse_env_duration_value(
+                "POSTGRES_ACQUIRE_TIMEOUT_SECONDS",
+                Ok("0".to_owned()),
+                DEFAULT_POSTGRES_ACQUIRE_TIMEOUT_SECONDS,
+            )
+            .is_err()
+        );
+        assert_eq!(
+            parse_env_optional_duration_value(
+                "POSTGRES_IDLE_TIMEOUT_SECONDS",
+                Ok("0".to_owned()),
+                DEFAULT_POSTGRES_IDLE_TIMEOUT_SECONDS,
+            )
+            .expect("disabled idle timeout"),
+            None
+        );
+        assert_eq!(
+            parse_env_optional_duration_value(
+                "POSTGRES_IDLE_TIMEOUT_SECONDS",
+                Ok("45".to_owned()),
+                DEFAULT_POSTGRES_IDLE_TIMEOUT_SECONDS,
+            )
+            .expect("explicit idle timeout"),
+            Some(Duration::from_secs(45))
+        );
+        assert_eq!(
+            parse_env_duration_value(
+                "POSTGRES_LOCK_TIMEOUT_SECONDS",
+                Err(std::env::VarError::NotPresent),
+                DEFAULT_POSTGRES_LOCK_TIMEOUT_SECONDS,
+            )
+            .expect("default lock timeout"),
+            Duration::from_secs(DEFAULT_POSTGRES_LOCK_TIMEOUT_SECONDS)
+        );
+        assert_eq!(
+            parse_env_duration_value(
+                "POSTGRES_MIGRATION_TIMEOUT_SECONDS",
+                Err(std::env::VarError::NotPresent),
+                DEFAULT_POSTGRES_MIGRATION_TIMEOUT_SECONDS,
+            )
+            .expect("default migration timeout"),
+            Duration::from_secs(DEFAULT_POSTGRES_MIGRATION_TIMEOUT_SECONDS)
+        );
+        assert_eq!(
+            parse_env_duration_value(
+                "POSTGRES_STATEMENT_TIMEOUT_SECONDS",
+                Err(std::env::VarError::NotPresent),
+                DEFAULT_POSTGRES_STATEMENT_TIMEOUT_SECONDS,
+            )
+            .expect("default statement timeout"),
+            Duration::from_secs(DEFAULT_POSTGRES_STATEMENT_TIMEOUT_SECONDS)
+        );
+        assert!(
+            parse_env_u32_value(
+                "POSTGRES_MAX_CONNECTIONS",
+                Ok("0".to_owned()),
+                DEFAULT_POSTGRES_MAX_CONNECTIONS,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn database_config_rejects_an_invalid_url() {
+        let error = database_configs_from_env("not a database URL").expect_err("invalid URL must be rejected");
+        assert!(error.to_string().contains("invalid DATABASE_URL"));
     }
 }

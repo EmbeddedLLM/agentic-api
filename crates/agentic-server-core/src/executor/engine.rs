@@ -10,7 +10,7 @@ use std::sync::Arc;
 use async_stream::stream;
 use either::Either;
 use tokio::sync::mpsc;
-use tracing::{debug, warn};
+use tracing::debug;
 
 use super::compaction::maybe_compact_context;
 use super::gateway::{
@@ -336,9 +336,7 @@ async fn run_blocking(
 
     let ch = exec_ctx.conv_handler.clone();
     let rh = exec_ctx.resp_handler.clone();
-    if let Err(e) = persist_if_needed(payload.clone(), ctx, ch, rh).await {
-        warn!("persist failed: {e}");
-    }
+    persist_if_needed(payload.clone(), ctx, ch, rh).await?;
 
     Ok(payload)
 }
@@ -379,7 +377,7 @@ fn run_stream(ctx: RequestContext, exec_ctx: Arc<ExecutionContext>, auth: Option
                             while let Ok(event) = event_rx.try_recv() {
                                 yield consume_stream_event(event, &mut next_sequence_number);
                             }
-                            yield stream_accumulator.error_chunk(&e.to_string());
+                            yield stream_accumulator.executor_error_chunk(&e);
                             yield DONE_MARKER.to_string();
                         }
                         Ok((Ok((payload, ctx)), mut stream_accumulator)) => {
@@ -390,16 +388,16 @@ fn run_stream(ctx: RequestContext, exec_ctx: Arc<ExecutionContext>, auth: Option
                             // `response.completed`. Persist before exposing that
                             // event so a custom call/output continuation cannot be
                             // cancelled by the client disconnect.
-                            let terminal_chunk = stream_accumulator.terminal_response_chunk(&payload);
                             let ch = exec_ctx.conv_handler.clone();
                             let rh = exec_ctx.resp_handler.clone();
-                            if let Err(e) = persist_if_needed(payload, ctx, ch, rh).await {
-                                warn!("persist failed: {e}");
-                            }
-
-                            match terminal_chunk {
-                                Ok(chunk) => yield chunk,
-                                Err(e) => yield stream_accumulator.error_chunk(&e.to_string()),
+                            let mut terminal_accumulator = stream_accumulator.clone();
+                            let terminal_chunk = terminal_accumulator.terminal_response_chunk(&payload);
+                            match persist_if_needed(payload, ctx, ch, rh).await {
+                                Ok(()) => match terminal_chunk {
+                                    Ok(chunk) => yield chunk,
+                                    Err(e) => yield stream_accumulator.executor_error_chunk(&e),
+                                },
+                                Err(e) => yield stream_accumulator.executor_error_chunk(&e),
                             }
                             yield DONE_MARKER.to_string();
                         }
