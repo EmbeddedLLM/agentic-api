@@ -4,6 +4,7 @@ use crate::types::request_response::ResponsePayload;
 use crate::utils::common::{serialize_to_string, serialize_to_value};
 use serde_json::Value;
 
+#[derive(Clone)]
 pub struct GatewayStreamAccumulator {
     next_sequence_number: u64,
     emitted_created: bool,
@@ -50,10 +51,11 @@ impl GatewayStreamAccumulator {
         serialize_sse_frame(&frame)
     }
 
-    pub(crate) fn error_chunk(&mut self, message: &str) -> String {
-        let mut frame = error_frame(message);
+    pub(crate) fn executor_error_chunk(&mut self, error: &ExecutorError) -> String {
+        let mut frame = executor_error_frame(error);
         self.stamp_event(&mut frame, 0);
-        serialize_sse_frame(&frame).unwrap_or_else(|_| error_sse_chunk(message, frame.sequence_number().unwrap_or(0)))
+        serialize_sse_frame(&frame)
+            .unwrap_or_else(|_| error_sse_chunk(&error.to_string(), frame.sequence_number().unwrap_or(0)))
     }
 
     fn should_emit_lifecycle(&mut self, event_type: SSEEventType) -> bool {
@@ -111,12 +113,17 @@ fn terminal_response_frame(payload: &ResponsePayload) -> ExecutorResult<EventFra
         .ok_or_else(|| ExecutorError::StreamError("terminal response event has no wire representation".to_owned()))
 }
 
-fn error_frame(message: &str) -> EventFrame {
+fn executor_error_frame(error: &ExecutorError) -> EventFrame {
+    let code = error.error_code();
     let mut wire = WireEvent::new("error");
+    wire.rest
+        .insert("status".to_owned(), serde_json::json!(error.http_status().as_u16()));
     wire.rest.insert(
         "error".to_owned(),
         serde_json::json!({
-            "message": message,
+            "message": error.to_string(),
+            "type": code,
+            "code": code,
         }),
     );
     EventFrame {
@@ -127,10 +134,26 @@ fn error_frame(message: &str) -> EventFrame {
 }
 
 pub(super) fn error_sse_chunk(message: &str, sequence_number: u64) -> String {
-    let mut frame = error_frame(message);
-    frame.wire.sequence_number = Some(sequence_number);
-    serialize_sse_frame(&frame)
-        .unwrap_or_else(|_| format!("data: {{\"type\":\"error\",\"sequence_number\":{sequence_number}}}\n\n"))
+    let code = "server_error";
+    let mut wire = WireEvent::new("error");
+    wire.sequence_number = Some(sequence_number);
+    wire.rest.insert("status".to_owned(), serde_json::json!(500));
+    wire.rest.insert(
+        "error".to_owned(),
+        serde_json::json!({
+            "message": message,
+            "type": code,
+            "code": code,
+        }),
+    );
+    let frame = EventFrame {
+        event_type: SSEEventType::Other,
+        payload: EventPayload::None,
+        wire,
+    };
+    serialize_sse_frame(&frame).unwrap_or_else(|_| {
+        format!("data: {{\"type\":\"error\",\"status\":500,\"sequence_number\":{sequence_number}}}\n\n")
+    })
 }
 
 pub(super) fn synthetic_event(

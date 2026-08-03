@@ -214,8 +214,8 @@ async fn test_store_false_proxies_sse_to_vllm() {
 }
 
 #[tokio::test]
-async fn test_store_true_reaches_executor_not_proxy() {
-    // Arrange — mock vLLM returns 200, but executor path will fail at storage layer
+async fn test_store_true_hides_internal_persistence_error_details() {
+    // Arrange — mock vLLM returns 200, but the executor cannot persist into the disabled test store.
     let (llm_url, _h1) = spawn_mock_vllm_json().await;
     let (gw_url, _h2) = spawn_gateway(test_state(&test_config(&llm_url))).await;
 
@@ -227,14 +227,41 @@ async fn test_store_true_reaches_executor_not_proxy() {
         .await
         .unwrap();
 
-    // Assert — executor path reached: executor assigns a resp_-prefixed id
-    assert_eq!(resp.status(), 200);
-    let body: serde_json::Value = resp.json().await.unwrap();
-    let id = body["id"].as_str().unwrap_or("");
-    assert!(
-        id.starts_with("resp_"),
-        "expected executor-assigned id starting with resp_, got: {id}"
-    );
+    // Assert — a stored request never reports success without durable state.
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("failed to persist response"), "{body}");
+    assert!(!body.contains("storage not configured or disabled"), "{body}");
+}
+
+#[tokio::test]
+async fn test_streaming_store_true_hides_persistence_details_without_sequence_gap() {
+    let (llm_url, _h1) = spawn_mock_vllm_sse().await;
+    let (gw_url, _h2) = spawn_gateway(test_state(&test_config(&llm_url))).await;
+
+    let resp = reqwest::Client::new()
+        .post(format!("{gw_url}/v1/responses"))
+        .json(&serde_json::json!({
+            "model": "test",
+            "input": [{"type": "message", "role": "user", "content": "hi"}],
+            "store": true,
+            "stream": true
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.text().await.unwrap();
+    assert!(body.contains("\"type\":\"error\""), "{body}");
+    assert!(body.contains("failed to persist response"), "{body}");
+    assert!(body.contains("\"status\":500"), "{body}");
+    assert!(body.contains("\"type\":\"server_error\""), "{body}");
+    assert!(body.contains("\"code\":\"server_error\""), "{body}");
+    assert!(!body.contains("storage not configured or disabled"), "{body}");
+    assert!(body.contains("\"sequence_number\":0"), "{body}");
+    assert!(body.contains("data: [DONE]"), "{body}");
+    assert!(!body.contains("\"type\":\"response.completed\""), "{body}");
 }
 
 #[tokio::test]

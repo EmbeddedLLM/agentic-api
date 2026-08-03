@@ -503,10 +503,8 @@ async fn test_conversation_store_persist_nonexistent_conversation() {
         )
         .await;
 
-    assert!(
-        result.is_err(),
-        "expected error when persisting to non-existent conversation"
-    );
+    let error = result.expect_err("persisting to a non-existent conversation should fail");
+    assert!(error.is_not_found(), "expected not-found error, got {error}");
 }
 
 #[tokio::test]

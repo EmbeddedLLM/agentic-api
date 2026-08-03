@@ -1965,7 +1965,9 @@ async fn stream_error_events_escape_error_messages() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let _handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    let pool = agentic_core::storage::create_pool_with_schema(None).await.unwrap();
+    let pool = agentic_core::storage::create_pool_with_schema(Some("sqlite://?mode=memory"))
+        .await
+        .unwrap();
     let conv_handler = ConversationHandler::new(ConversationStore::new(Arc::clone(&pool)));
     let resp_handler = ResponseHandler::new(ResponseStore::new(pool));
     let client = Arc::new(reqwest::Client::new());

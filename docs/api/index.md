@@ -1,5 +1,51 @@
 # API Reference
 
+## Authentication
+
+Inbound authentication is optional. When the gateway starts with both `OIDC_ISSUER` and `OIDC_AUDIENCE`, every
+`/v1/*` HTTP route and the `/v1/responses` WebSocket upgrade require an OIDC `Authorization: Bearer <token>`.
+`/health` and `/ready` remain public. Supplying only one OIDC setting is a startup error.
+
+The gateway treats `OIDC_AUDIENCE` as the complete audience trust set: every `aud` value must equal it, and any
+present `azp` value must also equal it. It also validates the token signature, issuer, subject, expiration, and
+not-before time. The identity token is consumed at the gateway boundary instead of being forwarded to the inference
+service. WebSocket sessions reject new `response.create` messages after the validated token expires.
+
+Missing or rejected credentials return `401 Unauthorized` with `WWW-Authenticate: Bearer`. OpenAI-compatible routes
+use this envelope:
+
+```json
+{
+  "error": {
+    "message": "invalid bearer token",
+    "type": "authentication_error",
+    "param": null,
+    "code": "invalid_token"
+  }
+}
+```
+
+`/v1/messages` and `/v1/messages/count_tokens` use the Anthropic-compatible envelope:
+
+```json
+{
+  "type": "error",
+  "error": {
+    "type": "authentication_error",
+    "message": "invalid bearer token"
+  },
+  "request_id": "req_019..."
+}
+```
+
+The same `req_`-prefixed identifier is returned in the `request-id` response header.
+
+A JWKS refresh failure returns `503 Service Unavailable`, without `WWW-Authenticate`, so clients can distinguish an
+identity-provider dependency failure from rejected credentials. See
+[OIDC bearer authentication](../design/oidc-bearer-authentication.md) for configuration and key-cache behavior.
+For a complete GitHub-backed deployment example, see
+[GitHub authentication with Dex](../deploying/github-oidc.md).
+
 ## Responses
 
 ### `POST /v1/responses`

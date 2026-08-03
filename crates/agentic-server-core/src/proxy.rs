@@ -317,6 +317,7 @@ mod tests {
             llm_ready_interval_s: 0.1,
             skip_llm_ready_check: false,
             db_url: None,
+            postgres: crate::config::PostgresConfig::default(),
             sqlite: crate::config::SqliteConfig::default(),
         }
     }
