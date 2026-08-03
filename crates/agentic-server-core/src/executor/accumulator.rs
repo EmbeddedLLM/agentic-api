@@ -1620,4 +1620,25 @@ mod tests {
         assert_eq!(call.input, "*** Begin Patch");
         assert_eq!(call.status, Some(MessageStatus::Completed));
     }
+
+    #[test]
+    fn test_reasoning_before_done_only_custom_tool_call_preserves_order() {
+        let lines = vec![
+            r#"data: {"type":"response.created","response":{"id":"resp_custom"}}"#.to_string(),
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[]}}"#.to_string(),
+            r#"data: {"type":"response.reasoning_text.done","text":"thinking...","item_id":"rs_1"}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":1,"item":{"id":"ctc_1","type":"custom_tool_call","call_id":"call_1","name":"raw_echo","input":"hello","status":"completed"}}"#.to_string(),
+            r#"data: {"type":"response.completed","response":{"id":"resp_custom","status":"completed","usage":null}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert_eq!(acc.output.len(), 2);
+        assert!(matches!(acc.output[0], OutputItem::Reasoning(_)));
+        let OutputItem::CustomToolCall(call) = &acc.output[1] else {
+            panic!("expected CustomToolCall");
+        };
+        assert_eq!(call.call_id, "call_1");
+        assert_eq!(call.name, "raw_echo");
+        assert_eq!(call.input, "hello");
+    }
 }
