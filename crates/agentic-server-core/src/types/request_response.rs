@@ -170,7 +170,7 @@ impl RequestPayload {
             .as_deref()
             .map(|tools| CodexNamespaceHandler.resolve_namespace_members(tools))
             .transpose()?;
-        let loaded_tools = loaded_function_tools(&self.input);
+        let loaded_tools: Vec<FunctionTool> = loaded_function_tools(&self.input);
         let tool_search_name_is_owned = renamed_tools.as_deref().is_some_and(|tools| {
             tools.iter().any(
                 |tool| matches!(tool, ResponsesTool::Function(function) if function.name.as_str() == TOOL_SEARCH_NAME),
@@ -741,6 +741,7 @@ mod tests {
         assert_eq!(tools[1]["name"], TOOL_SEARCH_NAME);
         assert_eq!(tools[1]["description"], "Search tools by goal.");
         assert_eq!(tools[1]["parameters"]["required"][0], "goal");
+        assert_eq!(tools[1]["strict"], false);
         assert!(tools[1].get("execution").is_none());
         assert!(tools[1].get("x-client-field").is_none());
     }
@@ -776,6 +777,7 @@ mod tests {
         assert_eq!(tools[0]["description"], "Hosted search");
         assert_eq!(tools[0]["parameters"]["type"], "object");
         assert_eq!(tools[0]["x-provider-field"], "preserved");
+        assert!(tools[0].get("strict").is_none());
         assert_eq!(tools[1], serde_json::json!({"type": "tool_search"}));
     }
 

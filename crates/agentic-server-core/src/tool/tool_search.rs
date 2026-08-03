@@ -22,7 +22,7 @@ pub(crate) fn tool_search_function_tool(declaration: &ToolSearchToolParam) -> Fu
         name: TOOL_SEARCH_NAME.to_owned(),
         description: declaration.description.clone(),
         parameters: declaration.parameters.clone(),
-        strict: None,
+        strict: Some(false),
         defer_loading: None,
     }
 }
