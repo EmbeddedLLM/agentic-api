@@ -248,6 +248,26 @@ async fn storage_backed_state(llm_url: &str) -> StorageBackedState {
     storage_backed_state_with_web_search(llm_url, None).await
 }
 
+fn persistence_disabled_state(llm_url: &str) -> AppState {
+    let config = test_config(llm_url);
+    let client = Arc::new(reqwest::Client::new());
+    let exec_ctx = Arc::new(ExecutionContext::new(
+        ConversationHandler::new(ConversationStore::disabled()),
+        ResponseHandler::new(ResponseStore::disabled()),
+        client,
+        config.llm_api_base.clone(),
+    ));
+    let proxy_state = ProxyState::new(config.clone()).expect("proxy state");
+    AppState {
+        proxy_state,
+        exec_ctx,
+        shutdown_token: CancellationToken::new(),
+        websocket_tracker: WebSocketTracker::default(),
+        llm_api_base: config.llm_api_base,
+        openai_api_key: config.openai_api_key,
+    }
+}
+
 async fn storage_backed_state_with_web_search(llm_url: &str, web_search_base_url: Option<&str>) -> StorageBackedState {
     let db = TestDb::new();
     let db_url = db.url();
@@ -746,6 +766,34 @@ async fn test_websocket_first_turn_forwards_incremental_events_and_final_payload
     assert_eq!(requests[0]["stream"], true);
     assert_eq!(requests[0]["input"][0]["content"], "hi");
     assert!(requests[0].get("type").is_none());
+}
+
+#[tokio::test]
+async fn test_websocket_streaming_persistence_error_uses_standard_envelope() {
+    let mock = MockResponsesServer::start(vec![sse_response("resp_upstream_1", "msg_upstream_1", "HELLO")]).await;
+    let (gateway_url, _gateway) = spawn_gateway(persistence_disabled_state(&mock.url)).await;
+    let mut ws = connect_responses_ws(&gateway_url).await;
+
+    send_json(
+        &mut ws,
+        json!({
+            "type": "response.create",
+            "model": "test-model",
+            "input": [{"type": "message", "role": "user", "content": "hi"}],
+            "store": true,
+            "stream": true
+        }),
+    )
+    .await;
+
+    let events = recv_until_completed(&mut ws).await;
+    let error = events.last().expect("persistence error event");
+    assert_eq!(error["type"], "error");
+    assert_eq!(error["status"], 500);
+    assert_eq!(error["error"]["message"], "failed to persist response");
+    assert_eq!(error["error"]["type"], "server_error");
+    assert_eq!(error["error"]["code"], "server_error");
+    assert!(events.iter().all(|event| event["type"] != "response.completed"));
 }
 
 #[tokio::test]

@@ -124,6 +124,30 @@ Then launch Codex:
 codex --disable image_generation -c model_provider=agentic-api -m Qwen/Qwen3-30B-A3B-FP8
 ```
 
+If the gateway enables OIDC, configure Codex's supported command-backed bearer authentication instead of
+`requires_openai_auth = false`:
+
+```toml
+[model_providers.agentic-api]
+name = "agentic-api"
+base_url = "http://localhost:9000/v1"
+wire_api = "responses"
+supports_websockets = true
+
+[model_providers.agentic-api.auth]
+command = "/absolute/path/to/print-oidc-token"
+args = ["--audience", "agentic-api"]
+refresh_interval_ms = 300000
+```
+
+The command must print only a current OIDC token to stdout. Codex refreshes it before expiry and sends it as the
+provider bearer token. See the
+[Codex custom-provider authentication reference](https://developers.openai.com/codex/config-advanced#custom-model-providers).
+Keep the inference credential in the gateway's `OPENAI_API_KEY`; do not print that service credential from the token
+command.
+See [GitHub authentication with Dex](docs/deploying/github-oidc.md) for a complete GitHub login, token-helper, and
+gateway setup.
+
 ## 🧑‍💻 Claude Code on your own GPUs
 
 Agentic API serves the Anthropic Messages protocol at `/v1/messages`, so Claude Code (CLI or Agent SDK) runs against open models. Point it at the gateway:
@@ -135,6 +159,22 @@ export ANTHROPIC_MODEL="Qwen/Qwen3-30B-A3B-FP8"   # match the served model
 
 claude -p "summarize the files in this directory"
 ```
+
+With OIDC enabled, use Claude Code's bearer-token variable and leave its API-key variable unset so the identity token
+is not also sent as an upstream `x-api-key`:
+
+```bash
+export ANTHROPIC_BASE_URL="http://localhost:9000"
+export ANTHROPIC_AUTH_TOKEN="$(/absolute/path/to/print-oidc-token --audience agentic-api)"
+unset ANTHROPIC_API_KEY
+
+claude -p "summarize the files in this directory"
+```
+
+Refresh `ANTHROPIC_AUTH_TOKEN` before it expires. For supported dynamic credential helpers, see Anthropic's
+[LLM gateway authentication guide](https://docs.anthropic.com/en/docs/claude-code/llm-gateway).
+The same [GitHub authentication with Dex](docs/deploying/github-oidc.md) guide shows how to obtain the ID token
+without embedding a client secret in Claude Code.
 
 Claude Code's own tools (Bash, Edit, Read, …) stay **client-owned** — Claude Code runs them, as usual.
 

@@ -1,5 +1,8 @@
 //! Storage layer for persistence operations.
 
+// Database URL classification and sanitization
+pub mod backend;
+
 // Strong types for storage operations (newtype pattern)
 pub mod types;
 
@@ -19,13 +22,14 @@ pub mod response;
 pub mod conversation;
 
 // Re-export commonly used types for convenience
+pub use backend::DatabaseBackend;
 pub use conversation::ConversationStore;
 pub use models::Conversation as DbConversation;
 pub use models::Item;
 pub use models::Response as DbResponse;
 pub use pool::{
-    DbPool, DbResult, DbTransaction, create_pool, create_pool_with_schema, create_pool_with_schema_and_sqlite_config,
-    create_pool_with_sqlite_config,
+    DbPool, DbResult, DbTransaction, create_pool, create_pool_with_configs, create_pool_with_schema,
+    create_pool_with_schema_and_configs, create_pool_with_schema_and_sqlite_config, create_pool_with_sqlite_config,
 };
 pub use response::ResponseStore;
 pub use schema::{PoolWithSchema, SchemaManager};

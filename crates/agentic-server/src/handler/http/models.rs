@@ -106,18 +106,22 @@ pub async fn health() -> impl IntoResponse {
 }
 
 pub async fn ready(State(state): State<AppState>) -> impl IntoResponse {
+    if !state.exec_ctx.storage_ready(std::time::Duration::from_secs(1)).await {
+        warn!("database persistence not ready");
+        return StatusCode::SERVICE_UNAVAILABLE;
+    }
+
     let base = state.llm_api_base.trim_end_matches('/');
     let url = format!("{base}/health");
 
-    let client = reqwest::Client::builder()
+    match state
+        .exec_ctx
+        .client
+        .get(&url)
         .timeout(std::time::Duration::from_secs(2))
-        .build();
-
-    let Ok(client) = client else {
-        return StatusCode::SERVICE_UNAVAILABLE;
-    };
-
-    match client.get(&url).send().await {
+        .send()
+        .await
+    {
         Ok(resp) if resp.status().is_success() => StatusCode::OK,
         Ok(resp) => {
             warn!("LLM backend not ready: {}", resp.status());

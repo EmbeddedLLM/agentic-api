@@ -48,3 +48,47 @@ jobs:
 
       - name: Run tests
         run: cargo test
+
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+        env:
+          POSTGRES_DB: agentic_api_test
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d agentic_api_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_POSTGRES_URL: postgresql://postgres:postgres@localhost:5432/agentic_api_test?sslmode=disable
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+
+      - name: Cache cargo registry and build
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-postgres-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-postgres-${{ runner.os }}-
+            cargo-${{ runner.os }}-
+
+      - name: Verify PostgreSQL schema upgrades and validation
+        run: cargo test -p agentic-server-core --lib -- --ignored
+
+      - name: Verify PostgreSQL migrations and restart persistence
+        run: cargo test -p agentic-server-core --test postgres_storage_integration -- --ignored

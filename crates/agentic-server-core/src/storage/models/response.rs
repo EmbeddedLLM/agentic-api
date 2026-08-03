@@ -44,7 +44,7 @@ pub async fn create_in_tx(
     sqlx::query_as::<_, Response>(
         "INSERT INTO responses \
          (id, conversation_id, previous_response_id, history_item_ids, metadata, created_at) \
-         VALUES (?, ?, ?, ?, ?, ?) RETURNING *",
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *",
     )
     .bind(id)
     .bind(conversation_id)
@@ -61,7 +61,7 @@ pub async fn create_in_tx(
 /// # Errors
 /// Returns `DbResult::Err` if the database query fails.
 pub async fn get(pool: &DbPool, id: &str) -> DbResult<Option<Response>> {
-    sqlx::query_as::<_, Response>("SELECT * FROM responses WHERE id = ?")
+    sqlx::query_as::<_, Response>("SELECT * FROM responses WHERE id = $1")
         .bind(id)
         .fetch_optional(pool)
         .await
