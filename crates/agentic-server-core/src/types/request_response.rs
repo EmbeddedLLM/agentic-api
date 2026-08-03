@@ -1,4 +1,5 @@
-use std::collections::HashSet;
+use std::borrow::Cow;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -6,8 +7,8 @@ use serde_json::{Value, json};
 use super::io::{
     FunctionTool, InputItem, InputMessage, InputMessageContent, OutputItem, ResponseUsage, ResponsesInput, ToolChoice,
 };
-use super::tools::{CustomToolParam, ResponsesTool, ToolSearchToolParam};
-use crate::tool::{CodexNamespaceHandler, ToolError, loaded_function_tools};
+use super::tools::{CustomToolParam, ResponsesTool, ToolSearchExecution, ToolSearchToolParam};
+use crate::tool::{CodexNamespaceHandler, TOOL_SEARCH_NAME, ToolError, loaded_function_names, loaded_function_tools};
 use crate::utils::common::serialize_to_string;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,6 +34,8 @@ pub struct RequestPayload {
     pub parallel_tool_calls: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_salt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_management: Option<Vec<ContextManagement>>,
 }
 
 fn default_true() -> bool {
@@ -42,13 +45,13 @@ fn default_true() -> bool {
 #[derive(Debug, Serialize)]
 pub struct UpstreamRequest<'a> {
     pub model: &'a str,
-    pub input: &'a ResponsesInput,
+    pub input: Cow<'a, ResponsesInput>,
     pub stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instructions: Option<&'a str>,
-    /// Tools forwarded to vLLM. Namespace members are flattened to ordinary
-    /// function declarations; native custom and tool-search declarations retain
-    /// their Responses wire shapes.
+    /// Tools forwarded to vLLM. Namespace members and client-executed tool
+    /// search are flattened to ordinary function declarations; native custom
+    /// and hosted tool-search declarations retain their Responses wire shape.
     /// Skipped when empty so vLLM does not receive an empty array.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<UpstreamTool>>,
@@ -73,11 +76,11 @@ pub struct UpstreamRequest<'a> {
 
 /// A tool declaration supported by the upstream Responses endpoint.
 ///
-/// Function-like gateway declarations are normalized to [`FunctionTool`],
-/// while freeform custom and tool-search declarations retain their native
-/// Responses shapes.
-/// Keeping these as distinct variants prevents unrelated request tool types
-/// from entering the upstream tool list.
+/// Function-like gateway declarations and client-executed tool search are
+/// normalized to [`FunctionTool`], while freeform custom and hosted tool-search
+/// declarations retain their native Responses shape. Keeping these as distinct
+/// variants prevents unrelated request tool types from entering the upstream
+/// tool list.
 #[derive(Debug, Clone)]
 pub enum UpstreamTool {
     Function(FunctionTool),
@@ -139,8 +142,9 @@ impl RequestPayload {
     /// Codex `namespace` tools' members are first renamed to their flat,
     /// model-visible names via [`CodexNamespaceHandler::resolve_namespace_members`].
     /// Namespace and gateway tools are then normalized to function declarations.
-    /// Native custom and tool-search tools are forwarded unchanged because
-    /// their calls are not function calls. `tool_choice` is resolved the same way via
+    /// Native custom tools and hosted tool search are forwarded unchanged.
+    /// Only an explicit client-executed tool search is normalized to the
+    /// ordinary provider function fallback. `tool_choice` is resolved the same way via
     /// [`CodexNamespaceHandler::resolve_tool_choice`].
     ///
     /// # Errors
@@ -161,14 +165,48 @@ impl RequestPayload {
             self.parallel_tool_calls
         };
 
-        let mut tools = self.declared_upstream_tools()?;
-        promote_loaded_function_tools(&self.input, &mut tools);
+        let renamed_tools = self
+            .tools
+            .as_deref()
+            .map(|tools| CodexNamespaceHandler.resolve_namespace_members(tools))
+            .transpose()?;
+        let loaded_tools = loaded_function_tools(&self.input);
+        let tool_search_name_is_owned = renamed_tools.as_deref().is_some_and(|tools| {
+            tools.iter().any(
+                |tool| matches!(tool, ResponsesTool::Function(function) if function.name.as_str() == TOOL_SEARCH_NAME),
+            )
+        }) || loaded_function_names(&self.input).contains(TOOL_SEARCH_NAME);
+        let mut provider_names = HashSet::new();
+        let mut tools = Vec::new();
+        for tool in renamed_tools.into_iter().flatten() {
+            if tool_search_name_is_owned
+                && matches!(
+                    tool,
+                    ResponsesTool::ToolSearch(ref declaration)
+                        if declaration.execution == Some(ToolSearchExecution::Client)
+                )
+            {
+                tracing::debug!("omitting provider tool_search fallback because the function name is already owned");
+                continue;
+            }
+            tools.extend(
+                upstream_tools(tool).into_iter().filter(|tool| {
+                    provider_function_name(tool).is_none_or(|name| provider_names.insert(name.to_owned()))
+                }),
+            );
+        }
+        for loaded in loaded_tools {
+            if provider_names.insert(loaded.name.clone()) {
+                tracing::debug!(name = %loaded.name, "promoting client-loaded tool for provider compatibility");
+                tools.push(UpstreamTool::Function(loaded));
+            }
+        }
         let tools = (!tools.is_empty()).then_some(tools);
         let namespace_map = CodexNamespaceHandler.build_namespace_map(self.tools.as_deref())?;
         let tool_choice = CodexNamespaceHandler.resolve_tool_choice(namespace_map.as_ref(), self.tool_choice.as_ref());
         Ok(UpstreamRequest {
             model: &self.model,
-            input: &self.input,
+            input: self.input.model_input(),
             stream,
             instructions: self.instructions.as_deref(),
             tools,
@@ -190,49 +228,50 @@ impl RequestPayload {
             .is_some_and(|tools| tools.iter().any(ResponsesTool::is_gateway_owned))
     }
 
-    /// Whether request conversion would add at least one provider-facing
-    /// function loaded by a valid client tool-search call/output pair.
+    /// Whether provider conversion adds at least one function definition from
+    /// a valid client tool-search call/output pair.
     ///
-    /// # Errors
-    ///
-    /// Returns [`ToolError::Config`] when declared namespace tools collide.
-    pub fn has_tool_search_promotions(&self) -> Result<bool, ToolError> {
-        let mut tools = self.declared_upstream_tools()?;
-        Ok(promote_loaded_function_tools(&self.input, &mut tools))
-    }
-
-    fn declared_upstream_tools(&self) -> Result<Vec<UpstreamTool>, ToolError> {
-        let renamed_tools = self
-            .tools
-            .as_deref()
-            .map(|tools| CodexNamespaceHandler.resolve_namespace_members(tools))
-            .transpose()?;
-        Ok(renamed_tools.into_iter().flatten().flat_map(upstream_tools).collect())
+    /// This is used by transport routing for stateless requests: promotion is
+    /// an executor responsibility even when no gateway-executed tool was
+    /// declared on the current request.
+    #[must_use]
+    pub fn has_tool_search_promotions(&self) -> bool {
+        !loaded_function_tools(&self.input).is_empty()
     }
 }
 
-fn promote_loaded_function_tools(input: &ResponsesInput, tools: &mut Vec<UpstreamTool>) -> bool {
-    let mut declared_names = tools
-        .iter()
-        .map(upstream_tool_name)
-        .map(str::to_owned)
-        .collect::<HashSet<_>>();
-    let original_len = tools.len();
-    for loaded in loaded_function_tools(input) {
-        if declared_names.insert(loaded.name.clone()) {
-            tracing::debug!(name = %loaded.name, "promoting client-loaded tool for provider compatibility");
-            tools.push(UpstreamTool::Function(loaded));
-        }
-    }
-    tools.len() != original_len
+/// Server-side context management configuration for a Responses request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextManagement {
+    #[serde(rename = "type")]
+    pub type_: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compact_threshold: Option<u64>,
 }
 
-fn upstream_tool_name(tool: &UpstreamTool) -> &str {
-    match tool {
-        UpstreamTool::Function(tool) => &tool.name,
-        UpstreamTool::Custom(tool) => tool.name.as_str(),
-        UpstreamTool::ToolSearch(_) => "tool_search",
-    }
+/// Request body accepted by `POST /v1/responses/compact`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CompactRequest {
+    pub model: String,
+    #[serde(default)]
+    pub input: Option<ResponsesInput>,
+    #[serde(default)]
+    pub instructions: Option<String>,
+    #[serde(default)]
+    pub previous_response_id: Option<String>,
+    /// Compatibility fields sent by current SDK and Codex clients.
+    #[serde(flatten)]
+    pub compatibility: HashMap<String, Value>,
+}
+
+/// Result returned by `POST /v1/responses/compact`.
+#[derive(Debug, Clone, Serialize)]
+pub struct CompactedResponse {
+    pub id: String,
+    pub object: String,
+    pub created_at: i64,
+    pub output: Vec<InputItem>,
+    pub usage: ResponseUsage,
 }
 
 fn upstream_tools(tool: ResponsesTool) -> Vec<UpstreamTool> {
@@ -245,10 +284,10 @@ fn upstream_tools(tool: ResponsesTool) -> Vec<UpstreamTool> {
             );
             vec![UpstreamTool::Custom(declaration)]
         }
-        ResponsesTool::ToolSearch(declaration) => {
+        ResponsesTool::ToolSearch(declaration) if declaration.execution != Some(ToolSearchExecution::Client) => {
             tracing::debug!(
                 execution = ?declaration.execution,
-                "forwarding native tool_search declaration upstream"
+                "forwarding hosted tool_search declaration upstream"
             );
             vec![UpstreamTool::ToolSearch(declaration)]
         }
@@ -257,6 +296,14 @@ fn upstream_tools(tool: ResponsesTool) -> Vec<UpstreamTool> {
             .into_iter()
             .map(UpstreamTool::Function)
             .collect(),
+    }
+}
+
+fn provider_function_name(tool: &UpstreamTool) -> Option<&str> {
+    match tool {
+        UpstreamTool::Function(tool) => Some(&tool.name),
+        UpstreamTool::Custom(tool) => Some(tool.name.as_str()),
+        UpstreamTool::ToolSearch(_) => None,
     }
 }
 
@@ -311,7 +358,7 @@ impl ResponsePayload {
         format!("data: {json_str}\n\n")
     }
 
-    fn terminal_event_type(&self) -> &'static str {
+    pub(crate) fn terminal_event_type(&self) -> &'static str {
         match self.status.as_str() {
             "incomplete" => "response.incomplete",
             "failed" | "error" => "response.failed",
@@ -325,7 +372,9 @@ impl From<&ResponsesInput> for Vec<InputItem> {
     fn from(input: &ResponsesInput) -> Self {
         match input {
             ResponsesInput::Text(text) => vec![InputItem::Message(InputMessage {
+                id: None,
                 role: "user".into(),
+                status: None,
                 content: InputMessageContent::Text(text.clone()),
             })],
             ResponsesInput::Items(items) => items.iter().filter(|item| !item.is_unknown()).cloned().collect(),
@@ -333,9 +382,40 @@ impl From<&ResponsesInput> for Vec<InputItem> {
     }
 }
 
+impl From<ResponsesInput> for Vec<InputItem> {
+    fn from(input: ResponsesInput) -> Self {
+        match input {
+            ResponsesInput::Text(text) => vec![InputItem::Message(InputMessage {
+                id: None,
+                role: "user".into(),
+                status: None,
+                content: InputMessageContent::Text(text),
+            })],
+            ResponsesInput::Items(items) => items.into_iter().filter(|item| !item.is_unknown()).collect(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compact_request_accepts_codex_compatibility_fields() {
+        let request: CompactRequest = serde_json::from_value(serde_json::json!({
+            "model": "test-model",
+            "input": [{"role": "user", "content": "hello"}],
+            "tools": [],
+            "parallel_tool_calls": true,
+            "reasoning": {"effort": "medium"},
+            "text": {"verbosity": "low"}
+        }))
+        .expect("compact request should parse");
+
+        assert_eq!(request.model, "test-model");
+        assert!(request.input.is_some());
+        assert_eq!(request.compatibility.len(), 4);
+    }
 
     #[test]
     fn request_payload_forwards_cache_salt_upstream() {
@@ -507,16 +587,7 @@ mod tests {
     fn builtin_tool_declarations() -> Vec<Value> {
         vec![
             serde_json::json!({
-                "type": "function",
-                "name": "read_mcp_resource",
-                "metadata": {
-                    "server_label": "repo",
-                    "server_url": "http://localhost:9001/mcp"
-                }
-            }),
-            serde_json::json!({
                 "type": "mcp",
-                "name": "read_mcp_resource",
                 "server_label": "repo",
                 "server_url": "http://localhost:9001/mcp"
             }),
@@ -632,11 +703,10 @@ mod tests {
     }
 
     #[test]
-    fn to_upstream_request_preserves_tool_search_and_deferred_function_fields() {
+    fn to_upstream_request_normalizes_tool_search_and_preserves_deferred_functions() {
         let payload: RequestPayload = serde_json::from_value(serde_json::json!({
             "model": "test",
             "input": "find a matching tool",
-            "parallel_tool_calls": false,
             "tools": [
                 {
                     "type": "function",
@@ -648,31 +718,126 @@ mod tests {
                 {
                     "type": "tool_search",
                     "execution": "client",
-                    "description": "Find project tools.",
+                    "description": "Search tools by goal.",
                     "parameters": {
                         "type": "object",
-                        "properties": {"goal": {"type": "string"}}
+                        "properties": {"goal": {"type": "string"}},
+                        "required": ["goal"]
                     },
-                    "x-provider-field": "kept"
+                    "x-client-field": "not-provider-facing"
                 }
             ]
         }))
-        .unwrap();
+        .expect("valid tool-search request");
 
-        let request = payload.to_upstream_request(false).unwrap();
-        let tools = request.tools.as_ref().expect("upstream tools");
-        assert!(matches!(tools[0], UpstreamTool::Function(_)));
-        assert!(matches!(tools[1], UpstreamTool::ToolSearch(_)));
-
-        let upstream = serde_json::to_value(request).unwrap();
-        assert_eq!(upstream["tools"][0]["defer_loading"], true);
-        assert_eq!(upstream["tools"][1]["type"], "tool_search");
-        assert_eq!(upstream["tools"][1]["execution"], "client");
-        assert_eq!(upstream["tools"][1]["x-provider-field"], "kept");
+        let upstream = serde_json::to_value(payload.to_upstream_request(false).expect("valid upstream request"))
+            .expect("serializable upstream request");
+        let tools = upstream["tools"].as_array().expect("upstream tools");
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0]["type"], "function");
+        assert_eq!(tools[0]["name"], "get_shipping_eta");
+        assert_eq!(tools[0]["defer_loading"], true);
+        assert_eq!(tools[1]["type"], "function");
+        assert_eq!(tools[1]["name"], TOOL_SEARCH_NAME);
+        assert_eq!(tools[1]["description"], "Search tools by goal.");
+        assert_eq!(tools[1]["parameters"]["required"][0], "goal");
+        assert!(tools[1].get("execution").is_none());
+        assert!(tools[1].get("x-client-field").is_none());
     }
 
     #[test]
-    fn to_upstream_request_promotes_a_client_loaded_namespace_member() {
+    fn to_upstream_request_preserves_server_and_bare_tool_search_declarations() {
+        let payload: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test",
+            "input": "find matching tools",
+            "tools": [
+                {
+                    "type": "tool_search",
+                    "execution": "server",
+                    "description": "Hosted search",
+                    "parameters": {"type": "object"},
+                    "x-provider-field": "preserved"
+                },
+                {"type": "tool_search"}
+            ]
+        }))
+        .expect("valid hosted tool-search request");
+
+        let request = payload.to_upstream_request(false).expect("valid upstream request");
+        let tools = request.tools.as_ref().expect("hosted upstream tools");
+        assert!(matches!(tools[0], UpstreamTool::ToolSearch(_)));
+        assert!(matches!(tools[1], UpstreamTool::ToolSearch(_)));
+
+        let upstream = serde_json::to_value(request).expect("serializable upstream request");
+        let tools = upstream["tools"].as_array().expect("upstream tools");
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0]["type"], "tool_search");
+        assert_eq!(tools[0]["execution"], "server");
+        assert_eq!(tools[0]["description"], "Hosted search");
+        assert_eq!(tools[0]["parameters"]["type"], "object");
+        assert_eq!(tools[0]["x-provider-field"], "preserved");
+        assert_eq!(tools[1], serde_json::json!({"type": "tool_search"}));
+    }
+
+    #[test]
+    fn hosted_tool_search_and_function_with_same_name_are_both_preserved() {
+        let payload: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test",
+            "input": "use hosted search or the function",
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "tool_search",
+                    "description": "A genuine function."
+                },
+                {"type": "tool_search", "execution": "server"}
+            ]
+        }))
+        .expect("valid heterogeneous request");
+
+        let upstream = serde_json::to_value(payload.to_upstream_request(false).expect("valid upstream request"))
+            .expect("serializable upstream request");
+        let tools = upstream["tools"].as_array().expect("upstream tools");
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0]["type"], "function");
+        assert_eq!(tools[0]["name"], TOOL_SEARCH_NAME);
+        assert_eq!(tools[1]["type"], "tool_search");
+        assert_eq!(tools[1]["execution"], "server");
+    }
+
+    #[test]
+    fn real_function_named_tool_search_owns_the_provider_name() {
+        let payload: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test",
+            "input": "call the real function",
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "tool_search",
+                    "description": "A real client function.",
+                    "parameters": {"type": "object", "properties": {"value": {"type": "string"}}}
+                },
+                {
+                    "type": "tool_search",
+                    "execution": "client",
+                    "description": "Search deferred tools.",
+                    "parameters": {"type": "object", "properties": {"query": {"type": "string"}}}
+                }
+            ]
+        }))
+        .expect("valid collision request");
+
+        let upstream = serde_json::to_value(payload.to_upstream_request(false).expect("valid upstream request"))
+            .expect("serializable upstream request");
+        let tools = upstream["tools"].as_array().expect("upstream tools");
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["type"], "function");
+        assert_eq!(tools[0]["name"], TOOL_SEARCH_NAME);
+        assert_eq!(tools[0]["description"], "A real client function.");
+    }
+
+    #[test]
+    fn completed_client_search_promotes_loaded_function_without_defer_loading() {
         let payload: RequestPayload = serde_json::from_value(serde_json::json!({
             "model": "test",
             "input": [
@@ -681,7 +846,7 @@ mod tests {
                     "execution": "client",
                     "call_id": "call_search",
                     "status": "completed",
-                    "arguments": {"query": "add_numbers"}
+                    "arguments": {"query": "shipping"}
                 },
                 {
                     "type": "tool_search_output",
@@ -689,173 +854,31 @@ mod tests {
                     "call_id": "call_search",
                     "status": "completed",
                     "tools": [{
-                        "type": "namespace",
-                        "name": "mcp__fixture",
-                        "tools": [{
-                            "type": "function",
-                            "name": "add_numbers",
-                            "description": "Add numbers.",
-                            "parameters": {"type": "object"},
-                            "strict": false,
-                            "defer_loading": true
-                        }]
+                        "type": "function",
+                        "name": "get_shipping_eta",
+                        "description": "Get an ETA.",
+                        "parameters": {"type": "object"},
+                        "defer_loading": true
                     }]
                 }
             ],
             "tools": [{
                 "type": "tool_search",
-                "execution": "client"
+                "execution": "client",
+                "description": "Search deferred tools.",
+                "parameters": {"type": "object"}
             }]
         }))
-        .unwrap();
+        .expect("valid loaded-tool request");
 
-        assert!(payload.has_tool_search_promotions().unwrap());
-        let upstream = serde_json::to_value(payload.to_upstream_request(false).unwrap()).unwrap();
-
-        assert_eq!(upstream["tools"].as_array().map(Vec::len), Some(2));
-        assert_eq!(upstream["tools"][0]["type"], "tool_search");
-        assert_eq!(upstream["tools"][1]["type"], "function");
-        assert_eq!(upstream["tools"][1]["name"], "add_numbers");
-        assert_eq!(upstream["tools"][1]["description"], "Add numbers.");
-        assert!(upstream["tools"][1].get("defer_loading").is_none());
-        assert_eq!(upstream["input"][1]["type"], "tool_search_output");
-        assert_eq!(upstream["input"][1]["tools"][0]["name"], "mcp__fixture");
-    }
-
-    #[test]
-    fn to_upstream_request_promotes_a_top_level_client_loaded_function() {
-        let payload: RequestPayload = serde_json::from_value(serde_json::json!({
-            "model": "test",
-            "input": [
-                {
-                    "type": "tool_search_call",
-                    "execution": "client",
-                    "call_id": "call_search",
-                    "status": "completed",
-                    "arguments": {"query": "add_numbers"}
-                },
-                {
-                    "type": "tool_search_output",
-                    "execution": "client",
-                    "call_id": "call_search",
-                    "status": "completed",
-                    "tools": [{
-                        "type": "function",
-                        "name": "add_numbers",
-                        "description": "Add numbers.",
-                        "parameters": {"type": "object"},
-                        "strict": false,
-                        "defer_loading": true
-                    }]
-                }
-            ],
-            "tools": [{"type": "tool_search", "execution": "client"}]
-        }))
-        .unwrap();
-
-        assert!(payload.has_tool_search_promotions().unwrap());
-        let upstream = serde_json::to_value(payload.to_upstream_request(false).unwrap()).unwrap();
-
-        assert_eq!(upstream["tools"].as_array().map(Vec::len), Some(2));
-        assert_eq!(upstream["tools"][0]["type"], "tool_search");
-        assert_eq!(upstream["tools"][1]["type"], "function");
-        assert_eq!(upstream["tools"][1]["name"], "add_numbers");
-        assert_eq!(upstream["tools"][1]["description"], "Add numbers.");
-        assert!(upstream["tools"][1].get("defer_loading").is_none());
-    }
-
-    #[test]
-    fn to_upstream_request_promotes_valid_stateless_continuation_without_current_tools() {
-        let payload: RequestPayload = serde_json::from_value(serde_json::json!({
-            "model": "test",
-            "input": [
-                {
-                    "type": "tool_search_call",
-                    "execution": "client",
-                    "call_id": "call_search",
-                    "status": "completed",
-                    "arguments": {"query": "continuation tools"}
-                },
-                {
-                    "type": "tool_search_output",
-                    "execution": "client",
-                    "call_id": "call_search",
-                    "status": "completed",
-                    "tools": [
-                        {"type": "function", "name": "direct_lookup", "defer_loading": true},
-                        {
-                            "type": "namespace",
-                            "name": "mcp__fixture",
-                            "tools": [{
-                                "type": "function",
-                                "name": "namespaced_lookup",
-                                "defer_loading": true
-                            }]
-                        }
-                    ]
-                }
-            ]
-        }))
-        .unwrap();
-
-        assert!(payload.has_tool_search_promotions().unwrap());
-        let upstream = serde_json::to_value(payload.to_upstream_request(false).unwrap()).unwrap();
-        let tools = upstream["tools"].as_array().expect("promoted tools");
-
+        assert!(payload.has_tool_search_promotions());
+        let upstream = serde_json::to_value(payload.to_upstream_request(false).expect("valid upstream request"))
+            .expect("serializable upstream request");
+        let tools = upstream["tools"].as_array().expect("upstream tools");
         assert_eq!(tools.len(), 2);
-        assert_eq!(tools[0]["name"], "direct_lookup");
-        assert_eq!(tools[1]["name"], "namespaced_lookup");
-        assert!(tools.iter().all(|tool| tool["type"] == "function"));
-        assert!(tools.iter().all(|tool| tool.get("defer_loading").is_none()));
-        assert_eq!(upstream["input"][1]["type"], "tool_search_output");
-    }
-
-    #[test]
-    fn to_upstream_request_does_not_override_a_declared_function_with_a_loaded_one() {
-        let payload: RequestPayload = serde_json::from_value(serde_json::json!({
-            "model": "test",
-            "input": [{
-                "type": "tool_search_call",
-                "execution": "client",
-                "call_id": "call_search",
-                "status": "completed",
-                "arguments": {"query": "echo_text"}
-            }, {
-                "type": "tool_search_output",
-                "execution": "client",
-                "call_id": "call_search",
-                "status": "completed",
-                "tools": [{
-                    "type": "namespace",
-                    "name": "mcp__fixture",
-                    "tools": [{
-                        "type": "function",
-                        "name": "echo_text",
-                        "description": "Loaded description."
-                    }]
-                }]
-            }],
-            "tools": [
-                {
-                    "type": "function",
-                    "name": "echo_text",
-                    "description": "Declared description."
-                },
-                {
-                    "type": "tool_search",
-                    "execution": "client"
-                }
-            ]
-        }))
-        .unwrap();
-
-        assert!(!payload.has_tool_search_promotions().unwrap());
-        let upstream = serde_json::to_value(payload.to_upstream_request(false).unwrap()).unwrap();
-
-        assert_eq!(upstream["tools"].as_array().map(Vec::len), Some(2));
-        assert_eq!(upstream["tools"][0]["name"], "echo_text");
-        assert_eq!(upstream["tools"][0]["description"], "Declared description.");
-        assert_eq!(upstream["tools"][1]["type"], "tool_search");
+        assert_eq!(tools[0]["name"], TOOL_SEARCH_NAME);
+        assert_eq!(tools[1]["name"], "get_shipping_eta");
+        assert!(tools[1].get("defer_loading").is_none());
     }
 
     #[test]

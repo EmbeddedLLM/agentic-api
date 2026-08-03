@@ -1,6 +1,7 @@
 //! Agentic executor.
 
 pub mod accumulator;
+pub mod compaction;
 pub mod engine;
 pub mod error;
 pub mod inference;
@@ -12,8 +13,10 @@ pub mod rehydrate;
 pub mod request;
 
 mod gateway;
+pub mod gateway_accumulator;
 mod upstream;
 
+pub use compaction::compact_response;
 pub use engine::{BoxStream, ExecuteRequest, create_conversation, execute};
 pub use error::{ExecutorError, ExecutorResult};
 pub use inference::call_inference;

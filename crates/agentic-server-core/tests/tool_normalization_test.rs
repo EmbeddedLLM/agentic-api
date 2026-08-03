@@ -6,6 +6,7 @@
 use serde::Deserialize;
 use serde_json::Value;
 
+use agentic_core::events::WireEvent;
 use agentic_core::executor::RequestContext;
 use agentic_core::tool::{
     CodexNamespaceHandler, GatewayExecutors, ToolRegistry, ToolType, model_visible_namespace_member_name,
@@ -16,7 +17,6 @@ use agentic_core::utils::common::serialize_to_string;
 
 const MULTI_TURN_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/tool_calls/multi_turn");
 const CODEX_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/codex");
-const MCP_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/mcp");
 
 const CODEX_CASSETTES: &[&str] = &[
     "codex-direct-vllm-http-custom-tool-Qwen-Qwen3.6-35B-A3B-streaming.yaml",
@@ -75,10 +75,6 @@ fn load_cassette(filename: &str) -> TurnCassette {
 
 fn load_codex_cassette(filename: &str) -> TurnCassette {
     load_cassette_from(CODEX_DIR, filename)
-}
-
-fn load_mcp_cassette(filename: &str) -> TurnCassette {
-    load_cassette_from(MCP_DIR, filename)
 }
 
 fn tools_from_turn(turn: &Turn) -> Option<serde_json::Value> {
@@ -184,11 +180,12 @@ async fn assert_registry_lookup(cassette_file: &str) {
         let Some(tools_val) = tools_from_turn(turn) else {
             continue;
         };
-        let tools: Vec<ResponsesTool> = serde_json::from_value(tools_val).expect("tools parse");
-        let registry = ToolRegistry::build_with_handlers(&tools, &GatewayExecutors::default())
+        let mut tools: Vec<ResponsesTool> = serde_json::from_value(tools_val).expect("tools parse");
+        let declared_tools = tools.clone();
+        let registry = ToolRegistry::build_with_handlers(&mut tools, &mut GatewayExecutors::default())
             .await
             .unwrap_or_else(|err| panic!("{cassette_file} turn {i}: registry failed: {err}"));
-        for tool in &tools {
+        for tool in &declared_tools {
             if let ResponsesTool::Function(p) = tool {
                 let entry = registry
                     .lookup(p.name.as_str())
@@ -338,7 +335,8 @@ async fn codex_custom_cassettes_preserve_native_upstream_shape_and_client_owners
                 "{filename} turn {i}: expected native custom grammar declaration"
             );
 
-            let registry = ToolRegistry::build_with_handlers(tools, &GatewayExecutors::default())
+            let mut registry_tools = tools.clone();
+            let registry = ToolRegistry::build_with_handlers(&mut registry_tools, &mut GatewayExecutors::default())
                 .await
                 .unwrap_or_else(|err| panic!("{filename} turn {i}: registry failed: {err}"));
             assert!(
@@ -416,6 +414,41 @@ fn codex_namespace_cassettes_flatten_to_safe_upstream_function_name() {
     }
 }
 
+#[tokio::test]
+async fn tool_registry_restores_wire_event_namespace_losslessly() {
+    let mut tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([
+        {
+            "type": "namespace",
+            "name": "mcp__agentic_fixture",
+            "tools": [{"type": "function", "name": "add_numbers"}]
+        }
+    ]))
+    .unwrap();
+    let registry = ToolRegistry::build_with_handlers(&mut tools, &mut GatewayExecutors::default())
+        .await
+        .expect("valid registry");
+    let mut wire = WireEvent::new("response.output_item.done");
+    wire.output_index = Some(0);
+    wire.rest.insert(
+        "item".to_owned(),
+        serde_json::json!({
+            "type": "function_call",
+            "name": "agentic_ns__mcp__agentic_fixture__add_numbers",
+            "call_id": "call_1",
+            "arguments": "{\"numbers\":[8,0]}",
+            "provider_extra": {"kept": true}
+        }),
+    );
+
+    assert!(registry.restore_stream_event_wire(&mut wire));
+
+    let item = &wire.rest["item"];
+    assert_eq!(item["namespace"], "mcp__agentic_fixture");
+    assert_eq!(item["name"], "add_numbers");
+    assert_eq!(item["arguments"], "{\"numbers\":[8,0]}");
+    assert_eq!(item["provider_extra"]["kept"], true);
+}
+
 #[test]
 fn codex_direct_vllm_flat_namespace_cassette_is_plain_function_tool() {
     let filename = "codex-direct-vllm-http-flat-namespace-tool-Qwen-Qwen3.6-35B-A3B-streaming.yaml";
@@ -470,38 +503,4 @@ fn web_search_preview_normalizes_to_gateway_function() {
     assert_eq!(tools[0].get("type").and_then(Value::as_str), Some("function"));
     assert_eq!(tools[0].get("name").and_then(Value::as_str), Some("web_search"));
     assert_eq!(tools[0]["parameters"]["required"], serde_json::json!(["query"]));
-}
-
-#[test]
-fn mcp_read_resource_normalizes_to_gateway_function() {
-    for filename in ["mcp-read-resource-Qwen-Qwen3-30B-A3B-FP8-nonstreaming.yaml"] {
-        let cassette = load_mcp_cassette(filename);
-        for (i, turn) in cassette.turns.iter().enumerate() {
-            let json = request_body_from_turn(turn);
-            let payload: RequestPayload = serde_json::from_value(json)
-                .unwrap_or_else(|e| panic!("{filename} turn {i}: RequestPayload parse failed: {e}"));
-
-            let upstream = upstream_request_value(payload, false);
-            let tools = upstream.get("tools").and_then(Value::as_array).unwrap_or_else(|| {
-                panic!("{filename} turn {i}: MCP read_resource should normalize to a function tool")
-            });
-
-            assert_eq!(tools.len(), 1, "{filename} turn {i}: expected one normalized tool");
-            assert_eq!(
-                tools[0].get("type").and_then(Value::as_str),
-                Some("function"),
-                "{filename} turn {i}: normalized type must be 'function'"
-            );
-            assert_eq!(
-                tools[0].get("name").and_then(Value::as_str),
-                Some(agentic_core::tool::READ_MCP_RESOURCE_TOOL_NAME),
-                "{filename} turn {i}: normalized name must be READ_MCP_RESOURCE_TOOL_NAME"
-            );
-            assert_eq!(
-                tools[0]["parameters"]["required"],
-                serde_json::json!(["server", "uri"]),
-                "{filename} turn {i}: normalized parameters must require server and uri"
-            );
-        }
-    }
 }

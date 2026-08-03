@@ -1,0 +1,37 @@
+[
+  {
+    "type": "tool_search",
+    "execution": "client",
+    "description": "Find the project-specific tools needed to continue the task.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "goal": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "goal"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "get_shipping_eta",
+    "description": "Look up shipping ETA details for an order.",
+    "defer_loading": true,
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "order_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "order_id"
+      ],
+      "additionalProperties": false
+    }
+  }
+]

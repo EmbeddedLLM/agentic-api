@@ -86,51 +86,15 @@ impl McpClientPool {
         self.clients.get(server_label)
     }
 
-    pub fn client_for_param(&self, param: &McpToolParam) -> Option<Arc<McpClient>> {
-        let Some(server_label) = clean_string(param.server_label.as_deref()) else {
-            tracing::debug!(name = %param.name, "MCP tool param has no server_label");
-            return None;
-        };
-
-        let Some(client) = self.get(&server_label).cloned() else {
-            if let Some(error) = self.connection_error(&server_label) {
-                tracing::warn!(
-                    server_label,
-                    name = %param.name,
-                    error,
-                    "MCP server failed to connect"
-                );
-            } else {
-                tracing::warn!(
-                    server_label,
-                    name = %param.name,
-                    "MCP server is not connected"
-                );
-            }
-            return None;
-        };
-
-        Some(client)
-    }
-
     #[must_use]
     pub fn connection_error(&self, server_label: &str) -> Option<&str> {
         self.connection_errors.get(server_label).map(String::as_str)
     }
-
-    pub fn iter(&self) -> impl Iterator<Item = (&String, &Arc<McpClient>)> {
-        self.clients.iter()
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.clients.is_empty()
-    }
 }
 
 fn server_entry_from_param(param: &McpToolParam) -> Option<(String, McpServerEntry)> {
-    let Some(server_label) = clean_string(param.server_label.as_deref()) else {
-        tracing::debug!(name = %param.name, "MCP tool param has no server_label");
+    let Some(server_label) = clean_string(Some(&param.server_label)) else {
+        tracing::debug!("MCP tool param has no server_label");
         return None;
     };
 
@@ -138,13 +102,7 @@ fn server_entry_from_param(param: &McpToolParam) -> Option<(String, McpServerEnt
         let url = match validate_request_server_url(&url) {
             Ok(url) => url,
             Err(reason) => {
-                tracing::warn!(
-                    server_label,
-                    name = %param.name,
-                    url,
-                    reason,
-                    "MCP tool param server_url rejected"
-                );
+                tracing::warn!(server_label, url, reason, "MCP tool param server_url rejected");
                 return None;
             }
         };
@@ -153,17 +111,21 @@ fn server_entry_from_param(param: &McpToolParam) -> Option<(String, McpServerEnt
             server_label,
             McpServerEntry::Http {
                 url,
-                headers: param.headers.clone(),
+                headers: request_headers(param),
             },
         ));
     }
 
-    tracing::warn!(
-        server_label,
-        name = %param.name,
-        "MCP tool param has no server_url"
-    );
+    tracing::warn!(server_label, "MCP tool param has no server_url");
     None
+}
+
+fn request_headers(param: &McpToolParam) -> Option<HashMap<String, String>> {
+    let mut headers = param.headers.clone().unwrap_or_default();
+    if let Some(authorization) = clean_string(param.authorization.as_deref()) {
+        headers.insert("Authorization".to_owned(), format!("Bearer {authorization}"));
+    }
+    (!headers.is_empty()).then_some(headers)
 }
 
 fn validate_request_server_url(value: &str) -> Result<String, String> {
@@ -289,9 +251,8 @@ mod tests {
     }
 
     #[test]
-    fn request_params_do_not_accept_stdio_command() {
+    fn request_params_ignore_stdio_fields_without_configuring_transport() {
         let param = serde_json::from_value::<McpToolParam>(serde_json::json!({
-            "name": "read_mcp_resource",
             "server_label": "repo",
             "command": "python3",
             "args": ["/tmp/server.py"]

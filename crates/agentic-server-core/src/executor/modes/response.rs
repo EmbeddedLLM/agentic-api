@@ -122,6 +122,7 @@ mod tests {
             metadata: None,
             parallel_tool_calls: None,
             cache_salt: None,
+            context_management: None,
         };
         RequestContext {
             enriched_request: req.clone(),

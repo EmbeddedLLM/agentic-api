@@ -21,6 +21,7 @@ use crate::types::io::{
     ApplyDone, CustomToolCall, FunctionToolCall, OutputItem, OutputMessage, OutputTextContent, ReasoningOutput,
     ReasoningTextContent, ResponseUsage,
 };
+use crate::types::io::{McpCall, WebSearchCall};
 use crate::types::request_response::{IncompleteDetails, ResponsePayload};
 use crate::utils::common::{deserialize_from_str, deserialize_from_value_opt};
 use crate::utils::uuid7_str;
@@ -32,6 +33,8 @@ enum InFlight {
     Reasoning { item: ReasoningOutput, text: String },
     FunctionCall { item: FunctionToolCall, arguments: String },
     CustomToolCall { item: CustomToolCall, input: String },
+    WebSearchCall { item: Option<WebSearchCall> },
+    McpCall { item: McpCall },
 }
 
 impl std::fmt::Debug for InFlight {
@@ -41,42 +44,52 @@ impl std::fmt::Debug for InFlight {
             Self::Reasoning { .. } => write!(f, "InFlight::Reasoning {{ .. }}"),
             Self::FunctionCall { .. } => write!(f, "InFlight::FunctionCall {{ .. }}"),
             Self::CustomToolCall { .. } => write!(f, "InFlight::CustomToolCall {{ .. }}"),
+            Self::WebSearchCall { .. } => write!(f, "InFlight::WebSearchCall {{ .. }}"),
+            Self::McpCall { .. } => write!(f, "InFlight::McpCall {{ .. }}"),
         }
     }
 }
 
 impl InFlight {
-    fn finalize(self, output: &mut Vec<OutputItem>) {
+    fn finalize(self) -> Option<OutputItem> {
         match self {
             Self::Reasoning { mut item, text } => {
                 if !text.is_empty() {
                     item.content.push(ReasoningTextContent::new(text));
                 }
-                output.push(OutputItem::Reasoning(item));
+                Some(OutputItem::Reasoning(item))
             }
             Self::FunctionCall { mut item, arguments } => {
                 if !arguments.is_empty() && item.arguments.is_empty() {
                     item.arguments = arguments;
                 }
                 item.status = MessageStatus::Completed;
-                output.push(OutputItem::FunctionCall(item));
+                Some(OutputItem::FunctionCall(item))
             }
             Self::Message { mut item, text } => {
                 if !text.is_empty() {
                     item.content.push(OutputTextContent::new(text));
                 }
                 item.status = MessageStatus::Completed;
-                output.push(OutputItem::Message(item));
+                Some(OutputItem::Message(item))
             }
             Self::CustomToolCall { mut item, input } => {
                 if item.input.is_empty() {
                     item.input = input;
                 }
                 item.status = Some(MessageStatus::Completed);
-                output.push(OutputItem::CustomToolCall(item));
+                Some(OutputItem::CustomToolCall(item))
             }
+            Self::WebSearchCall { item } => item.map(OutputItem::WebSearchCall),
+            Self::McpCall { item } => Some(OutputItem::McpCall(item)),
         }
     }
+}
+
+#[derive(Debug)]
+struct InFlightEntry {
+    output_index: u32,
+    item: InFlight,
 }
 
 /// Accumulates LLM response chunks from streaming or non-streaming sources.
@@ -90,7 +103,9 @@ pub struct ResponseAccumulator {
     incomplete_details: Option<IncompleteDetails>,
     error: Option<serde_json::Value>,
     /// In-flight output items keyed by `item_id`, in insertion order.
-    in_flight: IndexMap<String, InFlight>,
+    in_flight: IndexMap<String, InFlightEntry>,
+    /// Completed streaming items waiting to be emitted in `output_index` order.
+    completed: Vec<(u32, OutputItem)>,
 }
 
 impl ResponseAccumulator {
@@ -106,6 +121,7 @@ impl ResponseAccumulator {
             incomplete_details: None,
             error: None,
             in_flight: IndexMap::new(),
+            completed: Vec::new(),
         }
     }
 
@@ -146,6 +162,7 @@ impl ResponseAccumulator {
             incomplete_details,
             error,
             in_flight: IndexMap::new(),
+            completed: Vec::new(),
         })
     }
 
@@ -194,7 +211,7 @@ impl ResponseAccumulator {
     fn process_stream_chunks(rx: mpsc::Receiver<String>, conversation_id: Option<String>) -> Self {
         let mut acc = Self::new(uuid7_str("resp_"), conversation_id);
         for line in rx {
-            acc.process_sse_line(&line);
+            let _ = acc.process_sse_line(&line);
         }
         acc.finish_stream();
         acc
@@ -209,45 +226,50 @@ impl ResponseAccumulator {
     pub fn from_sse_lines(lines: impl IntoIterator<Item = String>, conversation_id: Option<&str>) -> Self {
         let mut acc = Self::new(uuid7_str("resp_"), conversation_id.map(str::to_string));
         for line in lines {
-            acc.process_sse_line(&line);
+            let _ = acc.process_sse_line(&line);
         }
         acc.finalize_all();
         acc
     }
 
-    /// Finalizes all in-flight items in insertion order, pushing them to `output`.
+    /// Finalizes all streaming items in upstream `output_index` order.
     pub(crate) fn finalize_all(&mut self) {
-        for (_, entry) in self.in_flight.drain(..) {
-            entry.finalize(&mut self.output);
-        }
+        self.completed.extend(
+            self.in_flight
+                .drain(..)
+                .filter_map(|(_, entry)| entry.item.finalize().map(|item| (entry.output_index, item))),
+        );
+        self.completed.sort_by_key(|(output_index, _)| *output_index);
+        self.output
+            .extend(self.completed.drain(..).map(|(_, output_item)| output_item));
     }
 
-    pub(crate) fn process_sse_line(&mut self, line: &str) {
-        if let Some(frame) = normalize_sse_line(line) {
-            if matches!(
-                frame.event_type,
-                SSEEventType::ResponseFailed | SSEEventType::ResponseIncomplete
-            ) {
-                self.capture_terminal_details(line);
-            }
-            self.process_event(&frame);
-        }
+    pub(crate) fn process_sse_line(&mut self, line: &str) -> Option<EventFrame> {
+        let frame = normalize_sse_line(line)?;
+        self.capture_terminal_details_if_needed(&frame);
+        self.process_event(&frame);
+        Some(frame)
     }
 
-    fn capture_terminal_details(&mut self, line: &str) {
-        let Some(data) = line.strip_prefix("data: ") else {
-            return;
-        };
-        let Ok(mut event) = deserialize_from_str::<serde_json::Value>(data) else {
-            return;
-        };
-        let Some(response) = event.get_mut("response") else {
+    fn capture_terminal_details(&mut self, frame: &EventFrame) {
+        let Some(response) = frame.wire.rest.get("response") else {
             return;
         };
 
-        self.incomplete_details =
-            deserialize_from_value_opt::<IncompleteDetails>(response["incomplete_details"].take());
-        self.error = (!response["error"].is_null()).then(|| response["error"].take());
+        self.incomplete_details = response
+            .get("incomplete_details")
+            .cloned()
+            .and_then(deserialize_from_value_opt::<IncompleteDetails>);
+        self.error = response.get("error").filter(|error| !error.is_null()).cloned();
+    }
+
+    fn capture_terminal_details_if_needed(&mut self, frame: &EventFrame) {
+        if matches!(
+            frame.event_type,
+            SSEEventType::ResponseFailed | SSEEventType::ResponseIncomplete
+        ) {
+            self.capture_terminal_details(frame);
+        }
     }
 
     pub(crate) fn finish_stream(&mut self) {
@@ -267,86 +289,68 @@ impl ResponseAccumulator {
             (SSEEventType::ResponseCreated, EventPayload::Response { id, .. }) if !id.is_empty() => {
                 self.response_id.clone_from(id);
             }
-            (SSEEventType::OutputItemAdded, payload @ EventPayload::OutputItemAdded { item_id, item_type, .. }) => {
-                let entry = match item_type {
-                    SSEItemType::Reasoning => ReasoningOutput::try_from(payload).ok().map(|item| InFlight::Reasoning {
-                        item,
-                        text: String::with_capacity(256),
-                    }),
-                    SSEItemType::FunctionCall => {
-                        FunctionToolCall::try_from(payload)
-                            .ok()
-                            .map(|item| InFlight::FunctionCall {
-                                item,
-                                arguments: String::with_capacity(128),
-                            })
-                    }
-                    SSEItemType::CustomToolCall => {
-                        CustomToolCall::try_from(payload)
-                            .ok()
-                            .map(|item| InFlight::CustomToolCall {
-                                item,
-                                input: String::with_capacity(256),
-                            })
-                    }
-                    SSEItemType::Message => OutputMessage::try_from(payload).ok().map(|item| InFlight::Message {
-                        item,
-                        text: String::with_capacity(256),
-                    }),
-                    SSEItemType::ToolSearchCall
-                    | SSEItemType::ToolSearchOutput
-                    | SSEItemType::WebSearchCall
-                    | SSEItemType::McpToolCall
-                    | SSEItemType::Unknown => None,
-                };
-                if let Some(inflight) = entry {
-                    self.in_flight.insert(item_id.clone(), inflight);
-                }
+            (SSEEventType::OutputItemAdded, payload @ EventPayload::OutputItemAdded { .. }) => {
+                self.start_output_item(payload);
             }
             (
                 SSEEventType::OutputItemDone,
                 EventPayload::OutputItemDone {
                     item_id,
                     item_type: SSEItemType::CustomToolCall,
+                    output_index,
                     item,
                     ..
                 },
-            ) => self.complete_custom_tool_call(item_id, item),
-            (SSEEventType::OutputItemDone, EventPayload::OutputItemDone { item, .. }) => {
-                self.complete_non_delta_output_item(item);
+            ) => self.complete_custom_tool_call(item_id, *output_index, item),
+            (SSEEventType::OutputItemDone, payload @ EventPayload::OutputItemDone { .. }) => {
+                self.complete_call_item(payload);
             }
             (SSEEventType::ReasoningTextDelta, EventPayload::ReasoningDelta { delta, item_id }) => {
-                if let Some(InFlight::Reasoning { text, .. }) = self.in_flight.get_mut(item_id) {
+                if let Some(InFlight::Reasoning { text, .. }) =
+                    self.in_flight.get_mut(item_id).map(|entry| &mut entry.item)
+                {
                     text.push_str(delta);
                 }
             }
             (SSEEventType::ReasoningTextDone, EventPayload::ReasoningDone { item_id, .. }) => {
-                if let Some(InFlight::Reasoning { item, text }) = self.in_flight.get_mut(item_id) {
+                if let Some(InFlight::Reasoning { item, text }) =
+                    self.in_flight.get_mut(item_id).map(|entry| &mut entry.item)
+                {
                     item.apply_done(&frame.payload, text);
                 }
             }
             (SSEEventType::FunctionCallArgumentsDelta, EventPayload::FunctionCallArgsDelta { delta, item_id, .. }) => {
-                if let Some(InFlight::FunctionCall { arguments, .. }) = self.in_flight.get_mut(item_id) {
+                if let Some(InFlight::FunctionCall { arguments, .. }) =
+                    self.in_flight.get_mut(item_id).map(|entry| &mut entry.item)
+                {
                     arguments.push_str(delta);
                 }
             }
             (SSEEventType::FunctionCallArgumentsDone, EventPayload::FunctionCallArgsDone { item_id, .. }) => {
-                if let Some(InFlight::FunctionCall { item, arguments }) = self.in_flight.get_mut(item_id) {
+                if let Some(InFlight::FunctionCall { item, arguments }) =
+                    self.in_flight.get_mut(item_id).map(|entry| &mut entry.item)
+                {
                     item.apply_done(&frame.payload, arguments);
                 }
             }
             (SSEEventType::CustomToolCallInputDelta, EventPayload::CustomToolCallInputDelta { delta, item_id, .. }) => {
-                if let Some(InFlight::CustomToolCall { input, .. }) = self.in_flight.get_mut(item_id) {
+                if let Some(InFlight::CustomToolCall { input, .. }) =
+                    self.in_flight.get_mut(item_id).map(|entry| &mut entry.item)
+                {
                     input.push_str(delta);
                 }
             }
             (SSEEventType::CustomToolCallInputDone, EventPayload::CustomToolCallInputDone { item_id, .. }) => {
-                if let Some(InFlight::CustomToolCall { item, input }) = self.in_flight.get_mut(item_id) {
+                if let Some(InFlight::CustomToolCall { item, input }) =
+                    self.in_flight.get_mut(item_id).map(|entry| &mut entry.item)
+                {
                     item.apply_done(&frame.payload, input);
                 }
             }
             (SSEEventType::OutputTextDelta, EventPayload::TextDelta { delta, item_id, .. }) => {
-                if let Some(InFlight::Message { text, .. }) = self.in_flight.get_mut(item_id) {
+                if let Some(InFlight::Message { text, .. }) =
+                    self.in_flight.get_mut(item_id).map(|entry| &mut entry.item)
+                {
                     text.push_str(delta);
                 }
             }
@@ -363,19 +367,72 @@ impl ResponseAccumulator {
         }
     }
 
+    fn start_output_item(&mut self, payload: &EventPayload) {
+        let EventPayload::OutputItemAdded {
+            item_id,
+            item_type,
+            output_index,
+            ..
+        } = payload
+        else {
+            return;
+        };
+        let item = match item_type {
+            SSEItemType::Reasoning => ReasoningOutput::try_from(payload).ok().map(|item| InFlight::Reasoning {
+                item,
+                text: String::with_capacity(256),
+            }),
+            SSEItemType::FunctionCall => FunctionToolCall::try_from(payload)
+                .ok()
+                .map(|item| InFlight::FunctionCall {
+                    item,
+                    arguments: String::with_capacity(128),
+                }),
+            SSEItemType::CustomToolCall => {
+                CustomToolCall::try_from(payload)
+                    .ok()
+                    .map(|item| InFlight::CustomToolCall {
+                        item,
+                        input: String::with_capacity(256),
+                    })
+            }
+            SSEItemType::Message => OutputMessage::try_from(payload).ok().map(|item| InFlight::Message {
+                item,
+                text: String::with_capacity(256),
+            }),
+            SSEItemType::WebSearchCall if !item_id.is_empty() => Some(InFlight::WebSearchCall { item: None }),
+            SSEItemType::McpCall => McpCall::try_from(payload).ok().map(|item| InFlight::McpCall { item }),
+            SSEItemType::WebSearchCall
+            | SSEItemType::ToolSearchCall
+            | SSEItemType::ToolSearchOutput
+            | SSEItemType::Unknown => None,
+        };
+        if let Some(item) = item {
+            self.in_flight.insert(
+                item_id.clone(),
+                InFlightEntry {
+                    output_index: *output_index,
+                    item,
+                },
+            );
+        }
+    }
+
     fn finish_response(&mut self, status: ResponseStatus, usage: Option<ResponseUsage>) {
         self.finalize_all();
         self.status = status;
         self.usage = usage;
     }
 
-    fn complete_custom_tool_call(&mut self, item_id: &str, raw_item: &serde_json::Value) {
+    fn complete_custom_tool_call(&mut self, item_id: &str, output_index: u32, raw_item: &serde_json::Value) {
         let Some(OutputItem::CustomToolCall(mut call)) = deserialize_from_value_opt::<OutputItem>(raw_item.clone())
         else {
             return;
         };
 
-        if let Some(InFlight::CustomToolCall { item, input }) = self.in_flight.get_mut(item_id) {
+        if let Some(InFlight::CustomToolCall { item, input }) =
+            self.in_flight.get_mut(item_id).map(|entry| &mut entry.item)
+        {
             if call.input.is_empty() {
                 call.input = if item.input.is_empty() {
                     std::mem::take(input)
@@ -388,22 +445,70 @@ impl ResponseAccumulator {
             *item = call;
         } else {
             // Some Responses-compatible providers omit `output_item.added`.
-            self.output.push(OutputItem::CustomToolCall(call));
+            self.completed.push((output_index, OutputItem::CustomToolCall(call)));
         }
     }
 
-    fn complete_non_delta_output_item(&mut self, raw_item: &serde_json::Value) {
-        let Some(output_item) = deserialize_from_value_opt::<OutputItem>(raw_item.clone()) else {
+    fn complete_call_item(&mut self, payload: &EventPayload) {
+        let EventPayload::OutputItemDone {
+            item_id,
+            item_type,
+            output_index,
+            item: raw_item,
+            ..
+        } = payload
+        else {
             return;
         };
-        if matches!(
-            output_item,
-            OutputItem::ToolSearchCall(_)
-                | OutputItem::ToolSearchOutput(_)
-                | OutputItem::WebSearchCall(_)
-                | OutputItem::McpToolCall(_)
-        ) {
-            self.output.push(output_item);
+        if *item_type == SSEItemType::WebSearchCall {
+            let Some(OutputItem::WebSearchCall(mut call)) = deserialize_from_value_opt::<OutputItem>(raw_item.clone())
+            else {
+                return;
+            };
+            let in_flight_key = self
+                .in_flight
+                .get(item_id)
+                .filter(|entry| matches!(entry.item, InFlight::WebSearchCall { .. }))
+                .map(|_| item_id.to_owned())
+                .or_else(|| {
+                    self.in_flight.iter().find_map(|(key, entry)| {
+                        (entry.output_index == *output_index && matches!(entry.item, InFlight::WebSearchCall { .. }))
+                            .then(|| key.clone())
+                    })
+                });
+            if call.id.is_empty() {
+                call.id = in_flight_key
+                    .as_deref()
+                    .filter(|id| !id.is_empty())
+                    .map_or_else(|| uuid7_str("ws_"), str::to_owned);
+            }
+            if let Some(InFlight::WebSearchCall { item }) = in_flight_key
+                .as_deref()
+                .and_then(|key| self.in_flight.get_mut(key))
+                .map(|entry| &mut entry.item)
+            {
+                *item = Some(call);
+            } else {
+                self.completed.push((*output_index, OutputItem::WebSearchCall(call)));
+            }
+            return;
+        }
+        if let (SSEItemType::McpCall, Some(InFlight::McpCall { item })) =
+            (item_type, self.in_flight.get_mut(item_id).map(|entry| &mut entry.item))
+        {
+            item.apply_done(payload, &mut String::new());
+            return;
+        }
+        if matches!(item_type, SSEItemType::ToolSearchCall | SSEItemType::ToolSearchOutput) {
+            if let Some(output_item @ (OutputItem::ToolSearchCall(_) | OutputItem::ToolSearchOutput(_))) =
+                deserialize_from_value_opt::<OutputItem>(raw_item.clone())
+            {
+                self.completed.push((*output_index, output_item));
+            }
+            return;
+        }
+        if let Some(output_item @ OutputItem::McpCall(_)) = deserialize_from_value_opt::<OutputItem>(raw_item.clone()) {
+            self.completed.push((*output_index, output_item));
         }
     }
 
@@ -446,6 +551,8 @@ impl ResponseAccumulator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::events::WireEvent;
+    use crate::types::io::{McpCallError, McpCallStatus, WebSearchCallStatus};
 
     #[test]
     fn test_accumulator_new() {
@@ -540,7 +647,7 @@ mod tests {
                 status: "in_progress".into(),
                 usage: None,
             },
-            sequence_number: Some(0),
+            wire: WireEvent::new("test"),
         };
         acc.process_event(&frame);
         assert_eq!(acc.response_id, "resp_new");
@@ -556,7 +663,7 @@ mod tests {
                 status: "in_progress".into(),
                 usage: None,
             },
-            sequence_number: Some(0),
+            wire: WireEvent::new("test"),
         };
         acc.process_event(&frame);
         assert_eq!(acc.response_id, "resp_keep");
@@ -576,7 +683,7 @@ mod tests {
                 namespace: None,
                 call_id: None,
             },
-            sequence_number: Some(1),
+            wire: WireEvent::new("test"),
         });
 
         acc.process_event(&EventFrame {
@@ -587,7 +694,7 @@ mod tests {
                 output_index: 0,
                 content_index: 0,
             },
-            sequence_number: Some(2),
+            wire: WireEvent::new("test"),
         });
         acc.process_event(&EventFrame {
             event_type: SSEEventType::OutputTextDelta,
@@ -597,7 +704,7 @@ mod tests {
                 output_index: 0,
                 content_index: 0,
             },
-            sequence_number: Some(3),
+            wire: WireEvent::new("test"),
         });
 
         acc.process_event(&EventFrame {
@@ -607,7 +714,7 @@ mod tests {
                 status: "completed".into(),
                 usage: None,
             },
-            sequence_number: Some(4),
+            wire: WireEvent::new("test"),
         });
 
         assert_eq!(acc.status, ResponseStatus::Completed);
@@ -620,19 +727,204 @@ mod tests {
     }
 
     #[test]
-    fn test_process_event_mcp_tool_call_done_accumulates_output() {
+    fn test_process_event_mcp_call_done_accumulates_output() {
         let lines = vec![
-            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"mcp_tool_call","id":"mcp_1","server":"repo","tool":"read_mcp_resource","arguments":{"server":"repo"},"status":"in_progress"}}"#.to_string(),
-            r#"data: {"type":"response.mcp_tool_call.in_progress","item_id":"mcp_1","output_index":0}"#.to_string(),
-            r#"data: {"type":"response.mcp_tool_call.completed","item_id":"mcp_1","output_index":0,"item":{"type":"mcp_tool_call","id":"mcp_1","server":"repo","tool":"read_mcp_resource","arguments":{"server":"repo"},"status":"completed","result":{"contents":[]}}}"#.to_string(),
-            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"mcp_tool_call","id":"mcp_1","server":"repo","tool":"read_mcp_resource","arguments":{"server":"repo"},"status":"completed","result":{"contents":[]}}}"#.to_string(),
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"mcp_call","id":"mcp_1","server_label":"counter","name":"increment","arguments":"","status":"in_progress","approval_request_id":null,"output":null,"error":null}}"#.to_string(),
+            r#"data: {"type":"response.mcp_call.in_progress","item_id":"mcp_1","output_index":0}"#.to_string(),
+            r#"data: {"type":"response.mcp_call_arguments.delta","delta":"{}","item_id":"mcp_1","output_index":0}"#.to_string(),
+            r#"data: {"type":"response.mcp_call_arguments.done","arguments":"{}","item_id":"mcp_1","output_index":0}"#.to_string(),
+            r#"data: {"type":"response.mcp_call.completed","item_id":"mcp_1","output_index":0}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"mcp_call","id":"mcp_1","server_label":"counter","name":"increment","arguments":"{}","status":"completed","approval_request_id":null,"output":"1","error":null}}"#.to_string(),
             r#"data: {"type":"response.done","response":{"id":"resp_1","status":"completed","usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}"#.to_string(),
         ];
 
         let acc = ResponseAccumulator::from_sse_lines(lines, None);
         assert_eq!(acc.status, ResponseStatus::Completed);
         assert_eq!(acc.output.len(), 1);
-        assert!(matches!(acc.output[0], OutputItem::McpToolCall(_)));
+        assert!(matches!(acc.output[0], OutputItem::McpCall(_)));
+    }
+
+    #[test]
+    fn test_accumulator_reasoning_before_mcp_call_preserves_order() {
+        let lines = vec![
+            r#"data: {"type":"response.created","response":{"id":"resp_abc"}}"#.to_string(),
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[]}}"#.to_string(),
+            r#"data: {"type":"response.reasoning_text.done","text":"thinking...","item_id":"rs_1"}"#.to_string(),
+            r#"data: {"type":"response.output_item.added","output_index":1,"item":{"type":"mcp_call","id":"mcp_1","server_label":"counter","name":"increment","arguments":"","status":"in_progress","approval_request_id":null,"output":null,"error":null}}"#.to_string(),
+            r#"data: {"type":"response.mcp_call.completed","item_id":"mcp_1","output_index":1}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":1,"item":{"type":"mcp_call","id":"mcp_1","server_label":"counter","name":"increment","arguments":"{}","status":"completed","approval_request_id":null,"output":"1","error":null}}"#.to_string(),
+            r#"data: {"type":"response.done","response":{"id":"resp_abc","status":"completed","usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert_eq!(acc.output.len(), 2);
+        assert!(matches!(acc.output[0], OutputItem::Reasoning(_)));
+        assert!(matches!(acc.output[1], OutputItem::McpCall(_)));
+    }
+
+    #[test]
+    fn test_accumulator_reasoning_before_done_only_mcp_call_preserves_order() {
+        let lines = vec![
+            r#"data: {"type":"response.created","response":{"id":"resp_abc"}}"#.to_string(),
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[]}}"#.to_string(),
+            r#"data: {"type":"response.reasoning_text.done","text":"thinking...","item_id":"rs_1"}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":1,"item":{"type":"mcp_call","id":"mcp_1","server_label":"counter","name":"increment","arguments":"{}","status":"completed","approval_request_id":null,"output":"1","error":null}}"#.to_string(),
+            r#"data: {"type":"response.done","response":{"id":"resp_abc","status":"completed","usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert_eq!(acc.output.len(), 2);
+        assert!(matches!(acc.output[0], OutputItem::Reasoning(_)));
+        assert!(matches!(acc.output[1], OutputItem::McpCall(_)));
+    }
+
+    #[test]
+    fn test_accumulator_reasoning_before_web_search_call_preserves_order() {
+        let lines = vec![
+            r#"data: {"type":"response.created","response":{"id":"resp_abc"}}"#.to_string(),
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[]}}"#.to_string(),
+            r#"data: {"type":"response.reasoning_text.done","text":"thinking...","item_id":"rs_1"}"#.to_string(),
+            r#"data: {"type":"response.output_item.added","output_index":1,"item":{"type":"web_search_call","id":"ws_1","status":"in_progress","action":{"type":"search","query":"","sources":[]}}}"#.to_string(),
+            r#"data: {"type":"response.web_search_call.in_progress","item_id":"ws_1","output_index":1}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":1,"item":{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","query":"rust","sources":[]}}}"#.to_string(),
+            r#"data: {"type":"response.done","response":{"id":"resp_abc","status":"completed","usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert_eq!(acc.output.len(), 2);
+        assert!(matches!(acc.output[0], OutputItem::Reasoning(_)));
+        let OutputItem::WebSearchCall(call) = &acc.output[1] else {
+            panic!("expected web_search_call");
+        };
+        assert_eq!(call.status, WebSearchCallStatus::Completed);
+        assert_eq!(call.action.as_search().unwrap().query, "rust");
+    }
+
+    #[test]
+    fn test_accumulator_preserves_open_page_web_search_action() {
+        let lines = vec![
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"web_search_call","id":"ws_1","status":"in_progress"}}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"open_page","url":"https://example.com"}}}"#.to_string(),
+            r#"data: {"type":"response.done","response":{"id":"resp_1","status":"completed"}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert_eq!(acc.output.len(), 1);
+        let action = match &acc.output[0] {
+            OutputItem::WebSearchCall(call) => serde_json::to_value(&call.action).unwrap(),
+            _ => panic!("expected web_search_call"),
+        };
+        assert_eq!(action["type"], "open_page");
+        assert_eq!(action["url"], "https://example.com");
+    }
+
+    #[test]
+    fn test_accumulator_preserves_find_in_page_web_search_action() {
+        let lines = vec![
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"web_search_call","id":"ws_1","status":"in_progress"}}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"find_in_page","url":"https://example.com","pattern":"needle"}}}"#.to_string(),
+            r#"data: {"type":"response.done","response":{"id":"resp_1","status":"completed"}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert_eq!(acc.output.len(), 1);
+        let action = match &acc.output[0] {
+            OutputItem::WebSearchCall(call) => serde_json::to_value(&call.action).unwrap(),
+            _ => panic!("expected web_search_call"),
+        };
+        assert_eq!(action["type"], "find_in_page");
+        assert_eq!(action["url"], "https://example.com");
+        assert_eq!(action["pattern"], "needle");
+    }
+
+    #[test]
+    fn test_accumulator_drops_unfinished_web_search_placeholder() {
+        let lines = vec![
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"web_search_call","id":"ws_1","status":"in_progress"}}"#.to_string(),
+            r#"data: {"type":"response.done","response":{"id":"resp_1","status":"completed"}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert!(acc.output.is_empty());
+    }
+
+    #[test]
+    fn test_accumulator_empty_added_id_then_stable_done_does_not_duplicate() {
+        let lines = vec![
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"web_search_call","id":"","status":"in_progress"}}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"web_search_call","id":"ws_1","status":"completed","action":{"type":"search","query":"rust","sources":[]}}}"#.to_string(),
+            r#"data: {"type":"response.done","response":{"id":"resp_1","status":"completed"}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert_eq!(acc.output.len(), 1);
+        let OutputItem::WebSearchCall(call) = &acc.output[0] else {
+            panic!("expected web_search_call");
+        };
+        assert_eq!(call.id, "ws_1");
+    }
+
+    #[test]
+    fn test_accumulator_stable_added_id_survives_empty_done_id() {
+        let lines = vec![
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"web_search_call","id":"ws_added","status":"in_progress"}}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"web_search_call","id":"","status":"completed","action":{"type":"search","query":"rust","sources":[]}}}"#.to_string(),
+            r#"data: {"type":"response.done","response":{"id":"resp_1","status":"completed"}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert_eq!(acc.output.len(), 1);
+        let OutputItem::WebSearchCall(call) = &acc.output[0] else {
+            panic!("expected web_search_call");
+        };
+        assert_eq!(call.id, "ws_added");
+    }
+
+    #[test]
+    fn test_unknown_mcp_call_error_shape_is_not_dropped() {
+        let lines = vec![
+            r#"data: {"type":"response.created","response":{"id":"resp_abc"}}"#.to_string(),
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"mcp_call","id":"mcp_1","server_label":"counter","name":"increment","arguments":"","status":"in_progress","approval_request_id":null,"output":null,"error":null}}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"mcp_call","id":"mcp_1","server_label":"counter","name":"increment","arguments":"{}","status":"failed","approval_request_id":null,"output":null,"error":{"type":"mcp_protocol_error","code":-32000,"message":"boom"}}}"#.to_string(),
+            r#"data: {"type":"response.done","response":{"id":"resp_abc","status":"completed","usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert_eq!(acc.output.len(), 1);
+        let OutputItem::McpCall(call) = &acc.output[0] else {
+            panic!("expected mcp_call");
+        };
+        let Some(McpCallError::Unknown(error)) = &call.error else {
+            panic!("expected unknown MCP error payload");
+        };
+        assert_eq!(error["type"], "mcp_protocol_error");
+        assert_eq!(error["code"], -32000);
+        assert_eq!(error["message"], "boom");
+    }
+
+    #[test]
+    fn test_streaming_preserves_all_documented_mcp_call_statuses() {
+        let lines = vec![
+            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"mcp_call","id":"mcp_calling","server_label":"counter","name":"increment","arguments":"{}","status":"calling","approval_request_id":null,"output":null,"error":null}}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":1,"item":{"type":"mcp_call","id":"mcp_incomplete","server_label":"counter","name":"increment","arguments":"{}","status":"incomplete","approval_request_id":null,"output":null,"error":null}}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":2,"item":{"type":"mcp_call","id":"mcp_omitted","server_label":"counter","name":"increment","arguments":"{}","approval_request_id":null,"output":"1","error":null}}"#.to_string(),
+            r#"data: {"type":"response.done","response":{"id":"resp_1","status":"completed","usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        let statuses = acc
+            .output
+            .iter()
+            .map(|item| match item {
+                OutputItem::McpCall(call) => call.status,
+                _ => panic!("expected mcp_call"),
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            statuses,
+            vec![Some(McpCallStatus::Calling), Some(McpCallStatus::Incomplete), None]
+        );
     }
 
     #[test]
@@ -665,7 +957,7 @@ mod tests {
                     ..Default::default()
                 }),
             },
-            sequence_number: Some(9),
+            wire: WireEvent::new("test"),
         };
         acc.process_event(&frame);
         assert_eq!(acc.status, ResponseStatus::Completed);
@@ -683,7 +975,7 @@ mod tests {
                 status: "failed".into(),
                 usage: None,
             },
-            sequence_number: Some(4),
+            wire: WireEvent::new("response.failed"),
         });
         assert_eq!(acc.status, ResponseStatus::Error);
     }
@@ -698,7 +990,7 @@ mod tests {
                 status: "incomplete".into(),
                 usage: None,
             },
-            sequence_number: Some(4),
+            wire: WireEvent::new("test"),
         });
         assert_eq!(acc.status, ResponseStatus::Incomplete);
     }
@@ -709,7 +1001,7 @@ mod tests {
         let frame = EventFrame {
             event_type: SSEEventType::ContentPartAdded,
             payload: EventPayload::Raw(serde_json::json!({"type": "response.content_part.added"})),
-            sequence_number: Some(3),
+            wire: WireEvent::new("test"),
         };
         acc.process_event(&frame);
         assert_eq!(acc.response_id, "resp_1");
@@ -816,6 +1108,44 @@ mod tests {
     }
 
     #[test]
+    fn test_blocking_preserves_all_documented_mcp_call_statuses() {
+        let cases: [(Option<&str>, Option<McpCallStatus>); 3] = [
+            (Some("calling"), Some(McpCallStatus::Calling)),
+            (Some("incomplete"), Some(McpCallStatus::Incomplete)),
+            (None, None),
+        ];
+
+        for (status, expected) in cases {
+            let mut item = serde_json::json!({
+                "type": "mcp_call",
+                "id": "mcp_1",
+                "server_label": "counter",
+                "name": "increment",
+                "arguments": "{}",
+                "approval_request_id": null,
+                "output": null,
+                "error": null
+            });
+            if let Some(status) = status {
+                item["status"] = serde_json::json!(status);
+            }
+            let body = serde_json::json!({
+                "id": "resp_1",
+                "status": "completed",
+                "output": [item],
+                "usage": {"input_tokens": 5, "output_tokens": 2, "total_tokens": 7}
+            });
+
+            let acc = ResponseAccumulator::from_json(&body.to_string(), None).unwrap();
+            assert_eq!(acc.output.len(), 1);
+            let OutputItem::McpCall(call) = &acc.output[0] else {
+                panic!("expected mcp_call");
+            };
+            assert_eq!(call.status, expected);
+        }
+    }
+
+    #[test]
     fn test_function_call_accumulation_basic() {
         let mut acc = ResponseAccumulator::new("resp_1".into(), None);
 
@@ -829,7 +1159,7 @@ mod tests {
                 namespace: Some("mcp__weather".into()),
                 call_id: Some("call_abc".into()),
             },
-            sequence_number: Some(1),
+            wire: WireEvent::new("test"),
         });
 
         acc.process_event(&EventFrame {
@@ -840,7 +1170,7 @@ mod tests {
                 item_id: "fc_1".into(),
                 output_index: 0,
             },
-            sequence_number: Some(2),
+            wire: WireEvent::new("test"),
         });
 
         acc.process_event(&EventFrame {
@@ -851,7 +1181,7 @@ mod tests {
                 item_id: "fc_1".into(),
                 output_index: 0,
             },
-            sequence_number: Some(3),
+            wire: WireEvent::new("test"),
         });
 
         acc.process_event(&EventFrame {
@@ -863,7 +1193,7 @@ mod tests {
                 name: "get_weather".into(),
                 output_index: 0,
             },
-            sequence_number: Some(4),
+            wire: WireEvent::new("test"),
         });
 
         acc.process_event(&EventFrame {
@@ -873,7 +1203,7 @@ mod tests {
                 status: "completed".into(),
                 usage: None,
             },
-            sequence_number: Some(5),
+            wire: WireEvent::new("test"),
         });
 
         assert_eq!(acc.status, ResponseStatus::Completed);
@@ -904,7 +1234,7 @@ mod tests {
                 namespace: None,
                 call_id: Some("call_1".into()),
             },
-            sequence_number: Some(1),
+            wire: WireEvent::new("test"),
         });
 
         acc.process_event(&EventFrame {
@@ -915,7 +1245,7 @@ mod tests {
                 item_id: "fc_1".into(),
                 output_index: 0,
             },
-            sequence_number: Some(2),
+            wire: WireEvent::new("test"),
         });
 
         acc.process_event(&EventFrame {
@@ -927,7 +1257,7 @@ mod tests {
                 name: "search".into(),
                 output_index: 0,
             },
-            sequence_number: Some(3),
+            wire: WireEvent::new("test"),
         });
 
         acc.finalize_all();
@@ -940,7 +1270,7 @@ mod tests {
     }
 
     #[test]
-    fn test_function_call_multiple_parallel_finalize_in_insertion_order() {
+    fn test_function_call_multiple_parallel() {
         let mut acc = ResponseAccumulator::new("resp_1".into(), None);
 
         acc.process_event(&EventFrame {
@@ -948,12 +1278,12 @@ mod tests {
             payload: EventPayload::OutputItemAdded {
                 item_id: "fc_1".into(),
                 item_type: "function_call".into(),
-                output_index: 1,
+                output_index: 0,
                 name: Some("get_weather".into()),
                 namespace: None,
                 call_id: Some("call_1".into()),
             },
-            sequence_number: Some(1),
+            wire: WireEvent::new("test"),
         });
         acc.process_event(&EventFrame {
             event_type: SSEEventType::FunctionCallArgumentsDone,
@@ -962,9 +1292,9 @@ mod tests {
                 call_id: Some("call_1".into()),
                 item_id: "fc_1".into(),
                 name: "get_weather".into(),
-                output_index: 1,
+                output_index: 0,
             },
-            sequence_number: Some(2),
+            wire: WireEvent::new("test"),
         });
 
         acc.process_event(&EventFrame {
@@ -972,12 +1302,12 @@ mod tests {
             payload: EventPayload::OutputItemAdded {
                 item_id: "fc_2".into(),
                 item_type: "function_call".into(),
-                output_index: 0,
+                output_index: 1,
                 name: Some("get_time".into()),
                 namespace: None,
                 call_id: Some("call_2".into()),
             },
-            sequence_number: Some(3),
+            wire: WireEvent::new("test"),
         });
         acc.process_event(&EventFrame {
             event_type: SSEEventType::FunctionCallArgumentsDone,
@@ -986,9 +1316,9 @@ mod tests {
                 call_id: Some("call_2".into()),
                 item_id: "fc_2".into(),
                 name: "get_time".into(),
-                output_index: 0,
+                output_index: 1,
             },
-            sequence_number: Some(4),
+            wire: WireEvent::new("test"),
         });
 
         acc.process_event(&EventFrame {
@@ -998,7 +1328,7 @@ mod tests {
                 status: "completed".into(),
                 usage: None,
             },
-            sequence_number: Some(5),
+            wire: WireEvent::new("test"),
         });
 
         assert_eq!(acc.output.len(), 2);
@@ -1020,7 +1350,7 @@ mod tests {
                 namespace: None,
                 call_id: None,
             },
-            sequence_number: Some(1),
+            wire: WireEvent::new("test"),
         });
         acc.process_event(&EventFrame {
             event_type: SSEEventType::OutputTextDelta,
@@ -1030,7 +1360,7 @@ mod tests {
                 output_index: 0,
                 content_index: 0,
             },
-            sequence_number: Some(2),
+            wire: WireEvent::new("test"),
         });
 
         acc.process_event(&EventFrame {
@@ -1043,7 +1373,7 @@ mod tests {
                 namespace: None,
                 call_id: Some("call_x".into()),
             },
-            sequence_number: Some(3),
+            wire: WireEvent::new("test"),
         });
         acc.process_event(&EventFrame {
             event_type: SSEEventType::FunctionCallArgumentsDone,
@@ -1054,7 +1384,7 @@ mod tests {
                 name: "lookup".into(),
                 output_index: 1,
             },
-            sequence_number: Some(4),
+            wire: WireEvent::new("test"),
         });
 
         acc.process_event(&EventFrame {
@@ -1064,7 +1394,7 @@ mod tests {
                 status: "completed".into(),
                 usage: None,
             },
-            sequence_number: Some(5),
+            wire: WireEvent::new("test"),
         });
 
         assert_eq!(acc.output.len(), 2);
@@ -1086,7 +1416,7 @@ mod tests {
                 namespace: None,
                 call_id: Some("old_call".into()),
             },
-            sequence_number: Some(1),
+            wire: WireEvent::new("test"),
         });
 
         acc.process_event(&EventFrame {
@@ -1098,7 +1428,7 @@ mod tests {
                 name: "new_name".into(),
                 output_index: 0,
             },
-            sequence_number: Some(2),
+            wire: WireEvent::new("test"),
         });
 
         acc.finalize_all();
@@ -1124,7 +1454,7 @@ mod tests {
                 namespace: None,
                 call_id: Some("c1".into()),
             },
-            sequence_number: Some(1),
+            wire: WireEvent::new("test"),
         });
 
         acc.process_event(&EventFrame {
@@ -1136,7 +1466,7 @@ mod tests {
                 name: "tool".into(),
                 output_index: 0,
             },
-            sequence_number: Some(2),
+            wire: WireEvent::new("test"),
         });
 
         acc.finalize_all();
@@ -1160,7 +1490,7 @@ mod tests {
                 item_id: String::new(),
                 output_index: 0,
             },
-            sequence_number: Some(1),
+            wire: WireEvent::new("test"),
         });
 
         assert!(acc.output.is_empty());
@@ -1181,7 +1511,7 @@ mod tests {
                 namespace: None,
                 call_id: Some("c1".into()),
             },
-            sequence_number: Some(1),
+            wire: WireEvent::new("test"),
         });
         acc.process_event(&EventFrame {
             event_type: SSEEventType::FunctionCallArgumentsDelta,
@@ -1191,7 +1521,7 @@ mod tests {
                 item_id: "fc_1".into(),
                 output_index: 0,
             },
-            sequence_number: Some(2),
+            wire: WireEvent::new("test"),
         });
 
         acc.process_event(&EventFrame {
@@ -1201,7 +1531,7 @@ mod tests {
                 status: "completed".into(),
                 usage: None,
             },
-            sequence_number: Some(3),
+            wire: WireEvent::new("test"),
         });
 
         assert_eq!(acc.output.len(), 1);
@@ -1263,90 +1593,44 @@ mod tests {
     }
 
     #[test]
-    fn test_tool_search_items_accumulate_from_complete_sse_items() {
+    fn test_reasoning_precedes_done_only_tool_search_by_output_index() {
         let lines = vec![
-            r#"data: {"type":"response.created","response":{"id":"resp_search"}}"#.to_string(),
-            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"tool_search_call","execution":"client","call_id":"call_search_1","status":"in_progress","arguments":{}}}"#.to_string(),
-            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"tool_search_call","execution":"client","call_id":"call_search_1","status":"completed","arguments":{"goal":"Find shell tools"}}}"#.to_string(),
-            r#"data: {"type":"response.output_item.added","output_index":1,"item":{"type":"tool_search_output","execution":"client","call_id":"call_search_1","status":"in_progress","tools":[]}}"#.to_string(),
-            r#"data: {"type":"response.output_item.done","output_index":1,"item":{"type":"tool_search_output","execution":"client","call_id":"call_search_1","status":"completed","tools":[{"type":"function","name":"run","defer_loading":true,"parameters":{"type":"object"}}]}}"#.to_string(),
-            r#"data: {"type":"response.completed","response":{"id":"resp_search","status":"completed","usage":null}}"#.to_string(),
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[]}}"#.to_owned(),
+            r#"data: {"type":"response.reasoning_summary_text.delta","item_id":"rs_1","output_index":0,"delta":"Need a tool."}"#.to_owned(),
+            r#"data: {"type":"response.output_item.done","output_index":1,"item":{"type":"tool_search_call","execution":"client","call_id":"call_search","status":"completed","arguments":{"query":"shell"}}}"#.to_owned(),
+            r#"data: {"type":"response.completed","response":{"id":"resp_search","status":"completed","usage":null}}"#.to_owned(),
         ];
 
         let acc = ResponseAccumulator::from_sse_lines(lines, None);
         assert_eq!(acc.output.len(), 2);
-        let OutputItem::ToolSearchCall(call) = &acc.output[0] else {
-            panic!("expected ToolSearchCall");
-        };
-        assert_eq!(call.call_id.as_deref(), Some("call_search_1"));
-        assert_eq!(call.arguments["goal"], "Find shell tools");
-
-        let OutputItem::ToolSearchOutput(output) = &acc.output[1] else {
-            panic!("expected ToolSearchOutput");
-        };
-        assert_eq!(output.call_id.as_deref(), Some("call_search_1"));
-        assert_eq!(output.tools[0]["name"], "run");
-        assert_eq!(output.tools[0]["defer_loading"], true);
+        assert!(matches!(acc.output[0], OutputItem::Reasoning(_)));
+        assert!(matches!(acc.output[1], OutputItem::ToolSearchCall(_)));
     }
 
     #[test]
-    fn test_incomplete_and_optional_tool_search_fields_accumulate() {
+    fn test_tool_search_completion_order_is_sorted_by_output_index() {
         let lines = vec![
-            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"tool_search_call","execution":"client","call_id":"call_incomplete","status":"incomplete","arguments":{"query":"shell"}}}"#.to_string(),
-            r#"data: {"type":"response.output_item.done","output_index":1,"item":{"type":"tool_search_output","call_id":"call_optional","tools":[]}}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":1,"item":{"type":"tool_search_output","execution":"client","call_id":"call_search","status":"completed","tools":[]}}"#.to_owned(),
+            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"tool_search_call","execution":"client","call_id":"call_search","status":"completed","arguments":{"query":"shell"}}}"#.to_owned(),
         ];
 
         let acc = ResponseAccumulator::from_sse_lines(lines, None);
-        let OutputItem::ToolSearchCall(call) = &acc.output[0] else {
-            panic!("expected incomplete tool-search call");
-        };
-        assert_eq!(call.status, Some(crate::types::io::ToolSearchStatus::Incomplete));
-        assert!(!call.requires_client_execution());
-        let OutputItem::ToolSearchOutput(output) = &acc.output[1] else {
-            panic!("expected tool-search output with optional fields omitted");
-        };
-        assert_eq!(output.execution, None);
-        assert_eq!(output.status, None);
-    }
-
-    #[test]
-    fn test_unknown_output_item_type_is_not_accumulated_as_message() {
-        let lines = vec![
-            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"id":"future_1","type":"future_item"}}"#.to_string(),
-            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"id":"future_1","type":"future_item","payload":{"a":1}}}"#.to_string(),
-        ];
-
-        let acc = ResponseAccumulator::from_sse_lines(lines, None);
-        assert!(acc.output.is_empty());
-    }
-
-    #[test]
-    fn test_completed_tool_search_precedes_in_flight_reasoning_on_finalization() {
-        let lines = vec![
-            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning"}}"#.to_string(),
-            r#"data: {"type":"response.reasoning_summary_text.delta","item_id":"rs_1","output_index":0,"delta":"Need a tool."}"#.to_string(),
-            r#"data: {"type":"response.output_item.done","output_index":1,"item":{"type":"tool_search_call","execution":"client","call_id":"call_search","status":"completed","arguments":{"query":"shell"}}}"#.to_string(),
-            r#"data: {"type":"response.completed","response":{"id":"resp_search","status":"completed","usage":null}}"#.to_string(),
-        ];
-
-        let acc = ResponseAccumulator::from_sse_lines(lines, None);
-        assert!(matches!(acc.output[0], OutputItem::ToolSearchCall(_)));
-        assert!(matches!(acc.output[1], OutputItem::Reasoning(_)));
-    }
-
-    #[test]
-    fn test_completed_search_items_precede_later_finalized_function_call() {
-        let lines = vec![
-            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"tool_search_call","execution":"server","call_id":null,"status":"completed","arguments":{"paths":["crm"]}}}"#.to_string(),
-            r#"data: {"type":"response.output_item.done","output_index":1,"item":{"type":"tool_search_output","execution":"server","call_id":null,"status":"completed","tools":[{"type":"function","name":"lookup"}]}}"#.to_string(),
-            r#"data: {"type":"response.output_item.added","output_index":2,"item":{"id":"fc_1","type":"function_call","call_id":"call_lookup","name":"lookup"}}"#.to_string(),
-            r#"data: {"type":"response.function_call_arguments.done","item_id":"fc_1","output_index":2,"call_id":"call_lookup","name":"lookup","arguments":"{}"}"#.to_string(),
-            r#"data: {"type":"response.completed","response":{"id":"resp_search","status":"completed","usage":null}}"#.to_string(),
-        ];
-
-        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert_eq!(acc.output.len(), 2);
         assert!(matches!(acc.output[0], OutputItem::ToolSearchCall(_)));
         assert!(matches!(acc.output[1], OutputItem::ToolSearchOutput(_)));
-        assert!(matches!(acc.output[2], OutputItem::FunctionCall(_)));
+    }
+
+    #[test]
+    fn test_tool_search_and_unknown_added_items_do_not_create_messages() {
+        let lines = vec![
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"tool_search_call","execution":"client","call_id":"call_search","status":"in_progress","arguments":{}}}"#.to_owned(),
+            r#"data: {"type":"response.output_item.added","output_index":1,"item":{"id":"future_1","type":"future_item"}}"#.to_owned(),
+            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"tool_search_call","execution":"client","call_id":"call_search","status":"completed","arguments":{"query":"shell"}}}"#.to_owned(),
+            r#"data: {"type":"response.output_item.done","output_index":1,"item":{"id":"future_1","type":"future_item","payload":{"a":1}}}"#.to_owned(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert_eq!(acc.output.len(), 1);
+        assert!(matches!(acc.output[0], OutputItem::ToolSearchCall(_)));
     }
 }

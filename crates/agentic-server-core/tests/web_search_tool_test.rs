@@ -21,6 +21,243 @@ use tokio::sync::{Notify, mpsc};
 
 mod support;
 
+const WEB_SEARCH_CASSETTE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/web_search");
+const WEB_SEARCH_GATEWAY_MODEL: &str = "Qwen/Qwen3.5-35B-A3B-FP8";
+const WEB_SEARCH_GATEWAY_MODEL_SLUG: &str = "Qwen-Qwen3.5-35B-A3B-FP8";
+const WEB_SEARCH_OPENAI_MODEL: &str = "gpt-5.6";
+const WEB_SEARCH_OPENAI_MODEL_SLUG: &str = "gpt-5.6";
+
+fn load_recorded_web_search_pair(streaming: bool) -> (support::Cassette, support::Cassette) {
+    let mode = if streaming { "streaming" } else { "nonstreaming" };
+    let openai = support::load_cassette(&format!(
+        "{WEB_SEARCH_CASSETTE_DIR}/web-search-openai-reference-{WEB_SEARCH_OPENAI_MODEL_SLUG}-{mode}.yaml"
+    ));
+    let gateway = support::load_cassette(&format!(
+        "{WEB_SEARCH_CASSETTE_DIR}/web-search-gateway-{WEB_SEARCH_GATEWAY_MODEL_SLUG}-{mode}.yaml"
+    ));
+    (openai, gateway)
+}
+
+fn recorded_sse_events(turn: &support::Turn) -> Vec<serde_json::Value> {
+    turn.response
+        .sse
+        .as_ref()
+        .expect("streaming cassette should contain SSE")
+        .iter()
+        .flat_map(|entry| entry.lines())
+        .filter_map(|line| line.strip_prefix("data: "))
+        .filter(|data| *data != "[DONE]")
+        .map(|data| serde_json::from_str(data).expect("cassette SSE data should be valid JSON"))
+        .collect()
+}
+
+fn recorded_terminal_output(turn: &support::Turn) -> Vec<serde_json::Value> {
+    if let Some(body) = &turn.response.body {
+        assert_eq!(body["status"], "completed");
+        return body["output"]
+            .as_array()
+            .expect("blocking response should contain output")
+            .clone();
+    }
+
+    let events = recorded_sse_events(turn);
+    let response = events
+        .iter()
+        .find(|event| event["type"] == "response.completed")
+        .and_then(|event| event.get("response"))
+        .expect("streaming response should contain response.completed");
+    assert_eq!(response["status"], "completed");
+    response["output"]
+        .as_array()
+        .expect("completed response should contain output")
+        .clone()
+}
+
+fn assert_recorded_web_search_requests(openai: &support::Cassette, gateway: &support::Cassette, streaming: bool) {
+    assert_eq!(openai.turns.len(), 1);
+    assert_eq!(gateway.turns.len(), 1);
+    let openai = &openai.turns[0].request;
+    let gateway = &gateway.turns[0].request;
+
+    assert_eq!(openai.path, "/v1/responses");
+    assert_eq!(gateway.path, openai.path);
+    assert_eq!(openai.body.model.as_deref(), Some(WEB_SEARCH_OPENAI_MODEL));
+    assert_eq!(gateway.body.model.as_deref(), Some(WEB_SEARCH_GATEWAY_MODEL));
+    assert_eq!(gateway.body.input, openai.body.input);
+    assert_eq!(gateway.body.store, openai.body.store);
+    assert_eq!(gateway.body.stream, streaming);
+    assert_eq!(gateway.body.stream, openai.body.stream);
+    assert_eq!(gateway.body.tools, openai.body.tools);
+    assert_eq!(
+        gateway.body.tools,
+        vec![serde_json::json!({"type": "web_search_preview"})]
+    );
+    assert_eq!(gateway.body.tool_choice, openai.body.tool_choice);
+    assert_eq!(gateway.body.tool_choice, Some(serde_json::json!("auto")));
+    assert_eq!(gateway.body.max_output_tokens, openai.body.max_output_tokens);
+    assert_eq!(gateway.body.max_output_tokens, Some(1024));
+}
+
+fn assert_recorded_web_search_output(output: &[serde_json::Value]) -> &serde_json::Value {
+    assert!(
+        !output
+            .iter()
+            .any(|item| item["type"] == "function_call" && item["name"] == "web_search"),
+        "internal web_search function calls must not appear in public output"
+    );
+    let public_types: Vec<&str> = output
+        .iter()
+        .filter_map(|item| item["type"].as_str())
+        .filter(|item_type| *item_type != "reasoning")
+        .collect();
+    assert_eq!(public_types, ["web_search_call", "message"]);
+
+    let call = output
+        .iter()
+        .find(|item| item["type"] == "web_search_call")
+        .expect("output should contain web_search_call");
+    assert!(call["id"].as_str().is_some_and(|id| id.starts_with("ws_")));
+    assert_eq!(call["status"], "completed");
+    assert_eq!(call["action"]["type"], "search");
+    assert_eq!(call["action"]["query"], "potato");
+    assert!(
+        output
+            .iter()
+            .any(|item| item["type"] == "message" && item["status"] == "completed"),
+        "output should contain a completed assistant message"
+    );
+    call
+}
+
+fn assert_matching_recorded_web_search_action(openai_call: &serde_json::Value, gateway_call: &serde_json::Value) {
+    let openai_action = &openai_call["action"];
+    let gateway_action = &gateway_call["action"];
+
+    assert_eq!(gateway_action["type"], openai_action["type"]);
+    assert_eq!(gateway_action["query"], openai_action["query"]);
+    assert_eq!(openai_action["queries"], serde_json::json!(["potato"]));
+
+    let gateway_sources = gateway_action["sources"]
+        .as_array()
+        .expect("gateway search action should contain resolved sources");
+    assert!(!gateway_sources.is_empty());
+    assert!(
+        gateway_sources
+            .iter()
+            .all(|source| { source["url"].as_str().is_some_and(|url| url.starts_with("https://")) })
+    );
+}
+
+fn assert_recorded_web_search_lifecycle(turn: &support::Turn) -> String {
+    let events = recorded_sse_events(turn);
+    let expected_types = [
+        "response.output_item.added",
+        "response.web_search_call.in_progress",
+        "response.web_search_call.searching",
+        "response.web_search_call.completed",
+        "response.output_item.done",
+    ];
+    let lifecycle: Vec<&serde_json::Value> = events
+        .iter()
+        .filter(|event| {
+            event["type"]
+                .as_str()
+                .is_some_and(|event_type| event_type.starts_with("response.web_search_call."))
+                || event["item"]["type"] == "web_search_call"
+        })
+        .collect();
+    assert_eq!(
+        lifecycle
+            .iter()
+            .filter_map(|event| event["type"].as_str())
+            .collect::<Vec<_>>(),
+        expected_types
+    );
+
+    let item_ids: Vec<&str> = lifecycle
+        .iter()
+        .map(|event| {
+            event["item_id"]
+                .as_str()
+                .or_else(|| event["item"]["id"].as_str())
+                .expect("web-search lifecycle event should contain an item id")
+        })
+        .collect();
+    assert!(item_ids[0].starts_with("ws_"));
+    assert!(item_ids.iter().all(|item_id| *item_id == item_ids[0]));
+
+    let output_indexes: Vec<u64> = lifecycle
+        .iter()
+        .map(|event| {
+            event["output_index"]
+                .as_u64()
+                .expect("web-search lifecycle event should contain output_index")
+        })
+        .collect();
+    assert!(
+        output_indexes
+            .iter()
+            .all(|output_index| *output_index == output_indexes[0])
+    );
+
+    let sequence_numbers: Vec<u64> = events
+        .iter()
+        .map(|event| {
+            event["sequence_number"]
+                .as_u64()
+                .expect("recorded event should contain sequence_number")
+        })
+        .collect();
+    assert_eq!(
+        sequence_numbers,
+        (0..u64::try_from(events.len()).unwrap()).collect::<Vec<_>>()
+    );
+
+    item_ids[0].to_owned()
+}
+
+#[test]
+fn recorded_web_search_nonstreaming_matches_openai_contract() {
+    let (openai, gateway) = load_recorded_web_search_pair(false);
+    assert_recorded_web_search_requests(&openai, &gateway, false);
+
+    let openai_output = recorded_terminal_output(&openai.turns[0]);
+    let gateway_output = recorded_terminal_output(&gateway.turns[0]);
+    assert!(
+        openai_output.iter().any(|item| item["type"] == "reasoning"),
+        "reasoning-capable OpenAI reference should contain a reasoning item"
+    );
+    assert!(
+        gateway_output.iter().any(|item| item["type"] == "reasoning"),
+        "gateway recording should contain a reasoning item"
+    );
+    let openai_call = assert_recorded_web_search_output(&openai_output);
+    let gateway_call = assert_recorded_web_search_output(&gateway_output);
+    assert_eq!(gateway_call["status"], openai_call["status"]);
+    assert_matching_recorded_web_search_action(openai_call, gateway_call);
+}
+
+#[test]
+fn recorded_web_search_streaming_matches_openai_contract() {
+    let (openai, gateway) = load_recorded_web_search_pair(true);
+    assert_recorded_web_search_requests(&openai, &gateway, true);
+
+    let openai_id = assert_recorded_web_search_lifecycle(&openai.turns[0]);
+    let gateway_id = assert_recorded_web_search_lifecycle(&gateway.turns[0]);
+    let openai_output = recorded_terminal_output(&openai.turns[0]);
+    let gateway_output = recorded_terminal_output(&gateway.turns[0]);
+    assert!(
+        gateway_output.iter().any(|item| item["type"] == "reasoning"),
+        "gateway stream should preserve its reasoning items"
+    );
+    let openai_call = assert_recorded_web_search_output(&openai_output);
+    let gateway_call = assert_recorded_web_search_output(&gateway_output);
+    assert_eq!(openai_call["id"], openai_id);
+    assert_eq!(gateway_call["id"], gateway_id);
+    assert_eq!(gateway_call["status"], openai_call["status"]);
+    assert_matching_recorded_web_search_action(openai_call, gateway_call);
+}
+
 #[derive(Debug)]
 struct CapturedSearchRequest {
     api_key: String,
@@ -360,6 +597,11 @@ fn web_search_function_call_sse_response() -> support::MockResponse {
             "arguments": "{\"query\":\"rust async\",\"count\":2}"
         }),
         serde_json::json!({
+            "type": "provider.gateway_metadata",
+            "output_index": 0,
+            "metadata": {"trace_id": "trace_search"}
+        }),
+        serde_json::json!({
             "type": "response.completed",
             "response": {"id": "resp_tool_call", "status": "completed", "usage": null}
         }),
@@ -436,6 +678,135 @@ fn text_sse_response(text: &str) -> support::MockResponse {
     ])
 }
 
+fn text_sse_response_with_output_index(text: &str, output_index: u32) -> support::MockResponse {
+    sse_response([
+        serde_json::json!({
+            "type": "response.created",
+            "response": {"id": "resp_final", "status": "in_progress", "usage": null}
+        }),
+        serde_json::json!({
+            "type": "response.in_progress",
+            "response": {"id": "resp_final", "status": "in_progress", "usage": null}
+        }),
+        serde_json::json!({
+            "type": "response.output_item.added",
+            "output_index": output_index,
+            "item": {
+                "id": "msg_final",
+                "type": "message",
+                "role": "assistant",
+                "status": "in_progress",
+                "content": []
+            }
+        }),
+        serde_json::json!({
+            "type": "response.output_text.delta",
+            "item_id": "msg_final",
+            "output_index": output_index,
+            "content_index": 0,
+            "delta": text
+        }),
+        serde_json::json!({
+            "type": "response.output_item.done",
+            "output_index": output_index,
+            "item": {
+                "id": "msg_final",
+                "type": "message",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{"type": "output_text", "text": text, "annotations": []}]
+            }
+        }),
+        serde_json::json!({
+            "type": "response.completed",
+            "response": {"id": "resp_final", "status": "completed", "usage": null}
+        }),
+    ])
+}
+
+fn two_messages_then_web_search_sse_response() -> support::MockResponse {
+    sse_response([
+        serde_json::json!({
+            "type": "response.created",
+            "response": {"id": "resp_mid", "status": "in_progress", "usage": null}
+        }),
+        serde_json::json!({
+            "type": "response.in_progress",
+            "response": {"id": "resp_mid", "status": "in_progress", "usage": null}
+        }),
+        serde_json::json!({
+            "type": "response.output_item.added",
+            "output_index": 0,
+            "item": {"id": "msg_mid_0", "type": "message", "role": "assistant", "status": "in_progress", "content": []}
+        }),
+        serde_json::json!({
+            "type": "response.output_text.delta",
+            "item_id": "msg_mid_0",
+            "output_index": 0,
+            "content_index": 0,
+            "delta": "First result."
+        }),
+        serde_json::json!({
+            "type": "response.output_item.done",
+            "output_index": 0,
+            "item": {
+                "id": "msg_mid_0",
+                "type": "message",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{"type": "output_text", "text": "First result.", "annotations": []}]
+            }
+        }),
+        serde_json::json!({
+            "type": "response.output_item.added",
+            "output_index": 1,
+            "item": {"id": "msg_mid_1", "type": "message", "role": "assistant", "status": "in_progress", "content": []}
+        }),
+        serde_json::json!({
+            "type": "response.output_text.delta",
+            "item_id": "msg_mid_1",
+            "output_index": 1,
+            "content_index": 0,
+            "delta": "Second result."
+        }),
+        serde_json::json!({
+            "type": "response.output_item.done",
+            "output_index": 1,
+            "item": {
+                "id": "msg_mid_1",
+                "type": "message",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{"type": "output_text", "text": "Second result.", "annotations": []}]
+            }
+        }),
+        serde_json::json!({
+            "type": "response.output_item.added",
+            "output_index": 2,
+            "item": {
+                "id": "fc_search_mid",
+                "type": "function_call",
+                "call_id": "call_search_mid",
+                "name": "web_search",
+                "arguments": "",
+                "status": "in_progress"
+            }
+        }),
+        serde_json::json!({
+            "type": "response.function_call_arguments.done",
+            "item_id": "fc_search_mid",
+            "output_index": 2,
+            "call_id": "call_search_mid",
+            "name": "web_search",
+            "arguments": "{\"query\":\"tokio streams\",\"count\":2}"
+        }),
+        serde_json::json!({
+            "type": "response.completed",
+            "response": {"id": "resp_mid", "status": "completed", "usage": null}
+        }),
+    ])
+}
+
 fn mixed_web_search_and_client_function_response() -> support::MockResponse {
     support::MockResponse::Json(
         serde_json::json!({
@@ -471,6 +842,90 @@ fn mixed_web_search_and_client_function_response() -> support::MockResponse {
         })
         .to_string(),
     )
+}
+
+fn mixed_web_search_and_client_function_sse_response() -> support::MockResponse {
+    sse_response([
+        serde_json::json!({
+            "type": "response.created",
+            "response": {"id": "resp_mixed_tool_call", "status": "in_progress", "usage": null}
+        }),
+        serde_json::json!({
+            "type": "response.output_item.added",
+            "output_index": 0,
+            "item": {
+                "id": "fc_search",
+                "type": "function_call",
+                "call_id": "call_search",
+                "name": "web_search",
+                "arguments": "",
+                "status": "in_progress"
+            }
+        }),
+        serde_json::json!({
+            "type": "response.function_call_arguments.done",
+            "item_id": "fc_search",
+            "output_index": 0,
+            "call_id": "call_search",
+            "name": "web_search",
+            "arguments": "{\"query\":\"rust async\",\"count\":2}"
+        }),
+        serde_json::json!({
+            "type": "response.output_item.added",
+            "output_index": 1,
+            "item": {
+                "id": "fc_weather",
+                "type": "function_call",
+                "call_id": "call_weather",
+                "arguments": "",
+                "status": "in_progress"
+            }
+        }),
+        serde_json::json!({
+            "type": "response.function_call_arguments.done",
+            "item_id": "fc_weather",
+            "output_index": 1,
+            "call_id": "call_weather",
+            "name": "get_weather",
+            "arguments": "{\"city\":\"San Francisco\"}"
+        }),
+        serde_json::json!({
+            "type": "response.output_item.done",
+            "output_index": 1,
+            "item": {
+                "id": "fc_weather",
+                "type": "function_call",
+                "call_id": "call_weather",
+                "name": "get_weather",
+                "arguments": "{\"city\":\"San Francisco\"}",
+                "status": "completed"
+            }
+        }),
+        serde_json::json!({
+            "type": "response.output_item.added",
+            "output_index": 2,
+            "item": {
+                "id": "fc_search_second",
+                "type": "function_call",
+                "call_id": "call_search_second",
+                "name": "web_search",
+                "arguments": "",
+                "status": "in_progress"
+            }
+        }),
+        serde_json::json!({
+            "type": "response.function_call_arguments.done",
+            "item_id": "fc_search_second",
+            "output_index": 2,
+            "call_id": "call_search_second",
+            "name": "web_search",
+            "arguments": "{\"query\":\"tokio streams\",\"count\":2}"
+        }),
+        serde_json::json!({
+            "type": "response.completed",
+            "response": {"id": "resp_mixed_tool_call", "status": "completed", "usage": null}
+        }),
+    ])
 }
 
 fn text_response_with_usage(text: &str, input_tokens: i64, output_tokens: i64) -> support::MockResponse {
@@ -586,6 +1041,7 @@ async fn execute_runs_web_search_and_sends_tool_output_back_to_model() {
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
+        context_management: None,
     };
 
     let result = ExecuteRequest::new(payload, Arc::clone(&exec_ctx)).run().await.unwrap();
@@ -671,6 +1127,7 @@ async fn execute_relaxes_forced_tool_choice_after_web_search_result() {
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
+        context_management: None,
     };
 
     let result = ExecuteRequest::new(payload, Arc::clone(&exec_ctx)).run().await.unwrap();
@@ -720,6 +1177,7 @@ async fn execute_returns_mixed_client_tool_calls_without_followup_model_request(
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
+        context_management: None,
     };
 
     let result = ExecuteRequest::new(payload, Arc::clone(&exec_ctx)).run().await.unwrap();
@@ -768,6 +1226,7 @@ async fn execute_returns_mixed_client_tool_calls_without_followup_model_request(
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
+        context_management: None,
     };
     let continuation = ExecuteRequest::new(continuation_payload, exec_ctx).run().await.unwrap();
     assert!(matches!(continuation, Either::Left(_)));
@@ -839,6 +1298,7 @@ async fn execute_accumulates_usage_across_web_search_model_rounds() {
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
+        context_management: None,
     };
 
     let result = ExecuteRequest::new(payload, exec_ctx).run().await.unwrap();
@@ -883,6 +1343,7 @@ async fn stream_emits_web_search_lifecycle_events_before_final_payload() {
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
+        context_management: None,
     };
 
     let result = ExecuteRequest::new(payload, Arc::clone(&exec_ctx)).run().await.unwrap();
@@ -938,6 +1399,132 @@ async fn stream_emits_web_search_lifecycle_events_before_final_payload() {
     assert!(output.iter().any(|item| item["type"] == "message"));
 }
 
+fn assert_single_logical_lifecycle(json_events: &[serde_json::Value]) {
+    let event_types: Vec<&str> = json_events.iter().filter_map(|event| event["type"].as_str()).collect();
+    assert_eq!(
+        event_types
+            .iter()
+            .filter(|event_type| **event_type == "response.created")
+            .count(),
+        1,
+        "multi-round stream should expose one logical response.created: {event_types:?}"
+    );
+    assert_eq!(
+        event_types
+            .iter()
+            .filter(|event_type| **event_type == "response.in_progress")
+            .count(),
+        1,
+        "multi-round stream should expose one logical response.in_progress: {event_types:?}"
+    );
+}
+
+fn assert_contiguous_sequence_numbers(json_events: &[serde_json::Value], message: &str) {
+    let sequence_numbers: Vec<u64> = json_events
+        .iter()
+        .map(|event| {
+            event["sequence_number"]
+                .as_u64()
+                .unwrap_or_else(|| panic!("event missing sequence_number: {event}"))
+        })
+        .collect();
+    assert_eq!(
+        sequence_numbers,
+        (0..u64::try_from(sequence_numbers.len()).unwrap()).collect::<Vec<_>>(),
+        "{message}"
+    );
+}
+
+fn assert_output_event_indices_in_order(json_events: &[serde_json::Value], expected_events: &[(&str, u64)]) {
+    let output_events: Vec<(&str, u64)> = json_events
+        .iter()
+        .filter_map(|event| Some((event["type"].as_str()?, event["output_index"].as_u64()?)))
+        .collect();
+    assert_eq!(output_events, expected_events);
+}
+
+#[tokio::test]
+async fn multi_round_stream_has_single_lifecycle_and_monotonic_public_sequence() {
+    let (you_url, mut captured_you, _you_handle) = spawn_mock_you().await;
+    let llm = support::MockServer::start_deque(vec![
+        web_search_function_call_sse_response(),
+        two_messages_then_web_search_sse_response(),
+        text_sse_response_with_output_index("Use async carefully.", 0),
+    ])
+    .await;
+    let exec_ctx = build_exec_ctx(llm.url(), you_url).await;
+    let web_search: ResponsesTool = serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).unwrap();
+    let payload = RequestPayload {
+        model: "test-model".to_owned(),
+        input: ResponsesInput::Text("look up rust async".to_owned()),
+        instructions: None,
+        previous_response_id: None,
+        conversation_id: None,
+        tools: Some(vec![web_search]),
+        tool_choice: None,
+        stream: true,
+        store: true,
+        include: None,
+        temperature: None,
+        top_p: None,
+        max_output_tokens: Some(1024),
+        truncation: None,
+        cache_salt: None,
+        metadata: None,
+        parallel_tool_calls: None,
+        context_management: None,
+    };
+
+    let result = ExecuteRequest::new(payload, Arc::clone(&exec_ctx)).run().await.unwrap();
+    let Either::Right(stream) = result else {
+        panic!("expected streaming response");
+    };
+    let chunks: Vec<String> = stream.collect().await;
+    captured_you.recv().await.expect("mock You.com should receive request");
+    captured_you
+        .recv()
+        .await
+        .expect("mock You.com should receive second request");
+
+    let json_events: Vec<serde_json::Value> = chunks
+        .iter()
+        .filter_map(|chunk| {
+            let data = chunk.trim_end_matches('\n').strip_prefix("data: ")?;
+            (data != "[DONE]").then(|| serde_json::from_str(data).ok())?
+        })
+        .collect();
+    assert_single_logical_lifecycle(&json_events);
+    assert_contiguous_sequence_numbers(
+        &json_events,
+        "public sequence_number must be contiguous across upstream, synthetic, and terminal frames",
+    );
+    assert_output_event_indices_in_order(
+        &json_events,
+        &[
+            ("response.output_item.added", 0),
+            ("response.web_search_call.in_progress", 0),
+            ("response.web_search_call.searching", 0),
+            ("response.web_search_call.completed", 0),
+            ("response.output_item.done", 0),
+            ("provider.gateway_metadata", 0),
+            ("response.output_item.added", 1),
+            ("response.output_text.delta", 1),
+            ("response.output_item.done", 1),
+            ("response.output_item.added", 2),
+            ("response.output_text.delta", 2),
+            ("response.output_item.done", 2),
+            ("response.output_item.added", 3),
+            ("response.web_search_call.in_progress", 3),
+            ("response.web_search_call.searching", 3),
+            ("response.web_search_call.completed", 3),
+            ("response.output_item.done", 3),
+            ("response.output_item.added", 4),
+            ("response.output_text.delta", 4),
+            ("response.output_item.done", 4),
+        ],
+    );
+}
+
 #[tokio::test]
 async fn stream_hides_web_search_function_events_when_name_arrives_on_done() {
     let (you_url, mut captured_you, _you_handle) = spawn_mock_you().await;
@@ -966,6 +1553,7 @@ async fn stream_hides_web_search_function_events_when_name_arrives_on_done() {
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
+        context_management: None,
     };
 
     let result = ExecuteRequest::new(payload, Arc::clone(&exec_ctx)).run().await.unwrap();
@@ -1006,6 +1594,100 @@ async fn stream_hides_web_search_function_events_when_name_arrives_on_done() {
 }
 
 #[tokio::test]
+async fn stream_orders_gateway_lifecycle_before_later_client_function_events() {
+    let (you_url, mut captured_you, _you_handle) = spawn_mock_you_waiting_for_two_searches().await;
+    let llm = support::MockServer::start_deque(vec![mixed_web_search_and_client_function_sse_response()]).await;
+    let exec_ctx = build_exec_ctx(llm.url(), you_url).await;
+    let web_search: ResponsesTool = serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).unwrap();
+    let client_function: ResponsesTool = serde_json::from_value(serde_json::json!({
+        "type": "function",
+        "name": "get_weather",
+        "parameters": {
+            "type": "object",
+            "properties": {"city": {"type": "string"}}
+        }
+    }))
+    .unwrap();
+    let payload = RequestPayload {
+        model: "test-model".to_owned(),
+        input: ResponsesInput::Text("look up rust async and weather".to_owned()),
+        instructions: None,
+        previous_response_id: None,
+        conversation_id: None,
+        tools: Some(vec![web_search, client_function]),
+        tool_choice: None,
+        stream: true,
+        store: true,
+        include: None,
+        temperature: None,
+        top_p: None,
+        max_output_tokens: Some(1024),
+        truncation: None,
+        metadata: None,
+        parallel_tool_calls: None,
+        cache_salt: None,
+        context_management: None,
+    };
+
+    let result = ExecuteRequest::new(payload, exec_ctx).run().await.unwrap();
+    let Either::Right(stream) = result else {
+        panic!("expected streaming response");
+    };
+    let chunks: Vec<String> = tokio::time::timeout(Duration::from_secs(2), stream.collect())
+        .await
+        .expect("interleaved gateway calls should execute concurrently");
+    captured_you
+        .recv()
+        .await
+        .expect("mock You.com should receive first request");
+    captured_you
+        .recv()
+        .await
+        .expect("mock You.com should receive second request");
+
+    let json_events: Vec<serde_json::Value> = chunks
+        .iter()
+        .filter_map(|chunk| {
+            let data = chunk.trim_end_matches('\n').strip_prefix("data: ")?;
+            (data != "[DONE]").then(|| serde_json::from_str(data).ok())?
+        })
+        .collect();
+    assert_contiguous_sequence_numbers(
+        &json_events,
+        "mixed-call stream must retain contiguous sequence numbers",
+    );
+    assert!(
+        json_events
+            .iter()
+            .any(|event| { event["item"]["type"] == "function_call" && event["item"]["name"] == "get_weather" })
+    );
+    assert!(
+        !json_events
+            .iter()
+            .any(|event| { event["item"]["type"] == "function_call" && event["item"]["name"] == "web_search" })
+    );
+
+    assert_output_event_indices_in_order(
+        &json_events,
+        &[
+            ("response.output_item.added", 0),
+            ("response.web_search_call.in_progress", 0),
+            ("response.web_search_call.searching", 0),
+            ("response.web_search_call.completed", 0),
+            ("response.output_item.done", 0),
+            ("response.output_item.added", 1),
+            ("response.function_call_arguments.done", 1),
+            ("response.output_item.done", 1),
+            ("response.output_item.added", 2),
+            ("response.web_search_call.in_progress", 2),
+            ("response.web_search_call.searching", 2),
+            ("response.web_search_call.completed", 2),
+            ("response.output_item.done", 2),
+        ],
+    );
+}
+
+#[tokio::test]
 async fn execute_runs_multiple_web_search_calls_concurrently() {
     let (you_url, mut captured_you, _you_handle) = spawn_mock_you_waiting_for_two_searches().await;
     let llm = support::MockServer::start_deque(vec![
@@ -1033,6 +1715,7 @@ async fn execute_runs_multiple_web_search_calls_concurrently() {
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
+        context_management: None,
     };
 
     let result = tokio::time::timeout(Duration::from_secs(2), ExecuteRequest::new(payload, exec_ctx).run())
@@ -1082,6 +1765,7 @@ async fn execute_feeds_web_search_execution_errors_back_to_model() {
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
+        context_management: None,
     };
 
     let result = ExecuteRequest::new(payload, exec_ctx).run().await.unwrap();
@@ -1133,6 +1817,7 @@ async fn execute_returns_incomplete_after_max_gateway_tool_rounds() {
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
+        context_management: None,
     };
 
     // Budget exhausted while the model keeps requesting tools → the response is
@@ -1184,6 +1869,7 @@ async fn execute_feeds_invalid_web_search_arguments_back_to_model() {
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
+        context_management: None,
     };
 
     let result = ExecuteRequest::new(payload, exec_ctx).run().await.unwrap();
@@ -1242,6 +1928,7 @@ async fn execute_runs_large_gateway_fanout_without_hard_cap() {
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
+        context_management: None,
     };
 
     let result = ExecuteRequest::new(payload, exec_ctx)
@@ -1306,6 +1993,7 @@ async fn stream_error_events_escape_error_messages() {
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
+        context_management: None,
     };
 
     let result = ExecuteRequest::new(payload, exec_ctx).run().await.unwrap();
@@ -1382,6 +2070,7 @@ async fn incomplete_turn_persists_a_consistent_conversation_for_continuation() {
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
+        context_management: None,
     };
 
     let result = ExecuteRequest::new(payload, Arc::clone(&exec_ctx)).run().await.unwrap();
@@ -1409,6 +2098,7 @@ async fn incomplete_turn_persists_a_consistent_conversation_for_continuation() {
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
+        context_management: None,
     };
     let _ = ExecuteRequest::new(continuation_payload, exec_ctx).run().await.unwrap();
 
@@ -1480,6 +2170,7 @@ async fn stream_returns_incomplete_after_max_gateway_tool_rounds() {
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
+        context_management: None,
     };
 
     let result = ExecuteRequest::new(payload, exec_ctx).run().await.unwrap();
@@ -1488,13 +2179,29 @@ async fn stream_returns_incomplete_after_max_gateway_tool_rounds() {
     };
     let chunks: Vec<String> = stream.collect().await;
 
-    let final_event = chunks
+    let json_events: Vec<serde_json::Value> = chunks
         .iter()
         .filter_map(|chunk| {
             let data = chunk.trim_end_matches('\n').strip_prefix("data: ")?;
             (data != "[DONE]").then(|| serde_json::from_str::<serde_json::Value>(data).ok())?
         })
-        .next_back()
+        .collect();
+    let sequence_numbers: Vec<u64> = json_events
+        .iter()
+        .map(|event| {
+            event["sequence_number"]
+                .as_u64()
+                .unwrap_or_else(|| panic!("event missing sequence_number: {event}"))
+        })
+        .collect();
+    assert_eq!(
+        sequence_numbers,
+        (0..u64::try_from(sequence_numbers.len()).unwrap()).collect::<Vec<_>>(),
+        "incomplete terminal stream should keep sequence_number contiguous"
+    );
+
+    let final_event = json_events
+        .last()
         .expect("stream should carry a final response payload");
     // The terminal SSE event wraps the payload: {"type":"response.incomplete","response":{...}}
     let response = &final_event["response"];

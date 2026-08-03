@@ -6,9 +6,12 @@ use crate::executor::error::ExecutorError;
 use crate::tool::ToolRegistry;
 use crate::types::event::MessageStatus;
 use crate::types::tools::ToolSearchExecution;
+use crate::utils::common::deserialize_from_value_opt;
 use crate::utils::uuid7_str;
 
-use super::input::{InputContent, InputItem, InputMessage, InputMessageContent, InputTextContent};
+use super::input::{
+    InputContent, InputFunctionToolCall, InputItem, InputMessage, InputMessageContent, InputTextContent,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutputTextContent {
@@ -73,7 +76,9 @@ impl From<OutputMessage> for InputMessage {
             .map(|c| InputContent::OutputText(InputTextContent { text: c.text }))
             .collect();
         Self {
+            id: Some(msg.id),
             role: msg.role,
+            status: Some(msg.status),
             content: InputMessageContent::Parts(parts),
         }
     }
@@ -81,7 +86,8 @@ impl From<OutputMessage> for InputMessage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionToolCall {
-    #[serde(default)]
+    #[serde(default = "default_function_call_id")]
+    #[serde(deserialize_with = "deserialize_function_call_id")]
     pub id: String,
     #[serde(default)]
     pub call_id: String,
@@ -182,6 +188,19 @@ fn default_completed_status() -> MessageStatus {
     MessageStatus::Completed
 }
 
+fn default_function_call_id() -> String {
+    uuid7_str("fc_")
+}
+
+fn deserialize_function_call_id<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(Option::<String>::deserialize(deserializer)?
+        .filter(|id| !id.is_empty())
+        .unwrap_or_else(default_function_call_id))
+}
+
 fn deserialize_status_or_default<'de, D>(deserializer: D) -> Result<MessageStatus, D::Error>
 where
     D: Deserializer<'de>,
@@ -266,6 +285,26 @@ impl GatewayCallStatus {
 
 pub type WebSearchCallStatus = GatewayCallStatus;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum McpCallStatus {
+    InProgress,
+    Calling,
+    Completed,
+    Incomplete,
+    Failed,
+}
+
+impl From<GatewayCallStatus> for McpCallStatus {
+    fn from(status: GatewayCallStatus) -> Self {
+        match status {
+            GatewayCallStatus::InProgress => Self::InProgress,
+            GatewayCallStatus::Completed => Self::Completed,
+            GatewayCallStatus::Failed => Self::Failed,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSearchSource {
     pub url: String,
@@ -275,20 +314,67 @@ pub struct WebSearchSource {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSearchActionSearch {
-    #[serde(rename = "type")]
+    #[serde(skip, default = "default_web_search_action_search_type")]
     pub type_: String,
     pub query: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub queries: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sources: Vec<WebSearchSource>,
+}
+
+fn default_web_search_action_search_type() -> String {
+    "search".to_owned()
 }
 
 impl WebSearchActionSearch {
     #[must_use]
     pub fn new(query: impl Into<String>, sources: Vec<WebSearchSource>) -> Self {
         Self {
-            type_: "search".to_owned(),
+            type_: default_web_search_action_search_type(),
             query: query.into(),
+            queries: Vec::new(),
             sources,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSearchActionOpenPage {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebSearchActionFindInPage {
+    pub pattern: String,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum WebSearchAction {
+    Search(WebSearchActionSearch),
+    OpenPage(WebSearchActionOpenPage),
+    FindInPage(WebSearchActionFindInPage),
+}
+
+impl WebSearchAction {
+    #[must_use]
+    pub const fn type_str(&self) -> &'static str {
+        match self {
+            Self::Search(_) => "search",
+            Self::OpenPage(_) => "open_page",
+            Self::FindInPage(_) => "find_in_page",
+        }
+    }
+
+    #[must_use]
+    pub const fn as_search(&self) -> Option<&WebSearchActionSearch> {
+        match self {
+            Self::Search(action) => Some(action),
+            Self::OpenPage(_) | Self::FindInPage(_) => None,
         }
     }
 }
@@ -297,7 +383,7 @@ impl WebSearchActionSearch {
 pub struct WebSearchCall {
     pub id: String,
     pub status: WebSearchCallStatus,
-    pub action: WebSearchActionSearch,
+    pub action: WebSearchAction,
 }
 
 impl WebSearchCall {
@@ -311,44 +397,108 @@ impl WebSearchCall {
         Self {
             id: id.into(),
             status,
-            action: WebSearchActionSearch::new(query, sources),
+            action: WebSearchAction::Search(WebSearchActionSearch::new(query, sources)),
         }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct McpToolCall {
-    pub id: String,
-    pub server: String,
-    pub tool: String,
-    pub arguments: Value,
-    pub status: GatewayCallStatus,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
+#[serde(untagged)]
+pub enum McpCallError {
+    Text(String),
+    ToolExecution(McpToolExecutionError),
+    Unknown(Value),
 }
 
-impl McpToolCall {
+impl McpCallError {
+    #[must_use]
+    pub fn tool_execution(text: impl Into<String>) -> Self {
+        Self::ToolExecution(McpToolExecutionError {
+            type_: "mcp_tool_execution_error".to_owned(),
+            content: vec![McpToolExecutionErrorContent {
+                type_: "text".to_owned(),
+                text: text.into(),
+                annotations: None,
+                meta: None,
+            }],
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpToolExecutionError {
+    #[serde(rename = "type")]
+    pub type_: String,
+    pub content: Vec<McpToolExecutionErrorContent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpToolExecutionErrorContent {
+    #[serde(rename = "type")]
+    pub type_: String,
+    pub text: String,
+    pub annotations: Option<Value>,
+    pub meta: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpCall {
+    pub id: String,
+    pub server_label: String,
+    pub name: String,
+    pub arguments: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<McpCallStatus>,
+    pub approval_request_id: Option<String>,
+    pub output: Option<String>,
+    pub error: Option<McpCallError>,
+}
+
+impl McpCall {
     #[must_use]
     pub fn new(
         id: impl Into<String>,
-        server: impl Into<String>,
-        tool: impl Into<String>,
-        arguments: Value,
-        status: GatewayCallStatus,
-        result: Option<Value>,
-        error: Option<String>,
+        server_label: impl Into<String>,
+        name: impl Into<String>,
+        arguments: impl Into<String>,
+        status: McpCallStatus,
+        output: Option<String>,
+        error: Option<McpCallError>,
     ) -> Self {
         Self {
             id: id.into(),
-            server: server.into(),
-            tool: tool.into(),
-            arguments,
-            status,
-            result,
+            server_label: server_label.into(),
+            name: name.into(),
+            arguments: arguments.into(),
+            status: Some(status),
+            approval_request_id: None,
+            output,
             error,
         }
+    }
+}
+
+impl TryFrom<&EventPayload> for McpCall {
+    type Error = ExecutorError;
+
+    fn try_from(payload: &EventPayload) -> Result<Self, Self::Error> {
+        let EventPayload::OutputItemAdded { item_id, name, .. } = payload else {
+            return Err(ExecutorError::ParseError("expected OutputItemAdded payload".into()));
+        };
+        let id = if item_id.is_empty() {
+            uuid7_str("mcp_")
+        } else {
+            item_id.clone()
+        };
+        Ok(Self::new(
+            id,
+            "",
+            name.as_deref().unwrap_or_default(),
+            "",
+            McpCallStatus::InProgress,
+            None,
+            None,
+        ))
     }
 }
 
@@ -474,6 +624,17 @@ impl ApplyDone for CustomToolCall {
     }
 }
 
+impl ApplyDone for McpCall {
+    fn apply_done(&mut self, payload: &EventPayload, _buffer: &mut String) {
+        let EventPayload::OutputItemDone { item, .. } = payload else {
+            return;
+        };
+        if let Some(call) = deserialize_from_value_opt(item.clone()) {
+            *self = call;
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum OutputItem {
@@ -489,8 +650,8 @@ pub enum OutputItem {
     ToolSearchOutput(ToolSearchOutput),
     #[serde(rename = "web_search_call")]
     WebSearchCall(WebSearchCall),
-    #[serde(rename = "mcp_tool_call")]
-    McpToolCall(McpToolCall),
+    #[serde(rename = "mcp_call")]
+    McpCall(McpCall),
     #[serde(rename = "reasoning")]
     Reasoning(ReasoningOutput),
     #[serde(other)]
@@ -509,7 +670,7 @@ impl OutputItem {
             Self::Message(_)
             | Self::ToolSearchOutput(_)
             | Self::WebSearchCall(_)
-            | Self::McpToolCall(_)
+            | Self::McpCall(_)
             | Self::Reasoning(_)
             | Self::Unknown => false,
         }
@@ -520,11 +681,11 @@ impl OutputItem {
         match self {
             Self::Message(message) => Some(InputItem::Message(message.clone().into())),
             Self::Reasoning(reasoning) => Some(InputItem::Reasoning(reasoning.clone())),
-            Self::FunctionCall(call) => Some(InputItem::FunctionCall(call.clone())),
+            Self::FunctionCall(call) => Some(InputItem::FunctionCall(InputFunctionToolCall::from(call.clone()))),
             Self::CustomToolCall(call) => Some(InputItem::CustomToolCall(call.clone())),
             Self::ToolSearchCall(call) => Some(InputItem::ToolSearchCall(call.clone())),
             Self::ToolSearchOutput(output) => Some(InputItem::ToolSearchOutput(output.clone())),
-            Self::WebSearchCall(_) | Self::McpToolCall(_) | Self::Unknown => None,
+            Self::WebSearchCall(_) | Self::McpCall(_) | Self::Unknown => None,
         }
     }
 }
@@ -730,23 +891,27 @@ mod tests {
     }
 
     #[test]
-    fn mcp_tool_call_serializes_as_output_item() {
-        let item = OutputItem::McpToolCall(McpToolCall::new(
+    fn mcp_call_serializes_as_openai_output_item() {
+        let item = OutputItem::McpCall(McpCall::new(
             "mcp_1",
-            "repo",
-            "read_mcp_resource",
-            serde_json::json!({"server": "repo", "uri": "file://fixture.yaml"}),
-            GatewayCallStatus::Completed,
-            Some(serde_json::json!({"contents": []})),
+            "counter",
+            "increment",
+            "{}",
+            McpCallStatus::Completed,
+            Some("1".to_owned()),
             None,
         ));
 
         let json = serde_json::to_value(item).unwrap();
-        assert_eq!(json["type"], "mcp_tool_call");
+        assert_eq!(json["type"], "mcp_call");
         assert_eq!(json["id"], "mcp_1");
         assert_eq!(json["status"], "completed");
-        assert_eq!(json["server"], "repo");
-        assert_eq!(json["tool"], "read_mcp_resource");
+        assert_eq!(json["server_label"], "counter");
+        assert_eq!(json["name"], "increment");
+        assert_eq!(json["arguments"], "{}");
+        assert_eq!(json["output"], "1");
+        assert!(json["approval_request_id"].is_null());
+        assert!(json["error"].is_null());
     }
 
     #[test]

@@ -1,13 +1,14 @@
 use crate::types::io::FunctionTool;
 use crate::types::io::input::FunctionToolResultMessage;
-use crate::types::tools::ResponsesTool;
+use crate::types::tools::{ResponsesTool, ToolSearchExecution};
 use crate::utils::common::serialize_to_value_or_custom_default;
 
 use super::codex::CodexNamespaceHandler;
 use super::function::FunctionHandler;
 use super::handler::{ToolHandler, ToolOutput};
-use super::mcp::{McpHandler, maybe_mcp_function};
+use super::mcp::McpHandler;
 use super::registry::ToolType;
+use super::tool_search::tool_search_function_tool;
 use super::web_search::web_search_function_tool;
 
 impl ResponsesTool {
@@ -15,10 +16,7 @@ impl ResponsesTool {
     #[must_use]
     pub fn tool_type(&self) -> Option<ToolType> {
         match self {
-            Self::Function(p) => match maybe_mcp_function(p) {
-                Some(params) if !params.is_empty() => Some(ToolType::Mcp),
-                _ => Some(ToolType::Function),
-            },
+            Self::Function(_) => Some(ToolType::Function),
             Self::Mcp(_) => Some(ToolType::Mcp),
             Self::WebSearch(_) => Some(ToolType::WebSearch),
             Self::FileSearch(_) => Some(ToolType::FileSearch),
@@ -39,9 +37,12 @@ impl ResponsesTool {
     ///   Returns an empty list and logs at `debug` level if the name is empty.
     /// - `Mcp` variants convert gateway MCP built-ins to the function specs
     ///   vLLM can call.
-    /// - `Custom` and `ToolSearch` variants return no function tools because
-    ///   `RequestPayload::to_upstream_request()` forwards their native
-    ///   Responses declarations separately.
+    /// - Client-executed `ToolSearch` converts to the ordinary `tool_search`
+    ///   function fallback understood by providers without native dynamic-tool
+    ///   support. Hosted declarations stay native in upstream conversion.
+    /// - `Custom` returns no function tools because
+    ///   `RequestPayload::to_upstream_request()` forwards its native Responses
+    ///   declaration separately.
     /// - Unimplemented variants (`FileSearch`, `CodeInterpreter`) return
     ///   an empty list and emit a `tracing::debug!`.
     ///
@@ -85,11 +86,16 @@ impl ResponsesTool {
                 vec![]
             }
             Self::ToolSearch(p) => {
-                tracing::debug!(
-                    execution = ?p.execution,
-                    "tool_search retained for native upstream forwarding"
-                );
-                vec![]
+                if p.execution == Some(ToolSearchExecution::Client) {
+                    tracing::debug!("normalizing client tool_search declaration to provider function");
+                    vec![tool_search_function_tool(p)]
+                } else {
+                    tracing::debug!(
+                        execution = ?p.execution,
+                        "hosted tool_search declaration retained for native upstream forwarding"
+                    );
+                    vec![]
+                }
             }
             Self::Unknown => {
                 tracing::debug!("unknown tool skipped in normalize");

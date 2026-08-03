@@ -57,7 +57,13 @@ impl TryFrom<&ResponseMetadata> for String {
     type Error = StorageError;
 
     fn try_from(metadata: &ResponseMetadata) -> Result<Self, Self::Error> {
-        serialize_to_string(metadata).map_err(StorageError::Serialization)
+        let mut persisted = metadata.clone();
+        if let Some(tools) = persisted.effective_tools.as_mut() {
+            for tool in tools {
+                tool.sanitize_for_persistence();
+            }
+        }
+        serialize_to_string(&persisted).map_err(StorageError::Serialization)
     }
 }
 
@@ -119,6 +125,56 @@ mod tests {
         assert!(json_str.contains("gpt-4"));
         assert!(json_str.contains("resp_1"));
         assert!(json_str.contains("be helpful"));
+    }
+
+    #[test]
+    fn test_response_metadata_serialization_removes_request_scoped_mcp_state() {
+        let mut tool = serde_json::from_value(serde_json::json!({
+            "type": "mcp",
+            "server_label": "counter",
+            "server_url": "https://mcp.example.com/mcp",
+            "headers": {"X-API-Key": "secret"},
+            "authorization": "bearer-secret",
+            "require_approval": "never"
+        }))
+        .expect("valid MCP tool");
+        let ResponsesTool::Mcp(param) = &mut tool else {
+            panic!("expected MCP tool");
+        };
+        param
+            .discovered_tools
+            .push(crate::types::tools::McpDiscoveredToolParam {
+                server_label: "counter".to_owned(),
+                tool_name: "increment".to_owned(),
+                internal_name: "mcp__counter__increment".to_owned(),
+                tool: serde_json::from_value(serde_json::json!({
+                    "name": "increment",
+                    "inputSchema": {"type": "object"}
+                }))
+                .expect("discovered MCP tool"),
+            });
+        let metadata = ResponseMetadata {
+            effective_tools: Some(vec![tool]),
+            ..ResponseMetadata::default()
+        };
+
+        let serialized = String::try_from(&metadata).expect("serialization failed");
+        let serialized_value: serde_json::Value =
+            serde_json::from_str(&serialized).expect("serialized response metadata");
+        assert!(
+            serialized_value["effective_tools"][0]
+                .get("_agentic_discovered_tools")
+                .is_none()
+        );
+
+        let persisted: ResponseMetadata = serde_json::from_str(&serialized).expect("persisted metadata");
+        let tools = persisted.effective_tools.expect("persisted tools");
+        let ResponsesTool::Mcp(tool) = &tools[0] else {
+            panic!("expected MCP tool");
+        };
+
+        assert!(tool.headers.is_none());
+        assert!(tool.authorization.is_none());
     }
 
     #[test]

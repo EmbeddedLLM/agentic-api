@@ -22,6 +22,9 @@ printf 'First prompt\nSecond prompt\n' | python tests/cassettes/record_cassette.
 
 # gateway-backed cassette -- records the gateway-facing request/response
 printf 'Use web search to look up potato, then summarize in one sentence.\n' | python tests/cassettes/record_cassette.py --mode responses --turns 1 --no-stream --gateway http://localhost:9000 --model openai/gpt-oss-20b --output out.yaml
+
+# structured single-turn input -- sends the JSON string or item array from input.json
+python tests/cassettes/record_cassette.py --mode responses --turns 1 --no-stream --no-store --max-output-tokens 0 --input-file input.json --model gpt-4o --output out.yaml
 ```
 
 The recorder scripts (`record_reasoning_cassettes.sh`, `record_tool_call_cassettes.sh`, etc.) use `printf` to feed fixed prompts per test so no manual input is needed.
@@ -51,6 +54,7 @@ The recorder scripts (`record_reasoning_cassettes.sh`, `record_tool_call_cassett
 --openai URL           OpenAI upstream (default https://api.openai.com)
 --tools FILE           JSON file containing a tools array (responses mode only)
 --tool-choice VALUE    "auto", "none", "required", or JSON e.g. '{"type":"function","name":"foo"}'
+--input-file FILE       JSON string or item array for one HTTP Responses turn
 --max-output-tokens N  max_output_tokens for Responses requests (default 1024; use 0 to omit)
 --proxy-port PORT      Local proxy port (default 7070)
 --branch-from TURN     Branch from this turn's response id (repeatable)
@@ -162,6 +166,8 @@ turns:
 | `record_reasoning_cassettes.sh` | 2 reasoning cassettes (single turn, streaming + non-streaming) | vLLM |
 | `record_tool_call_cassettes.sh` | 8 tool-call cassettes (4 tool_choice modes x streaming + non-streaming) | vLLM |
 | `record_codex_cli_tool_call_cassettes.sh` | Codex function/namespace/custom-tool matrix | gateway, vLLM, and OpenAI |
+| `record_mcp_cassettes.sh` | Native MCP counter tool discovery and calls (streaming + non-streaming) | gateway and OpenAI reference |
+| `record_web_search_cassettes.sh` | Matching web-search calls (streaming + non-streaming) | gateway and OpenAI reference |
 
 ### Text-only (OpenAI)
 
@@ -186,6 +192,16 @@ vllm serve Qwen/Qwen3-30B-A3B-FP8 --tool-call-parser hermes --enable-auto-tool-c
 VLLM_URL=http://0.0.0.0:5050 MODEL=Qwen/Qwen3-30B-A3B-FP8 bash tests/cassettes/record_tool_call_cassettes.sh
 ```
 
+### Web search (gateway and OpenAI)
+
+The default records both providers. Use `WEB_SEARCH_RECORD_SET=gateway` or
+`WEB_SEARCH_RECORD_SET=openai` to record only one side.
+
+```bash
+OPENAI_API_KEY=sk-... \
+bash crates/agentic-server-core/tests/cassettes/record_web_search_cassettes.sh
+```
+
 ### Codex custom tools (gateway, vLLM, and OpenAI)
 
 The custom fixture uses a Lark grammar and records two turns: the model returns raw `custom_tool_call.input`, then the
@@ -203,4 +219,38 @@ bash tests/cassettes/record_codex_cli_tool_call_cassettes.sh direct-vllm-custom
 OPENAI_API_KEY=sk-... \
 OPENAI_CUSTOM_MODEL=gpt-5.6 \
 bash tests/cassettes/record_codex_cli_tool_call_cassettes.sh openai-custom
+```
+
+### Compaction replay (OpenAI)
+
+These recordings capture the non-streaming `/v1/responses` inference calls replayed by the compaction integration
+tests. The JSON inputs contain the exact model-facing item arrays, including the context-checkpoint prompt. Use the
+existing recorder directly from `crates/agentic-server-core`:
+
+```bash
+record_compaction() {
+  input_name="$1"
+  output_name="$2"
+  uv run \
+    --with click \
+    --with fastapi \
+    --with httpx \
+    --with uvicorn \
+    --with pyyaml \
+    python tests/cassettes/record_cassette.py \
+    --mode responses \
+    --turns 1 \
+    --no-stream \
+    --no-store \
+    --max-output-tokens 0 \
+    --openai https://api.openai.com \
+    --model gpt-4o \
+    --input-file "tests/cassettes/compaction/inputs/${input_name}.json" \
+    --output "tests/cassettes/compaction/compact-${output_name}-gpt-4o-nonstreaming.yaml"
+}
+
+export OPENAI_API_KEY=sk-...
+record_compaction basic basic
+record_compaction tool-prior-compaction tool-prior
+record_compaction followup followup
 ```

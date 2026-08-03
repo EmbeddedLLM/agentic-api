@@ -2,13 +2,30 @@ use std::collections::{HashMap, HashSet};
 
 use serde_json::{Map, Value};
 
+use crate::events::WireEvent;
 use crate::types::io::{
     FunctionTool, InputItem, OutputItem, ResponsesInput, ToolSearchCall, ToolSearchOutput, ToolSearchStatus,
 };
-use crate::types::tools::ToolSearchExecution;
+use crate::types::tools::{ToolSearchExecution, ToolSearchToolParam};
 use crate::utils::common::deserialize_from_str_opt;
 
 pub(crate) const TOOL_SEARCH_NAME: &str = "tool_search";
+
+/// Convert the public tool-search declaration into the ordinary function
+/// shape accepted by providers without native tool-search support.
+///
+/// The caller controls both the description and search argument schema, so
+/// neither field may be replaced with gateway defaults.
+pub(crate) fn tool_search_function_tool(declaration: &ToolSearchToolParam) -> FunctionTool {
+    FunctionTool {
+        type_: "function".to_owned(),
+        name: TOOL_SEARCH_NAME.to_owned(),
+        description: declaration.description.clone(),
+        parameters: declaration.parameters.clone(),
+        strict: None,
+        defer_loading: None,
+    }
+}
 
 /// Return valid client tool-search outputs in input order.
 ///
@@ -230,17 +247,13 @@ pub(crate) fn restore_output_items(output: &mut [OutputItem], enabled: bool) {
             continue;
         };
 
-        let mut extra = HashMap::new();
-        if !call.id.is_empty() {
-            extra.insert("id".to_owned(), Value::String(call.id.clone()));
-        }
         let call_id = call.call_id.clone();
         *item = OutputItem::ToolSearchCall(ToolSearchCall {
             execution: Some(ToolSearchExecution::Client),
             call_id: Some(call_id.clone()),
             status: Some(call.status.into()),
             arguments,
-            extra,
+            extra: HashMap::new(),
         });
         tracing::debug!(%call_id, "restored provider function_call fallback as tool_search_call");
     }
@@ -299,6 +312,14 @@ pub(crate) fn restore_response_value(value: &mut Value, enabled: bool) -> bool {
     changed
 }
 
+/// Restore tool-search function fallbacks inside a parsed streaming event.
+pub(crate) fn restore_response_wire(wire: &mut WireEvent, enabled: bool) -> bool {
+    if !enabled {
+        return false;
+    }
+    restore_response_map(&mut wire.rest)
+}
+
 pub(crate) fn restore_loaded_namespace_response_value(
     value: &mut Value,
     loaded_namespaces: &HashMap<String, String>,
@@ -318,6 +339,55 @@ pub(crate) fn restore_loaded_namespace_response_value(
         }
     }
     if let Some(Value::Array(items)) = value.as_object_mut().and_then(|object| object.get_mut("output")) {
+        for item in items {
+            changed |= restore_loaded_namespace_call_value(item, loaded_namespaces);
+        }
+    }
+    changed
+}
+
+pub(crate) fn restore_loaded_namespace_response_wire(
+    wire: &mut WireEvent,
+    loaded_namespaces: &HashMap<String, String>,
+) -> bool {
+    if loaded_namespaces.is_empty() {
+        return false;
+    }
+    restore_loaded_namespace_response_map(&mut wire.rest, loaded_namespaces)
+}
+
+fn restore_response_map(object: &mut Map<String, Value>) -> bool {
+    let mut changed = false;
+    if let Some(item) = object.get_mut("item") {
+        changed |= restore_call_value(item);
+    }
+    for key in ["response", "payload"] {
+        if let Some(nested) = object.get_mut(key) {
+            changed |= restore_response_value(nested, true);
+        }
+    }
+    if let Some(Value::Array(items)) = object.get_mut("output") {
+        for item in items {
+            changed |= restore_call_value(item);
+        }
+    }
+    changed
+}
+
+fn restore_loaded_namespace_response_map(
+    object: &mut Map<String, Value>,
+    loaded_namespaces: &HashMap<String, String>,
+) -> bool {
+    let mut changed = false;
+    if let Some(item) = object.get_mut("item") {
+        changed |= restore_loaded_namespace_call_value(item, loaded_namespaces);
+    }
+    for key in ["response", "payload"] {
+        if let Some(nested) = object.get_mut(key) {
+            changed |= restore_loaded_namespace_response_value(nested, loaded_namespaces);
+        }
+    }
+    if let Some(Value::Array(items)) = object.get_mut("output") {
         for item in items {
             changed |= restore_loaded_namespace_call_value(item, loaded_namespaces);
         }
@@ -353,6 +423,7 @@ fn restore_call_value(value: &mut Value) -> bool {
     object.insert("type".to_owned(), Value::String("tool_search_call".to_owned()));
     object.insert("execution".to_owned(), Value::String("client".to_owned()));
     object.insert("arguments".to_owned(), arguments);
+    object.remove("id");
     object.remove("name");
     object.remove("namespace");
     true
@@ -402,7 +473,7 @@ mod tests {
         assert_eq!(call.call_id.as_deref(), Some("call_search"));
         assert_eq!(call.status, Some(ToolSearchStatus::Completed));
         assert_eq!(call.arguments["query"], "calendar");
-        assert_eq!(call.extra["id"], "fc_search");
+        assert!(!call.extra.contains_key("id"));
     }
 
     #[test]

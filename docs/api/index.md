@@ -5,9 +5,16 @@
 ### `POST /v1/responses`
 
 HTTP Responses requests use the OpenAI-compatible Responses shape. Requests
-with `store=true`, `previous_response_id`, or `conversation_id` run through the
-stateful executor. Stateless `store=false` requests without continuation state
-are proxied directly to the configured vLLM backend.
+with `store=true`, `previous_response_id`, `conversation_id`, compaction input,
+or `context_management` run through the executor. Other stateless `store=false`
+requests are passed directly to the configured vLLM backend.
+
+### `POST /v1/responses/compact`
+
+Compacts direct input or a stored previous-response chain into a canonical
+window of retained user messages plus one `compaction` item. See
+[Responses compaction](../guides/responses-compaction.md) for request examples,
+automatic threshold management, and the local plaintext limitation.
 
 ### `WS /v1/responses`
 

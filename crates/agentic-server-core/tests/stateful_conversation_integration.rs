@@ -357,9 +357,9 @@ async fn test_store_false_with_conversation_id_hydrates_and_persists() {
     assert_eq!(
         request_input_texts(&requests[1]),
         vec![
-            t1.request.body.input.as_str(),
+            t1.request.body.input.as_str().expect("text cassette input"),
             expected_text(t1).as_str(),
-            t2.request.body.input.as_str()
+            t2.request.body.input.as_str().expect("text cassette input")
         ]
     );
 }

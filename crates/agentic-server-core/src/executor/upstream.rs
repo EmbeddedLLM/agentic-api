@@ -3,16 +3,29 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 use serde_json::Value;
-use tokio::sync::mpsc;
 
-use crate::events::{EventPayload, SSEEventType, SSEItemType, normalize_sse_line};
+use crate::events::{EventFrame, EventPayload, SSEEventType, SSEItemType, WireEvent};
 use crate::executor::accumulator::ResponseAccumulator;
 use crate::executor::error::{ExecutorError, ExecutorResult};
+use crate::executor::gateway_accumulator::{GatewayStreamAccumulator, StreamEvent, emit_sse_frame, synthetic_event};
 use crate::executor::inference::{call_inference, fetch_response_json};
 use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::tool::ToolRegistry;
 use crate::types::request_response::ResponsePayload;
-use crate::utils::common::{deserialize_from_str, serialize_to_string};
+use crate::utils::common::serialize_to_string;
+
+struct StreamEmitContext<'a> {
+    request: &'a RequestContext,
+    registry: &'a ToolRegistry,
+    sender: &'a tokio::sync::mpsc::UnboundedSender<StreamEvent>,
+    accumulator: &'a mut GatewayStreamAccumulator,
+    output_offset: usize,
+}
+
+pub(super) struct StreamPayload {
+    pub(super) payload: ResponsePayload,
+    pub(super) deferred_events: Vec<EventFrame>,
+}
 
 pub(super) async fn fetch_blocking_payload(
     ctx: &RequestContext,
@@ -42,8 +55,12 @@ pub(super) async fn fetch_stream_payload(
     exec_ctx: &ExecutionContext,
     auth: Option<&str>,
     registry: &ToolRegistry,
-    stream_events: Option<&mpsc::UnboundedSender<String>>,
-) -> ExecutorResult<ResponsePayload> {
+    mut stream: Option<(
+        &mut GatewayStreamAccumulator,
+        &tokio::sync::mpsc::UnboundedSender<StreamEvent>,
+    )>,
+    output_offset: usize,
+) -> ExecutorResult<StreamPayload> {
     let url = exec_ctx.responses_url();
     let upstream_request = ctx.enriched_request.to_upstream_request(true)?;
     let upstream_json = serialize_to_string(&upstream_request).map_err(ExecutorError::JsonError)?;
@@ -57,22 +74,32 @@ pub(super) async fn fetch_stream_payload(
     let mut acc = ResponseAccumulator::new(ctx.response_id.clone(), ctx.conversation_id.clone());
     let mut hidden_gateway_item_ids = HashSet::new();
     let mut fallback_tool_search_item_ids = HashSet::new();
-    let mut pending_unnamed_function_events = HashMap::<String, Vec<String>>::new();
+    let mut pending_unnamed_function_events = HashMap::<String, Vec<EventFrame>>::new();
+    let mut defer_from_output_index = None;
+    let mut deferred_events = Vec::new();
     while let Some(line_result) = line_stream.next().await {
         let line = line_result?;
-        log_upstream_failure(&line, &ctx.response_id);
-        if let Some(sender) = stream_events {
-            emit_upstream_stream_event(
-                &line,
-                ctx,
-                registry,
-                sender,
-                &mut hidden_gateway_item_ids,
-                &mut fallback_tool_search_item_ids,
-                &mut pending_unnamed_function_events,
-            )?;
+        if let Some(frame) = acc.process_sse_line(&line) {
+            log_upstream_failure(&frame, &ctx.response_id);
+            if let Some((accumulator, sender)) = stream.as_mut() {
+                let mut emit_ctx = StreamEmitContext {
+                    request: ctx,
+                    registry,
+                    sender,
+                    accumulator,
+                    output_offset,
+                };
+                emit_upstream_stream_event(
+                    frame,
+                    &mut emit_ctx,
+                    &mut hidden_gateway_item_ids,
+                    &mut fallback_tool_search_item_ids,
+                    &mut pending_unnamed_function_events,
+                    &mut defer_from_output_index,
+                    &mut deferred_events,
+                )?;
+            }
         }
-        acc.process_sse_line(&line);
     }
     acc.finish_stream();
     let mut payload = acc.finalize(
@@ -81,24 +108,18 @@ pub(super) async fn fetch_stream_payload(
         ctx.original_request.instructions.as_deref(),
     );
     ctx.inject_ids(&mut payload);
-    Ok(payload)
+    Ok(StreamPayload {
+        payload,
+        deferred_events,
+    })
 }
 
-fn log_upstream_failure(line: &str, gateway_response_id: &str) {
-    let Some(frame) = normalize_sse_line(line) else {
-        return;
-    };
+fn log_upstream_failure(frame: &EventFrame, gateway_response_id: &str) {
     if frame.event_type != SSEEventType::ResponseFailed {
         return;
     }
 
-    let Some(data) = line.strip_prefix("data: ") else {
-        return;
-    };
-    let Ok(event) = deserialize_from_str::<Value>(data) else {
-        return;
-    };
-    let response = &event["response"];
+    let response = frame.wire.rest.get("response").unwrap_or(&Value::Null);
     let error = &response["error"];
     let error_code = error.get("code").and_then(Value::as_str).unwrap_or_default();
     let error_message = error
@@ -122,65 +143,59 @@ fn log_upstream_failure(line: &str, gateway_response_id: &str) {
 }
 
 fn emit_upstream_stream_event(
-    line: &str,
-    ctx: &RequestContext,
-    registry: &ToolRegistry,
-    sender: &mpsc::UnboundedSender<String>,
+    frame: EventFrame,
+    emit_ctx: &mut StreamEmitContext<'_>,
     hidden_gateway_item_ids: &mut HashSet<String>,
     fallback_tool_search_item_ids: &mut HashSet<String>,
-    pending_unnamed_function_events: &mut HashMap<String, Vec<String>>,
+    pending_unnamed_function_events: &mut HashMap<String, Vec<EventFrame>>,
+    defer_from_output_index: &mut Option<u64>,
+    deferred_events: &mut Vec<EventFrame>,
 ) -> ExecutorResult<()> {
-    let Some(data) = line.strip_prefix("data: ") else {
-        return Ok(());
-    };
-    let data = data.trim();
-    if data == "[DONE]" {
-        return Ok(());
-    }
-
-    let Some(frame) = normalize_sse_line(line) else {
-        return Ok(());
-    };
     if handle_fallback_tool_search_event(
         &frame,
-        ctx,
-        registry,
-        sender,
+        emit_ctx,
         fallback_tool_search_item_ids,
         pending_unnamed_function_events,
+        *defer_from_output_index,
+        deferred_events,
     )? {
         return Ok(());
     }
-    if should_hide_upstream_event(frame.event_type, &frame.payload, registry, hidden_gateway_item_ids)
-        || is_terminal_response_event(frame.event_type)
+    defer_after_gateway_call(&frame, emit_ctx.registry, defer_from_output_index);
+    if should_hide_upstream_event(
+        frame.event_type,
+        &frame.payload,
+        emit_ctx.registry,
+        hidden_gateway_item_ids,
+    ) || is_terminal_response_event(frame.event_type)
     {
         drop_pending_function_events(&frame.payload, pending_unnamed_function_events);
         return Ok(());
     }
-    if defer_or_flush_function_event(
-        line,
-        &frame.payload,
-        ctx,
-        registry,
-        sender,
+    let Some(frame) = defer_or_flush_function_event(
+        frame,
+        emit_ctx,
         hidden_gateway_item_ids,
         pending_unnamed_function_events,
-    )? {
+        defer_from_output_index,
+        deferred_events,
+    )?
+    else {
         return Ok(());
-    }
+    };
 
-    emit_stream_line(data, ctx, registry, sender)
+    emit_or_defer_stream_frame(frame, emit_ctx, *defer_from_output_index, deferred_events)
 }
 
 fn handle_fallback_tool_search_event(
-    frame: &crate::events::EventFrame,
-    ctx: &RequestContext,
-    registry: &ToolRegistry,
-    sender: &mpsc::UnboundedSender<String>,
+    frame: &EventFrame,
+    emit_ctx: &mut StreamEmitContext<'_>,
     fallback_item_ids: &mut HashSet<String>,
-    pending_unnamed_function_events: &mut HashMap<String, Vec<String>>,
+    pending_unnamed_function_events: &mut HashMap<String, Vec<EventFrame>>,
+    defer_from_output_index: Option<u64>,
+    deferred_events: &mut Vec<EventFrame>,
 ) -> ExecutorResult<bool> {
-    if !registry.can_restore_tool_search_fallback() {
+    if !emit_ctx.registry.can_restore_tool_search_fallback() {
         return Ok(false);
     }
 
@@ -192,9 +207,10 @@ fn handle_fallback_tool_search_event(
                 item_type: SSEItemType::FunctionCall,
                 name: Some(name),
                 namespace: None,
+                call_id: Some(call_id),
                 ..
             },
-        ) if name == "tool_search" => {
+        ) if name == crate::tool::TOOL_SEARCH_NAME && !call_id.is_empty() => {
             fallback_item_ids.insert(item_id.clone());
             Ok(false)
         }
@@ -211,13 +227,14 @@ fn handle_fallback_tool_search_event(
                 output_index,
                 ..
             },
-        ) if name == "tool_search"
+        ) if name == crate::tool::TOOL_SEARCH_NAME
             && !call_id.is_empty()
             && pending_function_is_unqualified(item_id, pending_unnamed_function_events) =>
         {
             pending_unnamed_function_events.remove(item_id);
             fallback_item_ids.insert(item_id.clone());
-            emit_fallback_tool_search_added(item_id, call_id, *output_index, ctx, registry, sender)?;
+            let added = fallback_tool_search_added_frame(call_id, *output_index)?;
+            emit_or_defer_stream_frame(added, emit_ctx, defer_from_output_index, deferred_events)?;
             Ok(true)
         }
         (
@@ -226,20 +243,20 @@ fn handle_fallback_tool_search_event(
                 item_id,
                 item_type: SSEItemType::FunctionCall,
                 item,
-                ..
+                output_index,
             },
         ) if is_unqualified_tool_search_function(item) => {
             if !fallback_item_ids.contains(item_id)
-                && pending_function_is_unqualified(item_id, pending_unnamed_function_events)
                 && let Some(call_id) = item
                     .get("call_id")
                     .and_then(Value::as_str)
                     .filter(|call_id| !call_id.is_empty())
             {
-                emit_fallback_tool_search_added(item_id, call_id, frame_output_index(frame), ctx, registry, sender)?;
+                fallback_item_ids.insert(item_id.clone());
+                let added = fallback_tool_search_added_frame(call_id, *output_index)?;
+                emit_or_defer_stream_frame(added, emit_ctx, defer_from_output_index, deferred_events)?;
             }
             pending_unnamed_function_events.remove(item_id);
-            fallback_item_ids.remove(item_id);
             Ok(false)
         }
         _ => Ok(false),
@@ -248,12 +265,11 @@ fn handle_fallback_tool_search_event(
 
 fn pending_function_is_unqualified(
     item_id: &str,
-    pending_unnamed_function_events: &HashMap<String, Vec<String>>,
+    pending_unnamed_function_events: &HashMap<String, Vec<EventFrame>>,
 ) -> bool {
     pending_unnamed_function_events
         .get(item_id)
         .and_then(|events| events.first())
-        .and_then(|line| normalize_sse_line(line))
         .is_some_and(|frame| {
             matches!(
                 frame.payload,
@@ -267,95 +283,144 @@ fn pending_function_is_unqualified(
 }
 
 fn is_unqualified_tool_search_function(item: &Value) -> bool {
-    item.get("name").and_then(Value::as_str) == Some("tool_search")
+    item.get("name").and_then(Value::as_str) == Some(crate::tool::TOOL_SEARCH_NAME)
         && item.get("namespace").and_then(Value::as_str).is_none()
 }
 
-fn frame_output_index(frame: &crate::events::EventFrame) -> u32 {
-    match &frame.payload {
-        EventPayload::OutputItemDone { output_index, .. } => *output_index,
-        _ => 0,
+fn fallback_tool_search_added_frame(call_id: &str, output_index: u32) -> ExecutorResult<EventFrame> {
+    let mut frame = synthetic_event(
+        SSEEventType::OutputItemAdded,
+        [(
+            "item".to_owned(),
+            serde_json::json!({
+                "type": "tool_search_call",
+                "execution": "client",
+                "call_id": call_id,
+                "status": "in_progress",
+                "arguments": {}
+            }),
+        )],
+    )?;
+    frame.wire.output_index = Some(u64::from(output_index));
+    Ok(frame)
+}
+
+pub(super) fn emit_deferred_stream_events(
+    deferred_events: Vec<EventFrame>,
+    request: &RequestContext,
+    registry: &ToolRegistry,
+    accumulator: &mut GatewayStreamAccumulator,
+    sender: &tokio::sync::mpsc::UnboundedSender<StreamEvent>,
+    output_offset: usize,
+) -> ExecutorResult<()> {
+    let mut emit_ctx = StreamEmitContext {
+        request,
+        registry,
+        sender,
+        accumulator,
+        output_offset,
+    };
+    for mut frame in deferred_events {
+        emit_stream_frame(&mut frame, &mut emit_ctx)?;
+    }
+    Ok(())
+}
+
+fn defer_after_gateway_call(frame: &EventFrame, registry: &ToolRegistry, defer_from_output_index: &mut Option<u64>) {
+    let EventPayload::OutputItemAdded {
+        item_type: SSEItemType::FunctionCall,
+        name: Some(name),
+        ..
+    } = &frame.payload
+    else {
+        return;
+    };
+    if registry.is_gateway_owned_name(name) {
+        record_first_hidden_gateway_output_index(frame, defer_from_output_index);
     }
 }
 
-fn emit_fallback_tool_search_added(
-    item_id: &str,
-    call_id: &str,
-    output_index: u32,
-    ctx: &RequestContext,
-    registry: &ToolRegistry,
-    sender: &mpsc::UnboundedSender<String>,
-) -> ExecutorResult<()> {
-    let event = serde_json::json!({
-        "type": "response.output_item.added",
-        "output_index": output_index,
-        "item": {
-            "type": "tool_search_call",
-            "id": item_id,
-            "execution": "client",
-            "call_id": call_id,
-            "status": "in_progress",
-            "arguments": {}
-        }
-    });
-    let data = serialize_to_string(&event).map_err(ExecutorError::JsonError)?;
-    emit_stream_line(&data, ctx, registry, sender)
+fn record_first_hidden_gateway_output_index(frame: &EventFrame, defer_from_output_index: &mut Option<u64>) {
+    let Some(output_index) = frame.wire.output_index else {
+        return;
+    };
+    if defer_from_output_index.is_none_or(|first_hidden_index| output_index < first_hidden_index) {
+        *defer_from_output_index = Some(output_index);
+    }
 }
 
-fn emit_stream_line(
-    data: &str,
-    ctx: &RequestContext,
-    registry: &ToolRegistry,
-    sender: &mpsc::UnboundedSender<String>,
+fn should_defer_stream_event(frame: &EventFrame, defer_from_output_index: Option<u64>) -> bool {
+    defer_from_output_index.is_some_and(|first_hidden_index| {
+        frame
+            .wire
+            .output_index
+            .is_some_and(|output_index| output_index >= first_hidden_index)
+    })
+}
+
+fn emit_stream_frame(frame: &mut EventFrame, emit_ctx: &mut StreamEmitContext<'_>) -> ExecutorResult<()> {
+    apply_context_response_ids(&mut frame.wire, emit_ctx.request);
+    emit_ctx.registry.restore_stream_event_wire(&mut frame.wire);
+    if emit_ctx.accumulator.process_event(frame, emit_ctx.output_offset) {
+        emit_sse_frame(emit_ctx.sender, frame)?;
+    }
+    Ok(())
+}
+
+fn emit_or_defer_stream_frame(
+    mut frame: EventFrame,
+    emit_ctx: &mut StreamEmitContext<'_>,
+    defer_from_output_index: Option<u64>,
+    deferred_events: &mut Vec<EventFrame>,
 ) -> ExecutorResult<()> {
-    let mut value = serde_json::from_str::<Value>(data).map_err(ExecutorError::JsonError)?;
-    apply_context_response_ids(&mut value, ctx);
-    registry.restore_stream_event_value(&mut value);
-    let event_json = serialize_to_string(&value).map_err(ExecutorError::JsonError)?;
-    sender
-        .send(format!("data: {event_json}\n\n"))
-        .map_err(|_| ExecutorError::StreamError("stream receiver closed while emitting upstream event".to_owned()))
+    if should_defer_stream_event(&frame, defer_from_output_index) {
+        deferred_events.push(frame);
+        return Ok(());
+    }
+    emit_stream_frame(&mut frame, emit_ctx)
 }
 
 fn defer_or_flush_function_event(
-    line: &str,
-    payload: &EventPayload,
-    ctx: &RequestContext,
-    registry: &ToolRegistry,
-    sender: &mpsc::UnboundedSender<String>,
+    frame: EventFrame,
+    emit_ctx: &mut StreamEmitContext<'_>,
     hidden_gateway_item_ids: &mut HashSet<String>,
-    pending_unnamed_function_events: &mut HashMap<String, Vec<String>>,
-) -> ExecutorResult<bool> {
-    match payload {
+    pending_unnamed_function_events: &mut HashMap<String, Vec<EventFrame>>,
+    defer_from_output_index: &mut Option<u64>,
+    deferred_events: &mut Vec<EventFrame>,
+) -> ExecutorResult<Option<EventFrame>> {
+    match &frame.payload {
         EventPayload::OutputItemAdded {
             item_id,
             item_type,
             name: None,
             ..
         } if *item_type == SSEItemType::FunctionCall => {
-            pending_unnamed_function_events
-                .entry(item_id.clone())
-                .or_default()
-                .push(line.to_owned());
-            Ok(true)
+            let item_id = item_id.clone();
+            pending_unnamed_function_events.entry(item_id).or_default().push(frame);
+            Ok(None)
         }
         EventPayload::FunctionCallArgsDelta { item_id, .. }
             if pending_unnamed_function_events.contains_key(item_id) =>
         {
-            pending_unnamed_function_events
-                .entry(item_id.clone())
-                .or_default()
-                .push(line.to_owned());
-            Ok(true)
+            let item_id = item_id.clone();
+            pending_unnamed_function_events.entry(item_id).or_default().push(frame);
+            Ok(None)
         }
         EventPayload::FunctionCallArgsDone { item_id, name, .. } => {
-            if registry.is_gateway_owned_name(name) {
+            if emit_ctx.registry.is_gateway_owned_name(name) {
                 hidden_gateway_item_ids.insert(item_id.clone());
+                record_first_hidden_gateway_output_index(&frame, defer_from_output_index);
                 pending_unnamed_function_events.remove(item_id);
-                return Ok(true);
+                return Ok(None);
             }
-            flush_pending_function_events(item_id, ctx, registry, sender, pending_unnamed_function_events)?;
-            Ok(false)
+            flush_pending_function_events(
+                item_id,
+                emit_ctx,
+                pending_unnamed_function_events,
+                *defer_from_output_index,
+                deferred_events,
+            )?;
+            Ok(Some(frame))
         }
         EventPayload::OutputItemDone {
             item_id,
@@ -366,41 +431,45 @@ fn defer_or_flush_function_event(
             if item
                 .get("name")
                 .and_then(Value::as_str)
-                .is_some_and(|name| registry.is_gateway_owned_name(name))
+                .is_some_and(|name| emit_ctx.registry.is_gateway_owned_name(name))
             {
                 hidden_gateway_item_ids.insert(item_id.clone());
+                record_first_hidden_gateway_output_index(&frame, defer_from_output_index);
                 pending_unnamed_function_events.remove(item_id);
-                return Ok(true);
+                return Ok(None);
             }
-            flush_pending_function_events(item_id, ctx, registry, sender, pending_unnamed_function_events)?;
-            Ok(false)
+            flush_pending_function_events(
+                item_id,
+                emit_ctx,
+                pending_unnamed_function_events,
+                *defer_from_output_index,
+                deferred_events,
+            )?;
+            Ok(Some(frame))
         }
-        _ => Ok(false),
+        _ => Ok(Some(frame)),
     }
 }
 
 fn flush_pending_function_events(
     item_id: &str,
-    ctx: &RequestContext,
-    registry: &ToolRegistry,
-    sender: &mpsc::UnboundedSender<String>,
-    pending_unnamed_function_events: &mut HashMap<String, Vec<String>>,
+    emit_ctx: &mut StreamEmitContext<'_>,
+    pending_unnamed_function_events: &mut HashMap<String, Vec<EventFrame>>,
+    defer_from_output_index: Option<u64>,
+    deferred_events: &mut Vec<EventFrame>,
 ) -> ExecutorResult<()> {
-    let Some(lines) = pending_unnamed_function_events.remove(item_id) else {
+    let Some(frames) = pending_unnamed_function_events.remove(item_id) else {
         return Ok(());
     };
-    for line in lines {
-        let Some(data) = line.strip_prefix("data: ") else {
-            continue;
-        };
-        emit_stream_line(data.trim(), ctx, registry, sender)?;
+    for frame in frames {
+        emit_or_defer_stream_frame(frame, emit_ctx, defer_from_output_index, deferred_events)?;
     }
     Ok(())
 }
 
 fn drop_pending_function_events(
     payload: &EventPayload,
-    pending_unnamed_function_events: &mut HashMap<String, Vec<String>>,
+    pending_unnamed_function_events: &mut HashMap<String, Vec<EventFrame>>,
 ) {
     match payload {
         EventPayload::OutputItemDone { item_id, .. }
@@ -460,8 +529,8 @@ fn is_terminal_response_event(event_type: SSEEventType) -> bool {
     )
 }
 
-fn apply_context_response_ids(value: &mut Value, ctx: &RequestContext) {
-    let Some(response) = value.get_mut("response").and_then(Value::as_object_mut) else {
+fn apply_context_response_ids(wire: &mut WireEvent, ctx: &RequestContext) {
+    let Some(response) = wire.rest.get_mut("response").and_then(Value::as_object_mut) else {
         return;
     };
     response.insert("id".to_owned(), Value::String(ctx.response_id.clone()));
@@ -479,70 +548,234 @@ fn apply_context_response_ids(value: &mut Value, ctx: &RequestContext) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::events::normalize_sse_line;
     use crate::tool::GatewayExecutors;
     use crate::types::request_response::RequestPayload;
 
-    fn emitted_event(receiver: &mut mpsc::UnboundedReceiver<String>) -> Value {
-        let line = receiver.try_recv().expect("emitted SSE event");
-        let data = line
+    fn emitted_event(receiver: &mut tokio::sync::mpsc::UnboundedReceiver<StreamEvent>) -> Value {
+        let event = receiver.try_recv().expect("emitted SSE event");
+        let data = event
+            .content
             .strip_prefix("data: ")
             .and_then(|line| line.strip_suffix("\n\n"))
             .expect("SSE data framing");
-        serde_json::from_str(data).expect("valid emitted JSON")
+        let value: Value = serde_json::from_str(data).expect("valid emitted JSON");
+        assert_eq!(value["sequence_number"], event.sequence_number);
+        value
     }
 
-    #[tokio::test]
-    async fn unnamed_fallback_emits_only_canonical_tool_search_lifecycle() {
-        let request: RequestPayload = serde_json::from_value(serde_json::json!({
+    async fn client_tool_search_fixture() -> (RequestContext, ToolRegistry) {
+        let mut request: RequestPayload = serde_json::from_value(serde_json::json!({
             "model": "test",
             "input": "find a tool",
-            "tools": [{"type": "tool_search", "execution": "client"}]
+            "tools": [{
+                "type": "tool_search",
+                "execution": "client",
+                "description": "Search deferred tools",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"]
+                }
+            }]
         }))
-        .unwrap();
+        .expect("valid request");
+        let mut executors = GatewayExecutors::default();
         let registry =
-            ToolRegistry::build_with_handlers(request.tools.as_deref().unwrap(), &GatewayExecutors::default())
+            ToolRegistry::build_with_handlers(request.tools.as_deref_mut().expect("declared tools"), &mut executors)
                 .await
-                .unwrap();
-        let ctx = RequestContext {
+                .expect("valid registry");
+        let context = RequestContext {
             original_request: request.clone(),
             enriched_request: request,
             new_input_items: Vec::new(),
             response_id: "resp_gateway".to_owned(),
             conversation_id: None,
         };
-        let (sender, mut receiver) = mpsc::unbounded_channel();
+        (context, registry)
+    }
+
+    #[tokio::test]
+    async fn fallback_stream_emits_only_canonical_tool_search_lifecycle() {
+        let (context, registry) = client_tool_search_fixture().await;
+
+        let cases = [
+            [
+                r#"data: {"type":"response.output_item.added","output_index":2,"item":{"id":"fc_search","type":"function_call","call_id":"call_search","name":"tool_search","status":"in_progress","arguments":""}}"#,
+                r#"data: {"type":"response.function_call_arguments.delta","item_id":"fc_search","output_index":2,"call_id":"call_search","delta":"{\"query\":\"shell\"}"}"#,
+                r#"data: {"type":"response.function_call_arguments.done","item_id":"fc_search","output_index":2,"call_id":"call_search","name":"tool_search","arguments":"{\"query\":\"shell\"}"}"#,
+                r#"data: {"type":"response.output_item.done","output_index":2,"item":{"id":"fc_search","type":"function_call","call_id":"call_search","name":"tool_search","status":"completed","arguments":"{\"query\":\"shell\"}"}}"#,
+            ],
+            [
+                r#"data: {"type":"response.output_item.added","output_index":2,"item":{"id":"fc_search","type":"function_call","call_id":"call_search"}}"#,
+                r#"data: {"type":"response.function_call_arguments.delta","item_id":"fc_search","output_index":2,"call_id":"call_search","delta":"{\"query\":"}"#,
+                r#"data: {"type":"response.function_call_arguments.done","item_id":"fc_search","output_index":2,"call_id":"call_search","name":"tool_search","arguments":"{\"query\":\"shell\"}"}"#,
+                r#"data: {"type":"response.output_item.done","output_index":2,"item":{"id":"fc_search","type":"function_call","call_id":"call_search","name":"tool_search","status":"completed","arguments":"{\"query\":\"shell\"}"}}"#,
+            ],
+        ];
+
+        for lines in cases {
+            let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+            let mut accumulator = GatewayStreamAccumulator::new();
+            let mut emit_context = StreamEmitContext {
+                request: &context,
+                registry: &registry,
+                sender: &sender,
+                accumulator: &mut accumulator,
+                output_offset: 4,
+            };
+            let mut hidden_ids = HashSet::new();
+            let mut fallback_ids = HashSet::new();
+            let mut pending = HashMap::new();
+            let mut defer_from_output_index = None;
+            let mut deferred = Vec::new();
+
+            for line in lines {
+                let frame = normalize_sse_line(line).expect("valid upstream SSE event");
+                emit_upstream_stream_event(
+                    frame,
+                    &mut emit_context,
+                    &mut hidden_ids,
+                    &mut fallback_ids,
+                    &mut pending,
+                    &mut defer_from_output_index,
+                    &mut deferred,
+                )
+                .expect("event emission succeeds");
+            }
+
+            assert!(deferred.is_empty());
+            let added = emitted_event(&mut receiver);
+            assert_eq!(added["type"], "response.output_item.added");
+            assert_eq!(added["sequence_number"], 0);
+            assert_eq!(added["output_index"], 6);
+            assert_eq!(added["item"]["type"], "tool_search_call");
+            assert_eq!(added["item"]["execution"], "client");
+            assert_eq!(added["item"]["call_id"], "call_search");
+            assert_eq!(added["item"]["status"], "in_progress");
+            assert_eq!(added["item"]["arguments"], serde_json::json!({}));
+            assert!(added["item"].get("id").is_none());
+            assert!(added["item"].get("name").is_none());
+
+            let done = emitted_event(&mut receiver);
+            assert_eq!(done["type"], "response.output_item.done");
+            assert_eq!(done["sequence_number"], 1);
+            assert_eq!(done["output_index"], 6);
+            assert_eq!(done["item"]["type"], "tool_search_call");
+            assert_eq!(done["item"]["execution"], "client");
+            assert_eq!(done["item"]["call_id"], "call_search");
+            assert_eq!(done["item"]["status"], "completed");
+            assert_eq!(done["item"]["arguments"]["query"], "shell");
+            assert!(done["item"].get("id").is_none());
+            assert!(done["item"].get("name").is_none());
+            assert!(receiver.try_recv().is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn malformed_known_tool_search_without_call_id_passes_through() {
+        let (context, registry) = client_tool_search_fixture().await;
+        let cases = [
+            [
+                r#"data: {"type":"response.output_item.added","output_index":2,"item":{"id":"fc_search","type":"function_call","name":"tool_search","status":"in_progress","arguments":""}}"#,
+                r#"data: {"type":"response.function_call_arguments.delta","item_id":"fc_search","output_index":2,"delta":"{\"query\":"}"#,
+                r#"data: {"type":"response.function_call_arguments.done","item_id":"fc_search","output_index":2,"name":"tool_search","arguments":"{\"query\":\"shell\"}"}"#,
+                r#"data: {"type":"response.output_item.done","output_index":2,"item":{"id":"fc_search","type":"function_call","name":"tool_search","status":"completed","arguments":"{\"query\":\"shell\"}"}}"#,
+            ],
+            [
+                r#"data: {"type":"response.output_item.added","output_index":2,"item":{"id":"fc_search","type":"function_call","call_id":"","name":"tool_search","status":"in_progress","arguments":""}}"#,
+                r#"data: {"type":"response.function_call_arguments.delta","item_id":"fc_search","output_index":2,"call_id":"","delta":"{\"query\":"}"#,
+                r#"data: {"type":"response.function_call_arguments.done","item_id":"fc_search","output_index":2,"call_id":"","name":"tool_search","arguments":"{\"query\":\"shell\"}"}"#,
+                r#"data: {"type":"response.output_item.done","output_index":2,"item":{"id":"fc_search","type":"function_call","call_id":"","name":"tool_search","status":"completed","arguments":"{\"query\":\"shell\"}"}}"#,
+            ],
+        ];
+
+        for lines in cases {
+            let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+            let mut accumulator = GatewayStreamAccumulator::new();
+            let mut emit_context = StreamEmitContext {
+                request: &context,
+                registry: &registry,
+                sender: &sender,
+                accumulator: &mut accumulator,
+                output_offset: 0,
+            };
+            let mut hidden_ids = HashSet::new();
+            let mut fallback_ids = HashSet::new();
+            let mut pending = HashMap::new();
+            let mut defer_from_output_index = None;
+            let mut deferred = Vec::new();
+
+            for line in lines {
+                let frame = normalize_sse_line(line).expect("valid upstream SSE event");
+                emit_upstream_stream_event(
+                    frame,
+                    &mut emit_context,
+                    &mut hidden_ids,
+                    &mut fallback_ids,
+                    &mut pending,
+                    &mut defer_from_output_index,
+                    &mut deferred,
+                )
+                .expect("event emission succeeds");
+            }
+
+            let emitted = std::array::from_fn::<_, 4, _>(|_| emitted_event(&mut receiver));
+            assert_eq!(emitted[0]["type"], "response.output_item.added");
+            assert_eq!(emitted[0]["item"]["type"], "function_call");
+            assert_eq!(emitted[1]["type"], "response.function_call_arguments.delta");
+            assert_eq!(emitted[2]["type"], "response.function_call_arguments.done");
+            assert_eq!(emitted[3]["type"], "response.output_item.done");
+            assert_eq!(emitted[3]["item"]["type"], "function_call");
+            assert!(receiver.try_recv().is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn done_only_tool_search_synthesizes_one_added_event() {
+        let (context, registry) = client_tool_search_fixture().await;
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut accumulator = GatewayStreamAccumulator::new();
+        let mut emit_context = StreamEmitContext {
+            request: &context,
+            registry: &registry,
+            sender: &sender,
+            accumulator: &mut accumulator,
+            output_offset: 3,
+        };
         let mut hidden_ids = HashSet::new();
         let mut fallback_ids = HashSet::new();
         let mut pending = HashMap::new();
-        let lines = [
-            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"id":"fc_search","type":"function_call","call_id":"call_search"}}"#,
-            r#"data: {"type":"response.function_call_arguments.delta","item_id":"fc_search","output_index":0,"call_id":"call_search","delta":"{\"query\":"}"#,
-            r#"data: {"type":"response.function_call_arguments.done","item_id":"fc_search","output_index":0,"call_id":"call_search","name":"tool_search","arguments":"{\"query\":\"shell\"}"}"#,
-            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"id":"fc_search","type":"function_call","call_id":"call_search","name":"tool_search","status":"completed","arguments":"{\"query\":\"shell\"}"}}"#,
-        ];
+        let mut defer_from_output_index = None;
+        let mut deferred = Vec::new();
+        let line = r#"data: {"type":"response.output_item.done","output_index":2,"item":{"id":"fc_search","type":"function_call","call_id":"call_search","name":"tool_search","status":"completed","arguments":"{\"query\":\"shell\"}"}}"#;
 
-        for line in lines {
+        for _ in 0..2 {
+            let frame = normalize_sse_line(line).expect("valid upstream SSE event");
             emit_upstream_stream_event(
-                line,
-                &ctx,
-                &registry,
-                &sender,
+                frame,
+                &mut emit_context,
                 &mut hidden_ids,
                 &mut fallback_ids,
                 &mut pending,
+                &mut defer_from_output_index,
+                &mut deferred,
             )
-            .unwrap();
+            .expect("event emission succeeds");
         }
 
         let added = emitted_event(&mut receiver);
         assert_eq!(added["type"], "response.output_item.added");
+        assert_eq!(added["output_index"], 5);
         assert_eq!(added["item"]["type"], "tool_search_call");
-        assert_eq!(added["item"]["execution"], "client");
         assert_eq!(added["item"]["call_id"], "call_search");
-        let done = emitted_event(&mut receiver);
-        assert_eq!(done["type"], "response.output_item.done");
-        assert_eq!(done["item"]["type"], "tool_search_call");
-        assert_eq!(done["item"]["arguments"]["query"], "shell");
+        for expected_sequence in [1, 2] {
+            let done = emitted_event(&mut receiver);
+            assert_eq!(done["type"], "response.output_item.done");
+            assert_eq!(done["sequence_number"], expected_sequence);
+            assert_eq!(done["output_index"], 5);
+            assert_eq!(done["item"]["type"], "tool_search_call");
+        }
         assert!(receiver.try_recv().is_err());
     }
 }

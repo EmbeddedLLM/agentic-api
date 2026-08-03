@@ -15,14 +15,14 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use either::Either;
 use futures::StreamExt;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 use agentic_core::executor::{BoxStream, ConversationHandler, ExecutionContext, ResponseHandler};
 use agentic_core::storage::{ConversationStore, DbPool, ResponseStore, create_pool_with_schema};
-use agentic_core::types::io::{OutputItem, ResponsesInput};
+use agentic_core::types::io::OutputItem;
 use agentic_core::types::request_response::{RequestPayload, ResponsePayload};
 
 #[derive(Debug, Deserialize)]
@@ -45,7 +45,9 @@ pub struct TurnRequest {
 #[derive(Debug, Deserialize, Default)]
 pub struct TurnBody {
     #[serde(default)]
-    pub input: String,
+    pub model: Option<String>,
+    #[serde(default)]
+    pub input: Value,
     #[serde(default = "default_true")]
     pub store: bool,
     #[serde(default)]
@@ -54,6 +56,8 @@ pub struct TurnBody {
     pub tools: Vec<Value>,
     #[serde(default)]
     pub tool_choice: Option<Value>,
+    #[serde(default)]
+    pub max_output_tokens: Option<u64>,
 }
 
 fn default_true() -> bool {
@@ -347,7 +351,7 @@ pub fn request_input_texts(body: &Value) -> Vec<String> {
 }
 
 pub fn make_request(
-    input: &str,
+    input: impl Serialize,
     store: bool,
     stream: bool,
     previous_response_id: Option<String>,
@@ -355,7 +359,8 @@ pub fn make_request(
 ) -> RequestPayload {
     RequestPayload {
         model: "test-model".to_string(),
-        input: ResponsesInput::Text(input.to_string()),
+        input: serde_json::from_value(serde_json::to_value(input).expect("serialize Responses input"))
+            .expect("request should contain valid Responses input"),
         instructions: None,
         previous_response_id,
         conversation_id,
@@ -371,6 +376,7 @@ pub fn make_request(
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
+        context_management: None,
     }
 }
 
@@ -421,7 +427,7 @@ pub fn output_text(payload: &ResponsePayload) -> String {
             | OutputItem::ToolSearchCall(_)
             | OutputItem::ToolSearchOutput(_)
             | OutputItem::WebSearchCall(_)
-            | OutputItem::McpToolCall(_)
+            | OutputItem::McpCall(_)
             | OutputItem::Reasoning(_)
             | OutputItem::Unknown => None,
         })

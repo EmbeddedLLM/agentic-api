@@ -14,14 +14,10 @@ mod tool_search;
 pub mod web_search;
 
 pub use codex::{CodexNamespaceHandler, NamespaceMap, model_visible_namespace_member_name};
-pub use executors::GatewayExecutors;
+pub use executors::{GatewayExecutorRegistration, GatewayExecutors};
 pub use function::FunctionHandler;
 pub use handler::{GatewayExecutor, ToolError, ToolHandler, ToolOutput};
-pub use mcp::{
-    McpClient, McpClientPool, McpDiscoveredHandler, McpError, McpHandler, McpHandlerFactory, McpHandlerKind,
-    McpOperation, McpServerEntry, McpSpec, READ_MCP_RESOURCE_TOOL_NAME, ReadResourceArgs, build_mcp_registry,
-    read_mcp_resource_spec,
-};
+pub use mcp::{McpClient, McpClientPool, McpDiscoveredHandler, McpError, McpHandler, McpOperation, McpServerEntry};
 pub use registry::{GatewayDispatchResult, ToolEntry, ToolRegistry, ToolType};
-pub(crate) use tool_search::loaded_function_tools;
+pub(crate) use tool_search::{TOOL_SEARCH_NAME, loaded_function_names, loaded_function_tools};
 pub use web_search::WebSearchHandler;
