@@ -29,11 +29,11 @@ turns:
       background: false
       billing:
         payer: developer
-      completed_at: 1785495765
-      created_at: 1785495764
+      completed_at: 1785757996
+      created_at: 1785757995
       error: null
       frequency_penalty: 0.0
-      id: resp_0cbb8731608c41ea006a6c80d44b48819ab05ed7d969304f13
+      id: resp_06bab1ed35efb02b006a70812beab0819b8cde61712bc97926
       incomplete_details: null
       instructions: null
       max_output_tokens: 2048
@@ -43,8 +43,8 @@ turns:
       moderation: null
       object: response
       output:
-      - call_id: call_Ow0hzMz1qek4PhJPoGSisWOT
-        id: ctc_0cbb8731608c41ea006a6c80d514b0819abe522d32fe152a38
+      - call_id: call_t7gsPOaICdXkvdPvRE4WXCA7
+        id: ctc_06bab1ed35efb02b006a70812ca2c8819bbb90c4d33d3d7e65
         input: CUSTOM_CASSETTE_OK
         name: agentic_raw_echo
         status: completed
@@ -110,7 +110,7 @@ turns:
   request:
     body:
       input:
-      - call_id: call_Ow0hzMz1qek4PhJPoGSisWOT
+      - call_id: call_t7gsPOaICdXkvdPvRE4WXCA7
         output: CUSTOM_CASSETTE_OUTPUT_OK
         type: custom_tool_call_output
       - content: Use the custom tool output provided above. Do not call any tool again.
@@ -119,7 +119,7 @@ turns:
         type: message
       max_output_tokens: 2048
       model: gpt-5.6
-      previous_response_id: resp_0cbb8731608c41ea006a6c80d44b48819ab05ed7d969304f13
+      previous_response_id: resp_06bab1ed35efb02b006a70812beab0819b8cde61712bc97926
       store: true
       stream: false
       tools:
@@ -143,11 +143,11 @@ turns:
       background: false
       billing:
         payer: developer
-      completed_at: 1785495766
-      created_at: 1785495765
+      completed_at: 1785757998
+      created_at: 1785757997
       error: null
       frequency_penalty: 0.0
-      id: resp_0cbb8731608c41ea006a6c80d59dcc819abb682ff7f6d98861
+      id: resp_06bab1ed35efb02b006a70812d3df8819ba1b13ebc8fda0f48
       incomplete_details: null
       instructions: null
       max_output_tokens: 2048
@@ -162,14 +162,14 @@ turns:
           logprobs: []
           text: CUSTOM_CASSETTE_OUTPUT_OK
           type: output_text
-        id: msg_0cbb8731608c41ea006a6c80d65540819a99820cfe2f18d7e4
+        id: msg_06bab1ed35efb02b006a70812e310c819b92f139271e842828
         phase: final_answer
         role: assistant
         status: completed
         type: message
       parallel_tool_calls: true
       presence_penalty: 0.0
-      previous_response_id: resp_0cbb8731608c41ea006a6c80d44b48819ab05ed7d969304f13
+      previous_response_id: resp_06bab1ed35efb02b006a70812beab0819b8cde61712bc97926
       prompt_cache_key: null
       prompt_cache_retention: 24h
       reasoning:

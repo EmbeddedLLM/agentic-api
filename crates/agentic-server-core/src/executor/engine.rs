@@ -15,9 +15,9 @@ use tracing::{debug, warn};
 use super::compaction::maybe_compact_context;
 use super::gateway::{
     GatewayCallResult, LoopDecision, append_gateway_calls_to_new_input, append_output_items_to_input,
-    append_tool_outputs, classify_round, emit_client_call_events, emit_gateway_completed_events,
-    emit_gateway_start_events, execute_and_emit_output_calls, execute_output_calls, gateway_event_plans,
-    has_client_owned_calls, is_client_custom_call, is_gateway_owned_call, public_output_items,
+    append_tool_outputs, classify_round, emit_gateway_completed_events, emit_gateway_start_events,
+    execute_and_emit_output_calls, execute_output_calls, gateway_event_plans, has_client_owned_calls,
+    is_client_custom_call, is_gateway_owned_call, public_output_items,
 };
 use super::gateway_accumulator::{GatewayStreamAccumulator, StreamEvent, error_sse_chunk};
 use crate::events::EventFrame;
@@ -215,10 +215,7 @@ async fn execute_and_emit_round_output_calls(
     ctx: &RequestContext,
     stream: Option<(&mut GatewayStreamAccumulator, &mpsc::UnboundedSender<StreamEvent>)>,
 ) -> ExecutorResult<Vec<GatewayCallResult>> {
-    let has_client_custom_call = output_items
-        .iter()
-        .any(|item| matches!(item, OutputItem::FunctionCall(call) if is_client_custom_call(call, registry)));
-    match (deferred_events.is_empty() && !has_client_custom_call, stream) {
+    match (deferred_events.is_empty(), stream) {
         (true, stream) => execute_and_emit_output_calls(output_items, registry, output_offset, stream).await,
         (false, Some((stream_accumulator, stream_sender))) => {
             execute_and_emit_ordered_output_calls(
@@ -302,23 +299,6 @@ async fn execute_and_emit_ordered_output_calls(
                 output_offset,
             )?;
             gateway_index += 1;
-        } else if let OutputItem::FunctionCall(call) = item
-            && is_client_custom_call(call, registry)
-        {
-            emit_client_call_events(
-                call,
-                output_offset.saturating_add(index),
-                stream_accumulator,
-                stream_sender,
-            )?;
-            emit_deferred_stream_events(
-                std::mem::take(&mut events_by_output[index]),
-                ctx,
-                registry,
-                stream_accumulator,
-                stream_sender,
-                output_offset,
-            )?;
         } else {
             emit_deferred_stream_events(
                 std::mem::take(&mut events_by_output[index]),

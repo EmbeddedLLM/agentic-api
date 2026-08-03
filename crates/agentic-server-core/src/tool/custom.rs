@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use serde_json::{Map, Value};
 
 use crate::events::WireEvent;
-use crate::types::event::MessageStatus;
 use crate::types::io::{CustomToolCall, FunctionTool, FunctionToolCall, OutputItem};
 use crate::types::tools::{CustomToolParam, ResponsesTool};
 use crate::utils::common::serialize_to_value_or_custom_default;
@@ -77,17 +76,6 @@ impl CustomHandler {
             call_id: call.call_id.clone(),
             name: call.name.clone(),
             input: input_from_arguments(&call.arguments),
-        })
-    }
-
-    #[must_use]
-    pub(crate) fn started_output_item(call: &FunctionToolCall) -> OutputItem {
-        OutputItem::CustomToolCall(CustomToolCall {
-            id: public_item_id(&call.id),
-            status: Some(MessageStatus::InProgress),
-            call_id: call.call_id.clone(),
-            name: call.name.clone(),
-            input: String::new(),
         })
     }
 
@@ -309,6 +297,7 @@ pub(crate) fn try_input_from_arguments(arguments: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::event::MessageStatus;
 
     #[test]
     fn function_fallback_uses_public_custom_tool_shape() {

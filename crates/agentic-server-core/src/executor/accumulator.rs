@@ -16,6 +16,7 @@ use futures::{Stream, StreamExt};
 
 use crate::events::{EventFrame, EventPayload, SSEEventType, SSEItemType, normalize_sse_line};
 use crate::executor::error::{ExecutorError, ExecutorResult};
+use crate::executor::function_sse::{FunctionSseTranslation, FunctionSseTranslator};
 use crate::types::event::{MessageStatus, ResponseStatus};
 use crate::types::io::{
     ApplyDone, CustomToolCall, FunctionToolCall, OutputItem, OutputMessage, OutputTextContent, ReasoningOutput,
@@ -90,6 +91,23 @@ impl InFlight {
 struct InFlightEntry {
     output_index: u32,
     item: InFlight,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct AccumulatedFunctionCall<'a> {
+    pub(super) item: &'a FunctionToolCall,
+    pub(super) output_index: u32,
+    arguments: &'a str,
+}
+
+impl AccumulatedFunctionCall<'_> {
+    pub(super) fn arguments(&self) -> &str {
+        if self.item.arguments.is_empty() {
+            self.arguments
+        } else {
+            &self.item.arguments
+        }
+    }
 }
 
 /// Accumulates LLM response chunks from streaming or non-streaming sources.
@@ -249,6 +267,53 @@ impl ResponseAccumulator {
         self.capture_terminal_details_if_needed(&frame);
         self.process_event(&frame);
         Some(frame)
+    }
+
+    pub(super) fn process_sse_line_with_translator(
+        &mut self,
+        line: &str,
+        translator: &mut FunctionSseTranslator,
+    ) -> ExecutorResult<Option<FunctionSseTranslation>> {
+        let Some(frame) = self.process_sse_line(line) else {
+            return Ok(None);
+        };
+        let call_key = function_event_key(&frame.payload);
+        let call = call_key.and_then(|(item_id, output_index)| self.accumulated_function_call(item_id, output_index));
+        translator.translate(frame, call).map(Some)
+    }
+
+    fn accumulated_function_call(&self, item_id: &str, output_index: u32) -> Option<AccumulatedFunctionCall<'_>> {
+        let entry = self
+            .in_flight
+            .get(item_id)
+            .filter(|entry| matches!(entry.item, InFlight::FunctionCall { .. }))
+            .or_else(|| {
+                self.in_flight.values().find(|entry| {
+                    entry.output_index == output_index && matches!(entry.item, InFlight::FunctionCall { .. })
+                })
+            });
+        if let Some(InFlightEntry {
+            output_index,
+            item: InFlight::FunctionCall { item, arguments },
+        }) = entry
+        {
+            return Some(AccumulatedFunctionCall {
+                item,
+                output_index: *output_index,
+                arguments,
+            });
+        }
+
+        self.completed.iter().rev().find_map(|(completed_index, item)| {
+            let OutputItem::FunctionCall(item) = item else {
+                return None;
+            };
+            (*completed_index == output_index).then_some(AccumulatedFunctionCall {
+                item,
+                output_index: *completed_index,
+                arguments: &item.arguments,
+            })
+        })
     }
 
     fn capture_terminal_details(&mut self, frame: &EventFrame) {
@@ -518,6 +583,30 @@ fn in_flight_matches_call_type(item: &InFlight, item_type: SSEItemType) -> bool 
             | (InFlight::WebSearchCall { .. }, SSEItemType::WebSearchCall)
             | (InFlight::McpCall { .. }, SSEItemType::McpCall)
     )
+}
+
+fn function_event_key(payload: &EventPayload) -> Option<(&str, u32)> {
+    match payload {
+        EventPayload::OutputItemAdded {
+            item_id,
+            item_type: SSEItemType::FunctionCall,
+            output_index,
+            ..
+        }
+        | EventPayload::OutputItemDone {
+            item_id,
+            item_type: SSEItemType::FunctionCall,
+            output_index,
+            ..
+        }
+        | EventPayload::FunctionCallArgsDelta {
+            item_id, output_index, ..
+        }
+        | EventPayload::FunctionCallArgsDone {
+            item_id, output_index, ..
+        } => Some((item_id, *output_index)),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

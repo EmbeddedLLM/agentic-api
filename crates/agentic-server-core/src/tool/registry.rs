@@ -260,6 +260,13 @@ impl ToolRegistry {
         self.entries.get(tool_name)
     }
 
+    pub(crate) fn tool_type_map(&self) -> HashMap<String, ToolType> {
+        self.entries
+            .iter()
+            .map(|(name, entry)| (name.clone(), entry.tool_type))
+            .collect()
+    }
+
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()

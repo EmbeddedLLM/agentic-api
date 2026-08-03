@@ -1,16 +1,16 @@
-use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use futures::StreamExt;
 use serde_json::Value;
 
-use crate::events::{EventFrame, EventPayload, SSEEventType, SSEItemType, WireEvent};
+use crate::events::{EventFrame, SSEEventType, WireEvent};
 use crate::executor::accumulator::ResponseAccumulator;
 use crate::executor::error::{ExecutorError, ExecutorResult};
+use crate::executor::function_sse::FunctionSseTranslator;
 use crate::executor::gateway_accumulator::{GatewayStreamAccumulator, StreamEvent, emit_sse_frame};
 use crate::executor::inference::{call_inference, fetch_response_json};
 use crate::executor::request::{ExecutionContext, RequestContext};
-use crate::tool::{ToolRegistry, ToolType};
+use crate::tool::ToolRegistry;
 use crate::types::request_response::ResponsePayload;
 use crate::utils::common::serialize_to_string;
 
@@ -72,14 +72,22 @@ pub(super) async fn fetch_stream_payload(
         exec_ctx.streaming_timeout,
     ));
     let mut acc = ResponseAccumulator::new(ctx.response_id.clone(), ctx.conversation_id.clone());
-    let mut hidden_public_call_item_ids = HashSet::new();
-    let mut pending_unnamed_function_events = HashMap::<String, Vec<EventFrame>>::new();
+    let mut function_sse = FunctionSseTranslator::new(registry.tool_type_map());
     let mut defer_from_output_index = None;
     let mut deferred_events = Vec::new();
     while let Some(line_result) = line_stream.next().await {
         let line = line_result?;
-        if let Some(frame) = acc.process_sse_line(&line) {
-            log_upstream_failure(&frame, &ctx.response_id);
+        if stream.is_none() {
+            if let Some(frame) = acc.process_sse_line(&line) {
+                log_upstream_failure(&frame, &ctx.response_id);
+            }
+            continue;
+        }
+        if let Some(translation) = acc.process_sse_line_with_translator(&line, &mut function_sse)? {
+            record_first_gateway_output_index(translation.gateway_output_index, &mut defer_from_output_index);
+            for frame in &translation.frames {
+                log_upstream_failure(frame, &ctx.response_id);
+            }
             if let Some((accumulator, sender)) = stream.as_mut() {
                 let mut emit_ctx = StreamEmitContext {
                     request: ctx,
@@ -88,14 +96,16 @@ pub(super) async fn fetch_stream_payload(
                     accumulator,
                     output_offset,
                 };
-                emit_upstream_stream_event(
-                    frame,
-                    &mut emit_ctx,
-                    &mut hidden_public_call_item_ids,
-                    &mut pending_unnamed_function_events,
-                    &mut defer_from_output_index,
-                    &mut deferred_events,
-                )?;
+                for frame in translation.frames {
+                    if !is_terminal_response_event(frame.event_type) {
+                        emit_or_defer_stream_frame(
+                            frame,
+                            &mut emit_ctx,
+                            defer_from_output_index,
+                            &mut deferred_events,
+                        )?;
+                    }
+                }
             }
         }
     }
@@ -140,40 +150,6 @@ fn log_upstream_failure(frame: &EventFrame, gateway_response_id: &str) {
     );
 }
 
-fn emit_upstream_stream_event(
-    frame: EventFrame,
-    emit_ctx: &mut StreamEmitContext<'_>,
-    hidden_public_call_item_ids: &mut HashSet<String>,
-    pending_unnamed_function_events: &mut HashMap<String, Vec<EventFrame>>,
-    defer_from_output_index: &mut Option<u64>,
-    deferred_events: &mut Vec<EventFrame>,
-) -> ExecutorResult<()> {
-    defer_after_public_call(&frame, emit_ctx.registry, defer_from_output_index);
-    if should_hide_upstream_event(
-        frame.event_type,
-        &frame.payload,
-        emit_ctx.registry,
-        hidden_public_call_item_ids,
-    ) || is_terminal_response_event(frame.event_type)
-    {
-        drop_pending_function_events(&frame.payload, pending_unnamed_function_events);
-        return Ok(());
-    }
-    let Some(frame) = defer_or_flush_function_event(
-        frame,
-        emit_ctx,
-        hidden_public_call_item_ids,
-        pending_unnamed_function_events,
-        defer_from_output_index,
-        deferred_events,
-    )?
-    else {
-        return Ok(());
-    };
-
-    emit_or_defer_stream_frame(frame, emit_ctx, *defer_from_output_index, deferred_events)
-}
-
 pub(super) fn emit_deferred_stream_events(
     deferred_events: Vec<EventFrame>,
     request: &RequestContext,
@@ -195,26 +171,12 @@ pub(super) fn emit_deferred_stream_events(
     Ok(())
 }
 
-fn defer_after_public_call(frame: &EventFrame, registry: &ToolRegistry, defer_from_output_index: &mut Option<u64>) {
-    let EventPayload::OutputItemAdded {
-        item_type: SSEItemType::FunctionCall,
-        name: Some(name),
-        ..
-    } = &frame.payload
-    else {
+fn record_first_gateway_output_index(output_index: Option<u32>, first_gateway_output_index: &mut Option<u64>) {
+    let Some(output_index) = output_index.map(u64::from) else {
         return;
     };
-    if uses_public_call_shape(registry, name) {
-        record_first_hidden_public_output_index(frame, defer_from_output_index);
-    }
-}
-
-fn record_first_hidden_public_output_index(frame: &EventFrame, defer_from_output_index: &mut Option<u64>) {
-    let Some(output_index) = frame.wire.output_index else {
-        return;
-    };
-    if defer_from_output_index.is_none_or(|first_hidden_index| output_index < first_hidden_index) {
-        *defer_from_output_index = Some(output_index);
+    if first_gateway_output_index.is_none_or(|first| output_index < first) {
+        *first_gateway_output_index = Some(output_index);
     }
 }
 
@@ -247,154 +209,6 @@ fn emit_or_defer_stream_frame(
         return Ok(());
     }
     emit_stream_frame(&mut frame, emit_ctx)
-}
-
-fn defer_or_flush_function_event(
-    frame: EventFrame,
-    emit_ctx: &mut StreamEmitContext<'_>,
-    hidden_public_call_item_ids: &mut HashSet<String>,
-    pending_unnamed_function_events: &mut HashMap<String, Vec<EventFrame>>,
-    defer_from_output_index: &mut Option<u64>,
-    deferred_events: &mut Vec<EventFrame>,
-) -> ExecutorResult<Option<EventFrame>> {
-    match &frame.payload {
-        EventPayload::OutputItemAdded {
-            item_id,
-            item_type,
-            name: None,
-            ..
-        } if *item_type == SSEItemType::FunctionCall => {
-            let item_id = item_id.clone();
-            pending_unnamed_function_events.entry(item_id).or_default().push(frame);
-            Ok(None)
-        }
-        EventPayload::FunctionCallArgsDelta { item_id, .. }
-            if pending_unnamed_function_events.contains_key(item_id) =>
-        {
-            let item_id = item_id.clone();
-            pending_unnamed_function_events.entry(item_id).or_default().push(frame);
-            Ok(None)
-        }
-        EventPayload::FunctionCallArgsDone { item_id, name, .. } => {
-            if uses_public_call_shape(emit_ctx.registry, name) {
-                hidden_public_call_item_ids.insert(item_id.clone());
-                record_first_hidden_public_output_index(&frame, defer_from_output_index);
-                pending_unnamed_function_events.remove(item_id);
-                return Ok(None);
-            }
-            flush_pending_function_events(
-                item_id,
-                emit_ctx,
-                pending_unnamed_function_events,
-                *defer_from_output_index,
-                deferred_events,
-            )?;
-            Ok(Some(frame))
-        }
-        EventPayload::OutputItemDone {
-            item_id,
-            item_type,
-            item,
-            ..
-        } if *item_type == SSEItemType::FunctionCall => {
-            if item
-                .get("name")
-                .and_then(Value::as_str)
-                .is_some_and(|name| uses_public_call_shape(emit_ctx.registry, name))
-            {
-                hidden_public_call_item_ids.insert(item_id.clone());
-                record_first_hidden_public_output_index(&frame, defer_from_output_index);
-                pending_unnamed_function_events.remove(item_id);
-                return Ok(None);
-            }
-            flush_pending_function_events(
-                item_id,
-                emit_ctx,
-                pending_unnamed_function_events,
-                *defer_from_output_index,
-                deferred_events,
-            )?;
-            Ok(Some(frame))
-        }
-        _ => Ok(Some(frame)),
-    }
-}
-
-fn flush_pending_function_events(
-    item_id: &str,
-    emit_ctx: &mut StreamEmitContext<'_>,
-    pending_unnamed_function_events: &mut HashMap<String, Vec<EventFrame>>,
-    defer_from_output_index: Option<u64>,
-    deferred_events: &mut Vec<EventFrame>,
-) -> ExecutorResult<()> {
-    let Some(frames) = pending_unnamed_function_events.remove(item_id) else {
-        return Ok(());
-    };
-    for frame in frames {
-        emit_or_defer_stream_frame(frame, emit_ctx, defer_from_output_index, deferred_events)?;
-    }
-    Ok(())
-}
-
-fn drop_pending_function_events(
-    payload: &EventPayload,
-    pending_unnamed_function_events: &mut HashMap<String, Vec<EventFrame>>,
-) {
-    match payload {
-        EventPayload::OutputItemDone { item_id, .. }
-        | EventPayload::FunctionCallArgsDelta { item_id, .. }
-        | EventPayload::FunctionCallArgsDone { item_id, .. } => {
-            pending_unnamed_function_events.remove(item_id);
-        }
-        EventPayload::OutputItemAdded { .. }
-        | EventPayload::TextDelta { .. }
-        | EventPayload::TextDone { .. }
-        | EventPayload::CustomToolCallInputDelta { .. }
-        | EventPayload::CustomToolCallInputDone { .. }
-        | EventPayload::ReasoningDelta { .. }
-        | EventPayload::ReasoningDone { .. }
-        | EventPayload::Response { .. }
-        | EventPayload::Raw(_)
-        | EventPayload::None => {}
-    }
-}
-
-fn should_hide_upstream_event(
-    event_type: SSEEventType,
-    payload: &EventPayload,
-    registry: &ToolRegistry,
-    hidden_public_call_item_ids: &mut HashSet<String>,
-) -> bool {
-    match (event_type, payload) {
-        (
-            SSEEventType::OutputItemAdded,
-            EventPayload::OutputItemAdded {
-                item_id,
-                item_type,
-                name: Some(name),
-                ..
-            },
-        ) if *item_type == SSEItemType::FunctionCall && uses_public_call_shape(registry, name) => {
-            hidden_public_call_item_ids.insert(item_id.clone());
-            true
-        }
-        (SSEEventType::OutputItemDone, EventPayload::OutputItemDone { item_id, item_type, .. })
-            if *item_type == SSEItemType::FunctionCall && hidden_public_call_item_ids.contains(item_id) =>
-        {
-            true
-        }
-        (
-            SSEEventType::FunctionCallArgumentsDelta | SSEEventType::FunctionCallArgumentsDone,
-            EventPayload::FunctionCallArgsDelta { item_id, .. } | EventPayload::FunctionCallArgsDone { item_id, .. },
-        ) => hidden_public_call_item_ids.contains(item_id),
-        _ => false,
-    }
-}
-
-fn uses_public_call_shape(registry: &ToolRegistry, name: &str) -> bool {
-    registry
-        .lookup(name)
-        .is_some_and(|entry| entry.tool_type == ToolType::Custom || entry.tool_type.is_gateway_owned())
 }
 
 fn is_terminal_response_event(event_type: SSEEventType) -> bool {

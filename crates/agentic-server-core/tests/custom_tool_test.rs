@@ -158,6 +158,7 @@ fn normalized_custom_lifecycle(events: &[Value]) -> Value {
         .expect("custom output item added");
     let item_id = added["item"]["id"].as_str().expect("custom item ID");
     let mut lifecycle = Vec::new();
+    let mut deltas = Vec::new();
     let mut input = String::new();
     let mut lifecycle_item_ids = HashSet::new();
     let mut done_item = None;
@@ -174,7 +175,9 @@ fn normalized_custom_lifecycle(events: &[Value]) -> Value {
                 lifecycle.push(event_type);
             }
             "response.custom_tool_call_input.delta" => {
-                input.push_str(event["delta"].as_str().unwrap_or_default());
+                let delta = event["delta"].as_str().unwrap_or_default();
+                deltas.push(delta);
+                input.push_str(delta);
                 if lifecycle.last().copied() != Some(event_type) {
                     lifecycle.push(event_type);
                 }
@@ -192,6 +195,7 @@ fn normalized_custom_lifecycle(events: &[Value]) -> Value {
     assert_eq!(lifecycle_item_ids.len(), 1, "one public ID must span the lifecycle");
     json!({
         "lifecycle": lifecycle,
+        "deltas": deltas,
         "delta_input": input,
         "added": {
             "type": added["item"]["type"],

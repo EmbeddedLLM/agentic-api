@@ -294,58 +294,6 @@ fn output_item_value(item: &OutputItem) -> ExecutorResult<serde_json::Value> {
     serde_json::to_value(item).map_err(ExecutorError::JsonError)
 }
 
-pub(super) fn emit_client_call_events(
-    call: &FunctionToolCall,
-    output_index: usize,
-    stream_accumulator: &mut GatewayStreamAccumulator,
-    stream_sender: &tokio::sync::mpsc::UnboundedSender<StreamEvent>,
-) -> ExecutorResult<()> {
-    let output_index = u32::try_from(output_index).unwrap_or(u32::MAX);
-    let started_output = crate::tool::CustomHandler::started_output_item(call);
-    let completed_output = crate::tool::CustomHandler::output_item(call);
-    let OutputItem::CustomToolCall(custom_call) = &completed_output else {
-        return Ok(());
-    };
-
-    let mut added_event = synthetic_event(
-        SSEEventType::OutputItemAdded,
-        [
-            ("output_index".to_owned(), serde_json::json!(output_index)),
-            ("item".to_owned(), output_item_value(&started_output)?),
-        ],
-    )?;
-    emit_gateway_event(&mut added_event, stream_accumulator, stream_sender)?;
-
-    let mut input_delta_event = synthetic_event(
-        SSEEventType::CustomToolCallInputDelta,
-        [
-            ("delta".to_owned(), serde_json::json!(custom_call.input)),
-            ("item_id".to_owned(), serde_json::json!(custom_call.id)),
-            ("output_index".to_owned(), serde_json::json!(output_index)),
-        ],
-    )?;
-    emit_gateway_event(&mut input_delta_event, stream_accumulator, stream_sender)?;
-
-    let mut input_done_event = synthetic_event(
-        SSEEventType::CustomToolCallInputDone,
-        [
-            ("input".to_owned(), serde_json::json!(custom_call.input)),
-            ("item_id".to_owned(), serde_json::json!(custom_call.id)),
-            ("output_index".to_owned(), serde_json::json!(output_index)),
-        ],
-    )?;
-    emit_gateway_event(&mut input_done_event, stream_accumulator, stream_sender)?;
-
-    let mut done_event = synthetic_event(
-        SSEEventType::OutputItemDone,
-        [
-            ("output_index".to_owned(), serde_json::json!(output_index)),
-            ("item".to_owned(), output_item_value(&completed_output)?),
-        ],
-    )?;
-    emit_gateway_event(&mut done_event, stream_accumulator, stream_sender)
-}
-
 pub(super) fn emit_gateway_start_events(
     plans: &[GatewayCallEventPlan],
     stream_accumulator: &mut GatewayStreamAccumulator,
@@ -547,8 +495,7 @@ pub(super) fn append_gateway_calls_to_new_input(
 
 #[cfg(test)]
 mod tests {
-    use super::{GatewayCallResult, LoopDecision, classify_round, emit_client_call_events};
-    use crate::executor::gateway_accumulator::GatewayStreamAccumulator;
+    use super::{GatewayCallResult, LoopDecision, classify_round};
     use crate::types::io::output::FunctionToolCall;
     use crate::types::io::{InputItem, McpCallStatus};
     use tokio::sync::mpsc;
@@ -613,59 +560,6 @@ mod tests {
         // cap only matters when the model is still requesting tools.
         let decision = classify_round(false, &[], MAX - 1, MAX);
         assert!(matches!(decision, LoopDecision::Done));
-    }
-
-    #[test]
-    fn client_custom_events_follow_openai_lifecycle() {
-        let call = FunctionToolCall {
-            id: "fc_custom".to_owned(),
-            call_id: "call_custom".to_owned(),
-            name: "raw_echo".to_owned(),
-            arguments: r#"{"input":"CUSTOM_CASSETTE_OK"}"#.to_owned(),
-            status: crate::types::event::MessageStatus::Completed,
-            namespace: None,
-        };
-        let (sender, mut receiver) = mpsc::unbounded_channel();
-        let mut accumulator = GatewayStreamAccumulator::new();
-
-        emit_client_call_events(&call, 2, &mut accumulator, &sender).expect("custom events");
-        drop(sender);
-
-        let mut events = Vec::new();
-        while let Ok(event) = receiver.try_recv() {
-            let data = event
-                .content
-                .strip_prefix("data: ")
-                .and_then(|data| data.strip_suffix("\n\n"))
-                .expect("SSE data frame");
-            events.push(serde_json::from_str::<serde_json::Value>(data).expect("event JSON"));
-        }
-
-        assert_eq!(
-            events
-                .iter()
-                .map(|event| event["type"].as_str().unwrap())
-                .collect::<Vec<_>>(),
-            [
-                "response.output_item.added",
-                "response.custom_tool_call_input.delta",
-                "response.custom_tool_call_input.done",
-                "response.output_item.done",
-            ]
-        );
-        for (sequence_number, event) in events.iter().enumerate() {
-            assert_eq!(event["sequence_number"], sequence_number);
-            assert_eq!(event["output_index"], 2);
-        }
-        assert_eq!(events[0]["item"]["type"], "custom_tool_call");
-        assert_eq!(events[0]["item"]["id"], "ctc_custom");
-        assert_eq!(events[0]["item"]["status"], "in_progress");
-        assert_eq!(events[1]["delta"], "CUSTOM_CASSETTE_OK");
-        assert_eq!(events[1]["item_id"], "ctc_custom");
-        assert_eq!(events[2]["input"], "CUSTOM_CASSETTE_OK");
-        assert_eq!(events[3]["item"]["type"], "custom_tool_call");
-        assert_eq!(events[3]["item"]["status"], "completed");
-        assert_eq!(events[3]["item"]["input"], "CUSTOM_CASSETTE_OK");
     }
 
     use std::pin::Pin;

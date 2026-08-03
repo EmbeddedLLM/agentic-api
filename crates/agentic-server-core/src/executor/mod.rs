@@ -12,6 +12,7 @@ pub mod persist;
 pub mod rehydrate;
 pub mod request;
 
+mod function_sse;
 mod gateway;
 pub mod gateway_accumulator;
 mod upstream;
