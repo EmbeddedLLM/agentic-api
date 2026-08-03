@@ -286,7 +286,13 @@ fn stable_name_hash(value: &str) -> u64 {
 }
 
 pub(crate) fn input_from_arguments(arguments: &str) -> String {
-    try_input_from_arguments(arguments).unwrap_or_else(|| arguments.to_owned())
+    try_input_from_arguments(arguments).unwrap_or_else(|| {
+        tracing::debug!(
+            argument_bytes = arguments.len(),
+            "custom tool arguments did not match the normalized input envelope; forwarding raw arguments"
+        );
+        arguments.to_owned()
+    })
 }
 
 pub(crate) fn try_input_from_arguments(arguments: &str) -> Option<String> {
