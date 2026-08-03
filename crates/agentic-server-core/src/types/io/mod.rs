@@ -14,6 +14,6 @@ pub use output::{
     ReasoningTextContent, WebSearchAction, WebSearchActionFindInPage, WebSearchActionOpenPage, WebSearchActionSearch,
     WebSearchCall, WebSearchCallStatus, WebSearchSource,
 };
-pub use tools::{FunctionTool, ToolChoice};
+pub use tools::{AllowedTool, AllowedToolsMode, FunctionTool, ToolChoice};
 pub(crate) use tools::{resolve_tool_choice, resolve_tools};
 pub use usage::{InputTokenDetails, OutputTokenDetails, ResponseUsage};

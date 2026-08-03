@@ -53,8 +53,11 @@ pub struct UpstreamRequest<'a> {
     /// ordinary function tools.
     /// Skipped when empty so vLLM does not receive an empty array.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tools: Option<Vec<FunctionTool>>,
-    #[serde(skip_serializing_if = "is_absent_or_default_tool_choice")]
+    pub tools: Option<Vec<UpstreamTool>>,
+    #[serde(
+        skip_serializing_if = "is_absent_or_default_tool_choice",
+        serialize_with = "serialize_upstream_tool_choice"
+    )]
     pub tool_choice: Option<ToolChoice>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include: Option<&'a Vec<String>>,
@@ -73,11 +76,33 @@ pub struct UpstreamRequest<'a> {
     pub cache_salt: Option<&'a str>,
 }
 
+/// A normalized tool declaration supported by the upstream Responses endpoint.
+///
+/// Gateway and client tool declarations are converted to function tools before
+/// entering this upstream-only payload.
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum UpstreamTool {
+    Function(FunctionTool),
+}
+
 // serde's `skip_serializing_if` requires a `&Option<T>` receiver, so the
 // idiomatic `Option<&T>` clippy suggests does not apply here.
 #[allow(clippy::ref_option)]
 fn is_absent_or_default_tool_choice(choice: &Option<ToolChoice>) -> bool {
     choice.as_ref().is_none_or(|choice| matches!(choice, ToolChoice::Auto))
+}
+
+// serde's `serialize_with` passes a reference to the field's concrete type.
+#[allow(clippy::ref_option)]
+fn serialize_upstream_tool_choice<S>(choice: &Option<ToolChoice>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    choice
+        .as_ref()
+        .map(ToolChoice::normalized_for_upstream)
+        .serialize(serializer)
 }
 
 impl RequestPayload {
@@ -112,8 +137,13 @@ impl RequestPayload {
             .as_deref()
             .map(|tools| CodexNamespaceHandler.resolve_namespace_members(tools))
             .transpose()?;
-        let tools: Option<Vec<FunctionTool>> =
-            renamed_tools.map(|tools| tools.iter().flat_map(ResponsesTool::to_function_tools).collect());
+        let tools: Option<Vec<UpstreamTool>> = renamed_tools.map(|tools| {
+            tools
+                .iter()
+                .flat_map(ResponsesTool::to_function_tools)
+                .map(UpstreamTool::Function)
+                .collect()
+        });
         let tools = tools.filter(|tools| !tools.is_empty());
         let namespace_map = CodexNamespaceHandler.build_namespace_map(self.tools.as_deref())?;
         let tool_choice = CodexNamespaceHandler.resolve_tool_choice(namespace_map.as_ref(), self.tool_choice.as_ref());
@@ -572,8 +602,10 @@ mod tests {
 
         let request = payload.to_upstream_request(false).unwrap();
         let tools = request.tools.as_ref().expect("mixed upstream tools");
-        assert_eq!(tools[0].name, "read_file");
-        assert_eq!(tools[1].name, "apply_patch");
+        let UpstreamTool::Function(first) = &tools[0];
+        let UpstreamTool::Function(second) = &tools[1];
+        assert_eq!(first.name, "read_file");
+        assert_eq!(second.name, "apply_patch");
 
         let upstream = serde_json::to_value(request).unwrap();
         assert_eq!(upstream["tools"][0]["type"], "function");
@@ -599,6 +631,37 @@ mod tests {
         let deserialized: FunctionTool =
             serde_json::from_value(upstream["tools"][1].clone()).expect("upstream function tool should deserialize");
         assert_eq!(deserialized.name, "apply_patch");
+    }
+
+    #[test]
+    fn to_upstream_request_normalizes_custom_allowed_tool_choices() {
+        let payload: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test",
+            "input": "hi",
+            "tool_choice": {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [
+                    {"type": "function", "name": "read_file"},
+                    {"type": "custom", "name": "apply_patch"}
+                ]
+            },
+            "tools": [
+                {"type": "function", "name": "read_file"},
+                {"type": "custom", "name": "apply_patch"}
+            ]
+        }))
+        .unwrap();
+
+        let public_choice = serde_json::to_value(payload.tool_choice.as_ref().unwrap()).unwrap();
+        assert_eq!(public_choice["tools"][1]["type"], "custom");
+
+        let upstream = serde_json::to_value(payload.to_upstream_request(false).unwrap()).unwrap();
+        assert_eq!(upstream["tool_choice"]["type"], "allowed_tools");
+        assert_eq!(upstream["tool_choice"]["mode"], "required");
+        assert_eq!(upstream["tool_choice"]["tools"][0]["type"], "function");
+        assert_eq!(upstream["tool_choice"]["tools"][1]["type"], "function");
+        assert_eq!(upstream["tool_choice"]["tools"][1]["name"], "apply_patch");
     }
 
     #[test]
