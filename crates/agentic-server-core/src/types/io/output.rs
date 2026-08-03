@@ -521,26 +521,54 @@ impl ApplyDone for ReasoningOutput {
 
 impl ApplyDone for FunctionToolCall {
     fn apply_done(&mut self, payload: &EventPayload, buffer: &mut String) {
-        let EventPayload::FunctionCallArgsDone {
-            arguments,
-            call_id,
-            name,
-            ..
-        } = payload
-        else {
-            return;
-        };
-        self.arguments = if arguments.is_empty() {
-            std::mem::take(buffer)
-        } else {
-            buffer.clear();
-            arguments.clone()
-        };
-        if let Some(cid) = call_id.as_deref().filter(|s| !s.is_empty()) {
-            cid.clone_into(&mut self.call_id);
-        }
-        if !name.is_empty() {
-            name.clone_into(&mut self.name);
+        match payload {
+            EventPayload::FunctionCallArgsDone {
+                arguments,
+                call_id,
+                name,
+                ..
+            } => {
+                self.arguments = if arguments.is_empty() {
+                    std::mem::take(buffer)
+                } else {
+                    buffer.clear();
+                    arguments.clone()
+                };
+                if let Some(cid) = call_id.as_deref().filter(|s| !s.is_empty()) {
+                    cid.clone_into(&mut self.call_id);
+                }
+                if !name.is_empty() {
+                    name.clone_into(&mut self.name);
+                }
+            }
+            EventPayload::OutputItemDone { item, .. } => {
+                let Some(mut call) = deserialize_from_value_opt::<Self>(item.clone()) else {
+                    return;
+                };
+                if item.get("id").and_then(Value::as_str).is_none_or(str::is_empty) {
+                    call.id.clone_from(&self.id);
+                }
+                if call.call_id.is_empty() {
+                    call.call_id.clone_from(&self.call_id);
+                }
+                if call.name.is_empty() {
+                    call.name.clone_from(&self.name);
+                }
+                if call.namespace.is_none() {
+                    call.namespace.clone_from(&self.namespace);
+                }
+                if call.arguments.is_empty() {
+                    call.arguments = if self.arguments.is_empty() {
+                        std::mem::take(buffer)
+                    } else {
+                        std::mem::take(&mut self.arguments)
+                    };
+                } else {
+                    buffer.clear();
+                }
+                *self = call;
+            }
+            _ => {}
         }
     }
 }

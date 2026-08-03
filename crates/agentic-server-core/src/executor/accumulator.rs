@@ -422,55 +422,56 @@ impl ResponseAccumulator {
         else {
             return;
         };
-        match (item_type, self.in_flight.get_mut(item_id).map(|entry| &mut entry.item)) {
-            (SSEItemType::CustomToolCall, Some(InFlight::CustomToolCall { item, input })) => {
-                item.apply_done(payload, input);
-                return;
-            }
-            (SSEItemType::McpCall, Some(InFlight::McpCall { item })) => {
-                item.apply_done(payload, &mut String::new());
-                return;
-            }
-            _ => {}
-        }
-        if *item_type == SSEItemType::WebSearchCall {
-            let Some(OutputItem::WebSearchCall(mut call)) = deserialize_from_value_opt::<OutputItem>(raw_item.clone())
-            else {
-                return;
-            };
-            let in_flight_key = self
-                .in_flight
-                .get(item_id)
-                .filter(|entry| matches!(entry.item, InFlight::WebSearchCall { .. }))
-                .map(|_| item_id.to_owned())
-                .or_else(|| {
-                    self.in_flight.iter().find_map(|(key, entry)| {
-                        (entry.output_index == *output_index && matches!(entry.item, InFlight::WebSearchCall { .. }))
-                            .then(|| key.clone())
-                    })
-                });
-            if call.id.is_empty() {
-                call.id = in_flight_key
-                    .as_deref()
-                    .filter(|id| !id.is_empty())
-                    .map_or_else(|| uuid7_str("ws_"), str::to_owned);
-            }
-            if let Some(InFlight::WebSearchCall { item }) = in_flight_key
-                .as_deref()
-                .and_then(|key| self.in_flight.get_mut(key))
-                .map(|entry| &mut entry.item)
-            {
-                *item = Some(call);
-            } else {
-                self.completed.push((*output_index, OutputItem::WebSearchCall(call)));
+        let in_flight_key = self.in_flight_call_key(item_id, *item_type, *output_index);
+        let done_item = deserialize_from_value_opt::<OutputItem>(raw_item.clone());
+        if let Some(entry) = in_flight_key.as_deref().and_then(|key| self.in_flight.get_mut(key)) {
+            match (&mut entry.item, done_item) {
+                (InFlight::FunctionCall { item, arguments }, _) => item.apply_done(payload, arguments),
+                (InFlight::CustomToolCall { item, input }, _) => item.apply_done(payload, input),
+                (InFlight::McpCall { item }, _) => item.apply_done(payload, &mut String::new()),
+                (InFlight::WebSearchCall { item }, Some(OutputItem::WebSearchCall(mut call))) => {
+                    if call.id.is_empty() {
+                        call.id = in_flight_key
+                            .as_deref()
+                            .filter(|id| !id.is_empty())
+                            .map_or_else(|| uuid7_str("ws_"), str::to_owned);
+                    }
+                    *item = Some(call);
+                }
+                _ => {}
             }
             return;
         }
-        if let Some(output_item @ (OutputItem::CustomToolCall(_) | OutputItem::McpCall(_))) =
-            deserialize_from_value_opt::<OutputItem>(raw_item.clone())
+
+        if let Some(
+            mut output_item @ (OutputItem::FunctionCall(_)
+            | OutputItem::CustomToolCall(_)
+            | OutputItem::WebSearchCall(_)
+            | OutputItem::McpCall(_)),
+        ) = done_item
         {
+            let OutputItem::WebSearchCall(call) = &mut output_item else {
+                self.completed.push((*output_index, output_item));
+                return;
+            };
+            if call.id.is_empty() {
+                call.id = uuid7_str("ws_");
+            }
             self.completed.push((*output_index, output_item));
         }
+    }
+
+    fn in_flight_call_key(&self, item_id: &str, item_type: SSEItemType, output_index: u32) -> Option<String> {
+        self.in_flight
+            .get(item_id)
+            .filter(|entry| in_flight_matches_call_type(&entry.item, item_type))
+            .map(|_| item_id.to_owned())
+            .or_else(|| {
+                self.in_flight.iter().find_map(|(key, entry)| {
+                    (entry.output_index == output_index && in_flight_matches_call_type(&entry.item, item_type))
+                        .then(|| key.clone())
+                })
+            })
     }
 
     /// Marks the response as incomplete due to an error or interruption.
@@ -507,6 +508,16 @@ impl ResponseAccumulator {
             instructions: instructions.map(str::to_string),
         }
     }
+}
+
+fn in_flight_matches_call_type(item: &InFlight, item_type: SSEItemType) -> bool {
+    matches!(
+        (item, item_type),
+        (InFlight::FunctionCall { .. }, SSEItemType::FunctionCall)
+            | (InFlight::CustomToolCall { .. }, SSEItemType::CustomToolCall)
+            | (InFlight::WebSearchCall { .. }, SSEItemType::WebSearchCall)
+            | (InFlight::McpCall { .. }, SSEItemType::McpCall)
+    )
 }
 
 #[cfg(test)]
@@ -1399,6 +1410,63 @@ mod tests {
         } else {
             panic!("expected FunctionCall");
         }
+    }
+
+    #[test]
+    fn test_output_item_done_restores_initially_unnamed_function_call() {
+        let lines = vec![
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"","name":"","arguments":"","status":"in_progress"}}"#.to_string(),
+            r#"data: {"type":"response.function_call_arguments.delta","output_index":0,"item_id":"fc_1","delta":"{\"input\":\"hello\"}"}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"raw_echo","arguments":"","status":"completed"}}"#.to_string(),
+            r#"data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","usage":null}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert_eq!(acc.output.len(), 1);
+        let OutputItem::FunctionCall(call) = &acc.output[0] else {
+            panic!("expected function_call");
+        };
+        assert_eq!(call.id, "fc_1");
+        assert_eq!(call.call_id, "call_1");
+        assert_eq!(call.name, "raw_echo");
+        assert_eq!(call.arguments, r#"{"input":"hello"}"#);
+        assert_eq!(call.status, MessageStatus::Completed);
+    }
+
+    #[test]
+    fn test_function_call_done_matches_empty_added_id_by_output_index() {
+        let lines = vec![
+            r#"data: {"type":"response.output_item.added","output_index":3,"item":{"type":"function_call","id":"","call_id":"","name":"","arguments":"","status":"in_progress"}}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":3,"item":{"type":"function_call","id":"fc_done","call_id":"call_done","name":"raw_echo","arguments":"{}","status":"completed"}}"#.to_string(),
+            r#"data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","usage":null}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert_eq!(acc.output.len(), 1);
+        let OutputItem::FunctionCall(call) = &acc.output[0] else {
+            panic!("expected function_call");
+        };
+        assert_eq!(call.id, "fc_done");
+        assert_eq!(call.call_id, "call_done");
+        assert_eq!(call.name, "raw_echo");
+    }
+
+    #[test]
+    fn test_done_only_function_call_is_completed() {
+        let lines = vec![
+            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"get_weather","arguments":"{\"city\":\"Paris\"}","status":"completed"}}"#.to_string(),
+            r#"data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","usage":null}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert_eq!(acc.output.len(), 1);
+        let OutputItem::FunctionCall(call) = &acc.output[0] else {
+            panic!("expected function_call");
+        };
+        assert_eq!(call.id, "fc_1");
+        assert_eq!(call.call_id, "call_1");
+        assert_eq!(call.name, "get_weather");
+        assert_eq!(call.arguments, r#"{"city":"Paris"}"#);
     }
 
     #[test]
