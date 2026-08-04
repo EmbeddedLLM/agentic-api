@@ -1,6 +1,34 @@
 //! Domain type for conversation storage.
 
 use super::super::models::Conversation as StorageDbConversation;
+use super::item::InOutItem;
+
+/// Version of a conversation's stored item history.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConversationVersion {
+    /// The conversation has no stored items.
+    Empty,
+    /// The sequence number of the last stored item.
+    LastSequence(i64),
+}
+
+impl ConversationVersion {
+    pub(crate) const fn from_last_sequence(last_sequence: Option<i64>) -> Self {
+        match last_sequence {
+            Some(sequence) => Self::LastSequence(sequence),
+            None => Self::Empty,
+        }
+    }
+}
+
+/// Rehydrated conversation items together with their storage version.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConversationSnapshot {
+    /// Rehydrated input and output items in stored order.
+    pub items: Vec<InOutItem>,
+    /// Version derived from the last stored item sequence.
+    pub version: ConversationVersion,
+}
 
 /// Domain entity for a stored conversation.
 ///

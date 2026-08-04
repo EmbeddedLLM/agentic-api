@@ -1,6 +1,8 @@
 //! Conversation storage handler — owns all conversation store operations.
 
-use crate::storage::{ConversationData, ConversationStore, InOutItem, ResponseMetadata};
+use crate::storage::{
+    ConversationData, ConversationSnapshot, ConversationStore, InOutItem, ResponseMetadata, StorageError,
+};
 use crate::types::io::OutputItem;
 
 use crate::executor::error::{ExecutorError, ExecutorResult};
@@ -67,12 +69,26 @@ impl ConversationHandler {
     /// Returns `ExecutorError` if `conversation_id` is absent, the store is
     /// disabled, or the database query fails.
     pub async fn rehydrate(&self, ctx: &RequestContext) -> ExecutorResult<Vec<InOutItem>> {
+        Ok(self.rehydrate_snapshot(ctx).await?.items)
+    }
+
+    /// Loads the conversation's history items and storage version.
+    ///
+    /// Reads `conversation_id` from `ctx.original_request`.
+    ///
+    /// # Errors
+    /// Returns `ExecutorError` if `conversation_id` is absent, the store is
+    /// disabled, or the database query fails.
+    pub async fn rehydrate_snapshot(&self, ctx: &RequestContext) -> ExecutorResult<ConversationSnapshot> {
         let conv_id = ctx
             .original_request
             .conversation_id
             .as_deref()
             .ok_or_else(|| ExecutorError::InvalidRequest("conversation_id is required for rehydrate".into()))?;
-        self.store.rehydrate(conv_id).await.map_err(ExecutorError::Storage)
+        self.store
+            .rehydrate_snapshot(conv_id)
+            .await
+            .map_err(ExecutorError::Storage)
     }
 
     /// Persists one conversation turn — only the new items from this turn.
@@ -88,6 +104,9 @@ impl ConversationHandler {
         let conversation_id = ctx
             .conversation_id
             .ok_or_else(|| ExecutorError::InvalidRequest("conversation_id is required for execute_turn".into()))?;
+        let conversation_version = ctx
+            .conversation_version
+            .ok_or_else(|| ExecutorError::InvalidRequest("conversation version is required for execute_turn".into()))?;
 
         let metadata = ResponseMetadata {
             model: ctx.enriched_request.model,
@@ -102,21 +121,26 @@ impl ConversationHandler {
         new_items.extend(output_items.into_iter().map(InOutItem::Output));
 
         self.store
-            .persist(
+            .persist_if_version(
                 &conversation_id,
+                conversation_version,
                 &ctx.response_id,
                 metadata.previous_response_id.as_deref(),
                 new_items,
                 &metadata,
             )
             .await
-            .map_err(ExecutorError::Storage)
+            .map_err(|error| match error {
+                source @ StorageError::ConversationConflict { .. } => ExecutorError::ConversationLocked { source },
+                other => ExecutorError::Storage(other),
+            })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::{ConversationVersion, create_pool_with_schema};
     use crate::types::io::ResponsesInput;
     use crate::types::request_response::RequestPayload;
 
@@ -151,6 +175,7 @@ mod tests {
             new_input_items: vec![],
             response_id: "resp_test".into(),
             conversation_id: conversation_id.map(str::to_string),
+            conversation_version: None,
         }
     }
 
@@ -188,5 +213,87 @@ mod tests {
     async fn test_execute_turn_missing_conv_id_returns_error() {
         let result = disabled_handler().execute_turn(make_ctx(None), vec![]).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn execute_turn_rejects_missing_conversation_version_without_writing()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let pool = create_pool_with_schema(Some("sqlite://?mode=memory")).await?;
+        let store = ConversationStore::new(pool);
+        let conversation = store.create().await?;
+        let handler = ConversationHandler::new(store.clone());
+        let mut ctx = make_ctx(Some(&conversation.conversation_id));
+        ctx.new_input_items = Vec::from(&ctx.original_request.input);
+
+        let error = handler
+            .execute_turn(ctx, vec![])
+            .await
+            .expect_err("missing captured version must reject the turn");
+
+        assert!(matches!(
+            error,
+            ExecutorError::InvalidRequest(message)
+                if message == "conversation version is required for execute_turn"
+        ));
+        assert!(store.rehydrate(&conversation.conversation_id).await?.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn execute_turn_persists_with_captured_conversation_version() -> Result<(), Box<dyn std::error::Error>> {
+        let pool = create_pool_with_schema(Some("sqlite://?mode=memory")).await?;
+        let store = ConversationStore::new(pool);
+        let conversation = store.create().await?;
+        let handler = ConversationHandler::new(store.clone());
+        let mut ctx = make_ctx(Some(&conversation.conversation_id));
+        ctx.new_input_items = Vec::from(&ctx.original_request.input);
+        ctx.conversation_version = Some(ConversationVersion::Empty);
+
+        handler.execute_turn(ctx, vec![]).await?;
+
+        let snapshot = store.rehydrate_snapshot(&conversation.conversation_id).await?;
+        assert_eq!(snapshot.items.len(), 1);
+        assert_eq!(snapshot.version, ConversationVersion::LastSequence(0));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn execute_turn_rejects_a_stale_captured_conversation_version() -> Result<(), Box<dyn std::error::Error>> {
+        use std::error::Error;
+
+        let pool = create_pool_with_schema(Some("sqlite://?mode=memory")).await?;
+        let store = ConversationStore::new(pool);
+        let conversation = store.create().await?;
+        let handler = ConversationHandler::new(store.clone());
+        let mut ctx = make_ctx(Some(&conversation.conversation_id));
+        ctx.new_input_items = Vec::from(&ctx.original_request.input);
+        ctx.conversation_version = Some(ConversationVersion::Empty);
+        let competing_items = Vec::from(&ResponsesInput::Text("competing input".into()))
+            .into_iter()
+            .map(InOutItem::Input)
+            .collect();
+        store
+            .persist(
+                &conversation.conversation_id,
+                "resp_competing",
+                None,
+                competing_items,
+                &ResponseMetadata::default(),
+            )
+            .await?;
+
+        let error = handler
+            .execute_turn(ctx, vec![])
+            .await
+            .expect_err("stale captured version must reject the turn");
+
+        let source = error.source().expect("conversation conflict source must be retained");
+        assert!(matches!(
+            source.downcast_ref::<StorageError>(),
+            Some(StorageError::ConversationConflict { conversation_id })
+                if conversation_id == &conversation.conversation_id
+        ));
+        assert!(matches!(error, ExecutorError::ConversationLocked { .. }));
+        Ok(())
     }
 }

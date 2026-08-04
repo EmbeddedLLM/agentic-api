@@ -259,7 +259,7 @@ async fn test_multi_branch() {
     // Turn 2 (main branch)
     let p2 = unwrap_blocking(
         execute(
-            make_request(&t2.request.body.input, true, false, None, Some(conv_id)),
+            make_request(&t2.request.body.input, true, false, None, Some(conv_id.clone())),
             Arc::clone(ctx),
         )
         .await
@@ -290,6 +290,7 @@ async fn test_multi_branch() {
     );
     assert_eq!(p4.status, "completed");
     assert_eq!(output_text(&p4), expected_text(t4));
+    assert_eq!(p4.conversation_id.as_deref(), Some(conv_id.as_str()));
 
     // Branch 2 — off turn 2
     let p5 = unwrap_blocking(

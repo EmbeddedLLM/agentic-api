@@ -15,6 +15,14 @@ pub enum StorageError {
     #[error("not found: {resource_type} with id '{id}'")]
     NotFound { resource_type: String, id: String },
 
+    /// A conversation item did not have its required sequence number.
+    #[error("invalid conversation sequence for conversation '{conversation_id}' item '{item_id}'")]
+    InvalidConversationSequence { conversation_id: String, item_id: String },
+
+    /// A conversation changed after its version was read.
+    #[error("conversation changed while the response was being generated")]
+    ConversationConflict { conversation_id: String },
+
     /// Database operation failed.
     ///
     /// Wraps `sqlx::Error` and automatically converts from it via `#[from]`.
@@ -53,6 +61,12 @@ impl StorageError {
     #[must_use]
     pub fn is_not_configured(&self) -> bool {
         matches!(self, Self::NotConfigured)
+    }
+
+    /// Returns `true` if this error is a conversation version conflict.
+    #[must_use]
+    pub fn is_conversation_conflict(&self) -> bool {
+        matches!(self, Self::ConversationConflict { .. })
     }
 
     /// Extracts the resource type and ID if this is a "not found" error.

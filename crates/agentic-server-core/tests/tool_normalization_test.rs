@@ -102,6 +102,7 @@ fn upstream_request_value(payload: RequestPayload, stream: bool) -> Value {
         new_input_items: Vec::new(),
         response_id: "resp_test".to_string(),
         conversation_id: None,
+        conversation_version: None,
     };
     let upstream_request = ctx
         .enriched_request

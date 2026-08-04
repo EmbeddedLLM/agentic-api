@@ -13,7 +13,9 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
 use agentic_core::ResponseUsage;
-use agentic_core::executor::{BoxStream, ExecuteRequest, ExecutorError, RequestContext, rehydrate_conversation};
+use agentic_core::executor::{
+    BoxStream, ExecuteRequest, ExecutorError, RequestContext, persist_turn, rehydrate_conversation,
+};
 use agentic_core::types::request_response::RequestPayload;
 use agentic_core::utils::common::utcnow_str;
 
@@ -267,7 +269,15 @@ async fn complete_without_inference(
         Some(ResponseUsage::default()),
     );
 
-    state.exec_ctx.resp_handler.execute_turn(ctx, Vec::new()).await?;
+    #[cfg(debug_assertions)]
+    state.websocket_tracker.pause_local_completion_after_rehydration().await;
+    persist_turn(
+        ctx,
+        Vec::new(),
+        &state.exec_ctx.conv_handler,
+        &state.exec_ctx.resp_handler,
+    )
+    .await?;
 
     send_ws_json(sender, created_event).await?;
     send_ws_json(sender, completed_event).await

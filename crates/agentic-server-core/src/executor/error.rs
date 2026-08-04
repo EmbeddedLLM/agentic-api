@@ -19,6 +19,16 @@ pub enum ExecutorError {
     #[error("failed to persist response")]
     Persistence(#[source] Box<ExecutorError>),
 
+    /// A persisted conversation changed after its history was read.
+    ///
+    /// The storage source is retained for internal diagnostics while the
+    /// display message remains safe to send to API clients.
+    #[error("conversation changed while the response was being generated; retry the request")]
+    ConversationLocked {
+        #[source]
+        source: StorageError,
+    },
+
     /// The LLM backend returned a non-2xx status or was unreachable.
     #[error("LLM request failed ({status}): {body}")]
     LLMRequest { status: StatusCode, body: String },
@@ -71,31 +81,72 @@ pub enum ExecutorError {
 }
 
 impl ExecutorError {
+    fn client_visible_error(&self) -> &Self {
+        match self {
+            Self::Persistence(source) if source.contains_conversation_locked() => source.client_visible_error(),
+            _ => self,
+        }
+    }
+
+    fn contains_conversation_locked(&self) -> bool {
+        match self {
+            Self::ConversationLocked { .. } => true,
+            Self::Persistence(source) => source.contains_conversation_locked(),
+            _ => false,
+        }
+    }
+
     /// HTTP status code that best represents this error to an API caller.
     #[must_use]
     pub fn http_status(&self) -> StatusCode {
-        match self {
+        match self.client_visible_error() {
             Self::Storage(e) if e.is_not_found() => StatusCode::NOT_FOUND,
             Self::LLMRequest { status, .. } => *status,
-            Self::Tool(ToolError::Config(_)) | Self::InvalidRequest(_) | Self::JsonError(_) => StatusCode::BAD_REQUEST,
+            Self::ConversationLocked { .. }
+            | Self::Tool(ToolError::Config(_))
+            | Self::InvalidRequest(_)
+            | Self::JsonError(_) => StatusCode::BAD_REQUEST,
             Self::Tool(ToolError::Execution(_)) | Self::CompactionFailed { .. } => StatusCode::BAD_GATEWAY,
             Self::ParseError(_) => StatusCode::UNPROCESSABLE_ENTITY,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 
-    /// Short machine-readable error code for the API error envelope.
+    /// Machine-readable error type for the API error envelope.
     #[must_use]
-    pub fn error_code(&self) -> &'static str {
-        match self {
+    pub fn error_type(&self) -> &'static str {
+        match self.client_visible_error() {
+            Self::ConversationLocked { .. }
+            | Self::Tool(ToolError::Config(_))
+            | Self::InvalidRequest(_)
+            | Self::ParseError(_)
+            | Self::JsonError(_) => "invalid_request_error",
             Self::Storage(e) if e.is_not_found() => "not_found",
             Self::LLMRequest { .. } | Self::CompactionFailed { .. } => "upstream_error",
-            Self::Tool(ToolError::Config(_)) | Self::InvalidRequest(_) | Self::ParseError(_) | Self::JsonError(_) => {
-                "invalid_request_error"
-            }
             Self::Tool(ToolError::Execution(_)) => "tool_error",
             _ => "server_error",
         }
+    }
+
+    /// Short machine-readable error code for the API error envelope.
+    #[must_use]
+    pub fn error_code(&self) -> &'static str {
+        match self.client_visible_error() {
+            Self::ConversationLocked { .. } => "conversation_locked",
+            other => other.error_type(),
+        }
+    }
+
+    /// Request parameter associated with the API error, when applicable.
+    #[must_use]
+    pub fn error_param(&self) -> Option<&'static str> {
+        matches!(self.client_visible_error(), Self::ConversationLocked { .. }).then_some("conversation")
+    }
+
+    /// Client-safe message for the API error envelope.
+    #[must_use]
+    pub fn error_message(&self) -> String {
+        self.client_visible_error().to_string()
     }
 
     /// Serialise the error into the HTTP response body bytes.
@@ -107,10 +158,16 @@ impl ExecutorError {
         match self {
             Self::LLMRequest { body, .. } => body.into_bytes(),
             other => {
+                let error_type = other.error_type();
                 let code = other.error_code();
-                serialize_to_vec_or_default(&serde_json::json!({
-                    "error": { "message": other.to_string(), "type": code, "code": code }
-                }))
+                let mut error = serde_json::Map::new();
+                error.insert("message".to_owned(), serde_json::json!(other.error_message()));
+                error.insert("type".to_owned(), serde_json::json!(error_type));
+                error.insert("code".to_owned(), serde_json::json!(code));
+                if let Some(param) = other.error_param() {
+                    error.insert("param".to_owned(), serde_json::json!(param));
+                }
+                serialize_to_vec_or_default(&serde_json::json!({ "error": error }))
             }
         }
     }
@@ -159,5 +216,48 @@ mod tests {
         let exec_err = ExecutorError::from(json_err);
         assert!(exec_err.source().is_some(), "source should be chained");
         assert!(exec_err.to_string().contains("json error"));
+    }
+
+    #[test]
+    fn conversation_locked_response_preserves_conflict_through_persistence() {
+        use std::error::Error;
+
+        let error = ExecutorError::Persistence(Box::new(ExecutorError::ConversationLocked {
+            source: StorageError::ConversationConflict {
+                conversation_id: "conv_internal".to_owned(),
+            },
+        }));
+
+        let conversation_locked = error.source().expect("persistence source must be retained");
+        let conflict = conversation_locked
+            .source()
+            .expect("conversation conflict source must be retained");
+        assert!(matches!(
+            conflict.downcast_ref::<StorageError>(),
+            Some(StorageError::ConversationConflict { conversation_id })
+                if conversation_id == "conv_internal"
+        ));
+
+        assert_eq!(error.http_status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&error.into_response_body())
+                .expect("valid error response JSON"),
+            serde_json::json!({
+                "error": {
+                    "message": "conversation changed while the response was being generated; retry the request",
+                    "type": "invalid_request_error",
+                    "code": "conversation_locked",
+                    "param": "conversation"
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn non_conflict_response_omits_param() {
+        let body = ExecutorError::InvalidRequest("invalid input".to_owned()).into_response_body();
+        let value: serde_json::Value = serde_json::from_slice(&body).expect("valid error response JSON");
+
+        assert!(!value["error"].as_object().expect("error object").contains_key("param"));
     }
 }

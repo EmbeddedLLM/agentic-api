@@ -591,6 +591,7 @@ mod tests {
             new_input_items: Vec::new(),
             response_id: "resp_gateway".to_owned(),
             conversation_id: None,
+            conversation_version: None,
         };
         (context, registry)
     }

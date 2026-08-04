@@ -5,7 +5,9 @@ use crate::config::Config;
 use crate::error::Error;
 use crate::executor::modes::{ConversationHandler, ResponseHandler};
 use crate::storage::backend::redact_database_urls;
-use crate::storage::{ConversationStore, DatabaseBackend, ResponseStore, create_pool_with_schema_and_configs};
+use crate::storage::{
+    ConversationStore, ConversationVersion, DatabaseBackend, ResponseStore, create_pool_with_schema_and_configs,
+};
 use crate::tool::{GatewayExecutor, GatewayExecutors};
 use crate::types::io::InputItem;
 use crate::types::messages::GatewayToolMap;
@@ -30,6 +32,9 @@ pub struct RequestContext {
     pub response_id: String,
     /// Resolved conversation ID. `None` when `store=false` or non-conversational.
     pub conversation_id: Option<String>,
+    /// Conversation version captured with rehydrated history.
+    /// `None` for non-conversation and `previous_response_id` execution.
+    pub conversation_version: Option<ConversationVersion>,
 }
 
 impl RequestContext {

@@ -51,6 +51,29 @@ impl WsError {
         }
     }
 
+    fn error_type(&self) -> &'static str {
+        match self {
+            Self::Executor(err) => err.error_type(),
+            Self::InvalidJson(_) => "invalid_json",
+            Self::UnexpectedType | Self::BinaryFrame => "invalid_request_error",
+            Self::SerializeJson(_) | Self::SendFailed | Self::ClientDisconnected | Self::Receive(_) => "server_error",
+        }
+    }
+
+    fn param(&self) -> Option<&'static str> {
+        match self {
+            Self::Executor(err) => err.error_param(),
+            _ => None,
+        }
+    }
+
+    fn message(&self) -> String {
+        match self {
+            Self::Executor(err) => err.error_message(),
+            _ => self.to_string(),
+        }
+    }
+
     pub(super) fn to_ws_frame(&self) -> Option<Value> {
         if matches!(
             self,
@@ -59,15 +82,57 @@ impl WsError {
             return None;
         }
 
-        let code = self.code();
+        let mut error = serde_json::Map::new();
+        error.insert("message".to_owned(), Value::String(self.message()));
+        error.insert("type".to_owned(), Value::String(self.error_type().to_owned()));
+        error.insert("code".to_owned(), Value::String(self.code().to_owned()));
+        if let Some(param) = self.param() {
+            error.insert("param".to_owned(), Value::String(param.to_owned()));
+        }
         Some(json!({
             "type": "error",
             "status": self.status().as_u16(),
-            "error": {
-                "message": self.to_string(),
-                "type": code,
-                "code": code
-            }
+            "error": error
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agentic_core::StorageError;
+
+    #[test]
+    fn executor_conflict_ws_frame_uses_client_conflict_contract() {
+        let error = WsError::Executor(ExecutorError::Persistence(Box::new(
+            ExecutorError::ConversationLocked {
+                source: StorageError::ConversationConflict {
+                    conversation_id: "conv_test".to_owned(),
+                },
+            },
+        )));
+
+        assert_eq!(
+            error.to_ws_frame().expect("client-visible websocket error"),
+            json!({
+                "type": "error",
+                "status": 400,
+                "error": {
+                    "message": "conversation changed while the response was being generated; retry the request",
+                    "type": "invalid_request_error",
+                    "code": "conversation_locked",
+                    "param": "conversation"
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn non_conflict_ws_frame_omits_param() {
+        let frame = WsError::UnexpectedType
+            .to_ws_frame()
+            .expect("client-visible websocket error");
+
+        assert!(!frame["error"].as_object().expect("error object").contains_key("param"));
     }
 }
