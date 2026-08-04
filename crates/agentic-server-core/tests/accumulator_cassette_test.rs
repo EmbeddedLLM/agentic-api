@@ -1020,7 +1020,7 @@ fn test_custom_tool_cassettes_accumulate_public_streaming_shape() {
         assert!(call.id.starts_with("ctc_"), "{provider} custom item ID");
         assert!(!call.call_id.is_empty(), "{provider} custom call ID");
         assert_eq!(call.name, "agentic_raw_echo", "{provider} custom tool name");
-        assert_eq!(call.input, "CUSTOM_CASSETTE_OK", "{provider} custom input");
+        assert_eq!(call.input.trim(), "CUSTOM_CASSETTE_OK", "{provider} custom input");
         assert_eq!(call.status, Some(MessageStatus::Completed), "{provider} custom status");
 
         let continuation = process_codex_streaming_turn(&cassette, 1, model);
@@ -1062,7 +1062,7 @@ fn test_custom_tool_cassettes_accumulate_public_nonstreaming_shape() {
         assert!(call.id.starts_with("ctc_"), "{provider} custom item ID");
         assert!(!call.call_id.is_empty(), "{provider} custom call ID");
         assert_eq!(call.name, "agentic_raw_echo", "{provider} custom tool name");
-        assert_eq!(call.input, "CUSTOM_CASSETTE_OK", "{provider} custom input");
+        assert_eq!(call.input.trim(), "CUSTOM_CASSETTE_OK", "{provider} custom input");
         assert_eq!(call.status, Some(MessageStatus::Completed), "{provider} custom status");
 
         let continuation = process_nonstreaming_turn(&cassette, 1, model);

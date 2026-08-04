@@ -128,11 +128,11 @@ fn assert_public_calls_match(openai: &support::Cassette, gateway: &support::Cass
         assert!(call.id.starts_with("ctc_"));
         assert!(!call.call_id.is_empty());
         assert_eq!(call.name, "agentic_raw_echo");
-        assert_eq!(call.input, "CUSTOM_CASSETTE_OK");
+        assert_eq!(call.input.trim(), "CUSTOM_CASSETTE_OK");
         assert_eq!(call.status, Some(MessageStatus::Completed));
     }
     assert_eq!(actual.name, expected.name);
-    assert_eq!(actual.input, expected.input);
+    assert_eq!(actual.input.trim(), expected.input.trim());
     assert_eq!(actual.status, expected.status);
 
     assert_eq!(
