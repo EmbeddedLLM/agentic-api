@@ -182,29 +182,6 @@ fn model_visible_description(param: &CustomToolParam) -> String {
 
     fragments.push("Provide the raw tool input in the `input` string field.".to_owned());
 
-    if let Some(format) = &param.format {
-        let format_type = format.get("type").and_then(serde_json::Value::as_str);
-        let syntax = format.get("syntax").and_then(serde_json::Value::as_str);
-        let definition = format
-            .get("definition")
-            .and_then(serde_json::Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty());
-
-        if format_type == Some("grammar")
-            && matches!(syntax, Some("lark" | "regex"))
-            && let (Some(syntax), Some(definition)) = (syntax, definition)
-        {
-            fragments.push(format!(
-                "The string must match this {syntax} grammar exactly:\n{definition}"
-            ));
-        } else {
-            fragments.push(format!(
-                "The string must conform to this custom tool format declaration exactly:\n{format}"
-            ));
-        }
-    }
-
     if !param.extra.is_empty()
         && let Ok(extra) = serde_json::to_string(&param.extra)
     {
@@ -222,9 +199,15 @@ impl ToolHandler for CustomHandler {
     }
 
     fn validate(&self, param: &serde_json::Value) -> Result<(), ToolError> {
-        serde_json::from_value::<CustomToolParam>(param.clone())
-            .map(|_| ())
-            .map_err(|error| ToolError::Config(format!("invalid custom tool config: {error}")))
+        let param = serde_json::from_value::<CustomToolParam>(param.clone())
+            .map_err(|error| ToolError::Config(format!("invalid custom tool config: {error}")))?;
+        if param.format.is_some() {
+            return Err(ToolError::Config(format!(
+                "custom tool '{}' uses an unsupported format; gateway normalization cannot preserve constrained decoding",
+                param.name
+            )));
+        }
+        Ok(())
     }
 
     fn normalize(&self, param: &serde_json::Value) -> Vec<FunctionTool> {
@@ -330,16 +313,13 @@ mod tests {
         let param = serde_json::from_value::<CustomToolParam>(serde_json::json!({
             "name": "raw_echo",
             "description": "Echo raw input.",
-            "format": {
-                "type": "grammar",
-                "syntax": "lark",
-                "definition": "start: \"CUSTOM_OK\""
-            },
             "x-provider-field": {"mode": "strict"}
         }))
         .expect("custom tool");
 
-        let tool = CustomHandler::to_function_call(&param);
+        let value = serde_json::to_value(param).expect("custom tool value");
+        let mut tools = CustomHandler.normalize(&value);
+        let tool = tools.pop().expect("normalized custom tool");
 
         assert_eq!(tool.type_, "function");
         assert_eq!(tool.name, "raw_echo");
@@ -351,41 +331,34 @@ mod tests {
         let description = tool.description.as_deref().expect("model-visible description");
         assert!(description.contains("Echo raw input."));
         assert!(description.contains("raw tool input in the `input` string field"));
-        assert!(description.contains("lark grammar exactly"));
-        assert!(description.contains("start: \"CUSTOM_OK\""));
         assert!(description.contains("x-provider-field"));
         assert!(description.contains("strict"));
     }
 
     #[test]
-    fn regex_grammar_is_preserved_in_model_visible_description() {
-        let param = serde_json::from_value::<CustomToolParam>(serde_json::json!({
-            "name": "timestamp",
-            "description": "Save a timestamp.",
-            "format": {
-                "type": "grammar",
-                "syntax": "regex",
-                "definition": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
-            }
-        }))
-        .expect("custom tool");
+    fn grammar_formats_are_rejected() {
+        for syntax in ["lark", "regex"] {
+            let param = serde_json::from_value::<CustomToolParam>(serde_json::json!({
+                "name": "constrained_input",
+                "format": {
+                    "type": "grammar",
+                    "syntax": syntax,
+                    "definition": "start: value"
+                }
+            }))
+            .expect("custom tool");
 
-        let tool = CustomHandler::to_function_call(&param);
-        let description = tool.description.as_deref().expect("model-visible description");
-        assert!(description.contains("regex grammar exactly"));
-        assert!(description.contains("^[0-9]{4}-[0-9]{2}-[0-9]{2}$"));
+            let value = serde_json::to_value(param).expect("custom tool value");
+            let error = CustomHandler.validate(&value).expect_err("grammar must be rejected");
+            assert!(error.to_string().contains("cannot preserve constrained decoding"));
+        }
     }
 
     #[test]
     fn response_lifecycle_metadata_restores_public_custom_tool_shape() {
         let param = serde_json::from_value::<CustomToolParam>(serde_json::json!({
             "name": "raw_echo",
-            "description": "Echo raw input.",
-            "format": {
-                "type": "grammar",
-                "syntax": "lark",
-                "definition": "start: echo"
-            }
+            "description": "Echo raw input."
         }))
         .expect("custom tool");
         let tools = vec![ResponsesTool::Custom(param)];
@@ -408,7 +381,6 @@ mod tests {
         let response = &wire.rest["response"];
         assert_eq!(response["tools"][0]["type"], "custom");
         assert_eq!(response["tools"][0]["description"], "Echo raw input.");
-        assert_eq!(response["tools"][0]["format"]["syntax"], "lark");
         assert!(response["tools"][0].get("parameters").is_none());
         assert_eq!(response["tool_choice"]["type"], "custom");
         assert_eq!(response["tool_choice"]["name"], "raw_echo");

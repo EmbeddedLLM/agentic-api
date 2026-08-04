@@ -6,12 +6,52 @@ use crate::utils::common::serialize_to_value_or_custom_default;
 use super::codex::CodexNamespaceHandler;
 use super::custom::CustomHandler;
 use super::function::FunctionHandler;
-use super::handler::{ToolHandler, ToolOutput};
+use super::handler::{ToolError, ToolHandler, ToolOutput};
 use super::mcp::McpHandler;
 use super::registry::ToolType;
 use super::web_search::web_search_function_tool;
 
 impl ResponsesTool {
+    /// Validate this declaration through its tool handler before normalization.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ToolError::Config`] when the declaration cannot be safely
+    /// represented by the corresponding model-visible tool.
+    pub fn validate(&self) -> Result<(), ToolError> {
+        match self {
+            Self::Function(param) => serialize_to_value_or_custom_default(
+                param,
+                "function tool config serialization failed",
+                |param| FunctionHandler.validate(&param),
+                Err(ToolError::Config(
+                    "function tool config serialization failed".to_owned(),
+                )),
+            ),
+            Self::Mcp(param) => serialize_to_value_or_custom_default(
+                param,
+                "MCP tool config serialization failed",
+                |param| McpHandler::spec_from_param(&param).validate(&param),
+                Err(ToolError::Config("MCP tool config serialization failed".to_owned())),
+            ),
+            Self::WebSearch(_) | Self::FileSearch(_) | Self::CodeInterpreter(_) | Self::Unknown => Ok(()),
+            Self::Namespace(param) => serialize_to_value_or_custom_default(
+                param,
+                "namespace tool config serialization failed",
+                |param| CodexNamespaceHandler.validate(&param),
+                Err(ToolError::Config(
+                    "namespace tool config serialization failed".to_owned(),
+                )),
+            ),
+            Self::Custom(param) => serialize_to_value_or_custom_default(
+                param,
+                "custom tool config serialization failed",
+                |param| CustomHandler.validate(&param),
+                Err(ToolError::Config("custom tool config serialization failed".to_owned())),
+            ),
+        }
+    }
+
     /// Return the gateway routing type this declaration would register as.
     #[must_use]
     pub fn tool_type(&self) -> Option<ToolType> {
@@ -38,8 +78,9 @@ impl ResponsesTool {
     ///   Returns an empty list and logs at `debug` level if the name is empty.
     /// - `Mcp` variants convert gateway MCP built-ins to the function specs
     ///   vLLM can call.
-    /// - `Custom` variants become function tools with one string `input`
-    ///   parameter; the gateway restores their public custom-call shape.
+    /// - Unformatted `Custom` variants become function tools with one string
+    ///   `input` parameter; formatted declarations are rejected by the request
+    ///   path because normalization cannot preserve constrained decoding.
     /// - Unimplemented variants (`FileSearch`, `CodeInterpreter`) return
     ///   an empty list and emit a `tracing::debug!`.
     ///

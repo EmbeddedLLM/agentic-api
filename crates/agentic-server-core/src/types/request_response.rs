@@ -118,7 +118,8 @@ impl RequestPayload {
     ///
     /// Returns [`ToolError::Config`] when a Codex namespace member's generated
     /// flat name collides with a top-level function tool or another namespace
-    /// member.
+    /// member, or when a custom tool declares a format whose constrained
+    /// decoding cannot be preserved upstream.
     pub fn to_upstream_request(&self, stream: bool) -> Result<UpstreamRequest<'_>, ToolError> {
         let has_built_in_tool = self.declares_built_in_tool();
         if has_built_in_tool && self.parallel_tool_calls == Some(true) {
@@ -137,6 +138,11 @@ impl RequestPayload {
             .as_deref()
             .map(|tools| CodexNamespaceHandler.resolve_namespace_members(tools))
             .transpose()?;
+        if let Some(tools) = &renamed_tools {
+            for tool in tools {
+                tool.validate()?;
+            }
+        }
         let tools: Option<Vec<UpstreamTool>> = renamed_tools.map(|tools| {
             tools
                 .iter()
@@ -589,11 +595,6 @@ mod tests {
                     "type": "custom",
                     "name": "apply_patch",
                     "description": "Apply a patch.",
-                    "format": {
-                        "type": "grammar",
-                        "syntax": "lark",
-                        "definition": "start: patch"
-                    },
                     "x-provider-field": {"mode": "strict"}
                 }
             ]
@@ -617,8 +618,6 @@ mod tests {
             .expect("custom tool description");
         assert!(custom_description.contains("Apply a patch."));
         assert!(custom_description.contains("raw tool input in the `input` string field"));
-        assert!(custom_description.contains("lark grammar exactly"));
-        assert!(custom_description.contains("start: patch"));
         assert!(custom_description.contains("x-provider-field"));
         assert_eq!(
             upstream["tools"][1]["parameters"]["properties"]["input"]["type"],
@@ -631,6 +630,29 @@ mod tests {
         let deserialized: FunctionTool =
             serde_json::from_value(upstream["tools"][1].clone()).expect("upstream function tool should deserialize");
         assert_eq!(deserialized.name, "apply_patch");
+    }
+
+    #[test]
+    fn to_upstream_request_rejects_custom_tool_grammar_formats() {
+        let payload: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test",
+            "input": "hi",
+            "tools": [{
+                "type": "custom",
+                "name": "constrained_input",
+                "format": {
+                    "type": "grammar",
+                    "syntax": "lark",
+                    "definition": "start: value"
+                }
+            }]
+        }))
+        .expect("request");
+
+        let error = payload
+            .to_upstream_request(false)
+            .expect_err("unsupported grammar must fail closed");
+        assert!(error.to_string().contains("cannot preserve constrained decoding"));
     }
 
     #[test]

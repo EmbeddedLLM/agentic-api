@@ -229,12 +229,7 @@ async fn custom_tool_type_normalizes_for_the_model_but_remains_client_owned() {
         serde_json::from_value::<ResponsesTool>(serde_json::json!({
             "type": "custom",
             "name": "agentic_raw_echo",
-            "description": "Emit raw text.",
-            "format": {
-                "type": "grammar",
-                "syntax": "lark",
-                "definition": "start: \"CUSTOM_CASSETTE_OK\""
-            }
+            "description": "Emit raw text."
         }))
         .expect("custom declaration"),
     ];
@@ -254,6 +249,23 @@ async fn custom_tool_type_normalizes_for_the_model_but_remains_client_owned() {
         normalized[0].parameters.as_ref().unwrap()["properties"]["input"]["type"],
         "string"
     );
+}
+
+#[test]
+fn custom_tool_grammar_format_is_rejected() {
+    let tool = serde_json::from_value::<ResponsesTool>(serde_json::json!({
+        "type": "custom",
+        "name": "constrained_input",
+        "format": {
+            "type": "grammar",
+            "syntax": "lark",
+            "definition": "start: value"
+        }
+    }))
+    .expect("custom declaration");
+
+    let error = tool.validate().expect_err("unsupported grammar must fail closed");
+    assert!(error.to_string().contains("cannot preserve constrained decoding"));
 }
 
 #[test]
