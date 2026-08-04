@@ -9,11 +9,8 @@ turns:
       store: true
       stream: true
       tools:
-      - description: Emit the requested cassette token as raw text.
-        format:
-          definition: 'start: "CUSTOM_CASSETTE_OK"'
-          syntax: lark
-          type: grammar
+      - description: Emit the requested cassette token as raw text. The input must
+          be exactly CUSTOM_CASSETTE_OK.
         name: agentic_raw_echo
         type: custom
     headers:
@@ -27,585 +24,590 @@ turns:
     headers:
       content-type: text/event-stream; charset=utf-8
     sse:
-    - 'data: {"type":"response.created","sequence_number":0,"response":{"background":false,"created_at":1785758000,"ec_transfer_params":null,"frequency_penalty":0.0,"id":"resp_019fc778-a4c4-7b23-9854-f47e99aa89de","incomplete_details":null,"input_messages":null,"instructions":null,"kv_transfer_params":null,"max_output_tokens":2048,"max_tool_calls":null,"metadata":null,"model":"Qwen/Qwen3.5-35B-A3B-FP8","object":"response","output":[],"output_messages":null,"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","temperature":1.0,"text":null,"tool_choice":"auto","tools":[{"description":"Emit
-      the requested cassette token as raw text.","format":{"definition":"start: \"CUSTOM_CASSETTE_OK\"","syntax":"lark","type":"grammar"},"name":"agentic_raw_echo","type":"custom"}],"top_logprobs":null,"top_p":0.95,"truncation":"disabled","usage":null,"user":null}}
+    - 'data: {"type":"response.created","sequence_number":0,"response":{"background":false,"created_at":1785841457,"ec_transfer_params":null,"frequency_penalty":0.0,"id":"resp_019fcc72-19bd-7832-92b5-dde3d6925c01","incomplete_details":null,"input_messages":null,"instructions":null,"kv_transfer_params":null,"max_output_tokens":2048,"max_tool_calls":null,"metadata":null,"model":"Qwen/Qwen3.5-35B-A3B-FP8","object":"response","output":[],"output_messages":null,"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","temperature":1.0,"text":null,"tool_choice":"auto","tools":[{"description":"Emit
+      the requested cassette token as raw text. The input must be exactly CUSTOM_CASSETTE_OK.","name":"agentic_raw_echo","type":"custom"}],"top_logprobs":null,"top_p":0.95,"truncation":"disabled","usage":null,"user":null}}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.in_progress","sequence_number":1,"response":{"background":false,"created_at":1785758000,"ec_transfer_params":null,"frequency_penalty":0.0,"id":"resp_019fc778-a4c4-7b23-9854-f47e99aa89de","incomplete_details":null,"input_messages":null,"instructions":null,"kv_transfer_params":null,"max_output_tokens":2048,"max_tool_calls":null,"metadata":null,"model":"Qwen/Qwen3.5-35B-A3B-FP8","object":"response","output":[],"output_messages":null,"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","temperature":1.0,"text":null,"tool_choice":"auto","tools":[{"description":"Emit
-      the requested cassette token as raw text.","format":{"definition":"start: \"CUSTOM_CASSETTE_OK\"","syntax":"lark","type":"grammar"},"name":"agentic_raw_echo","type":"custom"}],"top_logprobs":null,"top_p":0.95,"truncation":"disabled","usage":null,"user":null}}
+    - 'data: {"type":"response.in_progress","sequence_number":1,"response":{"background":false,"created_at":1785841457,"ec_transfer_params":null,"frequency_penalty":0.0,"id":"resp_019fcc72-19bd-7832-92b5-dde3d6925c01","incomplete_details":null,"input_messages":null,"instructions":null,"kv_transfer_params":null,"max_output_tokens":2048,"max_tool_calls":null,"metadata":null,"model":"Qwen/Qwen3.5-35B-A3B-FP8","object":"response","output":[],"output_messages":null,"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","temperature":1.0,"text":null,"tool_choice":"auto","tools":[{"description":"Emit
+      the requested cassette token as raw text. The input must be exactly CUSTOM_CASSETTE_OK.","name":"agentic_raw_echo","type":"custom"}],"top_logprobs":null,"top_p":0.95,"truncation":"disabled","usage":null,"user":null}}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"content":null,"encrypted_content":null,"id":"82adad6aadd55280","status":"in_progress","summary":[],"type":"reasoning"}}
+    - 'data: {"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"content":null,"encrypted_content":null,"id":"a5e091bc5a62797b","status":"in_progress","summary":[],"type":"reasoning"}}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_part.added","sequence_number":3,"output_index":0,"content_index":0,"item_id":"82adad6aadd55280","part":{"text":"","type":"reasoning_text"}}
+    - 'data: {"type":"response.reasoning_part.added","sequence_number":3,"output_index":0,"content_index":0,"item_id":"a5e091bc5a62797b","part":{"text":"","type":"reasoning_text"}}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":4,"output_index":0,"content_index":0,"delta":"The","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":4,"output_index":0,"content_index":0,"delta":"The","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":5,"output_index":0,"content_index":0,"delta":"
-      user","item_id":"82adad6aadd55280"}
+      user","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":6,"output_index":0,"content_index":0,"delta":"
-      is","item_id":"82adad6aadd55280"}
+      is","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":7,"output_index":0,"content_index":0,"delta":"
-      asking","item_id":"82adad6aadd55280"}
+      instruct","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":8,"output_index":0,"content_index":0,"delta":"
-      me","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":8,"output_index":0,"content_index":0,"delta":"ing","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":9,"output_index":0,"content_index":0,"delta":"
-      to","item_id":"82adad6aadd55280"}
+      me","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":10,"output_index":0,"content_index":0,"delta":"
-      call","item_id":"82adad6aadd55280"}
+      to","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":11,"output_index":0,"content_index":0,"delta":"
-      the","item_id":"82adad6aadd55280"}
+      call","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":12,"output_index":0,"content_index":0,"delta":"
-      ag","item_id":"82adad6aadd55280"}
+      the","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":13,"output_index":0,"content_index":0,"delta":"entic","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":13,"output_index":0,"content_index":0,"delta":"
+      ag","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":14,"output_index":0,"content_index":0,"delta":"_raw","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":14,"output_index":0,"content_index":0,"delta":"entic","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":15,"output_index":0,"content_index":0,"delta":"_echo","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":15,"output_index":0,"content_index":0,"delta":"_raw","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":16,"output_index":0,"content_index":0,"delta":"
-      custom","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":16,"output_index":0,"content_index":0,"delta":"_echo","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":17,"output_index":0,"content_index":0,"delta":"
-      tool","item_id":"82adad6aadd55280"}
+      custom","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":18,"output_index":0,"content_index":0,"delta":"
-      with","item_id":"82adad6aadd55280"}
+      tool","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":19,"output_index":0,"content_index":0,"delta":"
-      exactly","item_id":"82adad6aadd55280"}
+      exactly","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":20,"output_index":0,"content_index":0,"delta":"
-      \"","item_id":"82adad6aadd55280"}
+      once","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":21,"output_index":0,"content_index":0,"delta":"CUSTOM","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":21,"output_index":0,"content_index":0,"delta":"
+      with","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":22,"output_index":0,"content_index":0,"delta":"_C","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":22,"output_index":0,"content_index":0,"delta":"
+      exactly","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":23,"output_index":0,"content_index":0,"delta":"AS","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":23,"output_index":0,"content_index":0,"delta":"
+      \"","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":24,"output_index":0,"content_index":0,"delta":"SET","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":24,"output_index":0,"content_index":0,"delta":"CUSTOM","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":25,"output_index":0,"content_index":0,"delta":"TE","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":25,"output_index":0,"content_index":0,"delta":"_C","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":26,"output_index":0,"content_index":0,"delta":"_OK","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":26,"output_index":0,"content_index":0,"delta":"AS","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":27,"output_index":0,"content_index":0,"delta":"\"","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":27,"output_index":0,"content_index":0,"delta":"SET","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":28,"output_index":0,"content_index":0,"delta":"
-      as","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":28,"output_index":0,"content_index":0,"delta":"TE","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":29,"output_index":0,"content_index":0,"delta":"
-      its","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":29,"output_index":0,"content_index":0,"delta":"_OK","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":30,"output_index":0,"content_index":0,"delta":"
-      raw","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":30,"output_index":0,"content_index":0,"delta":"\"","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":31,"output_index":0,"content_index":0,"delta":"
-      text","item_id":"82adad6aadd55280"}
+      as","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":32,"output_index":0,"content_index":0,"delta":"
-      input","item_id":"82adad6aadd55280"}
+      its","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":33,"output_index":0,"content_index":0,"delta":".","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":33,"output_index":0,"content_index":0,"delta":"
+      raw","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":34,"output_index":0,"content_index":0,"delta":"
-      They","item_id":"82adad6aadd55280"}
+      text","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":35,"output_index":0,"content_index":0,"delta":"
-      specifically","item_id":"82adad6aadd55280"}
+      input","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":36,"output_index":0,"content_index":0,"delta":"
-      said","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":36,"output_index":0,"content_index":0,"delta":".","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":37,"output_index":0,"content_index":0,"delta":"
-      I","item_id":"82adad6aadd55280"}
+      This","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":38,"output_index":0,"content_index":0,"delta":"
-      must","item_id":"82adad6aadd55280"}
+      is","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":39,"output_index":0,"content_index":0,"delta":"
-      call","item_id":"82adad6aadd55280"}
+      a","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":40,"output_index":0,"content_index":0,"delta":"
-      it","item_id":"82adad6aadd55280"}
+      straightforward","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":41,"output_index":0,"content_index":0,"delta":"
-      exactly","item_id":"82adad6aadd55280"}
+      instruction","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":42,"output_index":0,"content_index":0,"delta":"
-      once","item_id":"82adad6aadd55280"}
+      that","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":43,"output_index":0,"content_index":0,"delta":"
-      with","item_id":"82adad6aadd55280"}
+      matches","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":44,"output_index":0,"content_index":0,"delta":"
-      exactly","item_id":"82adad6aadd55280"}
+      the","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":45,"output_index":0,"content_index":0,"delta":"
-      this","item_id":"82adad6aadd55280"}
+      tool","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":46,"output_index":0,"content_index":0,"delta":"
-      input","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":46,"output_index":0,"content_index":0,"delta":"''s","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":47,"output_index":0,"content_index":0,"delta":".","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":47,"output_index":0,"content_index":0,"delta":"
+      description","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":48,"output_index":0,"content_index":0,"delta":"\n\n","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":48,"output_index":0,"content_index":0,"delta":".","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":49,"output_index":0,"content_index":0,"delta":"I","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":49,"output_index":0,"content_index":0,"delta":"\n\n","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":50,"output_index":0,"content_index":0,"delta":"
-      need","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":50,"output_index":0,"content_index":0,"delta":"I","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":51,"output_index":0,"content_index":0,"delta":"
-      to","item_id":"82adad6aadd55280"}
+      need","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":52,"output_index":0,"content_index":0,"delta":"
-      use","item_id":"82adad6aadd55280"}
+      to","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":53,"output_index":0,"content_index":0,"delta":"
-      the","item_id":"82adad6aadd55280"}
+      call","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":54,"output_index":0,"content_index":0,"delta":"
-      ag","item_id":"82adad6aadd55280"}
+      the","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":55,"output_index":0,"content_index":0,"delta":"entic","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":55,"output_index":0,"content_index":0,"delta":"
+      ag","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":56,"output_index":0,"content_index":0,"delta":"_raw","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":56,"output_index":0,"content_index":0,"delta":"entic","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":57,"output_index":0,"content_index":0,"delta":"_echo","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":57,"output_index":0,"content_index":0,"delta":"_raw","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":58,"output_index":0,"content_index":0,"delta":"
-      function","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":58,"output_index":0,"content_index":0,"delta":"_echo","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":59,"output_index":0,"content_index":0,"delta":"
-      with","item_id":"82adad6aadd55280"}
+      function","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":60,"output_index":0,"content_index":0,"delta":"
-      the","item_id":"82adad6aadd55280"}
+      with","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":61,"output_index":0,"content_index":0,"delta":"
-      input","item_id":"82adad6aadd55280"}
+      the","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":62,"output_index":0,"content_index":0,"delta":"
-      parameter","item_id":"82adad6aadd55280"}
+      input","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":63,"output_index":0,"content_index":0,"delta":"
-      set","item_id":"82adad6aadd55280"}
+      parameter","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":64,"output_index":0,"content_index":0,"delta":"
-      to","item_id":"82adad6aadd55280"}
+      set","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":65,"output_index":0,"content_index":0,"delta":"
-      \"","item_id":"82adad6aadd55280"}
+      to","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":66,"output_index":0,"content_index":0,"delta":"CUSTOM","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":66,"output_index":0,"content_index":0,"delta":"
+      \"","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":67,"output_index":0,"content_index":0,"delta":"_C","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":67,"output_index":0,"content_index":0,"delta":"CUSTOM","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":68,"output_index":0,"content_index":0,"delta":"AS","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":68,"output_index":0,"content_index":0,"delta":"_C","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":69,"output_index":0,"content_index":0,"delta":"SET","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":69,"output_index":0,"content_index":0,"delta":"AS","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":70,"output_index":0,"content_index":0,"delta":"TE","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":70,"output_index":0,"content_index":0,"delta":"SET","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":71,"output_index":0,"content_index":0,"delta":"_OK","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":71,"output_index":0,"content_index":0,"delta":"TE","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":72,"output_index":0,"content_index":0,"delta":"\".","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":72,"output_index":0,"content_index":0,"delta":"_OK","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":73,"output_index":0,"content_index":0,"delta":"\n","item_id":"82adad6aadd55280"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":73,"output_index":0,"content_index":0,"delta":"\".","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.done","sequence_number":74,"output_index":0,"content_index":0,"item_id":"82adad6aadd55280","text":"The
-      user is asking me to call the agentic_raw_echo custom tool with exactly \"CUSTOM_CASSETTE_OK\"
-      as its raw text input. They specifically said I must call it exactly once with
-      exactly this input.\n\nI need to use the agentic_raw_echo function with the
-      input parameter set to \"CUSTOM_CASSETTE_OK\".\n"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":74,"output_index":0,"content_index":0,"delta":"\n","item_id":"a5e091bc5a62797b"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_part.done","sequence_number":75,"output_index":0,"content_index":0,"item_id":"82adad6aadd55280","part":{"text":"The
-      user is asking me to call the agentic_raw_echo custom tool with exactly \"CUSTOM_CASSETTE_OK\"
-      as its raw text input. They specifically said I must call it exactly once with
-      exactly this input.\n\nI need to use the agentic_raw_echo function with the
-      input parameter set to \"CUSTOM_CASSETTE_OK\".\n","type":"reasoning_text"}}
+    - 'data: {"type":"response.reasoning_text.done","sequence_number":75,"output_index":0,"content_index":0,"item_id":"a5e091bc5a62797b","text":"The
+      user is instructing me to call the agentic_raw_echo custom tool exactly once
+      with exactly \"CUSTOM_CASSETTE_OK\" as its raw text input. This is a straightforward
+      instruction that matches the tool''s description.\n\nI need to call the agentic_raw_echo
+      function with the input parameter set to \"CUSTOM_CASSETTE_OK\".\n"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.output_item.done","sequence_number":76,"output_index":0,"item":{"content":[{"text":"The
-      user is asking me to call the agentic_raw_echo custom tool with exactly \"CUSTOM_CASSETTE_OK\"
-      as its raw text input. They specifically said I must call it exactly once with
-      exactly this input.\n\nI need to use the agentic_raw_echo function with the
-      input parameter set to \"CUSTOM_CASSETTE_OK\".\n","type":"reasoning_text"}],"encrypted_content":null,"id":"82adad6aadd55280","status":"completed","summary":[],"type":"reasoning"}}
+    - 'data: {"type":"response.reasoning_part.done","sequence_number":76,"output_index":0,"content_index":0,"item_id":"a5e091bc5a62797b","part":{"text":"The
+      user is instructing me to call the agentic_raw_echo custom tool exactly once
+      with exactly \"CUSTOM_CASSETTE_OK\" as its raw text input. This is a straightforward
+      instruction that matches the tool''s description.\n\nI need to call the agentic_raw_echo
+      function with the input parameter set to \"CUSTOM_CASSETTE_OK\".\n","type":"reasoning_text"}}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.output_item.added","sequence_number":77,"output_index":1,"item":{"call_id":"call_8e0a538bf00e25a8","id":"ctc_ac27a0ae302a449c","input":"","name":"agentic_raw_echo","status":"in_progress","type":"custom_tool_call"}}
+    - 'data: {"type":"response.output_item.done","sequence_number":77,"output_index":0,"item":{"content":[{"text":"The
+      user is instructing me to call the agentic_raw_echo custom tool exactly once
+      with exactly \"CUSTOM_CASSETTE_OK\" as its raw text input. This is a straightforward
+      instruction that matches the tool''s description.\n\nI need to call the agentic_raw_echo
+      function with the input parameter set to \"CUSTOM_CASSETTE_OK\".\n","type":"reasoning_text"}],"encrypted_content":null,"id":"a5e091bc5a62797b","status":"completed","summary":[],"type":"reasoning"}}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.custom_tool_call_input.delta","sequence_number":78,"output_index":1,"delta":"CUSTOM","item_id":"ctc_ac27a0ae302a449c"}
+    - 'data: {"type":"response.output_item.added","sequence_number":78,"output_index":1,"item":{"call_id":"call_b6eb1300a8bb4c10","id":"ctc_b55d84a89158e139","input":"","name":"agentic_raw_echo","status":"in_progress","type":"custom_tool_call"}}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.custom_tool_call_input.delta","sequence_number":79,"output_index":1,"delta":"_C","item_id":"ctc_ac27a0ae302a449c"}
+    - 'data: {"type":"response.custom_tool_call_input.delta","sequence_number":79,"output_index":1,"delta":"CUSTOM","item_id":"ctc_b55d84a89158e139"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.custom_tool_call_input.delta","sequence_number":80,"output_index":1,"delta":"AS","item_id":"ctc_ac27a0ae302a449c"}
+    - 'data: {"type":"response.custom_tool_call_input.delta","sequence_number":80,"output_index":1,"delta":"_C","item_id":"ctc_b55d84a89158e139"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.custom_tool_call_input.delta","sequence_number":81,"output_index":1,"delta":"SET","item_id":"ctc_ac27a0ae302a449c"}
+    - 'data: {"type":"response.custom_tool_call_input.delta","sequence_number":81,"output_index":1,"delta":"AS","item_id":"ctc_b55d84a89158e139"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.custom_tool_call_input.delta","sequence_number":82,"output_index":1,"delta":"TE","item_id":"ctc_ac27a0ae302a449c"}
+    - 'data: {"type":"response.custom_tool_call_input.delta","sequence_number":82,"output_index":1,"delta":"SET","item_id":"ctc_b55d84a89158e139"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.custom_tool_call_input.delta","sequence_number":83,"output_index":1,"delta":"_OK","item_id":"ctc_ac27a0ae302a449c"}
+    - 'data: {"type":"response.custom_tool_call_input.delta","sequence_number":83,"output_index":1,"delta":"TE","item_id":"ctc_b55d84a89158e139"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.custom_tool_call_input.done","sequence_number":84,"output_index":1,"input":"CUSTOM_CASSETTE_OK","item_id":"ctc_ac27a0ae302a449c"}
+    - 'data: {"type":"response.custom_tool_call_input.delta","sequence_number":84,"output_index":1,"delta":"_OK","item_id":"ctc_b55d84a89158e139"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.output_item.done","sequence_number":85,"output_index":1,"item":{"call_id":"call_8e0a538bf00e25a8","id":"ctc_ac27a0ae302a449c","input":"CUSTOM_CASSETTE_OK","name":"agentic_raw_echo","status":"completed","type":"custom_tool_call"}}
+    - 'data: {"type":"response.custom_tool_call_input.done","sequence_number":85,"output_index":1,"input":"CUSTOM_CASSETTE_OK","item_id":"ctc_b55d84a89158e139"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.completed","sequence_number":86,"response":{"conversation_id":null,"created_at":1785758001,"error":null,"id":"resp_019fc778-a4c4-7b23-9854-f47e99aa89de","incomplete_details":null,"instructions":null,"model":"Qwen/Qwen3.5-35B-A3B-FP8","object":"response","output":[{"content":[{"text":"The
-      user is asking me to call the agentic_raw_echo custom tool with exactly \"CUSTOM_CASSETTE_OK\"
-      as its raw text input. They specifically said I must call it exactly once with
-      exactly this input.\n\nI need to use the agentic_raw_echo function with the
-      input parameter set to \"CUSTOM_CASSETTE_OK\".\n","type":"reasoning_text"}],"encrypted_content":null,"id":"82adad6aadd55280","status":null,"summary":[],"type":"reasoning"},{"call_id":"call_8e0a538bf00e25a8","id":"ctc_ac27a0ae302a449c","input":"CUSTOM_CASSETTE_OK","name":"agentic_raw_echo","status":"completed","type":"custom_tool_call"}],"previous_response_id":null,"status":"completed","usage":{"input_tokens":390,"input_tokens_details":{"cached_tokens":0},"output_tokens":105,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":495}}}
+    - 'data: {"type":"response.output_item.done","sequence_number":86,"output_index":1,"item":{"call_id":"call_b6eb1300a8bb4c10","id":"ctc_b55d84a89158e139","input":"CUSTOM_CASSETTE_OK","name":"agentic_raw_echo","status":"completed","type":"custom_tool_call"}}
+
+      '
+    - '
+
+      '
+    - 'data: {"type":"response.completed","sequence_number":87,"response":{"conversation_id":null,"created_at":1785841458,"error":null,"id":"resp_019fcc72-19bd-7832-92b5-dde3d6925c01","incomplete_details":null,"instructions":null,"model":"Qwen/Qwen3.5-35B-A3B-FP8","object":"response","output":[{"content":[{"text":"The
+      user is instructing me to call the agentic_raw_echo custom tool exactly once
+      with exactly \"CUSTOM_CASSETTE_OK\" as its raw text input. This is a straightforward
+      instruction that matches the tool''s description.\n\nI need to call the agentic_raw_echo
+      function with the input parameter set to \"CUSTOM_CASSETTE_OK\".\n","type":"reasoning_text"}],"encrypted_content":null,"id":"a5e091bc5a62797b","status":null,"summary":[],"type":"reasoning"},{"call_id":"call_b6eb1300a8bb4c10","id":"ctc_b55d84a89158e139","input":"CUSTOM_CASSETTE_OK","name":"agentic_raw_echo","status":"completed","type":"custom_tool_call"}],"previous_response_id":null,"status":"completed","usage":{"input_tokens":379,"input_tokens_details":{"cached_tokens":0},"output_tokens":106,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":485}}}
 
       '
     - '
@@ -622,7 +624,7 @@ turns:
   request:
     body:
       input:
-      - call_id: call_8e0a538bf00e25a8
+      - call_id: call_b6eb1300a8bb4c10
         output: CUSTOM_CASSETTE_OUTPUT_OK
         type: custom_tool_call_output
       - content: Use the custom tool output provided above. Do not call any tool again.
@@ -631,15 +633,12 @@ turns:
         type: message
       max_output_tokens: 2048
       model: Qwen/Qwen3.5-35B-A3B-FP8
-      previous_response_id: resp_019fc778-a4c4-7b23-9854-f47e99aa89de
+      previous_response_id: resp_019fcc72-19bd-7832-92b5-dde3d6925c01
       store: true
       stream: true
       tools:
-      - description: Emit the requested cassette token as raw text.
-        format:
-          definition: 'start: "CUSTOM_CASSETTE_OK"'
-          syntax: lark
-          type: grammar
+      - description: Emit the requested cassette token as raw text. The input must
+          be exactly CUSTOM_CASSETTE_OK.
         name: agentic_raw_echo
         type: custom
     headers:
@@ -653,550 +652,385 @@ turns:
     headers:
       content-type: text/event-stream; charset=utf-8
     sse:
-    - 'data: {"type":"response.created","sequence_number":0,"response":{"background":false,"created_at":1785758001,"ec_transfer_params":null,"frequency_penalty":0.0,"id":"resp_019fc778-a7ca-71f2-9e13-f247b4babe93","incomplete_details":null,"input_messages":null,"instructions":null,"kv_transfer_params":null,"max_output_tokens":2048,"max_tool_calls":null,"metadata":null,"model":"Qwen/Qwen3.5-35B-A3B-FP8","object":"response","output":[],"output_messages":null,"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":"resp_019fc778-a4c4-7b23-9854-f47e99aa89de","prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","temperature":1.0,"text":null,"tool_choice":"auto","tools":[{"description":"Emit
-      the requested cassette token as raw text.","format":{"definition":"start: \"CUSTOM_CASSETTE_OK\"","syntax":"lark","type":"grammar"},"name":"agentic_raw_echo","type":"custom"}],"top_logprobs":null,"top_p":0.95,"truncation":"disabled","usage":null,"user":null}}
+    - 'data: {"type":"response.created","sequence_number":0,"response":{"background":false,"created_at":1785841458,"ec_transfer_params":null,"frequency_penalty":0.0,"id":"resp_019fcc72-1cc2-79a2-a04d-80897ab9307d","incomplete_details":null,"input_messages":null,"instructions":null,"kv_transfer_params":null,"max_output_tokens":2048,"max_tool_calls":null,"metadata":null,"model":"Qwen/Qwen3.5-35B-A3B-FP8","object":"response","output":[],"output_messages":null,"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":"resp_019fcc72-19bd-7832-92b5-dde3d6925c01","prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","temperature":1.0,"text":null,"tool_choice":"auto","tools":[{"description":"Emit
+      the requested cassette token as raw text. The input must be exactly CUSTOM_CASSETTE_OK.","name":"agentic_raw_echo","type":"custom"}],"top_logprobs":null,"top_p":0.95,"truncation":"disabled","usage":null,"user":null}}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.in_progress","sequence_number":1,"response":{"background":false,"created_at":1785758001,"ec_transfer_params":null,"frequency_penalty":0.0,"id":"resp_019fc778-a7ca-71f2-9e13-f247b4babe93","incomplete_details":null,"input_messages":null,"instructions":null,"kv_transfer_params":null,"max_output_tokens":2048,"max_tool_calls":null,"metadata":null,"model":"Qwen/Qwen3.5-35B-A3B-FP8","object":"response","output":[],"output_messages":null,"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":"resp_019fc778-a4c4-7b23-9854-f47e99aa89de","prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","temperature":1.0,"text":null,"tool_choice":"auto","tools":[{"description":"Emit
-      the requested cassette token as raw text.","format":{"definition":"start: \"CUSTOM_CASSETTE_OK\"","syntax":"lark","type":"grammar"},"name":"agentic_raw_echo","type":"custom"}],"top_logprobs":null,"top_p":0.95,"truncation":"disabled","usage":null,"user":null}}
+    - 'data: {"type":"response.in_progress","sequence_number":1,"response":{"background":false,"created_at":1785841458,"ec_transfer_params":null,"frequency_penalty":0.0,"id":"resp_019fcc72-1cc2-79a2-a04d-80897ab9307d","incomplete_details":null,"input_messages":null,"instructions":null,"kv_transfer_params":null,"max_output_tokens":2048,"max_tool_calls":null,"metadata":null,"model":"Qwen/Qwen3.5-35B-A3B-FP8","object":"response","output":[],"output_messages":null,"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":"resp_019fcc72-19bd-7832-92b5-dde3d6925c01","prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","temperature":1.0,"text":null,"tool_choice":"auto","tools":[{"description":"Emit
+      the requested cassette token as raw text. The input must be exactly CUSTOM_CASSETTE_OK.","name":"agentic_raw_echo","type":"custom"}],"top_logprobs":null,"top_p":0.95,"truncation":"disabled","usage":null,"user":null}}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"content":null,"encrypted_content":null,"id":"8360c29b181cca85","status":"in_progress","summary":[],"type":"reasoning"}}
+    - 'data: {"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"content":null,"encrypted_content":null,"id":"979e46bb06b5bb1a","status":"in_progress","summary":[],"type":"reasoning"}}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_part.added","sequence_number":3,"output_index":0,"content_index":0,"item_id":"8360c29b181cca85","part":{"text":"","type":"reasoning_text"}}
+    - 'data: {"type":"response.reasoning_part.added","sequence_number":3,"output_index":0,"content_index":0,"item_id":"979e46bb06b5bb1a","part":{"text":"","type":"reasoning_text"}}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":4,"output_index":0,"content_index":0,"delta":"The","item_id":"8360c29b181cca85"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":4,"output_index":0,"content_index":0,"delta":"The","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":5,"output_index":0,"content_index":0,"delta":"
-      user","item_id":"8360c29b181cca85"}
+      user","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":6,"output_index":0,"content_index":0,"delta":"
-      is","item_id":"8360c29b181cca85"}
+      is","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":7,"output_index":0,"content_index":0,"delta":"
-      asking","item_id":"8360c29b181cca85"}
+      asking","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":8,"output_index":0,"content_index":0,"delta":"
-      me","item_id":"8360c29b181cca85"}
+      me","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":9,"output_index":0,"content_index":0,"delta":"
-      to","item_id":"8360c29b181cca85"}
+      to","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":10,"output_index":0,"content_index":0,"delta":"
-      reply","item_id":"8360c29b181cca85"}
+      reply","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":11,"output_index":0,"content_index":0,"delta":"
-      with","item_id":"8360c29b181cca85"}
+      with","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":12,"output_index":0,"content_index":0,"delta":"
-      exactly","item_id":"8360c29b181cca85"}
+      exactly","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":13,"output_index":0,"content_index":0,"delta":"
-      \"","item_id":"8360c29b181cca85"}
+      \"","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":14,"output_index":0,"content_index":0,"delta":"CUSTOM","item_id":"8360c29b181cca85"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":14,"output_index":0,"content_index":0,"delta":"CUSTOM","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":15,"output_index":0,"content_index":0,"delta":"_C","item_id":"8360c29b181cca85"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":15,"output_index":0,"content_index":0,"delta":"_C","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":16,"output_index":0,"content_index":0,"delta":"AS","item_id":"8360c29b181cca85"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":16,"output_index":0,"content_index":0,"delta":"AS","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":17,"output_index":0,"content_index":0,"delta":"SET","item_id":"8360c29b181cca85"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":17,"output_index":0,"content_index":0,"delta":"SET","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":18,"output_index":0,"content_index":0,"delta":"TE","item_id":"8360c29b181cca85"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":18,"output_index":0,"content_index":0,"delta":"TE","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":19,"output_index":0,"content_index":0,"delta":"_OUTPUT","item_id":"8360c29b181cca85"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":19,"output_index":0,"content_index":0,"delta":"_OUTPUT","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":20,"output_index":0,"content_index":0,"delta":"_OK","item_id":"8360c29b181cca85"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":20,"output_index":0,"content_index":0,"delta":"_OK","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":21,"output_index":0,"content_index":0,"delta":"\"","item_id":"8360c29b181cca85"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":21,"output_index":0,"content_index":0,"delta":"\"","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":22,"output_index":0,"content_index":0,"delta":"
-      based","item_id":"8360c29b181cca85"}
+      and","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":23,"output_index":0,"content_index":0,"delta":"
-      on","item_id":"8360c29b181cca85"}
+      not","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":24,"output_index":0,"content_index":0,"delta":"
-      the","item_id":"8360c29b181cca85"}
+      to","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":25,"output_index":0,"content_index":0,"delta":"
-      custom","item_id":"8360c29b181cca85"}
+      call","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":26,"output_index":0,"content_index":0,"delta":"
-      tool","item_id":"8360c29b181cca85"}
+      any","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":27,"output_index":0,"content_index":0,"delta":"
-      output","item_id":"8360c29b181cca85"}
+      tool","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":28,"output_index":0,"content_index":0,"delta":"
-      that","item_id":"8360c29b181cca85"}
+      again","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":29,"output_index":0,"content_index":0,"delta":"
-      was","item_id":"8360c29b181cca85"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":29,"output_index":0,"content_index":0,"delta":".","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":30,"output_index":0,"content_index":0,"delta":"
-      provided","item_id":"8360c29b181cca85"}
+      I","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":31,"output_index":0,"content_index":0,"delta":"
-      above","item_id":"8360c29b181cca85"}
+      need","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":32,"output_index":0,"content_index":0,"delta":".","item_id":"8360c29b181cca85"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":32,"output_index":0,"content_index":0,"delta":"
+      to","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":33,"output_index":0,"content_index":0,"delta":"
-      They","item_id":"8360c29b181cca85"}
+      provide","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":34,"output_index":0,"content_index":0,"delta":"
-      also","item_id":"8360c29b181cca85"}
+      exactly","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":35,"output_index":0,"content_index":0,"delta":"
-      explicitly","item_id":"8360c29b181cca85"}
+      that","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":36,"output_index":0,"content_index":0,"delta":"
-      stated","item_id":"8360c29b181cca85"}
+      text","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":37,"output_index":0,"content_index":0,"delta":"
-      not","item_id":"8360c29b181cca85"}
+      as","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":38,"output_index":0,"content_index":0,"delta":"
-      to","item_id":"8360c29b181cca85"}
+      my","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":39,"output_index":0,"content_index":0,"delta":"
-      call","item_id":"8360c29b181cca85"}
+      response","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":40,"output_index":0,"content_index":0,"delta":"
-      any","item_id":"8360c29b181cca85"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":40,"output_index":0,"content_index":0,"delta":".","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":41,"output_index":0,"content_index":0,"delta":"
-      tool","item_id":"8360c29b181cca85"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":41,"output_index":0,"content_index":0,"delta":"\n","item_id":"979e46bb06b5bb1a"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":42,"output_index":0,"content_index":0,"delta":"
-      again","item_id":"8360c29b181cca85"}
+    - 'data: {"type":"response.reasoning_text.done","sequence_number":42,"output_index":0,"content_index":0,"item_id":"979e46bb06b5bb1a","text":"The
+      user is asking me to reply with exactly \"CUSTOM_CASSETTE_OUTPUT_OK\" and not
+      to call any tool again. I need to provide exactly that text as my response.\n"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":43,"output_index":0,"content_index":0,"delta":".","item_id":"8360c29b181cca85"}
+    - 'data: {"type":"response.reasoning_part.done","sequence_number":43,"output_index":0,"content_index":0,"item_id":"979e46bb06b5bb1a","part":{"text":"The
+      user is asking me to reply with exactly \"CUSTOM_CASSETTE_OUTPUT_OK\" and not
+      to call any tool again. I need to provide exactly that text as my response.\n","type":"reasoning_text"}}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":44,"output_index":0,"content_index":0,"delta":"\n\n","item_id":"8360c29b181cca85"}
+    - 'data: {"type":"response.output_item.done","sequence_number":44,"output_index":0,"item":{"content":[{"text":"The
+      user is asking me to reply with exactly \"CUSTOM_CASSETTE_OUTPUT_OK\" and not
+      to call any tool again. I need to provide exactly that text as my response.\n","type":"reasoning_text"}],"encrypted_content":null,"id":"979e46bb06b5bb1a","status":"completed","summary":[],"type":"reasoning"}}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":45,"output_index":0,"content_index":0,"delta":"I","item_id":"8360c29b181cca85"}
+    - 'data: {"type":"response.output_item.added","sequence_number":45,"output_index":1,"item":{"content":[],"id":"8dd3abb229d7f8b7","phase":null,"role":"assistant","status":"in_progress","type":"message"}}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":46,"output_index":0,"content_index":0,"delta":"
-      should","item_id":"8360c29b181cca85"}
+    - 'data: {"type":"response.content_part.added","sequence_number":46,"output_index":1,"content_index":0,"item_id":"8dd3abb229d7f8b7","part":{"annotations":[],"logprobs":[],"text":"","type":"output_text"}}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":47,"output_index":0,"content_index":0,"delta":"
-      simply","item_id":"8360c29b181cca85"}
+    - 'data: {"type":"response.output_text.delta","sequence_number":47,"output_index":1,"content_index":0,"delta":"\n\nCUSTOM","item_id":"8dd3abb229d7f8b7","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":48,"output_index":0,"content_index":0,"delta":"
-      reply","item_id":"8360c29b181cca85"}
+    - 'data: {"type":"response.output_text.delta","sequence_number":48,"output_index":1,"content_index":0,"delta":"_C","item_id":"8dd3abb229d7f8b7","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":49,"output_index":0,"content_index":0,"delta":"
-      with","item_id":"8360c29b181cca85"}
+    - 'data: {"type":"response.output_text.delta","sequence_number":49,"output_index":1,"content_index":0,"delta":"AS","item_id":"8dd3abb229d7f8b7","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":50,"output_index":0,"content_index":0,"delta":"
-      the","item_id":"8360c29b181cca85"}
+    - 'data: {"type":"response.output_text.delta","sequence_number":50,"output_index":1,"content_index":0,"delta":"SET","item_id":"8dd3abb229d7f8b7","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":51,"output_index":0,"content_index":0,"delta":"
-      exact","item_id":"8360c29b181cca85"}
+    - 'data: {"type":"response.output_text.delta","sequence_number":51,"output_index":1,"content_index":0,"delta":"TE","item_id":"8dd3abb229d7f8b7","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":52,"output_index":0,"content_index":0,"delta":"
-      text","item_id":"8360c29b181cca85"}
+    - 'data: {"type":"response.output_text.delta","sequence_number":52,"output_index":1,"content_index":0,"delta":"_OUTPUT","item_id":"8dd3abb229d7f8b7","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":53,"output_index":0,"content_index":0,"delta":"
-      \"","item_id":"8360c29b181cca85"}
+    - 'data: {"type":"response.output_text.delta","sequence_number":53,"output_index":1,"content_index":0,"delta":"_OK","item_id":"8dd3abb229d7f8b7","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":54,"output_index":0,"content_index":0,"delta":"CUSTOM","item_id":"8360c29b181cca85"}
+    - 'data: {"type":"response.output_text.done","sequence_number":54,"output_index":1,"content_index":0,"item_id":"8dd3abb229d7f8b7","logprobs":[],"text":"\n\nCUSTOM_CASSETTE_OUTPUT_OK"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":55,"output_index":0,"content_index":0,"delta":"_C","item_id":"8360c29b181cca85"}
+    - 'data: {"type":"response.content_part.done","sequence_number":55,"output_index":1,"content_index":0,"item_id":"8dd3abb229d7f8b7","part":{"annotations":[],"logprobs":null,"text":"\n\nCUSTOM_CASSETTE_OUTPUT_OK","type":"output_text"}}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":56,"output_index":0,"content_index":0,"delta":"AS","item_id":"8360c29b181cca85"}
+    - 'data: {"type":"response.output_item.done","sequence_number":56,"output_index":1,"item":{"content":[{"annotations":[],"logprobs":null,"text":"\n\nCUSTOM_CASSETTE_OUTPUT_OK","type":"output_text"}],"id":"8dd3abb229d7f8b7","phase":null,"role":"assistant","status":"completed","summary":[],"type":"message"}}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":57,"output_index":0,"content_index":0,"delta":"SET","item_id":"8360c29b181cca85"}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":58,"output_index":0,"content_index":0,"delta":"TE","item_id":"8360c29b181cca85"}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":59,"output_index":0,"content_index":0,"delta":"_OUTPUT","item_id":"8360c29b181cca85"}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":60,"output_index":0,"content_index":0,"delta":"_OK","item_id":"8360c29b181cca85"}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":61,"output_index":0,"content_index":0,"delta":"\"","item_id":"8360c29b181cca85"}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":62,"output_index":0,"content_index":0,"delta":"
-      as","item_id":"8360c29b181cca85"}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":63,"output_index":0,"content_index":0,"delta":"
-      requested","item_id":"8360c29b181cca85"}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":64,"output_index":0,"content_index":0,"delta":".","item_id":"8360c29b181cca85"}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":65,"output_index":0,"content_index":0,"delta":"\n","item_id":"8360c29b181cca85"}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.reasoning_text.done","sequence_number":66,"output_index":0,"content_index":0,"item_id":"8360c29b181cca85","text":"The
-      user is asking me to reply with exactly \"CUSTOM_CASSETTE_OUTPUT_OK\" based
-      on the custom tool output that was provided above. They also explicitly stated
-      not to call any tool again.\n\nI should simply reply with the exact text \"CUSTOM_CASSETTE_OUTPUT_OK\"
-      as requested.\n"}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.reasoning_part.done","sequence_number":67,"output_index":0,"content_index":0,"item_id":"8360c29b181cca85","part":{"text":"The
-      user is asking me to reply with exactly \"CUSTOM_CASSETTE_OUTPUT_OK\" based
-      on the custom tool output that was provided above. They also explicitly stated
-      not to call any tool again.\n\nI should simply reply with the exact text \"CUSTOM_CASSETTE_OUTPUT_OK\"
-      as requested.\n","type":"reasoning_text"}}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_item.done","sequence_number":68,"output_index":0,"item":{"content":[{"text":"The
-      user is asking me to reply with exactly \"CUSTOM_CASSETTE_OUTPUT_OK\" based
-      on the custom tool output that was provided above. They also explicitly stated
-      not to call any tool again.\n\nI should simply reply with the exact text \"CUSTOM_CASSETTE_OUTPUT_OK\"
-      as requested.\n","type":"reasoning_text"}],"encrypted_content":null,"id":"8360c29b181cca85","status":"completed","summary":[],"type":"reasoning"}}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_item.added","sequence_number":69,"output_index":1,"item":{"content":[],"id":"ab907eea77b6e005","phase":null,"role":"assistant","status":"in_progress","type":"message"}}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.content_part.added","sequence_number":70,"output_index":1,"content_index":0,"item_id":"ab907eea77b6e005","part":{"annotations":[],"logprobs":[],"text":"","type":"output_text"}}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":71,"output_index":1,"content_index":0,"delta":"\n\nCUSTOM","item_id":"ab907eea77b6e005","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":72,"output_index":1,"content_index":0,"delta":"_C","item_id":"ab907eea77b6e005","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":73,"output_index":1,"content_index":0,"delta":"AS","item_id":"ab907eea77b6e005","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":74,"output_index":1,"content_index":0,"delta":"SET","item_id":"ab907eea77b6e005","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":75,"output_index":1,"content_index":0,"delta":"TE","item_id":"ab907eea77b6e005","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":76,"output_index":1,"content_index":0,"delta":"_OUTPUT","item_id":"ab907eea77b6e005","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":77,"output_index":1,"content_index":0,"delta":"_OK","item_id":"ab907eea77b6e005","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.done","sequence_number":78,"output_index":1,"content_index":0,"item_id":"ab907eea77b6e005","logprobs":[],"text":"\n\nCUSTOM_CASSETTE_OUTPUT_OK"}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.content_part.done","sequence_number":79,"output_index":1,"content_index":0,"item_id":"ab907eea77b6e005","part":{"annotations":[],"logprobs":null,"text":"\n\nCUSTOM_CASSETTE_OUTPUT_OK","type":"output_text"}}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_item.done","sequence_number":80,"output_index":1,"item":{"content":[{"annotations":[],"logprobs":null,"text":"\n\nCUSTOM_CASSETTE_OUTPUT_OK","type":"output_text"}],"id":"ab907eea77b6e005","phase":null,"role":"assistant","status":"completed","summary":[],"type":"message"}}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.completed","sequence_number":81,"response":{"conversation_id":null,"created_at":1785758001,"error":null,"id":"resp_019fc778-a7ca-71f2-9e13-f247b4babe93","incomplete_details":null,"instructions":null,"model":"Qwen/Qwen3.5-35B-A3B-FP8","object":"response","output":[{"content":[{"text":"The
-      user is asking me to reply with exactly \"CUSTOM_CASSETTE_OUTPUT_OK\" based
-      on the custom tool output that was provided above. They also explicitly stated
-      not to call any tool again.\n\nI should simply reply with the exact text \"CUSTOM_CASSETTE_OUTPUT_OK\"
-      as requested.\n","type":"reasoning_text"}],"encrypted_content":null,"id":"8360c29b181cca85","status":null,"summary":[],"type":"reasoning"},{"content":[{"annotations":[],"text":"\n\nCUSTOM_CASSETTE_OUTPUT_OK","type":"output_text"}],"id":"ab907eea77b6e005","role":"assistant","status":"completed","type":"message"}],"previous_response_id":"resp_019fc778-a4c4-7b23-9854-f47e99aa89de","status":"completed","usage":{"input_tokens":474,"input_tokens_details":{"cached_tokens":0},"output_tokens":72,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":546}}}
+    - 'data: {"type":"response.completed","sequence_number":57,"response":{"conversation_id":null,"created_at":1785841458,"error":null,"id":"resp_019fcc72-1cc2-79a2-a04d-80897ab9307d","incomplete_details":null,"instructions":null,"model":"Qwen/Qwen3.5-35B-A3B-FP8","object":"response","output":[{"content":[{"text":"The
+      user is asking me to reply with exactly \"CUSTOM_CASSETTE_OUTPUT_OK\" and not
+      to call any tool again. I need to provide exactly that text as my response.\n","type":"reasoning_text"}],"encrypted_content":null,"id":"979e46bb06b5bb1a","status":null,"summary":[],"type":"reasoning"},{"content":[{"annotations":[],"text":"\n\nCUSTOM_CASSETTE_OUTPUT_OK","type":"output_text"}],"id":"8dd3abb229d7f8b7","role":"assistant","status":"completed","type":"message"}],"previous_response_id":"resp_019fcc72-19bd-7832-92b5-dde3d6925c01","status":"completed","usage":{"input_tokens":463,"input_tokens_details":{"cached_tokens":0},"output_tokens":48,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":511}}}
 
       '
     - '

@@ -205,8 +205,10 @@ bash crates/agentic-server-core/tests/cassettes/record_web_search_cassettes.sh
 
 ### Custom tool (gateway and OpenAI)
 
-This records a generic freeform `custom` tool with a Lark grammar, including
-the `custom_tool_call_output` continuation.
+This records an unformatted freeform custom tool, including the
+`custom_tool_call_output` continuation. Grammar-constrained custom tools are
+covered separately by unit tests because the gateway intentionally rejects
+formats that normalization cannot preserve.
 
 ```bash
 OPENAI_API_KEY=sk-... \

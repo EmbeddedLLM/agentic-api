@@ -99,9 +99,7 @@ fn assert_request_contract(cassette: &support::Cassette, streaming: bool) {
         let tool = &turn.request.body.tools[0];
         assert_eq!(tool["type"], "custom");
         assert_eq!(tool["name"], "agentic_raw_echo");
-        assert_eq!(tool["format"]["type"], "grammar");
-        assert_eq!(tool["format"]["syntax"], "lark");
-        assert_eq!(tool["format"]["definition"], r#"start: "CUSTOM_CASSETTE_OK""#);
+        assert!(tool.get("format").is_none());
     }
 
     let continuation = cassette.turns[1]

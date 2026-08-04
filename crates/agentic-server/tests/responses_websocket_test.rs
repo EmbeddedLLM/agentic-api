@@ -1054,12 +1054,7 @@ async fn test_websocket_custom_tool_round_trip_and_continuation() {
             "tools": [{
                 "type": "custom",
                 "name": "apply_patch",
-                "description": "Apply a patch.",
-                "format": {
-                    "type": "grammar",
-                    "syntax": "lark",
-                    "definition": "start: patch"
-                }
+                "description": "Apply a patch."
             }],
             "store": true,
             "stream": true

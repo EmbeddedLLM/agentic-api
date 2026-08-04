@@ -2,7 +2,7 @@
 # Records the same client-executed custom-tool flow against vLLM, the gateway,
 # and OpenAI.
 #
-# Each provider records a two-turn streaming and non-streaming cassette:
+# Each provider records a two-turn streaming and non-streaming freeform cassette:
 #   1. the model emits raw text in a custom_tool_call
 #   2. the recorder submits custom_tool_call_output and captures the final reply
 #
@@ -20,7 +20,7 @@ set -euo pipefail
 
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BASE_DIR="$SCRIPTS_DIR/custom_tool"
-TOOLS_FILE="$BASE_DIR/custom_tool.json"
+FREEFORM_TOOLS_FILE="$BASE_DIR/custom_tool.json"
 TOOL_OUTPUTS_FILE="$BASE_DIR/tool_outputs.json"
 GATEWAY_URL="${GATEWAY_URL:-http://localhost:9000}"
 MODEL="${MODEL:-Qwen/Qwen3.5-35B-A3B-FP8}"
@@ -51,7 +51,7 @@ record_scenario() {
         "$stream_flag" \
         --model "$model" \
         "$endpoint_flag" "$endpoint" \
-        --tools "$TOOLS_FILE" \
+        --tools "$FREEFORM_TOOLS_FILE" \
         --tool-outputs "$TOOL_OUTPUTS_FILE" \
         --max-output-tokens 2048 \
         --output "$temporary_output"
@@ -86,6 +86,7 @@ record_provider_suite() {
     "$endpoint_flag" "$endpoint" "$model" \
     "$BASE_DIR/${output_prefix}-nonstreaming.yaml" \
     --no-stream
+
 }
 
 case "$CUSTOM_TOOL_RECORD_SET" in
@@ -96,7 +97,7 @@ case "$CUSTOM_TOOL_RECORD_SET" in
     ;;
 esac
 
-for required_file in "$TOOLS_FILE" "$TOOL_OUTPUTS_FILE"; do
+for required_file in "$FREEFORM_TOOLS_FILE" "$TOOL_OUTPUTS_FILE"; do
   if [[ ! -f "$required_file" ]]; then
     echo "ERROR: required custom-tool fixture does not exist: $required_file" >&2
     exit 1
