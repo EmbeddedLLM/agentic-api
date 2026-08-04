@@ -38,6 +38,7 @@ struct CustomCallState {
 
 #[derive(Debug, Default)]
 struct PendingFunctionCall {
+    output_index: u32,
     frames: Vec<EventFrame>,
     bytes: usize,
 }
@@ -45,7 +46,7 @@ struct PendingFunctionCall {
 #[derive(Debug, Default)]
 pub(super) struct FunctionSseTranslation {
     pub(super) frames: Vec<EventFrame>,
-    pub(super) gateway_output_index: Option<u32>,
+    pub(super) defer_from_output_index: Option<u32>,
 }
 
 /// Restores normalized upstream function-call SSE to the public call shape.
@@ -57,6 +58,7 @@ pub(super) struct FunctionSseTranslator {
     active: HashMap<String, FunctionCallShape>,
     pending_unnamed: HashMap<String, PendingFunctionCall>,
     pending_bytes: usize,
+    first_gateway_output_index: Option<u32>,
 }
 
 impl FunctionSseTranslator {
@@ -72,7 +74,7 @@ impl FunctionSseTranslator {
         frame: EventFrame,
         call: Option<AccumulatedFunctionCall<'_>>,
     ) -> ExecutorResult<FunctionSseTranslation> {
-        match &frame.payload {
+        let mut translated = match &frame.payload {
             EventPayload::OutputItemAdded {
                 item_id,
                 item_type: SSEItemType::FunctionCall,
@@ -83,9 +85,10 @@ impl FunctionSseTranslator {
             EventPayload::OutputItemAdded {
                 item_id,
                 item_type: SSEItemType::FunctionCall,
+                output_index,
                 name: None,
                 ..
-            } => self.buffer_unnamed(item_id.clone(), frame),
+            } => self.buffer_unnamed(item_id.clone(), *output_index, frame),
             EventPayload::FunctionCallArgsDelta {
                 item_id, output_index, ..
             } => self.translate_delta(item_id, *output_index, frame.clone(), call),
@@ -106,9 +109,11 @@ impl FunctionSseTranslator {
             }
             _ => Ok(FunctionSseTranslation {
                 frames: vec![frame],
-                gateway_output_index: None,
+                defer_from_output_index: None,
             }),
-        }
+        }?;
+        translated.defer_from_output_index = self.defer_from_output_index();
+        Ok(translated)
     }
 
     fn start_call(
@@ -136,23 +141,23 @@ impl FunctionSseTranslator {
                         .transpose()?
                         .into_iter()
                         .collect(),
-                    gateway_output_index: None,
+                    defer_from_output_index: None,
                 })
             }
             ToolType::Mcp | ToolType::WebSearch | ToolType::FileSearch | ToolType::CodeInterpreter => {
+                if self.first_gateway_output_index.is_none_or(|first| output_index < first) {
+                    self.first_gateway_output_index = Some(output_index);
+                }
                 self.active
                     .insert(item_id.to_owned(), FunctionCallShape::GatewayOwned { output_index });
-                Ok(FunctionSseTranslation {
-                    frames: Vec::new(),
-                    gateway_output_index: Some(output_index),
-                })
+                Ok(FunctionSseTranslation::default())
             }
             ToolType::Function | ToolType::CodexNamespace => {
                 self.active
                     .insert(item_id.to_owned(), FunctionCallShape::PublicFunction { output_index });
                 Ok(FunctionSseTranslation {
                     frames: original.into_iter().collect(),
-                    gateway_output_index: None,
+                    defer_from_output_index: None,
                 })
             }
         }
@@ -169,7 +174,7 @@ impl FunctionSseTranslator {
         match key.as_deref().and_then(|key| self.active.get_mut(key)) {
             Some(FunctionCallShape::PublicFunction { .. }) => Ok(FunctionSseTranslation {
                 frames: vec![original],
-                gateway_output_index: None,
+                defer_from_output_index: None,
             }),
             Some(FunctionCallShape::GatewayOwned { .. }) => Ok(FunctionSseTranslation::default()),
             Some(FunctionCallShape::Custom(state)) => {
@@ -179,10 +184,10 @@ impl FunctionSseTranslator {
                 };
                 Ok(FunctionSseTranslation {
                     frames: frame.into_iter().collect(),
-                    gateway_output_index: None,
+                    defer_from_output_index: None,
                 })
             }
-            None => self.buffer_unnamed(item_id.to_owned(), original),
+            None => self.buffer_unnamed(item_id.to_owned(), output_index, original),
         }
     }
 
@@ -244,7 +249,7 @@ impl FunctionSseTranslator {
             return Ok(FunctionSseTranslation::default());
         }
 
-        let pending = self.take_pending(item_id);
+        let pending = self.take_pending(item_id, output_index);
         let original_added = pending.iter().find(|frame| {
             matches!(
                 frame.payload,
@@ -269,6 +274,13 @@ impl FunctionSseTranslator {
         self.tool_types.get(name).copied().unwrap_or(ToolType::Function)
     }
 
+    fn defer_from_output_index(&self) -> Option<u32> {
+        self.first_gateway_output_index
+            .into_iter()
+            .chain(self.pending_unnamed.values().map(|pending| pending.output_index))
+            .min()
+    }
+
     fn active_key(&self, item_id: &str, output_index: u32) -> Option<String> {
         self.active
             .contains_key(item_id)
@@ -280,7 +292,12 @@ impl FunctionSseTranslator {
             })
     }
 
-    fn buffer_unnamed(&mut self, item_id: String, frame: EventFrame) -> ExecutorResult<FunctionSseTranslation> {
+    fn buffer_unnamed(
+        &mut self,
+        item_id: String,
+        output_index: u32,
+        frame: EventFrame,
+    ) -> ExecutorResult<FunctionSseTranslation> {
         let bytes = serialize_to_string(&frame.wire)
             .map_err(ExecutorError::JsonError)?
             .len();
@@ -289,15 +306,30 @@ impl FunctionSseTranslator {
                 "unnamed function-call SSE exceeded {MAX_PENDING_FUNCTION_BYTES} buffered bytes"
             )));
         }
-        let pending = self.pending_unnamed.entry(item_id).or_default();
+        let pending = self
+            .pending_unnamed
+            .entry(item_id)
+            .or_insert_with(|| PendingFunctionCall {
+                output_index,
+                ..PendingFunctionCall::default()
+            });
         pending.frames.push(frame);
         pending.bytes = pending.bytes.saturating_add(bytes);
         self.pending_bytes = self.pending_bytes.saturating_add(bytes);
         Ok(FunctionSseTranslation::default())
     }
 
-    fn take_pending(&mut self, item_id: &str) -> Vec<EventFrame> {
-        let Some(pending) = self.pending_unnamed.remove(item_id) else {
+    fn take_pending(&mut self, item_id: &str, output_index: u32) -> Vec<EventFrame> {
+        let key = self
+            .pending_unnamed
+            .contains_key(item_id)
+            .then(|| item_id.to_owned())
+            .or_else(|| {
+                self.pending_unnamed
+                    .iter()
+                    .find_map(|(key, pending)| (pending.output_index == output_index).then(|| key.clone()))
+            });
+        let Some(pending) = key.and_then(|key| self.pending_unnamed.remove(&key)) else {
             return Vec::new();
         };
         self.pending_bytes = self.pending_bytes.saturating_sub(pending.bytes);
@@ -568,7 +600,65 @@ mod tests {
         assert_eq!(translated.frames.len(), 1);
         assert_eq!(translated.frames[0].event_type, SSEEventType::OutputItemAdded);
         assert_eq!(translated.frames[0].wire.rest["item"]["type"], "function_call");
-        assert_eq!(translated.gateway_output_index, None);
+        assert_eq!(translated.defer_from_output_index, None);
+    }
+
+    #[test]
+    fn unnamed_function_frames_are_recovered_by_output_index_when_done_changes_id() {
+        let mut accumulator = ResponseAccumulator::new("resp_1".to_owned(), None);
+        let mut translator = FunctionSseTranslator::new(HashMap::from([("echo".to_owned(), ToolType::Function)]));
+        let mut frames = Vec::new();
+        let mut defer_boundaries = Vec::new();
+
+        for event in [
+            serde_json::json!({
+                "type": "response.output_item.added",
+                "output_index": 1,
+                "item": {
+                    "id": "fc_transient",
+                    "type": "function_call",
+                    "status": "in_progress",
+                    "call_id": "call_echo",
+                    "arguments": ""
+                }
+            }),
+            serde_json::json!({
+                "type": "response.function_call_arguments.delta",
+                "output_index": 1,
+                "item_id": "fc_transient",
+                "call_id": "call_echo",
+                "delta": "{\"value\":1}"
+            }),
+            serde_json::json!({
+                "type": "response.output_item.done",
+                "output_index": 1,
+                "item": {
+                    "id": "fc_stable",
+                    "type": "function_call",
+                    "status": "completed",
+                    "call_id": "call_echo",
+                    "name": "echo",
+                    "arguments": "{\"value\":1}"
+                }
+            }),
+        ] {
+            let translated = translate(&mut accumulator, &mut translator, &event);
+            defer_boundaries.push(translated.defer_from_output_index);
+            frames.extend(translated.frames);
+        }
+
+        assert_eq!(
+            frames.iter().map(|frame| frame.event_type).collect::<Vec<_>>(),
+            [
+                SSEEventType::OutputItemAdded,
+                SSEEventType::FunctionCallArgumentsDelta,
+                SSEEventType::OutputItemDone,
+            ]
+        );
+        assert_eq!(frames[0].wire.rest["item"]["id"], "fc_transient");
+        assert_eq!(frames[1].wire.rest["item_id"], "fc_transient");
+        assert_eq!(frames[2].wire.rest["item"]["id"], "fc_stable");
+        assert_eq!(defer_boundaries, [Some(1), Some(1), None]);
     }
 
     #[test]
@@ -599,8 +689,8 @@ mod tests {
         let delta = translate(&mut accumulator, &mut translator, &delta);
 
         assert!(added.frames.is_empty());
-        assert_eq!(added.gateway_output_index, Some(2));
+        assert_eq!(added.defer_from_output_index, Some(2));
         assert!(delta.frames.is_empty());
-        assert_eq!(delta.gateway_output_index, None);
+        assert_eq!(delta.defer_from_output_index, Some(2));
     }
 }

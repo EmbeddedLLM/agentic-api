@@ -84,7 +84,8 @@ pub(super) async fn fetch_stream_payload(
             continue;
         }
         if let Some(translation) = acc.process_sse_line_with_translator(&line, &mut function_sse)? {
-            record_first_gateway_output_index(translation.gateway_output_index, &mut defer_from_output_index);
+            let previous_defer_from_output_index = defer_from_output_index;
+            defer_from_output_index = translation.defer_from_output_index.map(u64::from);
             for frame in &translation.frames {
                 log_upstream_failure(frame, &ctx.response_id);
             }
@@ -105,6 +106,9 @@ pub(super) async fn fetch_stream_payload(
                             &mut deferred_events,
                         )?;
                     }
+                }
+                if defer_from_output_index != previous_defer_from_output_index {
+                    flush_released_stream_frames(&mut emit_ctx, defer_from_output_index, &mut deferred_events)?;
                 }
             }
         }
@@ -171,15 +175,6 @@ pub(super) fn emit_deferred_stream_events(
     Ok(())
 }
 
-fn record_first_gateway_output_index(output_index: Option<u32>, first_gateway_output_index: &mut Option<u64>) {
-    let Some(output_index) = output_index.map(u64::from) else {
-        return;
-    };
-    if first_gateway_output_index.is_none_or(|first| output_index < first) {
-        *first_gateway_output_index = Some(output_index);
-    }
-}
-
 fn should_defer_stream_event(frame: &EventFrame, defer_from_output_index: Option<u64>) -> bool {
     defer_from_output_index.is_some_and(|first_hidden_index| {
         frame
@@ -209,6 +204,18 @@ fn emit_or_defer_stream_frame(
         return Ok(());
     }
     emit_stream_frame(&mut frame, emit_ctx)
+}
+
+fn flush_released_stream_frames(
+    emit_ctx: &mut StreamEmitContext<'_>,
+    defer_from_output_index: Option<u64>,
+    deferred_events: &mut Vec<EventFrame>,
+) -> ExecutorResult<()> {
+    let pending = std::mem::take(deferred_events);
+    for frame in pending {
+        emit_or_defer_stream_frame(frame, emit_ctx, defer_from_output_index, deferred_events)?;
+    }
+    Ok(())
 }
 
 fn is_terminal_response_event(event_type: SSEEventType) -> bool {
