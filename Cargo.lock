@@ -27,6 +27,7 @@ dependencies = [
  "rsa",
  "serde",
  "serde_json",
+ "sqlx",
  "thiserror",
  "tokio",
  "tokio-tungstenite",

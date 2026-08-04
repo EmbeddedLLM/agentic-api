@@ -82,8 +82,9 @@ impl ResponseHandler {
         new_items.extend(output_items.into_iter().map(InOutItem::Output));
 
         self.store
-            .persist(
+            .persist_with_conversation_id(
                 &ctx.response_id,
+                ctx.conversation_id.as_deref(),
                 metadata.previous_response_id.as_deref(),
                 new_items,
                 &metadata,
@@ -130,6 +131,7 @@ mod tests {
             new_input_items: vec![],
             response_id: "resp_test".into(),
             conversation_id: None,
+            conversation_version: None,
         }
     }
 

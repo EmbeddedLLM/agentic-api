@@ -624,6 +624,7 @@ async fn test_previous_response_id_persists_inherited_tools_and_choice() {
         new_input_items: vec![],
         response_id: "resp_lookup".into(),
         conversation_id: None,
+        conversation_version: None,
     };
 
     let stored = fixture

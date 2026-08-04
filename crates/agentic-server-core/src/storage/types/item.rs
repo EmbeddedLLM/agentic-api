@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use crate::storage::StorageError;
 use crate::types::io::{InputItem, OutputItem};
+use crate::utils::common::serialize_to_value;
 
 pub(crate) const STORED_ITEM_KIND_KEY: &str = "_agentic_item_kind";
 
@@ -40,6 +41,26 @@ impl ItemKind {
 pub enum InOutItem {
     Input(InputItem),
     Output(OutputItem),
+}
+
+fn serialized_values_equal<T: Serialize>(left: &T, right: &T) -> bool {
+    let Ok(left) = serialize_to_value(left) else {
+        return false;
+    };
+    let Ok(right) = serialize_to_value(right) else {
+        return false;
+    };
+    left == right
+}
+
+impl PartialEq for InOutItem {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Input(left), Self::Input(right)) => serialized_values_equal(left, right),
+            (Self::Output(left), Self::Output(right)) => serialized_values_equal(left, right),
+            _ => false,
+        }
+    }
 }
 
 impl From<InputItem> for InOutItem {

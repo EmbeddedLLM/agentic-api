@@ -232,6 +232,20 @@ pub async fn get_items_by_conversation(pool: &DbPool, conversation_id: &str) -> 
         .await
 }
 
+/// Returns the last stored item sequence for a conversation inside a transaction.
+///
+/// # Errors
+/// Returns `DbResult::Err` if the database query fails.
+pub async fn last_conversation_sequence_in_tx(
+    tx: &mut DbTransaction<'_>,
+    conversation_id: &str,
+) -> DbResult<Option<i64>> {
+    sqlx::query_scalar("SELECT MAX(seq) FROM items WHERE conversation_id = $1")
+        .bind(conversation_id)
+        .fetch_one(&mut **tx)
+        .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

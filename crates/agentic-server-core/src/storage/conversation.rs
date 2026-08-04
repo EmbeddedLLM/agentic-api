@@ -5,7 +5,9 @@ use std::sync::Arc;
 
 use super::models::{conversation, item, response};
 use super::pool::DbPool;
-use super::types::{ConversationData, InOutItem, ResponseMetadata, StorageError, StoreResult};
+use super::types::{
+    ConversationData, ConversationSnapshot, ConversationVersion, InOutItem, ResponseMetadata, StorageError, StoreResult,
+};
 use crate::utils::common::{serialize_to_string, uuid7_str};
 
 /// Conversation storage operations.
@@ -75,12 +77,32 @@ impl ConversationStore {
     ///
     /// # Errors
     ///
-    /// Returns error if conversation not found or database query fails.
+    /// Returns an error if a stored item is missing its sequence number or if the database query fails.
     pub async fn rehydrate(&self, conversation_id: &str) -> StoreResult<Vec<InOutItem>> {
+        Ok(self.rehydrate_snapshot(conversation_id).await?.items)
+    }
+
+    /// Rehydrates a conversation with its items and storage version.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a stored item is missing its sequence number or if the database query fails.
+    pub async fn rehydrate_snapshot(&self, conversation_id: &str) -> StoreResult<ConversationSnapshot> {
         let pool = self.pool()?;
         let rows = item::get_items_by_conversation(pool, conversation_id).await?;
 
-        Ok(rows.into_iter().filter_map(|row| row.as_inout()).collect())
+        let mut last_sequence = None;
+        for row in &rows {
+            last_sequence = Some(row.seq.ok_or_else(|| StorageError::InvalidConversationSequence {
+                conversation_id: conversation_id.to_string(),
+                item_id: row.id.clone(),
+            })?);
+        }
+
+        Ok(ConversationSnapshot {
+            items: rows.into_iter().filter_map(|row| row.as_inout()).collect(),
+            version: ConversationVersion::from_last_sequence(last_sequence),
+        })
     }
 
     /// Persists conversation turn with new items and response metadata.
@@ -93,6 +115,51 @@ impl ConversationStore {
     pub async fn persist(
         &self,
         conversation_id: &str,
+        response_id: &str,
+        previous_response_id: Option<&str>,
+        new_items: Vec<InOutItem>,
+        metadata: &ResponseMetadata,
+    ) -> StoreResult<()> {
+        self.persist_impl(
+            conversation_id,
+            None,
+            response_id,
+            previous_response_id,
+            new_items,
+            metadata,
+        )
+        .await
+    }
+
+    /// Persists a conversation turn only if its stored version still matches.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] if the conversation changed, was not found, or a database operation fails.
+    pub async fn persist_if_version(
+        &self,
+        conversation_id: &str,
+        expected_version: ConversationVersion,
+        response_id: &str,
+        previous_response_id: Option<&str>,
+        new_items: Vec<InOutItem>,
+        metadata: &ResponseMetadata,
+    ) -> StoreResult<()> {
+        self.persist_impl(
+            conversation_id,
+            Some(expected_version),
+            response_id,
+            previous_response_id,
+            new_items,
+            metadata,
+        )
+        .await
+    }
+
+    async fn persist_impl(
+        &self,
+        conversation_id: &str,
+        expected_version: Option<ConversationVersion>,
         response_id: &str,
         previous_response_id: Option<&str>,
         new_items: Vec<InOutItem>,
@@ -119,6 +186,16 @@ impl ConversationStore {
                 return Err(StorageError::not_found("Conversation", conversation_id));
             }
             Err(error) => return Err(error.into()),
+        }
+        if let Some(expected_version) = expected_version {
+            let current_version = ConversationVersion::from_last_sequence(
+                item::last_conversation_sequence_in_tx(&mut tx, conversation_id).await?,
+            );
+            if current_version != expected_version {
+                return Err(StorageError::ConversationConflict {
+                    conversation_id: conversation_id.to_owned(),
+                });
+            }
         }
         item::create_in_tx(&mut tx, items_, Some(conversation_id)).await?;
 

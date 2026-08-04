@@ -1,11 +1,11 @@
 mod support;
 
 use agentic_core::config::SqliteConfig;
-use agentic_core::storage::InOutItem;
 use agentic_core::storage::ResponseMetadata;
 use agentic_core::storage::{
     ConversationStore, ResponseStore, create_pool_with_schema, create_pool_with_schema_and_sqlite_config,
 };
+use agentic_core::storage::{ConversationVersion, InOutItem, StorageError};
 use agentic_core::types::event::MessageStatus;
 use agentic_core::types::io::{InputItem, InputMessage, InputMessageContent, OutputItem, OutputMessage};
 use std::sync::Arc;
@@ -58,6 +58,297 @@ async fn test_conversation_store_persist_and_rehydrate() {
     let rehydrated = store.rehydrate(conv_id).await.expect("rehydrate failed");
 
     assert_eq!(rehydrated.len(), 2);
+}
+
+#[tokio::test]
+async fn conversation_snapshot_reports_empty_and_last_sequence() -> Result<(), Box<dyn std::error::Error>> {
+    let pool = setup_pool().await;
+    let store = ConversationStore::new(pool);
+    let conversation = store.create().await?;
+
+    let snapshot = store.rehydrate_snapshot(&conversation.conversation_id).await?;
+    assert!(snapshot.items.is_empty());
+    assert_eq!(snapshot.version, ConversationVersion::Empty);
+
+    store
+        .persist(
+            &conversation.conversation_id,
+            "resp_1",
+            None,
+            vec![create_input_item("hello"), create_output_item("msg_1")],
+            &ResponseMetadata::default(),
+        )
+        .await?;
+
+    let snapshot = store.rehydrate_snapshot(&conversation.conversation_id).await?;
+    assert_eq!(snapshot.items.len(), 2);
+    assert_eq!(snapshot.version, ConversationVersion::LastSequence(1));
+    assert_eq!(store.rehydrate(&conversation.conversation_id).await?, snapshot.items);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn conversation_snapshot_version_includes_an_undecodable_final_row() -> Result<(), Box<dyn std::error::Error>> {
+    let pool = setup_pool().await;
+    let store = ConversationStore::new(Arc::clone(&pool));
+    let conversation = store.create().await?;
+    let stored_item = create_input_item("hello");
+
+    store
+        .persist(
+            &conversation.conversation_id,
+            "resp_1",
+            None,
+            vec![stored_item.clone()],
+            &ResponseMetadata::default(),
+        )
+        .await?;
+    sqlx::query("INSERT INTO items (id, data, created_at, conversation_id, seq) VALUES ($1, $2, $3, $4, $5)")
+        .bind("item_undecodable")
+        .bind("not valid JSON")
+        .bind(0_i64)
+        .bind(&conversation.conversation_id)
+        .bind(1_i64)
+        .execute(pool.as_ref())
+        .await?;
+
+    let snapshot = store.rehydrate_snapshot(&conversation.conversation_id).await?;
+
+    assert_eq!(snapshot.items, vec![stored_item]);
+    assert_eq!(snapshot.version, ConversationVersion::LastSequence(1));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn conversation_snapshot_rejects_items_without_a_sequence() -> Result<(), Box<dyn std::error::Error>> {
+    let pool = setup_pool().await;
+    let store = ConversationStore::new(Arc::clone(&pool));
+    let conversation = store.create().await?;
+
+    store
+        .persist(
+            &conversation.conversation_id,
+            "resp_1",
+            None,
+            vec![create_input_item("hello")],
+            &ResponseMetadata::default(),
+        )
+        .await?;
+
+    let item_id: String = sqlx::query_scalar("SELECT id FROM items WHERE conversation_id = $1")
+        .bind(&conversation.conversation_id)
+        .fetch_one(pool.as_ref())
+        .await?;
+    sqlx::query("UPDATE items SET seq = NULL WHERE id = $1")
+        .bind(&item_id)
+        .execute(pool.as_ref())
+        .await?;
+
+    let error = store
+        .rehydrate_snapshot(&conversation.conversation_id)
+        .await
+        .expect_err("snapshot must reject an item without a sequence");
+    assert!(matches!(
+        error,
+        StorageError::InvalidConversationSequence {
+            conversation_id,
+            item_id: invalid_item_id,
+        } if conversation_id == conversation.conversation_id && invalid_item_id == item_id
+    ));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn conversation_version_empty_checked_persist_succeeds() -> Result<(), Box<dyn std::error::Error>> {
+    let pool = setup_pool().await;
+    let store = ConversationStore::new(pool);
+    let conversation = store.create().await?;
+    let items = vec![create_input_item("first input"), create_output_item("msg_first")];
+
+    store
+        .persist_if_version(
+            &conversation.conversation_id,
+            ConversationVersion::Empty,
+            "resp_first",
+            None,
+            items.clone(),
+            &ResponseMetadata::default(),
+        )
+        .await?;
+
+    let snapshot = store.rehydrate_snapshot(&conversation.conversation_id).await?;
+    assert_eq!(snapshot.items, items);
+    assert_eq!(snapshot.version, ConversationVersion::LastSequence(1));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn conversation_version_stale_checked_persist_rolls_back_items_and_response()
+-> Result<(), Box<dyn std::error::Error>> {
+    let pool = setup_pool().await;
+    let store = ConversationStore::new(Arc::clone(&pool));
+    let response_store = ResponseStore::new(Arc::clone(&pool));
+    let conversation = store.create().await?;
+    let snapshot = store.rehydrate_snapshot(&conversation.conversation_id).await?;
+    let competing_items = vec![
+        create_input_item("competing input"),
+        create_output_item("msg_competing"),
+    ];
+    store
+        .persist(
+            &conversation.conversation_id,
+            "resp_competing",
+            None,
+            competing_items.clone(),
+            &ResponseMetadata::default(),
+        )
+        .await?;
+    let rejected_items = vec![create_input_item("stale input"), create_output_item("msg_stale")];
+
+    let error = store
+        .persist_if_version(
+            &conversation.conversation_id,
+            snapshot.version,
+            "resp_stale",
+            None,
+            rejected_items,
+            &ResponseMetadata::default(),
+        )
+        .await
+        .expect_err("a stale conversation version must be rejected");
+
+    assert!(error.is_conversation_conflict());
+    assert!(matches!(
+        error,
+        StorageError::ConversationConflict { conversation_id }
+            if conversation_id == conversation.conversation_id
+    ));
+    assert_eq!(store.rehydrate(&conversation.conversation_id).await?, competing_items);
+    let response_error = response_store
+        .get("resp_stale")
+        .await
+        .expect_err("the rejected response must not be stored");
+    assert!(response_error.is_not_found());
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn conversation_version_racing_checked_persists_allow_exactly_one_winner()
+-> Result<(), Box<dyn std::error::Error>> {
+    let pool = setup_pool().await;
+    let store = ConversationStore::new(Arc::clone(&pool));
+    let conversation = store.create().await?;
+    let version = store.rehydrate_snapshot(&conversation.conversation_id).await?.version;
+    let barrier = Arc::new(tokio::sync::Barrier::new(2));
+
+    let writer_one = {
+        let store = ConversationStore::new(Arc::clone(&pool));
+        let conversation_id = conversation.conversation_id.clone();
+        let barrier = Arc::clone(&barrier);
+        tokio::spawn(async move {
+            let items = vec![create_input_item("writer one"), create_output_item("msg_writer_one")];
+            barrier.wait().await;
+            let result = store
+                .persist_if_version(
+                    &conversation_id,
+                    version,
+                    "resp_writer_one",
+                    None,
+                    items.clone(),
+                    &ResponseMetadata::default(),
+                )
+                .await;
+            (result, items)
+        })
+    };
+    let writer_two = {
+        let store = ConversationStore::new(pool);
+        let conversation_id = conversation.conversation_id.clone();
+        tokio::spawn(async move {
+            let items = vec![create_input_item("writer two"), create_output_item("msg_writer_two")];
+            barrier.wait().await;
+            let result = store
+                .persist_if_version(
+                    &conversation_id,
+                    version,
+                    "resp_writer_two",
+                    None,
+                    items.clone(),
+                    &ResponseMetadata::default(),
+                )
+                .await;
+            (result, items)
+        })
+    };
+
+    let (writer_one_result, writer_one_items) = writer_one.await?;
+    let (writer_two_result, writer_two_items) = writer_two.await?;
+
+    assert_eq!(
+        usize::from(writer_one_result.is_ok()) + usize::from(writer_two_result.is_ok()),
+        1
+    );
+    assert_eq!(
+        usize::from(
+            writer_one_result
+                .as_ref()
+                .is_err_and(StorageError::is_conversation_conflict)
+        ) + usize::from(
+            writer_two_result
+                .as_ref()
+                .is_err_and(StorageError::is_conversation_conflict)
+        ),
+        1
+    );
+    let winner_items = if writer_one_result.is_ok() {
+        writer_one_items
+    } else {
+        writer_two_items
+    };
+    assert_eq!(store.rehydrate(&conversation.conversation_id).await?, winner_items);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn conversation_version_is_scoped_per_conversation() -> Result<(), Box<dyn std::error::Error>> {
+    let pool = setup_pool().await;
+    let store = ConversationStore::new(pool);
+    let first = store.create().await?;
+    let second = store.create().await?;
+    let first_items = vec![create_input_item("first conversation")];
+    store
+        .persist(
+            &first.conversation_id,
+            "resp_first_conversation",
+            None,
+            first_items.clone(),
+            &ResponseMetadata::default(),
+        )
+        .await?;
+    let first_snapshot = store.rehydrate_snapshot(&first.conversation_id).await?;
+
+    store
+        .persist_if_version(
+            &second.conversation_id,
+            ConversationVersion::Empty,
+            "resp_second_conversation",
+            None,
+            vec![create_input_item("second conversation")],
+            &ResponseMetadata::default(),
+        )
+        .await?;
+
+    let first_after = store.rehydrate_snapshot(&first.conversation_id).await?;
+    assert_eq!(first_after.items, first_items);
+    assert_eq!(first_after.version, first_snapshot.version);
+
+    Ok(())
 }
 
 #[tokio::test]
