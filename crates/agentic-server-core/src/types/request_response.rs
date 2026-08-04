@@ -8,7 +8,7 @@ use super::io::{
     FunctionTool, InputItem, InputMessage, InputMessageContent, OutputItem, ResponseUsage, ResponsesInput, ToolChoice,
 };
 use super::tools::ResponsesTool;
-use crate::tool::{CodexNamespaceHandler, ToolError};
+use crate::tool::{CodexNamespaceHandler, CustomHandler, ToolError};
 use crate::utils::common::serialize_to_string;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -153,6 +153,7 @@ impl RequestPayload {
         let tools = tools.filter(|tools| !tools.is_empty());
         let namespace_map = CodexNamespaceHandler.build_namespace_map(self.tools.as_deref())?;
         let tool_choice = CodexNamespaceHandler.resolve_tool_choice(namespace_map.as_ref(), self.tool_choice.as_ref());
+        CustomHandler::validate_tool_choice(self.tools.as_deref(), &tool_choice)?;
         Ok(UpstreamRequest {
             model: &self.model,
             input: self.input.model_input(),
@@ -684,6 +685,42 @@ mod tests {
         assert_eq!(upstream["tool_choice"]["tools"][0]["type"], "function");
         assert_eq!(upstream["tool_choice"]["tools"][1]["type"], "function");
         assert_eq!(upstream["tool_choice"]["tools"][1]["name"], "apply_patch");
+    }
+
+    #[test]
+    fn to_upstream_request_rejects_custom_choice_for_function_declaration() {
+        let payload: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test",
+            "input": "hi",
+            "tool_choice": {"type": "custom", "name": "echo"},
+            "tools": [{"type": "function", "name": "echo"}]
+        }))
+        .expect("request");
+
+        let error = payload
+            .to_upstream_request(false)
+            .expect_err("a custom selector must match a custom declaration");
+        assert!(error.to_string().contains("no matching custom tool is declared"));
+    }
+
+    #[test]
+    fn to_upstream_request_rejects_unknown_custom_allowed_tool() {
+        let payload: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test",
+            "input": "hi",
+            "tool_choice": {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [{"type": "custom", "name": "missing"}]
+            },
+            "tools": [{"type": "custom", "name": "apply_patch"}]
+        }))
+        .expect("request");
+
+        let error = payload
+            .to_upstream_request(false)
+            .expect_err("an allowed custom selector must match a custom declaration");
+        assert!(error.to_string().contains("no matching custom tool is declared"));
     }
 
     #[test]

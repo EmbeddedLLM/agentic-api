@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde_json::{Map, Value};
 
 use crate::events::WireEvent;
-use crate::types::io::{CustomToolCall, FunctionTool, FunctionToolCall, OutputItem};
+use crate::types::io::{CustomToolCall, FunctionTool, FunctionToolCall, OutputItem, ToolChoice};
 use crate::types::tools::{CustomToolParam, ResponsesTool};
 use crate::utils::common::serialize_to_value_or_custom_default;
 
@@ -47,6 +47,25 @@ impl CustomHandler {
         CustomToolMap::from_tools(tools)
     }
 
+    pub(crate) fn validate_tool_choice(
+        tools: Option<&[ResponsesTool]>,
+        tool_choice: &ToolChoice,
+    ) -> Result<(), ToolError> {
+        let map = tools.and_then(CustomToolMap::from_tools);
+        match tool_choice {
+            ToolChoice::Custom { name } => validate_custom_selector(map.as_ref(), name.as_str()),
+            ToolChoice::AllowedTools { tools, .. } => {
+                for tool in tools {
+                    if tool.type_.as_str() == "custom" {
+                        validate_custom_selector(map.as_ref(), tool.name.as_str())?;
+                    }
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
     #[must_use]
     pub fn to_function_call(param: &CustomToolParam) -> FunctionTool {
         FunctionTool {
@@ -87,6 +106,15 @@ impl CustomHandler {
         };
         restore_response_map(&mut wire.rest, map)
     }
+}
+
+fn validate_custom_selector(map: Option<&CustomToolMap>, name: &str) -> Result<(), ToolError> {
+    if map.and_then(|map| map.declaration(name)).is_some() {
+        return Ok(());
+    }
+    Err(ToolError::Config(format!(
+        "tool_choice selects custom tool '{name}', but no matching custom tool is declared"
+    )))
 }
 
 fn restore_response_map(object: &mut Map<String, Value>, map: &CustomToolMap) -> bool {
