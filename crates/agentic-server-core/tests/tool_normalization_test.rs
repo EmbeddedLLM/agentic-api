@@ -313,8 +313,8 @@ fn codex_request_payloads_parse_all_recorded_shapes() {
     }
 }
 
-#[tokio::test]
-async fn codex_custom_cassettes_normalize_upstream_and_preserve_client_ownership() {
+#[test]
+fn codex_custom_grammar_cassettes_fail_closed_before_upstream_normalization() {
     for filename in CODEX_CUSTOM_CASSETTES {
         let cassette = load_codex_cassette(filename);
         assert_eq!(cassette.turns.len(), 2, "{filename} should have two turns");
@@ -335,35 +335,12 @@ async fn codex_custom_cassettes_normalize_upstream_and_preserve_client_ownership
                 "{filename} turn {i}: expected native custom grammar declaration"
             );
 
-            let mut registry_tools = tools.clone();
-            let registry = ToolRegistry::build_with_handlers(&mut registry_tools, &mut GatewayExecutors::default())
-                .await
-                .unwrap_or_else(|err| panic!("{filename} turn {i}: registry failed: {err}"));
+            let error = payload
+                .to_upstream_request(false)
+                .expect_err("custom grammar must be rejected before normalization");
             assert!(
-                registry
-                    .lookup("agentic_raw_echo")
-                    .is_some_and(|entry| entry.tool_type == ToolType::Custom && !entry.tool_type.is_gateway_owned()),
-                "{filename} turn {i}: custom tool must remain client-owned"
-            );
-
-            let upstream = upstream_request_value(payload, false);
-            let upstream_tools = upstream
-                .get("tools")
-                .and_then(Value::as_array)
-                .unwrap_or_else(|| panic!("{filename} turn {i}: upstream request should contain tools"));
-            assert!(
-                upstream_tools.iter().any(|tool| {
-                    tool.get("type").and_then(Value::as_str) == Some("function")
-                        && tool.get("name").and_then(Value::as_str) == Some("agentic_raw_echo")
-                        && tool
-                            .get("parameters")
-                            .and_then(|parameters| parameters.get("properties"))
-                            .and_then(|properties| properties.get("input"))
-                            .and_then(|input| input.get("type"))
-                            .and_then(Value::as_str)
-                            == Some("string")
-                }),
-                "{filename} turn {i}: custom declaration must normalize to a function"
+                error.to_string().contains("cannot preserve constrained decoding"),
+                "{filename} turn {i}: unexpected validation error: {error}"
             );
         }
     }
