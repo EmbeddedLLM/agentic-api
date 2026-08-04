@@ -6,6 +6,8 @@ use axum::middleware;
 use axum::routing::{get, post};
 use http::HeaderValue;
 use tokio::sync::Notify;
+#[cfg(debug_assertions)]
+use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
@@ -26,6 +28,14 @@ pub struct WebSocketTracker {
 struct WebSocketTrackerInner {
     active: AtomicUsize,
     idle: Notify,
+    #[cfg(debug_assertions)]
+    local_completion_barrier: std::sync::Mutex<Option<LocalCompletionBarrier>>,
+}
+
+#[cfg(debug_assertions)]
+struct LocalCompletionBarrier {
+    rehydrated: oneshot::Sender<()>,
+    release: oneshot::Receiver<()>,
 }
 
 pub(crate) struct WebSocketGuard {
@@ -50,6 +60,40 @@ impl WebSocketTracker {
                 return;
             }
             idle.await;
+        }
+    }
+
+    /// Installs a one-shot test barrier after local WebSocket rehydration.
+    #[cfg(debug_assertions)]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn install_local_completion_test_barrier(&self) -> (oneshot::Receiver<()>, oneshot::Sender<()>) {
+        let (rehydrated_tx, rehydrated_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        let barrier = LocalCompletionBarrier {
+            rehydrated: rehydrated_tx,
+            release: release_rx,
+        };
+        self.inner
+            .local_completion_barrier
+            .lock()
+            .expect("local completion test barrier mutex poisoned")
+            .replace(barrier);
+        (rehydrated_rx, release_tx)
+    }
+
+    #[cfg(debug_assertions)]
+    pub(crate) async fn pause_local_completion_after_rehydration(&self) {
+        let barrier = self
+            .inner
+            .local_completion_barrier
+            .lock()
+            .expect("local completion test barrier mutex poisoned")
+            .take();
+        if let Some(barrier) = barrier {
+            if barrier.rehydrated.send(()).is_ok() {
+                let _ = barrier.release.await;
+            }
         }
     }
 }

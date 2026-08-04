@@ -98,6 +98,23 @@ impl ResponseStore {
         new_items: Vec<InOutItem>,
         metadata: &ResponseMetadata,
     ) -> StoreResult<()> {
+        self.persist_with_conversation_id(response_id, None, previous_response_id, new_items, metadata)
+            .await
+    }
+
+    /// Persists a response while retaining its inherited conversation ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StorageError`] if database operation fails or store is disabled.
+    pub(crate) async fn persist_with_conversation_id(
+        &self,
+        response_id: &str,
+        conversation_id: Option<&str>,
+        previous_response_id: Option<&str>,
+        new_items: Vec<InOutItem>,
+        metadata: &ResponseMetadata,
+    ) -> StoreResult<()> {
         let pool = self.pool()?;
 
         let mut item_ids: Vec<String> = match previous_response_id {
@@ -121,7 +138,7 @@ impl ResponseStore {
         response::create_in_tx(
             &mut tx,
             response_id,
-            None,
+            conversation_id,
             previous_response_id,
             Some(&history_item_ids_json),
             Some(&metadata_json),

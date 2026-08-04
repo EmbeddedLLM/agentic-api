@@ -38,6 +38,7 @@ pub async fn rehydrate_conversation(
         new_input_items,
         response_id,
         conversation_id: None,
+        conversation_version: None,
     };
 
     if ctx.original_request.conversation_id.is_some() && ctx.original_request.previous_response_id.is_some() {
@@ -94,7 +95,7 @@ async fn from_response(ctx: &mut RequestContext, exec_ctx: &ExecutionContext) ->
 /// Gets or creates the conversation (depending on `store`) and rehydrates its
 /// history in parallel, then prepends the history items to the enriched request input.
 async fn from_conversation(ctx: &mut RequestContext, exec_ctx: &ExecutionContext) -> ExecutorResult<()> {
-    let (conv_data, history) = tokio::try_join!(
+    let (conv_data, snapshot) = tokio::try_join!(
         async {
             if ctx.original_request.store {
                 exec_ctx.conv_handler.get_or_create(ctx).await
@@ -102,14 +103,123 @@ async fn from_conversation(ctx: &mut RequestContext, exec_ctx: &ExecutionContext
                 exec_ctx.conv_handler.get(ctx).await
             }
         },
-        exec_ctx.conv_handler.rehydrate(ctx),
+        exec_ctx.conv_handler.rehydrate_snapshot(ctx),
     )?;
 
-    let mut items = InOutItem::into_input_items(history);
+    let mut items = InOutItem::into_input_items(snapshot.items);
     items.reserve(ctx.new_input_items.len());
     items.extend(ctx.new_input_items.iter().cloned());
 
     ctx.enriched_request.input = ResponsesInput::Items(items);
     ctx.conversation_id = Some(conv_data.conversation_id);
+    ctx.conversation_version = Some(snapshot.version);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::executor::modes::{ConversationHandler, ResponseHandler};
+    use crate::storage::{
+        ConversationStore, ConversationVersion, InOutItem, ResponseMetadata, ResponseStore, create_pool_with_schema,
+    };
+    use crate::types::request_response::RequestPayload;
+
+    fn request(conversation_id: Option<&str>, previous_response_id: Option<&str>) -> RequestPayload {
+        RequestPayload {
+            model: "test".into(),
+            input: ResponsesInput::Text("new input".into()),
+            instructions: None,
+            previous_response_id: previous_response_id.map(str::to_owned),
+            conversation_id: conversation_id.map(str::to_owned),
+            tools: None,
+            tool_choice: None,
+            stream: false,
+            store: true,
+            include: None,
+            temperature: None,
+            top_p: None,
+            max_output_tokens: None,
+            truncation: None,
+            metadata: None,
+            parallel_tool_calls: None,
+            cache_salt: None,
+            context_management: None,
+        }
+    }
+
+    fn execution_context(conversation_store: ConversationStore, response_store: ResponseStore) -> ExecutionContext {
+        ExecutionContext::new(
+            ConversationHandler::new(conversation_store),
+            ResponseHandler::new(response_store),
+            Arc::new(reqwest::Client::new()),
+            "http://localhost:8000".to_owned(),
+        )
+    }
+
+    #[tokio::test]
+    async fn new_conversation_rehydration_captures_empty_version() -> Result<(), Box<dyn std::error::Error>> {
+        let pool = create_pool_with_schema(Some("sqlite://?mode=memory")).await?;
+        let conversation_store = ConversationStore::new(pool);
+        let conversation = conversation_store.create().await?;
+        let exec_ctx = execution_context(conversation_store, ResponseStore::disabled());
+
+        let ctx = rehydrate_conversation(request(Some(&conversation.conversation_id), None), &exec_ctx).await?;
+
+        assert_eq!(ctx.conversation_version, Some(ConversationVersion::Empty));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn existing_conversation_rehydration_captures_last_sequence() -> Result<(), Box<dyn std::error::Error>> {
+        let pool = create_pool_with_schema(Some("sqlite://?mode=memory")).await?;
+        let conversation_store = ConversationStore::new(pool);
+        let conversation = conversation_store.create().await?;
+        let prior_items = Vec::<InputItem>::from(&ResponsesInput::Text("prior input".into()))
+            .into_iter()
+            .map(InOutItem::Input)
+            .collect();
+        conversation_store
+            .persist(
+                &conversation.conversation_id,
+                "resp_prior",
+                None,
+                prior_items,
+                &ResponseMetadata::default(),
+            )
+            .await?;
+        let exec_ctx = execution_context(conversation_store, ResponseStore::disabled());
+
+        let ctx = rehydrate_conversation(request(Some(&conversation.conversation_id), None), &exec_ctx).await?;
+
+        assert_eq!(ctx.conversation_version, Some(ConversationVersion::LastSequence(0)));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn request_without_continuation_has_no_conversation_version() -> Result<(), Box<dyn std::error::Error>> {
+        let exec_ctx = execution_context(ConversationStore::disabled(), ResponseStore::disabled());
+
+        let ctx = rehydrate_conversation(request(None, None), &exec_ctx).await?;
+
+        assert_eq!(ctx.conversation_version, None);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn previous_response_rehydration_has_no_conversation_version() -> Result<(), Box<dyn std::error::Error>> {
+        let pool = create_pool_with_schema(Some("sqlite://?mode=memory")).await?;
+        let response_store = ResponseStore::new(pool);
+        response_store
+            .persist("resp_prior", None, Vec::new(), &ResponseMetadata::default())
+            .await?;
+        let exec_ctx = execution_context(ConversationStore::disabled(), response_store);
+
+        let ctx = rehydrate_conversation(request(None, Some("resp_prior")), &exec_ctx).await?;
+
+        assert_eq!(ctx.conversation_version, None);
+        Ok(())
+    }
 }

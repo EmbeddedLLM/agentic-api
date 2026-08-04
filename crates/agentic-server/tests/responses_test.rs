@@ -2,14 +2,331 @@ mod common;
 
 use axum::Router;
 use axum::body::Bytes;
+use axum::http::header;
 use axum::response::IntoResponse;
 use axum::routing::post;
 use http::StatusCode;
+use std::convert::Infallible;
+use std::future::Future;
+use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use tokio::net::TcpListener;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, oneshot};
+use tokio_util::sync::CancellationToken;
+
+use agentic_core::executor::{ConversationHandler, ExecutionContext, ResponseHandler};
+use agentic_core::proxy::ProxyState;
+use agentic_core::storage::{
+    ConversationStore, DbPool, InOutItem, ResponseMetadata, ResponseStore, create_pool_with_schema,
+};
+use agentic_core::types::io::{InputItem, ResponsesInput};
+use agentic_server::app::{AppState, WebSocketTracker};
 
 use common::{spawn_gateway, spawn_mock_llm, test_config, test_state};
+
+const COMPETING_RESPONSE_ID: &str = "resp_competing";
+const CONFLICT_MESSAGE: &str = "conversation changed while the response was being generated; retry the request";
+
+enum MockResponse {
+    GatedJson {
+        body: String,
+        arrived: oneshot::Sender<()>,
+        release: oneshot::Receiver<()>,
+    },
+    GatedSse {
+        first_chunk: String,
+        terminal_chunk: String,
+        arrived: oneshot::Sender<()>,
+        release: oneshot::Receiver<()>,
+    },
+}
+
+struct MockResponsesServer {
+    url: String,
+    handle: tokio::task::JoinHandle<()>,
+}
+
+struct GatedSse {
+    first_chunk: Option<Bytes>,
+    terminal_chunk: Option<Bytes>,
+    release: oneshot::Receiver<()>,
+}
+
+impl futures::Stream for GatedSse {
+    type Item = Result<Bytes, Infallible>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if let Some(first_chunk) = self.first_chunk.take() {
+            return Poll::Ready(Some(Ok(first_chunk)));
+        }
+        if self.terminal_chunk.is_none() {
+            return Poll::Ready(None);
+        }
+        match Pin::new(&mut self.release).poll(cx) {
+            Poll::Ready(_) => Poll::Ready(self.terminal_chunk.take().map(Ok)),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl MockResponsesServer {
+    async fn start_gated_json(body: String) -> (Self, oneshot::Receiver<()>, oneshot::Sender<()>) {
+        let (arrived_tx, arrived_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        let server = Self::start(MockResponse::GatedJson {
+            body,
+            arrived: arrived_tx,
+            release: release_rx,
+        })
+        .await;
+        (server, arrived_rx, release_tx)
+    }
+
+    async fn start_gated_sse(
+        first_chunk: String,
+        terminal_chunk: String,
+    ) -> (Self, oneshot::Receiver<()>, oneshot::Sender<()>) {
+        let (arrived_tx, arrived_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        let server = Self::start(MockResponse::GatedSse {
+            first_chunk,
+            terminal_chunk,
+            arrived: arrived_tx,
+            release: release_rx,
+        })
+        .await;
+        (server, arrived_rx, release_tx)
+    }
+
+    async fn start(response: MockResponse) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let response = Arc::new(Mutex::new(Some(response)));
+        let route_response = Arc::clone(&response);
+        let app = Router::new().route(
+            "/v1/responses",
+            post(move || {
+                let response = Arc::clone(&route_response);
+                async move {
+                    let response = response.lock().await.take().expect("mock response already consumed");
+                    match response {
+                        MockResponse::GatedJson { body, arrived, release } => {
+                            let _ = arrived.send(());
+                            let _ = release.await;
+                            axum::response::Response::builder()
+                                .status(StatusCode::OK)
+                                .header(header::CONTENT_TYPE, "application/json")
+                                .body(axum::body::Body::from(body))
+                                .unwrap()
+                                .into_response()
+                        }
+                        MockResponse::GatedSse {
+                            first_chunk,
+                            terminal_chunk,
+                            arrived,
+                            release,
+                        } => {
+                            let _ = arrived.send(());
+                            axum::response::Response::builder()
+                                .status(StatusCode::OK)
+                                .header(header::CONTENT_TYPE, "text/event-stream; charset=utf-8")
+                                .body(axum::body::Body::from_stream(GatedSse {
+                                    first_chunk: Some(Bytes::from(first_chunk)),
+                                    terminal_chunk: Some(Bytes::from(terminal_chunk)),
+                                    release,
+                                }))
+                                .unwrap()
+                                .into_response()
+                        }
+                    }
+                }
+            }),
+        );
+        let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        Self {
+            url: format!("http://{addr}"),
+            handle,
+        }
+    }
+}
+
+impl Drop for MockResponsesServer {
+    fn drop(&mut self) {
+        self.handle.abort();
+    }
+}
+
+struct TestDb {
+    path: PathBuf,
+}
+
+impl TestDb {
+    fn new() -> Self {
+        Self {
+            path: std::env::temp_dir().join(format!("agentic_http_test_{}.db", uuid::Uuid::now_v7())),
+        }
+    }
+
+    fn url(&self) -> String {
+        format!("sqlite://{}", self.path.display())
+    }
+}
+
+impl Drop for TestDb {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+        let _ = std::fs::remove_file(self.path.with_extension("db-shm"));
+        let _ = std::fs::remove_file(self.path.with_extension("db-wal"));
+    }
+}
+
+struct StorageBackedState {
+    state: AppState,
+    pool: Arc<DbPool>,
+    _db: TestDb,
+}
+
+async fn storage_backed_state(llm_url: &str) -> StorageBackedState {
+    let db = TestDb::new();
+    let pool = create_pool_with_schema(Some(&db.url())).await.unwrap();
+    let config = test_config(llm_url);
+    let client = Arc::new(reqwest::Client::new());
+    let exec_ctx = Arc::new(ExecutionContext::new(
+        ConversationHandler::new(ConversationStore::new(Arc::clone(&pool))),
+        ResponseHandler::new(ResponseStore::new(Arc::clone(&pool))),
+        client,
+        config.llm_api_base.clone(),
+    ));
+    let proxy_state = ProxyState::new(config.clone()).expect("proxy state");
+    let state = AppState {
+        proxy_state,
+        exec_ctx,
+        shutdown_token: CancellationToken::new(),
+        websocket_tracker: WebSocketTracker::default(),
+        llm_api_base: config.llm_api_base,
+        openai_api_key: config.openai_api_key,
+    };
+    StorageBackedState { state, pool, _db: db }
+}
+
+async fn create_conversation(client: &reqwest::Client, gateway_url: &str) -> String {
+    let response = client
+        .post(format!("{gateway_url}/v1/conversations"))
+        .json(&serde_json::json!({"store": true}))
+        .send()
+        .await
+        .expect("conversation request");
+    assert_eq!(response.status(), StatusCode::OK);
+    response
+        .json::<serde_json::Value>()
+        .await
+        .expect("conversation response JSON")["id"]
+        .as_str()
+        .expect("conversation ID")
+        .to_owned()
+}
+
+fn competing_turn_items() -> Vec<InOutItem> {
+    Vec::<InputItem>::from(&ResponsesInput::Text("competing turn".to_owned()))
+        .into_iter()
+        .map(InOutItem::Input)
+        .collect()
+}
+
+async fn persist_competing_turn(pool: &Arc<DbPool>, conversation_id: &str) {
+    ConversationStore::new(Arc::clone(pool))
+        .persist(
+            conversation_id,
+            COMPETING_RESPONSE_ID,
+            None,
+            competing_turn_items(),
+            &ResponseMetadata {
+                model: "competing-model".to_owned(),
+                ..ResponseMetadata::default()
+            },
+        )
+        .await
+        .expect("competing turn should persist");
+}
+
+fn conflict_error() -> serde_json::Value {
+    serde_json::json!({
+        "message": CONFLICT_MESSAGE,
+        "type": "invalid_request_error",
+        "code": "conversation_locked",
+        "param": "conversation"
+    })
+}
+
+fn sse_events(body: &str) -> Vec<serde_json::Value> {
+    body.split("\n\n")
+        .filter_map(|frame| frame.strip_prefix("data: "))
+        .filter(|data| *data != "[DONE]")
+        .map(|data| serde_json::from_str(data).expect("SSE data should be JSON"))
+        .collect()
+}
+
+fn gated_sse_chunks() -> (String, String) {
+    let created = serde_json::json!({
+        "type": "response.created",
+        "sequence_number": 0,
+        "response": {"id": "resp_upstream_stale_sse", "status": "in_progress"}
+    });
+    let added = serde_json::json!({
+        "type": "response.output_item.added",
+        "sequence_number": 1,
+        "output_index": 0,
+        "item": {"id": "msg_upstream_stale_sse", "type": "message"}
+    });
+    let delta = serde_json::json!({
+        "type": "response.output_text.delta",
+        "sequence_number": 2,
+        "item_id": "msg_upstream_stale_sse",
+        "output_index": 0,
+        "content_index": 0,
+        "delta": "partial"
+    });
+    let completed = serde_json::json!({
+        "type": "response.completed",
+        "sequence_number": 3,
+        "response": {"id": "resp_upstream_stale_sse", "status": "completed", "usage": null}
+    });
+    (
+        format!("data: {created}\n\ndata: {added}\n\ndata: {delta}\n\n"),
+        format!("data: {completed}\n\ndata: [DONE]\n\n"),
+    )
+}
+
+async fn assert_only_competing_turn_persisted(pool: &Arc<DbPool>, conversation_id: &str) {
+    let conversation_store = ConversationStore::new(Arc::clone(pool));
+    assert_eq!(
+        conversation_store
+            .rehydrate(conversation_id)
+            .await
+            .expect("conversation history"),
+        competing_turn_items()
+    );
+    let response = ResponseStore::new(Arc::clone(pool))
+        .get(COMPETING_RESPONSE_ID)
+        .await
+        .expect("competing response should remain");
+    assert_eq!(response.conversation_id.as_deref(), Some(conversation_id));
+    let response_count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM responses")
+        .fetch_one(pool.as_ref())
+        .await
+        .expect("response count");
+    assert_eq!(response_count, 1, "only the competing response should be stored");
+}
+
+async fn assert_response_not_persisted(pool: &Arc<DbPool>, response_id: &str) {
+    let error = ResponseStore::new(Arc::clone(pool))
+        .get(response_id)
+        .await
+        .expect_err("rejected response must not be persisted");
+    assert!(error.is_not_found(), "expected missing response, got {error}");
+}
 
 /// Spawn a mock vLLM that returns a minimal valid JSON response.
 async fn spawn_mock_vllm_json() -> (String, tokio::task::JoinHandle<()>) {
@@ -262,6 +579,131 @@ async fn test_streaming_store_true_hides_persistence_details_without_sequence_ga
     assert!(body.contains("\"sequence_number\":0"), "{body}");
     assert!(body.contains("data: [DONE]"), "{body}");
     assert!(!body.contains("\"type\":\"response.completed\""), "{body}");
+}
+
+#[tokio::test]
+async fn http_json_conversation_conflict_rejects_stale_turn_without_persisting_it() {
+    // Arrange
+    let upstream_body = serde_json::json!({
+        "id": "resp_upstream_stale_json",
+        "object": "response",
+        "status": "completed",
+        "model": "test-model",
+        "output": [],
+        "created_at": 0
+    })
+    .to_string();
+    let (mock, arrived, release) = MockResponsesServer::start_gated_json(upstream_body).await;
+    let fixture = storage_backed_state(&mock.url).await;
+    let (gateway_url, _gateway) = spawn_gateway(fixture.state.clone()).await;
+    let client = reqwest::Client::new();
+    let conversation_id = create_conversation(&client, &gateway_url).await;
+
+    // Act
+    let response_task = {
+        let client = client.clone();
+        let gateway_url = gateway_url.clone();
+        let conversation_id = conversation_id.clone();
+        tokio::spawn(async move {
+            client
+                .post(format!("{gateway_url}/v1/responses"))
+                .json(&serde_json::json!({
+                    "model": "test-model",
+                    "input": [{"type": "message", "role": "user", "content": "stale turn"}],
+                    "conversation_id": conversation_id,
+                    "store": true,
+                    "stream": false
+                }))
+                .send()
+                .await
+                .expect("response request")
+        })
+    };
+    arrived.await.expect("upstream request should arrive after rehydration");
+    persist_competing_turn(&fixture.pool, &conversation_id).await;
+    release.send(()).expect("release gated JSON response");
+    let response = response_task.await.expect("response task");
+
+    // Assert
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response.json::<serde_json::Value>().await.expect("error response JSON"),
+        serde_json::json!({"error": conflict_error()})
+    );
+    assert_only_competing_turn_persisted(&fixture.pool, &conversation_id).await;
+}
+
+#[tokio::test]
+async fn http_sse_conversation_conflict_terminates_after_observable_delta_without_persisting_stale_turn() {
+    // Arrange
+    let (first_chunk, terminal_chunk) = gated_sse_chunks();
+    let (mock, arrived, release) = MockResponsesServer::start_gated_sse(first_chunk, terminal_chunk).await;
+    let fixture = storage_backed_state(&mock.url).await;
+    let (gateway_url, _gateway) = spawn_gateway(fixture.state.clone()).await;
+    let client = reqwest::Client::new();
+    let conversation_id = create_conversation(&client, &gateway_url).await;
+
+    // Act
+    let mut response = client
+        .post(format!("{gateway_url}/v1/responses"))
+        .json(&serde_json::json!({
+            "model": "test-model",
+            "input": [{"type": "message", "role": "user", "content": "stale turn"}],
+            "conversation_id": conversation_id,
+            "store": true,
+            "stream": true
+        }))
+        .send()
+        .await
+        .expect("streaming response request");
+    assert_eq!(response.status(), StatusCode::OK);
+    arrived.await.expect("upstream request should arrive after rehydration");
+
+    let mut body = String::new();
+    while !body.contains("\"type\":\"response.output_text.delta\"") {
+        let chunk = response
+            .chunk()
+            .await
+            .expect("stream chunk")
+            .expect("stream should contain a delta before completion");
+        body.push_str(std::str::from_utf8(&chunk).expect("SSE should be UTF-8"));
+    }
+    assert!(body.contains("\"delta\":\"partial\""), "{body}");
+
+    persist_competing_turn(&fixture.pool, &conversation_id).await;
+    release.send(()).expect("release gated SSE response");
+    while let Some(chunk) = response.chunk().await.expect("stream chunk") {
+        body.push_str(std::str::from_utf8(&chunk).expect("SSE should be UTF-8"));
+    }
+
+    // Assert
+    let events = sse_events(&body);
+    let stale_response_id = events
+        .iter()
+        .find(|event| event["type"] == "response.created")
+        .and_then(|event| event["response"]["id"].as_str())
+        .expect("gateway response ID from response.created");
+    assert!(
+        events
+            .iter()
+            .any(|event| event["type"] == "response.output_text.delta" && event["delta"] == "partial"),
+        "{body}"
+    );
+    let errors = events
+        .iter()
+        .filter(|event| event["type"] == "error")
+        .collect::<Vec<_>>();
+    assert_eq!(errors.len(), 1, "{body}");
+    assert_eq!(errors[0]["status"], StatusCode::BAD_REQUEST.as_u16());
+    assert_eq!(errors[0]["error"], conflict_error());
+    assert_eq!(events.last().expect("terminal SSE event")["type"], "error");
+    assert!(body.contains("data: [DONE]"), "{body}");
+    assert!(
+        events.iter().all(|event| event["type"] != "response.completed"),
+        "{body}"
+    );
+    assert_only_competing_turn_persisted(&fixture.pool, &conversation_id).await;
+    assert_response_not_persisted(&fixture.pool, stale_response_id).await;
 }
 
 #[tokio::test]

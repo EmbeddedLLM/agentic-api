@@ -198,6 +198,7 @@ pub(crate) async fn compact_items(
         new_input_items: Vec::new(),
         response_id: uuid7_str("resp_"),
         conversation_id: None,
+        conversation_version: None,
     };
     let response = fetch_blocking_payload(&ctx, exec_ctx, auth).await?;
     let summary = completed_summary_text(&response)?;

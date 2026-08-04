@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use agentic_core::config::{PostgresConfig, SqliteConfig};
 use agentic_core::storage::{
-    ConversationStore, InOutItem, ResponseMetadata, ResponseStore, create_pool_with_configs,
+    ConversationStore, InOutItem, ResponseMetadata, ResponseStore, StorageError, create_pool_with_configs,
     create_pool_with_schema_and_configs,
 };
 use agentic_core::types::io::{InputItem, InputMessage, InputMessageContent};
@@ -362,6 +362,133 @@ async fn postgres_concurrent_conversation_writes_have_contiguous_sequences() {
         .collect::<Vec<_>>();
     let write_count = i64::try_from(WRITE_COUNT).expect("test write count must fit in i64");
     assert_eq!(sequences, (0..write_count).collect::<Vec<_>>());
+
+    first_pool.close().await;
+    second_pool.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires TEST_POSTGRES_URL pointing to an isolated PostgreSQL database"]
+#[allow(
+    clippy::too_many_lines,
+    reason = "keeps the complete two-pool race and persistence assertions in one integration test"
+)]
+async fn postgres_optimistic_conversation_conflict() {
+    let database_url = std::env::var("TEST_POSTGRES_URL").expect("TEST_POSTGRES_URL must be set");
+    let postgres_config = PostgresConfig {
+        max_connections: 2,
+        acquire_timeout: Duration::from_secs(5),
+        lock_timeout: Duration::from_secs(1),
+        migration_timeout: Duration::from_secs(5),
+        statement_timeout: Duration::from_secs(5),
+        idle_timeout: Some(Duration::from_secs(30)),
+        max_lifetime: Some(Duration::from_secs(60)),
+    };
+    let first_pool = create_pool_with_schema_and_configs(Some(&database_url), SqliteConfig::default(), postgres_config)
+        .await
+        .expect("initialize PostgreSQL database");
+    let second_pool = create_pool_with_configs(Some(&database_url), SqliteConfig::default(), postgres_config)
+        .await
+        .expect("create independent PostgreSQL pool");
+    let store = ConversationStore::new(first_pool.clone());
+    let conversation = store.create().await.expect("create conversation");
+    let version = store
+        .rehydrate_snapshot(&conversation.conversation_id)
+        .await
+        .expect("capture conversation version")
+        .version;
+    let barrier = Arc::new(Barrier::new(2));
+
+    let writer_one = {
+        let store = ConversationStore::new(first_pool.clone());
+        let conversation_id = conversation.conversation_id.clone();
+        let barrier = Arc::clone(&barrier);
+        tokio::spawn(async move {
+            let response_id = format!("resp_postgres_{}", uuid::Uuid::now_v7());
+            let items = vec![input_item("writer one input"), input_item("writer one follow-up")];
+            barrier.wait().await;
+            let result = store
+                .persist_if_version(
+                    &conversation_id,
+                    version,
+                    &response_id,
+                    None,
+                    items.clone(),
+                    &ResponseMetadata::default(),
+                )
+                .await;
+            (result, response_id, items)
+        })
+    };
+    let writer_two = {
+        let store = ConversationStore::new(second_pool.clone());
+        let conversation_id = conversation.conversation_id.clone();
+        let barrier = Arc::clone(&barrier);
+        tokio::spawn(async move {
+            let response_id = format!("resp_postgres_{}", uuid::Uuid::now_v7());
+            let items = vec![input_item("writer two input"), input_item("writer two follow-up")];
+            barrier.wait().await;
+            let result = store
+                .persist_if_version(
+                    &conversation_id,
+                    version,
+                    &response_id,
+                    None,
+                    items.clone(),
+                    &ResponseMetadata::default(),
+                )
+                .await;
+            (result, response_id, items)
+        })
+    };
+
+    let (writer_one_result, writer_one_response_id, writer_one_items) =
+        writer_one.await.expect("join first checked write");
+    let (writer_two_result, writer_two_response_id, writer_two_items) =
+        writer_two.await.expect("join second checked write");
+
+    assert_eq!(
+        usize::from(writer_one_result.is_ok()) + usize::from(writer_two_result.is_ok()),
+        1
+    );
+    assert_eq!(
+        usize::from(matches!(
+            &writer_one_result,
+            Err(StorageError::ConversationConflict { conversation_id })
+                if conversation_id == conversation.conversation_id.as_str()
+        )) + usize::from(matches!(
+            &writer_two_result,
+            Err(StorageError::ConversationConflict { conversation_id })
+                if conversation_id == conversation.conversation_id.as_str()
+        )),
+        1
+    );
+    let (winner_items, losing_response_id) = if writer_one_result.is_ok() {
+        (writer_one_items, writer_two_response_id)
+    } else {
+        (writer_two_items, writer_one_response_id)
+    };
+    let rows =
+        agentic_core::storage::models::item::get_items_by_conversation(&first_pool, &conversation.conversation_id)
+            .await
+            .expect("load winning conversation items");
+    let sequences = rows
+        .iter()
+        .map(|row| row.seq.expect("conversation item sequence"))
+        .collect::<Vec<_>>();
+    assert_eq!(sequences, vec![0, 1]);
+    assert_eq!(
+        store
+            .rehydrate(&conversation.conversation_id)
+            .await
+            .expect("rehydrate winning conversation items"),
+        winner_items
+    );
+    let response_error = ResponseStore::new(first_pool.clone())
+        .get(&losing_response_id)
+        .await
+        .expect_err("the losing response must not be stored");
+    assert!(response_error.is_not_found());
 
     first_pool.close().await;
     second_pool.close().await;

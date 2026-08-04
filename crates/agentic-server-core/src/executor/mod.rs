@@ -23,7 +23,7 @@ pub use inference::call_inference;
 pub use messages_loop::run_messages_loop;
 pub use messages_stream::run_messages_stream;
 pub use modes::{ConversationHandler, ResponseHandler};
-pub use persist::persist_response;
+pub use persist::{persist_response, persist_turn};
 pub use rehydrate::rehydrate_conversation;
 pub use request::ExecutionContext;
 pub use request::RequestContext;
