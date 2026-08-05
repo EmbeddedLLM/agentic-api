@@ -99,6 +99,7 @@ nav:
   - Deploying:
     - Container: deploying/container.md
     - GitHub authentication with Dex: deploying/github-oidc.md
+    - Kubernetes: deploying/kubernetes.md
   - Community: community/index.md
 
 extra:
