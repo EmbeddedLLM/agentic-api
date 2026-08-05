@@ -336,6 +336,12 @@ fn codex_custom_grammar_cassettes_fail_closed_before_upstream_normalization() {
                 "{filename} turn {i}: expected native custom grammar declaration"
             );
 
+            // The historical gateway and OpenAI cassettes both returned the
+            // only value allowed by this Lark grammar, but the prompt requested
+            // that exact value too. OpenAI constrained generation; the old
+            // gateway only exposed the grammar as model guidance, so matching
+            // output did not prove equivalent enforcement. Reject the format
+            // rather than silently normalizing it to an unconstrained function.
             let error = payload
                 .to_upstream_request(false)
                 .expect_err("custom grammar must be rejected before normalization");
