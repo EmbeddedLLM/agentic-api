@@ -483,8 +483,8 @@ impl ExecuteRequest {
     /// Execute one stateful conversation turn.
     ///
     /// Returns `Either::Left(ResponsePayload)` for non-streaming requests, or
-    /// `Either::Right(BoxStream)` for streaming, each yielded `String` is an SSE
-    /// line ready to forward to the client.
+    /// `Either::Right(BoxStream)` for streaming, where each yielded `String` is
+    /// a complete SSE frame ready to forward to the client.
     ///
     /// # Errors
     /// Returns [`ExecutorError`] if rehydration or (non-streaming) LLM inference fails.
@@ -547,15 +547,18 @@ mod tests {
         let error = task.await.expect_err("task should panic");
         let mut next_sequence_number = 0;
         let chunks = panicked_stream_chunks(&error, &mut event_rx, &mut next_sequence_number);
-        let error_event: serde_json::Value = serde_json::from_str(
-            chunks[1]
-                .trim_end_matches('\n')
-                .strip_prefix("data: ")
-                .expect("SSE data prefix"),
-        )
-        .expect("error chunk should be valid JSON");
+        let mut error_lines = chunks[1].lines();
+        assert_eq!(error_lines.next(), Some("event: error"));
+        let error_data = error_lines
+            .next()
+            .and_then(|line| line.strip_prefix("data: "))
+            .expect("SSE data");
+        assert!(error_lines.all(str::is_empty), "unexpected SSE frame content");
+        let error_event: serde_json::Value =
+            serde_json::from_str(error_data).expect("error chunk should be valid JSON");
 
         assert_eq!(chunks[0], "event");
+        assert_eq!(error_event["type"], "error");
         assert_eq!(error_event["sequence_number"], 1);
         assert_eq!(chunks[2], DONE_MARKER);
     }

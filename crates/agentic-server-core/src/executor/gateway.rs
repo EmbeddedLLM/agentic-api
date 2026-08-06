@@ -619,6 +619,23 @@ mod tests {
         }
     }
 
+    fn parse_named_sse_event(content: &str) -> Value {
+        let mut lines = content.lines();
+        let event_name = lines
+            .next()
+            .and_then(|line| line.strip_prefix("event: "))
+            .expect("SSE event name");
+        let data = lines
+            .next()
+            .and_then(|line| line.strip_prefix("data: "))
+            .expect("SSE data");
+        assert!(lines.all(str::is_empty), "unexpected SSE frame content");
+
+        let event = serde_json::from_str::<Value>(data).expect("event JSON");
+        assert_eq!(event["type"].as_str(), Some(event_name));
+        event
+    }
+
     #[tokio::test]
     async fn hung_gateway_call_times_out_into_error_output() {
         let web_search: ResponsesTool =
@@ -717,8 +734,7 @@ mod tests {
 
         let mut start_events = Vec::new();
         while let Ok(event) = receiver.try_recv() {
-            let data = event.content.strip_prefix("data: ").expect("SSE data").trim();
-            start_events.push(serde_json::from_str::<Value>(data).expect("event JSON"));
+            start_events.push(parse_named_sse_event(&event.content));
         }
         assert_eq!(
             start_events
@@ -769,15 +785,13 @@ mod tests {
             .expect("completed events");
 
         let completed = receiver.try_recv().expect("mcp_call.completed");
-        let completed: Value = serde_json::from_str(completed.content.strip_prefix("data: ").expect("SSE data").trim())
-            .expect("event JSON");
+        let completed = parse_named_sse_event(&completed.content);
         assert_eq!(completed["type"], "response.mcp_call.completed");
         assert_eq!(completed["sequence_number"], 4);
         assert!(completed.get("item").is_none());
 
         let done = receiver.try_recv().expect("output_item.done");
-        let done: Value =
-            serde_json::from_str(done.content.strip_prefix("data: ").expect("SSE data").trim()).expect("event JSON");
+        let done = parse_named_sse_event(&done.content);
         assert_eq!(done["type"], "response.output_item.done");
         assert_eq!(done["sequence_number"], 5);
         assert_eq!(done["item"]["type"], "mcp_call");
@@ -835,10 +849,7 @@ mod tests {
             .expect("failed events");
 
         let events = std::iter::from_fn(|| receiver.try_recv().ok())
-            .map(|event| {
-                serde_json::from_str::<Value>(event.content.strip_prefix("data: ").expect("SSE data").trim())
-                    .expect("event JSON")
-            })
+            .map(|event| parse_named_sse_event(&event.content))
             .collect::<Vec<_>>();
         assert_eq!(
             events

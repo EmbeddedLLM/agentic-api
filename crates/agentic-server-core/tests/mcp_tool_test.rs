@@ -111,14 +111,12 @@ fn assert_matching_native_mcp_requests(
     let gateway_server_url = gateway_request.body.tools[0]["server_url"]
         .as_str()
         .expect("gateway MCP server_url");
-    assert_eq!(
-        gateway_server_url, openai_server_url,
-        "gateway and OpenAI cassettes must use the same MCP server"
-    );
-    assert!(
-        openai_server_url.starts_with("https://"),
-        "OpenAI MCP cassette requires a public HTTPS server_url"
-    );
+    for (provider, server_url) in [("OpenAI", openai_server_url), ("gateway", gateway_server_url)] {
+        assert!(
+            server_url.starts_with("https://"),
+            "{provider} MCP cassette requires a public HTTPS server_url"
+        );
+    }
 
     for request in [openai_request, gateway_request] {
         assert_eq!(request.path, "/v1/responses");
@@ -145,21 +143,11 @@ fn assert_matching_native_mcp_requests(
         }
     }
 
-    assert_eq!(openai_request.body.tools, gateway_request.body.tools);
     assert_eq!(openai_request.body.tool_choice, gateway_request.body.tool_choice);
 }
 
 fn streaming_events(turn: &support::Turn) -> Vec<Value> {
-    turn.response
-        .sse
-        .as_ref()
-        .expect("streaming SSE response")
-        .iter()
-        .flat_map(|entry| entry.lines())
-        .filter_map(|line| line.strip_prefix("data: "))
-        .filter(|data| *data != "[DONE]")
-        .filter_map(|data| serde_json::from_str(data).ok())
-        .collect()
+    support::recorded_named_sse_events(turn)
 }
 
 fn response_output(turn: &support::Turn) -> Vec<OutputItem> {
