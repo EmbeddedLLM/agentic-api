@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::codex::insert_namespace_entries;
+use super::custom::{CustomHandler, CustomToolMap, insert_custom_entry};
 use super::executors::GatewayExecutors;
 use super::function::insert_function_entry;
 use super::mcp::handler::{McpToolMap, McpToolRef};
@@ -23,6 +24,7 @@ use crate::utils::common::serialize_to_value_or_custom_default;
 #[serde(rename_all = "snake_case")]
 pub enum ToolType {
     Function,
+    Custom,
     CodexNamespace,
     Mcp,
     /// Internal routing discriminant. Serializes as `"web_search"`.
@@ -38,6 +40,7 @@ impl ToolType {
     pub(crate) const fn description(self) -> &'static str {
         match self {
             Self::Function => "function tool",
+            Self::Custom => "custom tool",
             Self::CodexNamespace => "Codex namespace tool",
             Self::Mcp => "MCP tool",
             Self::WebSearch => "web search tool",
@@ -48,7 +51,7 @@ impl ToolType {
 
     #[must_use]
     pub const fn is_gateway_owned(self) -> bool {
-        !matches!(self, Self::Function | Self::CodexNamespace)
+        !matches!(self, Self::Function | Self::Custom | Self::CodexNamespace)
     }
 }
 
@@ -163,6 +166,10 @@ pub struct ToolRegistry {
     /// restoration don't rebuild it on every call.
     namespace_map: Option<NamespaceMap>,
 
+    /// Maps normalized custom function names back to their public declarations
+    /// for response lifecycle metadata restoration.
+    custom_tool_map: Option<CustomToolMap>,
+
     /// Maps model-visible MCP function names back to their public server and
     /// tool identities without reparsing executor configuration.
     mcp_tool_map: McpToolMap,
@@ -229,7 +236,7 @@ impl ToolRegistry {
                     insert_unique_tool_entries(&mut entries, |resolved| insert_namespace_entries(resolved, p))?;
                 }
                 ResponsesTool::Custom(p) => {
-                    tracing::debug!(name = %p.name, "client-owned custom tool skipped in function registry");
+                    insert_unique_tool_entries(&mut entries, |resolved| insert_custom_entry(resolved, p))?;
                 }
                 ResponsesTool::Unknown => {
                     tracing::debug!("unknown tool declared but skipped in registry");
@@ -238,10 +245,12 @@ impl ToolRegistry {
         }
 
         let namespace_map = CodexNamespaceHandler.build_namespace_map((!tools.is_empty()).then_some(tools))?;
+        let custom_tool_map = CustomHandler::build_tool_map(tools);
 
         Ok(Self {
             entries,
             namespace_map,
+            custom_tool_map,
             mcp_tool_map,
         })
     }
@@ -249,6 +258,13 @@ impl ToolRegistry {
     #[must_use]
     pub fn lookup(&self, tool_name: &str) -> Option<&ToolEntry> {
         self.entries.get(tool_name)
+    }
+
+    pub(crate) fn tool_type_map(&self) -> HashMap<String, ToolType> {
+        self.entries
+            .iter()
+            .map(|(name, entry)| (name.clone(), entry.tool_type))
+            .collect()
     }
 
     #[must_use]
@@ -275,7 +291,8 @@ impl ToolRegistry {
     }
 
     pub fn restore_stream_event_wire(&self, wire: &mut WireEvent) -> bool {
-        CodexNamespaceHandler.restore_response_wire(wire, self.namespace_map.as_ref())
+        let custom_restored = CustomHandler::restore_response_wire(wire, self.custom_tool_map.as_ref());
+        CodexNamespaceHandler.restore_response_wire(wire, self.namespace_map.as_ref()) | custom_restored
     }
 
     /// Returns the subset of `calls` whose names map to gateway-owned tools.
@@ -422,12 +439,13 @@ mod tests {
             .await
             .expect("mixed registry");
 
-        assert_eq!(registry.len(), 7);
+        assert_eq!(registry.len(), 8);
         assert!(registry.contains_mcp_server_label("counter"));
         assert!(!registry.contains_mcp_server_label("missing"));
 
         let expected_entries = [
             ("echo", ToolType::Function, None, false),
+            ("freeform", ToolType::Custom, None, false),
             ("mcp__counter__increment", ToolType::Mcp, Some("counter"), true),
             ("mcp__counter__get_value", ToolType::Mcp, Some("counter"), true),
             ("web_search", ToolType::WebSearch, None, true),
@@ -452,7 +470,7 @@ mod tests {
             );
             assert_eq!(entry.handler.is_some(), has_handler, "unexpected handler for '{name}'");
         }
-        assert!(registry.lookup("freeform").is_none());
+        assert_eq!(registry.lookup("freeform").unwrap().config["name"], "freeform");
         assert_eq!(registry.lookup("echo").unwrap().config["name"], "echo");
         assert_eq!(
             registry.lookup("mcp__counter__increment").unwrap().config["tool_name"],
@@ -479,7 +497,7 @@ mod tests {
         ] {
             assert!(registry.is_gateway_owned_name(name), "'{name}' should be gateway-owned");
         }
-        for name in ["echo", "agentic_ns__mcp__shell__run"] {
+        for name in ["echo", "freeform", "agentic_ns__mcp__shell__run"] {
             assert!(!registry.is_gateway_owned_name(name), "'{name}' should be client-owned");
         }
 

@@ -26,6 +26,24 @@ pub enum ToolChoice {
     Custom {
         name: NonEmptyToolName,
     },
+    AllowedTools {
+        mode: AllowedToolsMode,
+        tools: Vec<AllowedTool>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AllowedTool {
+    #[serde(rename = "type")]
+    pub type_: NonEmptyToolName,
+    pub name: NonEmptyToolName,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AllowedToolsMode {
+    Auto,
+    Required,
 }
 
 impl Serialize for ToolChoice {
@@ -50,6 +68,13 @@ impl Serialize for ToolChoice {
                 let mut map = serializer.serialize_map(Some(2))?;
                 map.serialize_entry("type", "custom")?;
                 map.serialize_entry("name", name.as_str())?;
+                map.end()
+            }
+            Self::AllowedTools { mode, tools } => {
+                let mut map = serializer.serialize_map(Some(3))?;
+                map.serialize_entry("type", "allowed_tools")?;
+                map.serialize_entry("mode", mode)?;
+                map.serialize_entry("tools", tools)?;
                 map.end()
             }
         }
@@ -92,6 +117,20 @@ impl<'de> Deserialize<'de> for ToolChoice {
                     return Ok(Self::Custom { name });
                 }
 
+                if object.get("type").and_then(Value::as_str) == Some("allowed_tools") {
+                    let mode = object
+                        .get("mode")
+                        .cloned()
+                        .ok_or_else(|| de::Error::missing_field("mode"))?;
+                    let mode = serde_json::from_value(mode).map_err(de::Error::custom)?;
+                    let tools = object
+                        .get("tools")
+                        .cloned()
+                        .ok_or_else(|| de::Error::missing_field("tools"))?;
+                    let tools = serde_json::from_value(tools).map_err(de::Error::custom)?;
+                    return Ok(Self::AllowedTools { mode, tools });
+                }
+
                 if let Some(function) = object.get("function").and_then(Value::as_object) {
                     let namespace = function.get("namespace").and_then(Value::as_str).map(str::to_string);
                     let name = function
@@ -103,14 +142,40 @@ impl<'de> Deserialize<'de> for ToolChoice {
                 }
 
                 Err(de::Error::custom(
-                    "expected tool_choice string, function object, or custom object",
+                    "expected tool_choice string, named tool object, or allowed_tools object",
                 ))
             }
             _ => Err(de::Error::custom(
-                "expected tool_choice string, function object, or custom object",
+                "expected tool_choice string, named tool object, or allowed_tools object",
             )),
         }
     }
+}
+
+impl ToolChoice {
+    /// Converts client-facing custom-tool selectors to the function-tool shape
+    /// used by the normalized upstream tool declarations.
+    #[must_use]
+    pub(crate) fn normalized_for_upstream(&self) -> Self {
+        match self {
+            Self::Custom { name } => Self::Function {
+                namespace: None,
+                name: name.clone(),
+            },
+            Self::AllowedTools { mode, tools } => Self::AllowedTools {
+                mode: *mode,
+                tools: tools.iter().cloned().map(normalize_allowed_tool).collect(),
+            },
+            choice => choice.clone(),
+        }
+    }
+}
+
+fn normalize_allowed_tool(mut tool: AllowedTool) -> AllowedTool {
+    if tool.type_.as_str() == "custom" {
+        tool.type_ = NonEmptyToolName::try_from("function").expect("function is a non-empty tool type");
+    }
+    tool
 }
 
 /// Returns the effective tool list, preferring `request_tools` when explicitly
@@ -168,19 +233,19 @@ mod tests {
 
     #[test]
     fn custom_tool_choice_round_trips() {
-        let expected = serde_json::json!({
+        let custom = serde_json::json!({
             "type": "custom",
             "name": "apply_patch"
         });
 
-        let choice: ToolChoice = serde_json::from_value(expected.clone()).unwrap();
+        let choice: ToolChoice = serde_json::from_value(custom.clone()).unwrap();
         assert_eq!(
             choice,
             ToolChoice::Custom {
                 name: NonEmptyToolName::try_from("apply_patch").unwrap()
             }
         );
-        assert_eq!(serde_json::to_value(choice).unwrap(), expected);
+        assert_eq!(serde_json::to_value(choice).unwrap(), custom);
     }
 
     #[test]
@@ -192,5 +257,38 @@ mod tests {
             }))
             .is_err()
         );
+    }
+
+    #[test]
+    fn allowed_tools_round_trip() {
+        let expected = serde_json::json!({
+            "type": "allowed_tools",
+            "mode": "required",
+            "tools": [
+                {"type": "function", "name": "get_weather"},
+                {"type": "custom", "name": "code_exec"}
+            ]
+        });
+
+        let choice: ToolChoice = serde_json::from_value(expected.clone()).unwrap();
+        assert_eq!(serde_json::to_value(choice).unwrap(), expected);
+    }
+
+    #[test]
+    fn allowed_tools_require_non_empty_type_and_name() {
+        for invalid_tool in [
+            serde_json::json!({"type": "function"}),
+            serde_json::json!({"type": "", "name": "get_weather"}),
+            serde_json::json!({"type": "function", "name": ""}),
+        ] {
+            assert!(
+                serde_json::from_value::<ToolChoice>(serde_json::json!({
+                    "type": "allowed_tools",
+                    "mode": "auto",
+                    "tools": [invalid_tool]
+                }))
+                .is_err()
+            );
+        }
     }
 }

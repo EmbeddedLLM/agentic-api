@@ -7,8 +7,8 @@ use serde_json::{Value, json};
 use super::io::{
     FunctionTool, InputItem, InputMessage, InputMessageContent, OutputItem, ResponseUsage, ResponsesInput, ToolChoice,
 };
-use super::tools::{CustomToolParam, ResponsesTool};
-use crate::tool::{CodexNamespaceHandler, ToolError};
+use super::tools::ResponsesTool;
+use crate::tool::{CodexNamespaceHandler, CustomHandler, ToolError};
 use crate::utils::common::serialize_to_string;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,13 +49,15 @@ pub struct UpstreamRequest<'a> {
     pub stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instructions: Option<&'a str>,
-    /// Tools forwarded to vLLM. Namespace members are flattened to ordinary
-    /// function declarations; native custom declarations retain their freeform
-    /// wire shape.
+    /// Tools forwarded to vLLM. Function-like declarations are normalized to
+    /// ordinary function tools.
     /// Skipped when empty so vLLM does not receive an empty array.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<UpstreamTool>>,
-    #[serde(skip_serializing_if = "is_absent_or_default_tool_choice")]
+    #[serde(
+        skip_serializing_if = "is_absent_or_default_tool_choice",
+        serialize_with = "serialize_upstream_tool_choice"
+    )]
     pub tool_choice: Option<ToolChoice>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include: Option<&'a Vec<String>>,
@@ -74,42 +76,14 @@ pub struct UpstreamRequest<'a> {
     pub cache_salt: Option<&'a str>,
 }
 
-/// A tool declaration supported by the upstream Responses endpoint.
+/// A normalized tool declaration supported by the upstream Responses endpoint.
 ///
-/// Function-like gateway declarations are normalized to [`FunctionTool`],
-/// while freeform custom declarations retain their native Responses shape.
-/// Keeping these as distinct variants prevents unrelated request tool types
-/// from entering the upstream tool list.
-#[derive(Debug, Clone)]
+/// Gateway and client tool declarations are converted to function tools before
+/// entering this upstream-only payload.
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
 pub enum UpstreamTool {
     Function(FunctionTool),
-    Custom(CustomToolParam),
-}
-
-impl Serialize for UpstreamTool {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        match self {
-            Self::Function(tool) => tool.serialize(serializer),
-            Self::Custom(declaration) => {
-                #[derive(Serialize)]
-                struct NativeCustomTool<'a> {
-                    #[serde(rename = "type")]
-                    type_: &'static str,
-                    #[serde(flatten)]
-                    declaration: &'a CustomToolParam,
-                }
-
-                NativeCustomTool {
-                    type_: "custom",
-                    declaration,
-                }
-                .serialize(serializer)
-            }
-        }
-    }
 }
 
 // serde's `skip_serializing_if` requires a `&Option<T>` receiver, so the
@@ -119,21 +93,33 @@ fn is_absent_or_default_tool_choice(choice: &Option<ToolChoice>) -> bool {
     choice.as_ref().is_none_or(|choice| matches!(choice, ToolChoice::Auto))
 }
 
+// serde's `serialize_with` passes a reference to the field's concrete type.
+#[allow(clippy::ref_option)]
+fn serialize_upstream_tool_choice<S>(choice: &Option<ToolChoice>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    choice
+        .as_ref()
+        .map(ToolChoice::normalized_for_upstream)
+        .serialize(serializer)
+}
+
 impl RequestPayload {
     /// Construct an `UpstreamRequest` suitable for forwarding to vLLM.
     ///
     /// Codex `namespace` tools' members are first renamed to their flat,
     /// model-visible names via [`CodexNamespaceHandler::resolve_namespace_members`].
-    /// Namespace and gateway tools are then normalized to function declarations.
-    /// Native custom tools are forwarded unchanged because their calls are not
-    /// function calls. `tool_choice` is resolved the same way via
+    /// Namespace, gateway, and custom tools are then normalized to function
+    /// declarations. `tool_choice` is resolved the same way via
     /// [`CodexNamespaceHandler::resolve_tool_choice`].
     ///
     /// # Errors
     ///
     /// Returns [`ToolError::Config`] when a Codex namespace member's generated
     /// flat name collides with a top-level function tool or another namespace
-    /// member.
+    /// member, or when a custom tool declares a format whose constrained
+    /// decoding cannot be preserved upstream.
     pub fn to_upstream_request(&self, stream: bool) -> Result<UpstreamRequest<'_>, ToolError> {
         let has_built_in_tool = self.declares_built_in_tool();
         if has_built_in_tool && self.parallel_tool_calls == Some(true) {
@@ -152,11 +138,22 @@ impl RequestPayload {
             .as_deref()
             .map(|tools| CodexNamespaceHandler.resolve_namespace_members(tools))
             .transpose()?;
-        let tools: Option<Vec<UpstreamTool>> =
-            renamed_tools.map(|tools| tools.into_iter().flat_map(upstream_tools).collect());
+        if let Some(tools) = &renamed_tools {
+            for tool in tools {
+                tool.validate()?;
+            }
+        }
+        let tools: Option<Vec<UpstreamTool>> = renamed_tools.map(|tools| {
+            tools
+                .iter()
+                .flat_map(ResponsesTool::to_function_tools)
+                .map(UpstreamTool::Function)
+                .collect()
+        });
         let tools = tools.filter(|tools| !tools.is_empty());
         let namespace_map = CodexNamespaceHandler.build_namespace_map(self.tools.as_deref())?;
         let tool_choice = CodexNamespaceHandler.resolve_tool_choice(namespace_map.as_ref(), self.tool_choice.as_ref());
+        CustomHandler::validate_tool_choice(self.tools.as_deref(), &tool_choice)?;
         Ok(UpstreamRequest {
             model: &self.model,
             input: self.input.model_input(),
@@ -214,24 +211,6 @@ pub struct CompactedResponse {
     pub created_at: i64,
     pub output: Vec<InputItem>,
     pub usage: ResponseUsage,
-}
-
-fn upstream_tools(tool: ResponsesTool) -> Vec<UpstreamTool> {
-    match tool {
-        ResponsesTool::Custom(declaration) => {
-            tracing::debug!(
-                name = %declaration.name,
-                has_format = declaration.format.is_some(),
-                "forwarding native custom tool declaration upstream"
-            );
-            vec![UpstreamTool::Custom(declaration)]
-        }
-        function_like => function_like
-            .to_function_tools()
-            .into_iter()
-            .map(UpstreamTool::Function)
-            .collect(),
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -304,7 +283,17 @@ impl From<&ResponsesInput> for Vec<InputItem> {
                 status: None,
                 content: InputMessageContent::Text(text.clone()),
             })],
-            ResponsesInput::Items(items) => items.iter().filter(|item| !item.is_unknown()).cloned().collect(),
+            ResponsesInput::Items(items) => items
+                .iter()
+                .filter_map(|item| match item {
+                    InputItem::Unknown => None,
+                    InputItem::CustomToolCall(call) => Some(InputItem::FunctionCall(call.clone().into())),
+                    InputItem::CustomToolCallOutput(output) => {
+                        Some(InputItem::FunctionCallOutput(output.clone().into()))
+                    }
+                    item => Some(item.clone()),
+                })
+                .collect(),
         }
     }
 }
@@ -318,7 +307,15 @@ impl From<ResponsesInput> for Vec<InputItem> {
                 status: None,
                 content: InputMessageContent::Text(text),
             })],
-            ResponsesInput::Items(items) => items.into_iter().filter(|item| !item.is_unknown()).collect(),
+            ResponsesInput::Items(items) => items
+                .into_iter()
+                .filter_map(|item| match item {
+                    InputItem::Unknown => None,
+                    InputItem::CustomToolCall(call) => Some(InputItem::FunctionCall(call.into())),
+                    InputItem::CustomToolCallOutput(output) => Some(InputItem::FunctionCallOutput(output.into())),
+                    item => Some(item),
+                })
+                .collect(),
         }
     }
 }
@@ -580,7 +577,7 @@ mod tests {
     }
 
     #[test]
-    fn to_upstream_request_serializes_mixed_function_and_native_custom_tools() {
+    fn to_upstream_request_normalizes_custom_tools_to_functions() {
         let payload: RequestPayload = serde_json::from_value(serde_json::json!({
             "model": "test",
             "input": "hi",
@@ -599,11 +596,6 @@ mod tests {
                     "type": "custom",
                     "name": "apply_patch",
                     "description": "Apply a patch.",
-                    "format": {
-                        "type": "grammar",
-                        "syntax": "lark",
-                        "definition": "start: patch"
-                    },
                     "x-provider-field": {"mode": "strict"}
                 }
             ]
@@ -612,21 +604,123 @@ mod tests {
 
         let request = payload.to_upstream_request(false).unwrap();
         let tools = request.tools.as_ref().expect("mixed upstream tools");
-        assert!(matches!(tools[0], UpstreamTool::Function(_)));
-        assert!(matches!(tools[1], UpstreamTool::Custom(_)));
+        let UpstreamTool::Function(first) = &tools[0];
+        let UpstreamTool::Function(second) = &tools[1];
+        assert_eq!(first.name, "read_file");
+        assert_eq!(second.name, "apply_patch");
 
         let upstream = serde_json::to_value(request).unwrap();
         assert_eq!(upstream["tools"][0]["type"], "function");
         assert_eq!(upstream["tools"][0]["name"], "read_file");
-        assert_eq!(upstream["tools"][1]["type"], "custom");
+        assert_eq!(upstream["tools"][1]["type"], "function");
         assert_eq!(upstream["tools"][1]["name"], "apply_patch");
-        assert_eq!(upstream["tools"][1]["description"], "Apply a patch.");
-        assert_eq!(upstream["tools"][1]["format"]["type"], "grammar");
-        assert_eq!(upstream["tools"][1]["format"]["syntax"], "lark");
-        assert_eq!(upstream["tools"][1]["format"]["definition"], "start: patch");
-        assert_eq!(upstream["tools"][1]["x-provider-field"]["mode"], "strict");
-        assert_eq!(upstream["tool_choice"]["type"], "custom");
+        let custom_description = upstream["tools"][1]["description"]
+            .as_str()
+            .expect("custom tool description");
+        assert!(custom_description.contains("Apply a patch."));
+        assert!(custom_description.contains("raw tool input in the `input` string field"));
+        assert!(custom_description.contains("x-provider-field"));
+        assert_eq!(
+            upstream["tools"][1]["parameters"]["properties"]["input"]["type"],
+            "string"
+        );
+        assert_eq!(upstream["tools"][1]["parameters"]["required"][0], "input");
+        assert_eq!(upstream["tool_choice"]["type"], "function");
         assert_eq!(upstream["tool_choice"]["name"], "apply_patch");
+
+        let deserialized: FunctionTool =
+            serde_json::from_value(upstream["tools"][1].clone()).expect("upstream function tool should deserialize");
+        assert_eq!(deserialized.name, "apply_patch");
+    }
+
+    #[test]
+    fn to_upstream_request_rejects_custom_tool_grammar_formats() {
+        let payload: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test",
+            "input": "hi",
+            "tools": [{
+                "type": "custom",
+                "name": "constrained_input",
+                "format": {
+                    "type": "grammar",
+                    "syntax": "lark",
+                    "definition": "start: value"
+                }
+            }]
+        }))
+        .expect("request");
+
+        let error = payload
+            .to_upstream_request(false)
+            .expect_err("unsupported grammar must fail closed");
+        assert!(error.to_string().contains("cannot preserve constrained decoding"));
+    }
+
+    #[test]
+    fn to_upstream_request_normalizes_custom_allowed_tool_choices() {
+        let payload: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test",
+            "input": "hi",
+            "tool_choice": {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [
+                    {"type": "function", "name": "read_file"},
+                    {"type": "custom", "name": "apply_patch"}
+                ]
+            },
+            "tools": [
+                {"type": "function", "name": "read_file"},
+                {"type": "custom", "name": "apply_patch"}
+            ]
+        }))
+        .unwrap();
+
+        let public_choice = serde_json::to_value(payload.tool_choice.as_ref().unwrap()).unwrap();
+        assert_eq!(public_choice["tools"][1]["type"], "custom");
+
+        let upstream = serde_json::to_value(payload.to_upstream_request(false).unwrap()).unwrap();
+        assert_eq!(upstream["tool_choice"]["type"], "allowed_tools");
+        assert_eq!(upstream["tool_choice"]["mode"], "required");
+        assert_eq!(upstream["tool_choice"]["tools"][0]["type"], "function");
+        assert_eq!(upstream["tool_choice"]["tools"][1]["type"], "function");
+        assert_eq!(upstream["tool_choice"]["tools"][1]["name"], "apply_patch");
+    }
+
+    #[test]
+    fn to_upstream_request_rejects_custom_choice_for_function_declaration() {
+        let payload: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test",
+            "input": "hi",
+            "tool_choice": {"type": "custom", "name": "echo"},
+            "tools": [{"type": "function", "name": "echo"}]
+        }))
+        .expect("request");
+
+        let error = payload
+            .to_upstream_request(false)
+            .expect_err("a custom selector must match a custom declaration");
+        assert!(error.to_string().contains("no matching custom tool is declared"));
+    }
+
+    #[test]
+    fn to_upstream_request_rejects_unknown_custom_allowed_tool() {
+        let payload: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test",
+            "input": "hi",
+            "tool_choice": {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [{"type": "custom", "name": "missing"}]
+            },
+            "tools": [{"type": "custom", "name": "apply_patch"}]
+        }))
+        .expect("request");
+
+        let error = payload
+            .to_upstream_request(false)
+            .expect_err("an allowed custom selector must match a custom declaration");
+        assert!(error.to_string().contains("no matching custom tool is declared"));
     }
 
     #[test]

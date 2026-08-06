@@ -128,9 +128,9 @@ pub struct FunctionToolParam {
 
 /// Parameters for a freeform (`type: "custom"`) tool.
 ///
-/// `format` is deliberately opaque: Codex currently sends grammar formats,
-/// and preserving unknown format fields keeps the gateway wire-compatible
-/// with future client and upstream versions.
+/// `format` remains opaque at the wire boundary so declarations round-trip,
+/// but the gateway rejects formatted custom tools before normalization because
+/// it cannot preserve their constrained-decoding semantics upstream.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomToolParam {
     pub name: NonEmptyToolName,

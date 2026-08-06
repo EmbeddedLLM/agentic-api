@@ -1,0 +1,141 @@
+turns:
+- filename: t1
+  request:
+    body:
+      input: You must call the agentic_raw_echo custom tool exactly once with exactly
+        CUSTOM_CASSETTE_OK as its raw text input.
+      max_output_tokens: 2048
+      model: Qwen/Qwen3.5-35B-A3B-FP8
+      store: true
+      stream: false
+      tools:
+      - description: Emit the requested cassette token as raw text. The input must
+          be exactly CUSTOM_CASSETTE_OK.
+        name: agentic_raw_echo
+        type: custom
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      conversation_id: null
+      created_at: 1785841460
+      error: null
+      id: resp_019fcc72-23f7-71b3-96a9-f399659cea1d
+      incomplete_details: null
+      instructions: null
+      model: Qwen/Qwen3.5-35B-A3B-FP8
+      object: response
+      output:
+      - content:
+        - text: 'The user is asking me to call the agentic_raw_echo tool with exactly
+            "CUSTOM_CASSETTE_OK" as the input parameter. Let me do that now.
+
+            '
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_87f33fdc75d1c531
+        status: null
+        summary: []
+        type: reasoning
+      - call_id: chatcmpl-tool-b2c92720fb126709
+        id: ctc_9814cada9df39d58
+        input: CUSTOM_CASSETTE_OK
+        name: agentic_raw_echo
+        status: completed
+        type: custom_tool_call
+      previous_response_id: null
+      status: completed
+      usage:
+        input_tokens: 379
+        input_tokens_details:
+          cached_tokens: 0
+        output_tokens: 70
+        output_tokens_details:
+          reasoning_tokens: 0
+        total_tokens: 449
+    headers:
+      content-type: application/json
+    status_code: 200
+- filename: t2
+  request:
+    body:
+      input:
+      - call_id: chatcmpl-tool-b2c92720fb126709
+        output: CUSTOM_CASSETTE_OUTPUT_OK
+        type: custom_tool_call_output
+      - content: Use the custom tool output provided above. Do not call any tool again.
+          Reply with exactly CUSTOM_CASSETTE_OUTPUT_OK.
+        role: user
+        type: message
+      max_output_tokens: 2048
+      model: Qwen/Qwen3.5-35B-A3B-FP8
+      previous_response_id: resp_019fcc72-23f7-71b3-96a9-f399659cea1d
+      store: true
+      stream: false
+      tools:
+      - description: Emit the requested cassette token as raw text. The input must
+          be exactly CUSTOM_CASSETTE_OK.
+        name: agentic_raw_echo
+        type: custom
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      conversation_id: null
+      created_at: 1785841461
+      error: null
+      id: resp_019fcc72-25f8-7020-b5c6-63ca7d804da6
+      incomplete_details: null
+      instructions: null
+      model: Qwen/Qwen3.5-35B-A3B-FP8
+      object: response
+      output:
+      - content:
+        - text: 'The user wants me to use the custom tool output that was provided
+            above. The tool output was "CUSTOM_CASSETTE_OUTPUT_OK" and the user wants
+            me to reply with exactly that string without calling any tools again.
+
+
+            This is a straightforward instruction - I need to reply with exactly "CUSTOM_CASSETTE_OUTPUT_OK".
+
+            '
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_bc564f627afa6579
+        status: null
+        summary: []
+        type: reasoning
+      - content:
+        - annotations: []
+          text: '
+
+
+            CUSTOM_CASSETTE_OUTPUT_OK'
+          type: output_text
+        id: msg_b563b8d3b4638fae
+        role: assistant
+        status: completed
+        type: message
+      previous_response_id: resp_019fcc72-23f7-71b3-96a9-f399659cea1d
+      status: completed
+      usage:
+        input_tokens: 463
+        input_tokens_details:
+          cached_tokens: 0
+        output_tokens: 78
+        output_tokens_details:
+          reasoning_tokens: 0
+        total_tokens: 541
+    headers:
+      content-type: application/json
+    status_code: 200

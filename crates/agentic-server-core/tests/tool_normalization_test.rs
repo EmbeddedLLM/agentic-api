@@ -314,8 +314,8 @@ fn codex_request_payloads_parse_all_recorded_shapes() {
     }
 }
 
-#[tokio::test]
-async fn codex_custom_cassettes_preserve_native_upstream_shape_and_client_ownership() {
+#[test]
+fn codex_custom_grammar_cassettes_fail_closed_before_upstream_normalization() {
     for filename in CODEX_CUSTOM_CASSETTES {
         let cassette = load_codex_cassette(filename);
         assert_eq!(cassette.turns.len(), 2, "{filename} should have two turns");
@@ -336,31 +336,18 @@ async fn codex_custom_cassettes_preserve_native_upstream_shape_and_client_owners
                 "{filename} turn {i}: expected native custom grammar declaration"
             );
 
-            let mut registry_tools = tools.clone();
-            let registry = ToolRegistry::build_with_handlers(&mut registry_tools, &mut GatewayExecutors::default())
-                .await
-                .unwrap_or_else(|err| panic!("{filename} turn {i}: registry failed: {err}"));
+            // The historical gateway and OpenAI cassettes both returned the
+            // only value allowed by this Lark grammar, but the prompt requested
+            // that exact value too. OpenAI constrained generation; the old
+            // gateway only exposed the grammar as model guidance, so matching
+            // output did not prove equivalent enforcement. Reject the format
+            // rather than silently normalizing it to an unconstrained function.
+            let error = payload
+                .to_upstream_request(false)
+                .expect_err("custom grammar must be rejected before normalization");
             assert!(
-                registry.lookup("agentic_raw_echo").is_none(),
-                "{filename} turn {i}: custom tool must remain client-owned"
-            );
-
-            let upstream = upstream_request_value(payload, false);
-            let upstream_tools = upstream
-                .get("tools")
-                .and_then(Value::as_array)
-                .unwrap_or_else(|| panic!("{filename} turn {i}: upstream request should contain tools"));
-            assert!(
-                upstream_tools.iter().any(|tool| {
-                    tool.get("type").and_then(Value::as_str) == Some("custom")
-                        && tool.get("name").and_then(Value::as_str) == Some("agentic_raw_echo")
-                        && tool
-                            .get("format")
-                            .and_then(|format| format.get("definition"))
-                            .and_then(Value::as_str)
-                            == Some("start: \"CUSTOM_CASSETTE_OK\"")
-                }),
-                "{filename} turn {i}: custom declaration must be forwarded natively"
+                error.to_string().contains("cannot preserve constrained decoding"),
+                "{filename} turn {i}: unexpected validation error: {error}"
             );
         }
     }

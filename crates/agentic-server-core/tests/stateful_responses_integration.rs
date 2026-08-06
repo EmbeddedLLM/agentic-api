@@ -433,7 +433,7 @@ async fn test_previous_response_id_rehydrates_function_call_before_tool_output()
     let mut second = make_request("ignored", true, false, Some(p1.id), None);
     second.input = ResponsesInput::Items(vec![InputItem::FunctionCallOutput(FunctionToolResultMessage {
         call_id: "call_1".to_string(),
-        output: "{\"stdout\":\"/workspace\"}".to_string(),
+        output: "{\"stdout\":\"/workspace\"}".into(),
     })]);
     let _p2 = unwrap_blocking(
         execute(second, Arc::clone(&fixture.exec_ctx))
@@ -787,7 +787,7 @@ fn upstream_mcp_fixture_call(id: &str, call_id: &str, name: &str, arguments: &st
 fn tool_output(call_id: &str, output: &str) -> InputItem {
     InputItem::FunctionCallOutput(FunctionToolResultMessage {
         call_id: call_id.to_string(),
-        output: output.to_string(),
+        output: output.into(),
     })
 }
 

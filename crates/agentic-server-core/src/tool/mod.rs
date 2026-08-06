@@ -4,6 +4,7 @@
 //! This module owns the behavioral layer: routing, handler interface, and normalization.
 
 pub mod codex;
+pub mod custom;
 pub mod executors;
 pub mod function;
 pub mod handler;
@@ -13,6 +14,7 @@ pub mod registry;
 pub mod web_search;
 
 pub use codex::{CodexNamespaceHandler, NamespaceMap, model_visible_namespace_member_name};
+pub use custom::CustomHandler;
 pub use executors::{GatewayExecutorRegistration, GatewayExecutors};
 pub use function::FunctionHandler;
 pub use handler::{GatewayExecutor, ToolError, ToolHandler, ToolOutput};

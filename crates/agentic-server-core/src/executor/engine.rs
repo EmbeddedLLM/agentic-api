@@ -17,7 +17,7 @@ use super::gateway::{
     GatewayCallResult, LoopDecision, append_gateway_calls_to_new_input, append_output_items_to_input,
     append_tool_outputs, classify_round, emit_gateway_completed_events, emit_gateway_start_events,
     execute_and_emit_output_calls, execute_output_calls, gateway_event_plans, has_client_owned_calls,
-    is_gateway_owned_call, public_output_items,
+    is_client_custom_call, is_gateway_owned_call, public_output_items,
 };
 use super::gateway_accumulator::{GatewayStreamAccumulator, StreamEvent, error_sse_chunk};
 use crate::events::EventFrame;
@@ -262,13 +262,21 @@ async fn execute_and_emit_ordered_output_calls(
     let first_gateway_index = output_items
         .iter()
         .position(|item| matches!(item, OutputItem::FunctionCall(call) if is_gateway_owned_call(call, registry)));
-    let first_gateway_run_end = first_gateway_index.map_or(0, |start| {
-        output_items[start..]
-            .iter()
-            .take_while(|item| matches!(item, OutputItem::FunctionCall(call) if is_gateway_owned_call(call, registry)))
-            .count()
-            .saturating_add(start)
-    });
+    let first_gateway_run_end = first_gateway_index
+        .filter(|start| {
+            !output_items[..*start]
+                .iter()
+                .any(|item| matches!(item, OutputItem::FunctionCall(call) if is_client_custom_call(call, registry)))
+        })
+        .map_or(0, |start| {
+            output_items[start..]
+                .iter()
+                .take_while(
+                    |item| matches!(item, OutputItem::FunctionCall(call) if is_gateway_owned_call(call, registry)),
+                )
+                .count()
+                .saturating_add(start)
+        });
     let first_gateway_run_len = first_gateway_run_end.saturating_sub(first_gateway_index.unwrap_or(0));
     emit_gateway_start_events(&event_plans[..first_gateway_run_len], stream_accumulator, stream_sender)?;
 

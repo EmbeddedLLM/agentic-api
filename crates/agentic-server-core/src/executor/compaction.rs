@@ -86,9 +86,9 @@ fn item_has_meaningful_context(item: &InputItem) -> bool {
             }),
         },
         InputItem::FunctionCall(call) => !call.name.trim().is_empty() || !call.arguments.trim().is_empty(),
-        InputItem::FunctionCallOutput(output) => !output.output.trim().is_empty(),
+        InputItem::FunctionCallOutput(output) => output.output.has_content(),
         InputItem::CustomToolCall(call) => !call.name.trim().is_empty() || !call.input.trim().is_empty(),
-        InputItem::CustomToolCallOutput(output) => value_has_content(&output.output),
+        InputItem::CustomToolCallOutput(output) => output.output.has_content(),
         InputItem::Reasoning(reasoning) => {
             reasoning.content.iter().any(|content| !content.text.trim().is_empty())
                 || reasoning.summary.iter().any(value_has_content)
@@ -391,7 +391,7 @@ mod tests {
             user_message("first"),
             InputItem::FunctionCallOutput(FunctionToolResultMessage {
                 call_id: "call_1".to_owned(),
-                output: "tool output".to_owned(),
+                output: "tool output".into(),
             }),
             user_message("second"),
         ];
@@ -428,7 +428,7 @@ mod tests {
             user_message("hello context"),
             InputItem::FunctionCallOutput(FunctionToolResultMessage {
                 call_id: "call_1".to_owned(),
-                output: "substantial tool output".to_owned(),
+                output: "substantial tool output".into(),
             }),
         ]);
 

@@ -1,0 +1,220 @@
+turns:
+- filename: t1
+  request:
+    body:
+      input: You must call the agentic_raw_echo custom tool exactly once with exactly
+        CUSTOM_CASSETTE_OK as its raw text input.
+      max_output_tokens: 2048
+      model: gpt-5.6
+      store: true
+      stream: false
+      tools:
+      - description: Emit the requested cassette token as raw text. The input must
+          be exactly CUSTOM_CASSETTE_OK.
+        name: agentic_raw_echo
+        type: custom
+    headers:
+      accept: '*/*'
+      authorization: Bearer ***
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      background: false
+      billing:
+        payer: developer
+      completed_at: 1785841454
+      created_at: 1785841453
+      error: null
+      frequency_penalty: 0.0
+      id: resp_01014eb0097f04f3006a71c72d48e4819b92b6c043a845ed57
+      incomplete_details: null
+      instructions: null
+      max_output_tokens: 2048
+      max_tool_calls: null
+      metadata: {}
+      model: gpt-5.6-sol
+      moderation: null
+      object: response
+      output:
+      - call_id: call_JDSSJwEPgXXYnkfXkb7CLVLF
+        id: ctc_01014eb0097f04f3006a71c72e2d40819bbefefdd49524c78b
+        input: 'CUSTOM_CASSETTE_OK
+
+          '
+        name: agentic_raw_echo
+        status: completed
+        type: custom_tool_call
+      parallel_tool_calls: true
+      presence_penalty: 0.0
+      previous_response_id: null
+      prompt_cache_key: null
+      prompt_cache_retention: 24h
+      reasoning:
+        context: all_turns
+        effort: medium
+        mode: standard
+        summary: null
+      safety_identifier: null
+      service_tier: default
+      status: completed
+      store: true
+      temperature: 1.0
+      text:
+        format:
+          type: text
+        verbosity: medium
+      tool_choice: auto
+      tool_usage:
+        image_gen:
+          input_tokens: 0
+          input_tokens_details:
+            image_tokens: 0
+            text_tokens: 0
+          output_tokens: 0
+          output_tokens_details:
+            image_tokens: 0
+            text_tokens: 0
+          total_tokens: 0
+        web_search:
+          num_requests: 0
+      tools:
+      - description: Emit the requested cassette token as raw text. The input must
+          be exactly CUSTOM_CASSETTE_OK.
+        format:
+          type: text
+        name: agentic_raw_echo
+        type: custom
+      top_logprobs: 0
+      top_p: 0.98
+      truncation: disabled
+      usage:
+        input_tokens: 95
+        input_tokens_details:
+          cache_write_tokens: 0
+          cached_tokens: 0
+        output_tokens: 20
+        output_tokens_details:
+          reasoning_tokens: 0
+        total_tokens: 115
+      user: null
+    headers:
+      content-type: application/json
+    status_code: 200
+- filename: t2
+  request:
+    body:
+      input:
+      - call_id: call_JDSSJwEPgXXYnkfXkb7CLVLF
+        output: CUSTOM_CASSETTE_OUTPUT_OK
+        type: custom_tool_call_output
+      - content: Use the custom tool output provided above. Do not call any tool again.
+          Reply with exactly CUSTOM_CASSETTE_OUTPUT_OK.
+        role: user
+        type: message
+      max_output_tokens: 2048
+      model: gpt-5.6
+      previous_response_id: resp_01014eb0097f04f3006a71c72d48e4819b92b6c043a845ed57
+      store: true
+      stream: false
+      tools:
+      - description: Emit the requested cassette token as raw text. The input must
+          be exactly CUSTOM_CASSETTE_OK.
+        name: agentic_raw_echo
+        type: custom
+    headers:
+      accept: '*/*'
+      authorization: Bearer ***
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      background: false
+      billing:
+        payer: developer
+      completed_at: 1785841455
+      created_at: 1785841455
+      error: null
+      frequency_penalty: 0.0
+      id: resp_01014eb0097f04f3006a71c72ef1dc819bbbaefbe3a5ad0ff7
+      incomplete_details: null
+      instructions: null
+      max_output_tokens: 2048
+      max_tool_calls: null
+      metadata: {}
+      model: gpt-5.6-sol
+      moderation: null
+      object: response
+      output:
+      - content:
+        - annotations: []
+          logprobs: []
+          text: CUSTOM_CASSETTE_OUTPUT_OK
+          type: output_text
+        id: msg_01014eb0097f04f3006a71c72fd210819bb751b115cd0730fc
+        phase: final_answer
+        role: assistant
+        status: completed
+        type: message
+      parallel_tool_calls: true
+      presence_penalty: 0.0
+      previous_response_id: resp_01014eb0097f04f3006a71c72d48e4819b92b6c043a845ed57
+      prompt_cache_key: null
+      prompt_cache_retention: 24h
+      reasoning:
+        context: all_turns
+        effort: medium
+        mode: standard
+        summary: null
+      safety_identifier: null
+      service_tier: default
+      status: completed
+      store: true
+      temperature: 1.0
+      text:
+        format:
+          type: text
+        verbosity: medium
+      tool_choice: auto
+      tool_usage:
+        image_gen:
+          input_tokens: 0
+          input_tokens_details:
+            image_tokens: 0
+            text_tokens: 0
+          output_tokens: 0
+          output_tokens_details:
+            image_tokens: 0
+            text_tokens: 0
+          total_tokens: 0
+        web_search:
+          num_requests: 0
+      tools:
+      - description: Emit the requested cassette token as raw text. The input must
+          be exactly CUSTOM_CASSETTE_OK.
+        format:
+          type: text
+        name: agentic_raw_echo
+        type: custom
+      top_logprobs: 0
+      top_p: 0.98
+      truncation: disabled
+      usage:
+        input_tokens: 165
+        input_tokens_details:
+          cache_write_tokens: 0
+          cached_tokens: 0
+        output_tokens: 11
+        output_tokens_details:
+          reasoning_tokens: 0
+        total_tokens: 176
+      user: null
+    headers:
+      content-type: application/json
+    status_code: 200

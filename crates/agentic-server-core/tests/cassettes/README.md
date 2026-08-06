@@ -166,6 +166,7 @@ turns:
 | `record_reasoning_cassettes.sh` | 2 reasoning cassettes (single turn, streaming + non-streaming) | vLLM |
 | `record_tool_call_cassettes.sh` | 8 tool-call cassettes (4 tool_choice modes x streaming + non-streaming) | vLLM |
 | `record_codex_cli_tool_call_cassettes.sh` | Codex function/namespace/custom-tool matrix | gateway, vLLM, and OpenAI |
+| `record_custom_tool_cassettes.sh` | Matching two-turn custom-tool flows (streaming + non-streaming) | gateway and OpenAI reference |
 | `record_mcp_cassettes.sh` | Native MCP counter tool discovery and calls (streaming + non-streaming) | gateway and OpenAI reference |
 | `record_web_search_cassettes.sh` | Matching web-search calls (streaming + non-streaming) | gateway and OpenAI reference |
 
@@ -201,6 +202,21 @@ The default records both providers. Use `WEB_SEARCH_RECORD_SET=gateway` or
 OPENAI_API_KEY=sk-... \
 bash crates/agentic-server-core/tests/cassettes/record_web_search_cassettes.sh
 ```
+
+### Custom tool (gateway and OpenAI)
+
+This records an unformatted freeform custom tool, including the
+`custom_tool_call_output` continuation. Grammar-constrained custom tools are
+covered separately by unit tests because the gateway intentionally rejects
+formats that normalization cannot preserve.
+
+```bash
+OPENAI_API_KEY=sk-... \
+bash crates/agentic-server-core/tests/cassettes/record_custom_tool_cassettes.sh
+```
+
+Use `CUSTOM_TOOL_RECORD_SET=gateway` or `CUSTOM_TOOL_RECORD_SET=openai` to
+record only one provider.
 
 ### Codex custom tools (gateway, vLLM, and OpenAI)
 

@@ -16,6 +16,7 @@ use futures::{Stream, StreamExt};
 
 use crate::events::{EventFrame, EventPayload, SSEEventType, SSEItemType, normalize_sse_line};
 use crate::executor::error::{ExecutorError, ExecutorResult};
+use crate::executor::function_sse::{FunctionSseTranslation, FunctionSseTranslator};
 use crate::types::event::{MessageStatus, ResponseStatus};
 use crate::types::io::{
     ApplyDone, CustomToolCall, FunctionToolCall, OutputItem, OutputMessage, OutputTextContent, ReasoningOutput,
@@ -90,6 +91,23 @@ impl InFlight {
 struct InFlightEntry {
     output_index: u32,
     item: InFlight,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct AccumulatedFunctionCall<'a> {
+    pub(super) item: &'a FunctionToolCall,
+    pub(super) output_index: u32,
+    arguments: &'a str,
+}
+
+impl AccumulatedFunctionCall<'_> {
+    pub(super) fn arguments(&self) -> &str {
+        if self.item.arguments.is_empty() {
+            self.arguments
+        } else {
+            &self.item.arguments
+        }
+    }
 }
 
 /// Accumulates LLM response chunks from streaming or non-streaming sources.
@@ -251,6 +269,53 @@ impl ResponseAccumulator {
         Some(frame)
     }
 
+    pub(super) fn process_sse_line_with_translator(
+        &mut self,
+        line: &str,
+        translator: &mut FunctionSseTranslator,
+    ) -> ExecutorResult<Option<FunctionSseTranslation>> {
+        let Some(frame) = self.process_sse_line(line) else {
+            return Ok(None);
+        };
+        let call_key = function_event_key(&frame.payload);
+        let call = call_key.and_then(|(item_id, output_index)| self.accumulated_function_call(item_id, output_index));
+        translator.translate(frame, call).map(Some)
+    }
+
+    fn accumulated_function_call(&self, item_id: &str, output_index: u32) -> Option<AccumulatedFunctionCall<'_>> {
+        let entry = self
+            .in_flight
+            .get(item_id)
+            .filter(|entry| matches!(entry.item, InFlight::FunctionCall { .. }))
+            .or_else(|| {
+                self.in_flight.values().find(|entry| {
+                    entry.output_index == output_index && matches!(entry.item, InFlight::FunctionCall { .. })
+                })
+            });
+        if let Some(InFlightEntry {
+            output_index,
+            item: InFlight::FunctionCall { item, arguments },
+        }) = entry
+        {
+            return Some(AccumulatedFunctionCall {
+                item,
+                output_index: *output_index,
+                arguments,
+            });
+        }
+
+        self.completed.iter().rev().find_map(|(completed_index, item)| {
+            let OutputItem::FunctionCall(item) = item else {
+                return None;
+            };
+            (*completed_index == output_index).then_some(AccumulatedFunctionCall {
+                item,
+                output_index: *completed_index,
+                arguments: &item.arguments,
+            })
+        })
+    }
+
     fn capture_terminal_details(&mut self, frame: &EventFrame) {
         let Some(response) = frame.wire.rest.get("response") else {
             return;
@@ -292,16 +357,6 @@ impl ResponseAccumulator {
             (SSEEventType::OutputItemAdded, payload @ EventPayload::OutputItemAdded { .. }) => {
                 self.start_output_item(payload);
             }
-            (
-                SSEEventType::OutputItemDone,
-                EventPayload::OutputItemDone {
-                    item_id,
-                    item_type: SSEItemType::CustomToolCall,
-                    output_index,
-                    item,
-                    ..
-                },
-            ) => self.complete_custom_tool_call(item_id, *output_index, item),
             (SSEEventType::OutputItemDone, payload @ EventPayload::OutputItemDone { .. }) => {
                 self.complete_call_item(payload);
             }
@@ -421,31 +476,6 @@ impl ResponseAccumulator {
         self.usage = usage;
     }
 
-    fn complete_custom_tool_call(&mut self, item_id: &str, output_index: u32, raw_item: &serde_json::Value) {
-        let Some(OutputItem::CustomToolCall(mut call)) = deserialize_from_value_opt::<OutputItem>(raw_item.clone())
-        else {
-            return;
-        };
-
-        if let Some(InFlight::CustomToolCall { item, input }) =
-            self.in_flight.get_mut(item_id).map(|entry| &mut entry.item)
-        {
-            if call.input.is_empty() {
-                call.input = if item.input.is_empty() {
-                    std::mem::take(input)
-                } else {
-                    std::mem::take(&mut item.input)
-                };
-            } else {
-                input.clear();
-            }
-            *item = call;
-        } else {
-            // Some Responses-compatible providers omit `output_item.added`.
-            self.completed.push((output_index, OutputItem::CustomToolCall(call)));
-        }
-    }
-
     fn complete_call_item(&mut self, payload: &EventPayload) {
         let EventPayload::OutputItemDone {
             item_id,
@@ -457,48 +487,56 @@ impl ResponseAccumulator {
         else {
             return;
         };
-        if *item_type == SSEItemType::WebSearchCall {
-            let Some(OutputItem::WebSearchCall(mut call)) = deserialize_from_value_opt::<OutputItem>(raw_item.clone())
-            else {
+        let in_flight_key = self.in_flight_call_key(item_id, *item_type, *output_index);
+        let done_item = deserialize_from_value_opt::<OutputItem>(raw_item.clone());
+        if let Some(entry) = in_flight_key.as_deref().and_then(|key| self.in_flight.get_mut(key)) {
+            match (&mut entry.item, done_item) {
+                (InFlight::FunctionCall { item, arguments }, _) => item.apply_done(payload, arguments),
+                (InFlight::CustomToolCall { item, input }, _) => item.apply_done(payload, input),
+                (InFlight::McpCall { item }, _) => item.apply_done(payload, &mut String::new()),
+                (InFlight::WebSearchCall { item }, Some(OutputItem::WebSearchCall(mut call))) => {
+                    if call.id.is_empty() {
+                        call.id = in_flight_key
+                            .as_deref()
+                            .filter(|id| !id.is_empty())
+                            .map_or_else(|| uuid7_str("ws_"), str::to_owned);
+                    }
+                    *item = Some(call);
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        if let Some(
+            mut output_item @ (OutputItem::FunctionCall(_)
+            | OutputItem::CustomToolCall(_)
+            | OutputItem::WebSearchCall(_)
+            | OutputItem::McpCall(_)),
+        ) = done_item
+        {
+            let OutputItem::WebSearchCall(call) = &mut output_item else {
+                self.completed.push((*output_index, output_item));
                 return;
             };
-            let in_flight_key = self
-                .in_flight
-                .get(item_id)
-                .filter(|entry| matches!(entry.item, InFlight::WebSearchCall { .. }))
-                .map(|_| item_id.to_owned())
-                .or_else(|| {
-                    self.in_flight.iter().find_map(|(key, entry)| {
-                        (entry.output_index == *output_index && matches!(entry.item, InFlight::WebSearchCall { .. }))
-                            .then(|| key.clone())
-                    })
-                });
             if call.id.is_empty() {
-                call.id = in_flight_key
-                    .as_deref()
-                    .filter(|id| !id.is_empty())
-                    .map_or_else(|| uuid7_str("ws_"), str::to_owned);
+                call.id = uuid7_str("ws_");
             }
-            if let Some(InFlight::WebSearchCall { item }) = in_flight_key
-                .as_deref()
-                .and_then(|key| self.in_flight.get_mut(key))
-                .map(|entry| &mut entry.item)
-            {
-                *item = Some(call);
-            } else {
-                self.completed.push((*output_index, OutputItem::WebSearchCall(call)));
-            }
-            return;
-        }
-        if let (SSEItemType::McpCall, Some(InFlight::McpCall { item })) =
-            (item_type, self.in_flight.get_mut(item_id).map(|entry| &mut entry.item))
-        {
-            item.apply_done(payload, &mut String::new());
-            return;
-        }
-        if let Some(output_item @ OutputItem::McpCall(_)) = deserialize_from_value_opt::<OutputItem>(raw_item.clone()) {
             self.completed.push((*output_index, output_item));
         }
+    }
+
+    fn in_flight_call_key(&self, item_id: &str, item_type: SSEItemType, output_index: u32) -> Option<String> {
+        self.in_flight
+            .get(item_id)
+            .filter(|entry| in_flight_matches_call_type(&entry.item, item_type))
+            .map(|_| item_id.to_owned())
+            .or_else(|| {
+                self.in_flight.iter().find_map(|(key, entry)| {
+                    (entry.output_index == output_index && in_flight_matches_call_type(&entry.item, item_type))
+                        .then(|| key.clone())
+                })
+            })
     }
 
     /// Marks the response as incomplete due to an error or interruption.
@@ -534,6 +572,40 @@ impl ResponseAccumulator {
             conversation_id: self.conversation_id,
             instructions: instructions.map(str::to_string),
         }
+    }
+}
+
+fn in_flight_matches_call_type(item: &InFlight, item_type: SSEItemType) -> bool {
+    matches!(
+        (item, item_type),
+        (InFlight::FunctionCall { .. }, SSEItemType::FunctionCall)
+            | (InFlight::CustomToolCall { .. }, SSEItemType::CustomToolCall)
+            | (InFlight::WebSearchCall { .. }, SSEItemType::WebSearchCall)
+            | (InFlight::McpCall { .. }, SSEItemType::McpCall)
+    )
+}
+
+fn function_event_key(payload: &EventPayload) -> Option<(&str, u32)> {
+    match payload {
+        EventPayload::OutputItemAdded {
+            item_id,
+            item_type: SSEItemType::FunctionCall,
+            output_index,
+            ..
+        }
+        | EventPayload::OutputItemDone {
+            item_id,
+            item_type: SSEItemType::FunctionCall,
+            output_index,
+            ..
+        }
+        | EventPayload::FunctionCallArgsDelta {
+            item_id, output_index, ..
+        }
+        | EventPayload::FunctionCallArgsDone {
+            item_id, output_index, ..
+        } => Some((item_id, *output_index)),
+        _ => None,
     }
 }
 
@@ -1430,6 +1502,63 @@ mod tests {
     }
 
     #[test]
+    fn test_output_item_done_restores_initially_unnamed_function_call() {
+        let lines = vec![
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"","name":"","arguments":"","status":"in_progress"}}"#.to_string(),
+            r#"data: {"type":"response.function_call_arguments.delta","output_index":0,"item_id":"fc_1","delta":"{\"input\":\"hello\"}"}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"raw_echo","arguments":"","status":"completed"}}"#.to_string(),
+            r#"data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","usage":null}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert_eq!(acc.output.len(), 1);
+        let OutputItem::FunctionCall(call) = &acc.output[0] else {
+            panic!("expected function_call");
+        };
+        assert_eq!(call.id, "fc_1");
+        assert_eq!(call.call_id, "call_1");
+        assert_eq!(call.name, "raw_echo");
+        assert_eq!(call.arguments, r#"{"input":"hello"}"#);
+        assert_eq!(call.status, MessageStatus::Completed);
+    }
+
+    #[test]
+    fn test_function_call_done_matches_empty_added_id_by_output_index() {
+        let lines = vec![
+            r#"data: {"type":"response.output_item.added","output_index":3,"item":{"type":"function_call","id":"","call_id":"","name":"","arguments":"","status":"in_progress"}}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":3,"item":{"type":"function_call","id":"fc_done","call_id":"call_done","name":"raw_echo","arguments":"{}","status":"completed"}}"#.to_string(),
+            r#"data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","usage":null}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert_eq!(acc.output.len(), 1);
+        let OutputItem::FunctionCall(call) = &acc.output[0] else {
+            panic!("expected function_call");
+        };
+        assert_eq!(call.id, "fc_done");
+        assert_eq!(call.call_id, "call_done");
+        assert_eq!(call.name, "raw_echo");
+    }
+
+    #[test]
+    fn test_done_only_function_call_is_completed() {
+        let lines = vec![
+            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"get_weather","arguments":"{\"city\":\"Paris\"}","status":"completed"}}"#.to_string(),
+            r#"data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","usage":null}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert_eq!(acc.output.len(), 1);
+        let OutputItem::FunctionCall(call) = &acc.output[0] else {
+            panic!("expected function_call");
+        };
+        assert_eq!(call.id, "fc_1");
+        assert_eq!(call.call_id, "call_1");
+        assert_eq!(call.name, "get_weather");
+        assert_eq!(call.arguments, r#"{"city":"Paris"}"#);
+    }
+
+    #[test]
     fn test_function_call_empty_item_id_generates_uuid() {
         let mut acc = ResponseAccumulator::new("resp_1".into(), None);
 
@@ -1562,7 +1691,7 @@ mod tests {
     fn test_custom_tool_call_accumulates_freeform_input() {
         let lines = vec![
             r#"data: {"type":"response.created","response":{"id":"resp_custom"}}"#.to_string(),
-            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"id":"ctc_1","type":"custom_tool_call","call_id":"call_1","name":"apply_patch","input":"","status":"in_progress"}}"#.to_string(),
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"id":"ctc_1","type":"custom_tool_call","call_id":"","name":"","input":"","status":"in_progress"}}"#.to_string(),
             r#"data: {"type":"response.custom_tool_call_input.delta","item_id":"ctc_1","output_index":0,"delta":"*** Begin"}"#.to_string(),
             r#"data: {"type":"response.custom_tool_call_input.delta","item_id":"ctc_1","output_index":0,"delta":" Patch"}"#.to_string(),
             r#"data: {"type":"response.custom_tool_call_input.done","item_id":"ctc_1","output_index":0,"input":""}"#.to_string(),
@@ -1579,5 +1708,26 @@ mod tests {
         assert_eq!(call.name, "apply_patch");
         assert_eq!(call.input, "*** Begin Patch");
         assert_eq!(call.status, Some(MessageStatus::Completed));
+    }
+
+    #[test]
+    fn test_reasoning_before_done_only_custom_tool_call_preserves_order() {
+        let lines = vec![
+            r#"data: {"type":"response.created","response":{"id":"resp_custom"}}"#.to_string(),
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning","summary":[]}}"#.to_string(),
+            r#"data: {"type":"response.reasoning_text.done","text":"thinking...","item_id":"rs_1"}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":1,"item":{"id":"ctc_1","type":"custom_tool_call","call_id":"call_1","name":"raw_echo","input":"hello","status":"completed"}}"#.to_string(),
+            r#"data: {"type":"response.completed","response":{"id":"resp_custom","status":"completed","usage":null}}"#.to_string(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert_eq!(acc.output.len(), 2);
+        assert!(matches!(acc.output[0], OutputItem::Reasoning(_)));
+        let OutputItem::CustomToolCall(call) = &acc.output[1] else {
+            panic!("expected CustomToolCall");
+        };
+        assert_eq!(call.call_id, "call_1");
+        assert_eq!(call.name, "raw_echo");
+        assert_eq!(call.input, "hello");
     }
 }

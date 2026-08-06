@@ -108,6 +108,12 @@ pub(super) fn is_gateway_owned_call(call: &FunctionToolCall, registry: &ToolRegi
         .is_some_and(|entry| entry.tool_type.is_gateway_owned())
 }
 
+pub(super) fn is_client_custom_call(call: &FunctionToolCall, registry: &ToolRegistry) -> bool {
+    registry
+        .lookup(&call.name)
+        .is_some_and(|entry| entry.tool_type == ToolType::Custom)
+}
+
 pub(super) fn has_client_owned_calls(output_items: &[OutputItem], registry: &ToolRegistry) -> bool {
     output_items.iter().any(|item| item.requires_client_action(registry))
 }
@@ -193,7 +199,11 @@ fn gateway_public_output(
         ToolType::Mcp => registry
             .mcp_tool_ref(&call.name)
             .map(|tool_ref| crate::tool::mcp::handler::output_item(call, output, status, tool_ref)),
-        ToolType::Function | ToolType::CodexNamespace | ToolType::FileSearch | ToolType::CodeInterpreter => None,
+        ToolType::Function
+        | ToolType::Custom
+        | ToolType::CodexNamespace
+        | ToolType::FileSearch
+        | ToolType::CodeInterpreter => None,
     }
 }
 
@@ -229,6 +239,13 @@ pub(super) fn public_output_items(
     output_items
         .iter()
         .map(|item| match item {
+            OutputItem::FunctionCall(call)
+                if registry
+                    .lookup(&call.name)
+                    .is_some_and(|entry| entry.tool_type == ToolType::Custom) =>
+            {
+                crate::tool::CustomHandler::output_item(call)
+            }
             OutputItem::FunctionCall(call) if is_gateway_owned_call(call, registry) => gateway_results
                 .iter()
                 .find(|result| result.call.call_id == call.call_id)
@@ -261,6 +278,7 @@ pub(super) fn gateway_event_plans(
                         .mcp_tool_ref(&call.name)
                         .map(|tool_ref| crate::tool::mcp::handler::started_output_item(call, tool_ref)),
                     ToolType::Function
+                    | ToolType::Custom
                     | ToolType::CodexNamespace
                     | ToolType::FileSearch
                     | ToolType::CodeInterpreter => None,

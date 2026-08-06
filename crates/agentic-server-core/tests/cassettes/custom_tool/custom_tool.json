@@ -1,0 +1,7 @@
+[
+  {
+    "type": "custom",
+    "name": "agentic_raw_echo",
+    "description": "Emit the requested cassette token as raw text. The input must be exactly CUSTOM_CASSETTE_OK."
+  }
+]

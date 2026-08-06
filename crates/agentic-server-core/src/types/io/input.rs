@@ -15,7 +15,25 @@ pub struct InputTextContent {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InputImageContent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InputFileContent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_data: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
 }
 
@@ -59,7 +77,50 @@ pub enum InputMessageContent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionToolResultMessage {
     pub call_id: String,
-    pub output: String,
+    pub output: ToolCallOutput,
+}
+
+/// Text or structured content returned by a client-owned tool call.
+///
+/// The Responses API accepts either a string or an array containing text,
+/// image, and file input content. Keeping the array structured preserves its
+/// media semantics when a custom-tool output is normalized to a function-tool
+/// output for the upstream model.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ToolCallOutput {
+    Text(String),
+    Content(Vec<ToolOutputContent>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ToolOutputContent {
+    InputText(InputTextContent),
+    InputImage(InputImageContent),
+    InputFile(InputFileContent),
+}
+
+impl ToolCallOutput {
+    #[must_use]
+    pub fn has_content(&self) -> bool {
+        match self {
+            Self::Text(text) => !text.trim().is_empty(),
+            Self::Content(content) => !content.is_empty(),
+        }
+    }
+}
+
+impl From<String> for ToolCallOutput {
+    fn from(output: String) -> Self {
+        Self::Text(output)
+    }
+}
+
+impl From<&str> for ToolCallOutput {
+    fn from(output: &str) -> Self {
+        Self::Text(output.to_owned())
+    }
 }
 
 /// A model-generated function call replayed as Responses input.
@@ -93,6 +154,19 @@ impl From<FunctionToolCall> for InputFunctionToolCall {
     }
 }
 
+impl From<CustomToolCall> for InputFunctionToolCall {
+    fn from(call: CustomToolCall) -> Self {
+        Self {
+            id: function_call_item_id(&call.id),
+            call_id: call.call_id,
+            name: call.name,
+            namespace: None,
+            arguments: serde_json::json!({ "input": call.input }).to_string(),
+            status: call.status,
+        }
+    }
+}
+
 /// An opaque compacted context checkpoint accepted as Responses input.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompactionItem {
@@ -107,7 +181,16 @@ pub struct CustomToolCallOutputMessage {
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    pub output: Value,
+    pub output: ToolCallOutput,
+}
+
+impl From<CustomToolCallOutputMessage> for FunctionToolResultMessage {
+    fn from(output: CustomToolCallOutputMessage) -> Self {
+        Self {
+            call_id: output.call_id,
+            output: output.output,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -121,8 +204,7 @@ pub enum InputItem {
     FunctionCall(InputFunctionToolCall),
     #[serde(rename = "function_call_output")]
     FunctionCallOutput(FunctionToolResultMessage),
-    /// The model's freeform invocation, retained when rehydrating the matching
-    /// client-provided `custom_tool_call_output` on the next turn.
+    /// The public freeform invocation accepted from a client request.
     #[serde(rename = "custom_tool_call")]
     CustomToolCall(CustomToolCall),
     #[serde(rename = "custom_tool_call_output")]
@@ -231,6 +313,7 @@ impl ResponsesInput {
         let Self::Items(items) = self else {
             return Cow::Borrowed(self);
         };
+
         let Some(window) = latest_compaction_window(items) else {
             return Cow::Borrowed(self);
         };
@@ -252,6 +335,16 @@ impl ResponsesInput {
             .collect();
         Cow::Owned(Self::Items(model_items))
     }
+}
+
+fn function_call_item_id(item_id: &str) -> Option<String> {
+    if item_id.is_empty() {
+        return None;
+    }
+    if let Some(suffix) = item_id.strip_prefix("ctc_").filter(|suffix| !suffix.is_empty()) {
+        return Some(format!("fc_{suffix}"));
+    }
+    Some(item_id.to_owned())
 }
 
 #[cfg(test)]
@@ -284,6 +377,46 @@ mod tests {
         }));
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn structured_custom_tool_output_is_preserved_when_normalized() {
+        let content = serde_json::json!([
+            {"type": "input_text", "text": "diagram"},
+            {"type": "input_image", "image_url": "data:image/png;base64,abc", "detail": "low"},
+            {"type": "input_file", "file_id": "file_123", "filename": "report.pdf"}
+        ]);
+        let item: InputItem = serde_json::from_value(serde_json::json!({
+            "type": "custom_tool_call_output",
+            "call_id": "call_1",
+            "output": content
+        }))
+        .expect("valid structured custom-tool output");
+
+        let InputItem::CustomToolCallOutput(output) = item else {
+            panic!("expected custom-tool output");
+        };
+        let normalized = FunctionToolResultMessage::from(output);
+        let value = serde_json::to_value(normalized).expect("normalized output serializes");
+
+        assert_eq!(value["output"], content);
+    }
+
+    #[test]
+    fn custom_tool_output_rejects_unsupported_shapes() {
+        for output in [
+            serde_json::json!({"result": "not a supported top-level object"}),
+            serde_json::json!([{"type": "output_text", "text": "wrong content type"}]),
+            serde_json::json!(["content items must be objects"]),
+        ] {
+            let result = serde_json::from_value::<InputItem>(serde_json::json!({
+                "type": "custom_tool_call_output",
+                "call_id": "call_1",
+                "output": output
+            }));
+
+            assert!(result.is_err(), "unsupported custom-tool output should fail");
+        }
     }
 
     #[test]
@@ -320,5 +453,36 @@ mod tests {
         assert_eq!(serialized[1]["role"], "assistant");
         assert_eq!(serialized[1]["content"][0]["text"], "latest summary");
         assert_eq!(serialized[2]["content"], "keep me");
+    }
+
+    #[test]
+    fn custom_items_convert_to_function_history() {
+        let input: ResponsesInput = serde_json::from_value(serde_json::json!([
+            {
+                "type": "custom_tool_call",
+                "id": "ctc_1",
+                "call_id": "call_1",
+                "name": "raw_echo",
+                "input": "hello",
+                "status": "completed"
+            },
+            {
+                "type": "custom_tool_call_output",
+                "call_id": "call_1",
+                "output": "done"
+            }
+        ]))
+        .expect("custom history");
+
+        let canonical_value = serde_json::to_value(Vec::<InputItem>::from(&input)).expect("canonical items");
+        assert_eq!(canonical_value[0]["type"], "function_call");
+        assert_eq!(canonical_value[0]["id"], "fc_1");
+        assert_eq!(canonical_value[0]["arguments"], r#"{"input":"hello"}"#);
+        assert_eq!(canonical_value[1]["type"], "function_call_output");
+        assert_eq!(canonical_value[1]["output"], "done");
+
+        let public_value = serde_json::to_value(input).expect("public input");
+        assert_eq!(public_value[0]["type"], "custom_tool_call");
+        assert_eq!(public_value[1]["type"], "custom_tool_call_output");
     }
 }
