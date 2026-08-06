@@ -1,5 +1,6 @@
 use agentic_core::executor::accumulator::ResponseAccumulator;
 use agentic_core::tool::{GatewayExecutors, ToolRegistry, ToolType};
+use agentic_core::types::io::output::McpListTools;
 use agentic_core::types::io::{McpCall, OutputItem};
 use agentic_core::types::tools::ResponsesTool;
 use serde_json::{Value, json};
@@ -215,6 +216,40 @@ fn mcp_calls(output: &[OutputItem]) -> Vec<&McpCall> {
         .collect()
 }
 
+fn mcp_list_tools(output: &[OutputItem]) -> &McpListTools {
+    let items = output
+        .iter()
+        .filter_map(|item| match item {
+            OutputItem::McpListTools(list_tools) => Some(list_tools),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(items.len(), 1, "response should contain one mcp_list_tools item");
+    items[0]
+}
+
+fn normalized_mcp_list_tools_item(item: &Value) -> Value {
+    json!({
+        "server_label": item["server_label"],
+        "tools": item["tools"],
+        "error": item.get("error").cloned().unwrap_or(Value::Null),
+    })
+}
+
+fn assert_list_tools_output_matches_openai(openai: &[OutputItem], gateway: &[OutputItem]) {
+    let expected = mcp_list_tools(openai);
+    let actual = mcp_list_tools(gateway);
+    assert!(expected.id.starts_with("mcpl_"));
+    assert!(actual.id.starts_with("mcpl_"));
+
+    let expected = serde_json::to_value(expected).expect("OpenAI mcp_list_tools JSON");
+    let actual = serde_json::to_value(actual).expect("gateway mcp_list_tools JSON");
+    assert_eq!(
+        normalized_mcp_list_tools_item(&actual),
+        normalized_mcp_list_tools_item(&expected)
+    );
+}
+
 fn normalized_json_string(value: &str) -> Value {
     serde_json::from_str(value).unwrap_or_else(|_| Value::String(value.to_owned()))
 }
@@ -224,6 +259,8 @@ fn normalized_optional_output(output: Option<&str>) -> Value {
 }
 
 fn assert_calls_match_openai(openai: &[OutputItem], gateway: &[OutputItem], compare_arguments: bool) {
+    assert_list_tools_output_matches_openai(openai, gateway);
+
     let expected = mcp_calls(openai);
     let actual = mcp_calls(gateway);
     assert_eq!(actual.len(), expected.len());
@@ -250,6 +287,76 @@ fn assert_calls_match_openai(openai: &[OutputItem], gateway: &[OutputItem], comp
             assert!(normalized_json_string(&expected.arguments).is_object());
         }
     }
+}
+
+fn assert_mcp_list_tools_lifecycle(events: &[Value]) -> Value {
+    let sequence_numbers = events
+        .iter()
+        .map(|event| {
+            event["sequence_number"]
+                .as_u64()
+                .unwrap_or_else(|| panic!("event missing sequence_number: {event}"))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        sequence_numbers,
+        (0..u64::try_from(events.len()).expect("event count fits in u64")).collect::<Vec<_>>()
+    );
+
+    let lifecycle = events
+        .iter()
+        .filter(|event| {
+            event["type"]
+                .as_str()
+                .is_some_and(|event_type| event_type.starts_with("response.mcp_list_tools."))
+                || matches!(
+                    event["type"].as_str(),
+                    Some("response.output_item.added" | "response.output_item.done")
+                ) && event["item"]["type"] == "mcp_list_tools"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        lifecycle
+            .iter()
+            .filter_map(|event| event["type"].as_str())
+            .collect::<Vec<_>>(),
+        [
+            "response.output_item.added",
+            "response.mcp_list_tools.in_progress",
+            "response.mcp_list_tools.completed",
+            "response.output_item.done",
+        ]
+    );
+
+    let item_id = lifecycle[0]["item"]["id"]
+        .as_str()
+        .expect("mcp_list_tools added item id");
+    assert!(item_id.starts_with("mcpl_"));
+    assert!(
+        lifecycle
+            .iter()
+            .all(|event| { event["item"]["id"].as_str().or_else(|| event["item_id"].as_str()) == Some(item_id) })
+    );
+
+    let output_index = &lifecycle[0]["output_index"];
+    assert!(lifecycle.iter().all(|event| &event["output_index"] == output_index));
+    assert_eq!(lifecycle[0]["item"]["tools"], json!([]));
+    assert_eq!(lifecycle[0]["item"]["server_label"], "counter");
+
+    let done_item = &lifecycle[3]["item"];
+    assert_eq!(done_item["server_label"], "counter");
+    assert!(!done_item["tools"].as_array().expect("discovered tools").is_empty());
+
+    let terminal_item = events
+        .iter()
+        .rev()
+        .find(|event| event["type"] == "response.completed")
+        .and_then(|event| event["response"]["output"].as_array())
+        .and_then(|output| output.iter().find(|item| item["type"] == "mcp_list_tools"))
+        .expect("terminal response mcp_list_tools item");
+    assert_eq!(terminal_item, done_item);
+
+    done_item.clone()
 }
 
 fn mcp_call_event_traces(events: &[Value]) -> Vec<(String, Vec<String>)> {
@@ -322,6 +429,12 @@ fn normalized_mcp_item_transitions(events: &[Value]) -> HashMap<String, Vec<Valu
 fn assert_streaming_contract_matches_openai(openai: &support::Turn, gateway: &support::Turn) {
     let expected = streaming_events(openai);
     let actual = streaming_events(gateway);
+    let expected_list_tools = assert_mcp_list_tools_lifecycle(&expected);
+    let actual_list_tools = assert_mcp_list_tools_lifecycle(&actual);
+    assert_eq!(
+        normalized_mcp_list_tools_item(&actual_list_tools),
+        normalized_mcp_list_tools_item(&expected_list_tools)
+    );
     assert_eq!(mcp_call_event_traces(&actual), mcp_call_event_traces(&expected));
     assert_eq!(
         normalized_mcp_item_transitions(&actual),
@@ -335,7 +448,7 @@ fn assert_streaming_contract_matches_openai(openai: &support::Turn, gateway: &su
 }
 
 #[test]
-fn mcp_tool_listing_has_no_calls_on_either_provider() {
+fn mcp_tool_listing_matches_openai_without_calls() {
     let (openai, gateway) = load_scenario_pair("list-tools", true);
     assert_matching_native_mcp_requests(&openai, &gateway, true, None);
 
