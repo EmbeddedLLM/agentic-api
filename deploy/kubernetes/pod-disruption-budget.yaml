@@ -1,0 +1,14 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: agentic-api
+  labels:
+    app.kubernetes.io/name: agentic-api
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: agentic-api
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agentic-api
+      app.kubernetes.io/component: gateway
