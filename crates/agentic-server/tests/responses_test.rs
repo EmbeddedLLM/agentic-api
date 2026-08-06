@@ -262,9 +262,15 @@ fn conflict_error() -> serde_json::Value {
 
 fn sse_events(body: &str) -> Vec<serde_json::Value> {
     body.split("\n\n")
-        .filter_map(|frame| frame.strip_prefix("data: "))
-        .filter(|data| *data != "[DONE]")
-        .map(|data| serde_json::from_str(data).expect("SSE data should be JSON"))
+        .filter(|frame| !frame.is_empty() && *frame != "data: [DONE]")
+        .map(|frame| {
+            let (event_line, data_line) = frame.split_once('\n').expect("named SSE event and data lines");
+            let event_name = event_line.strip_prefix("event: ").expect("SSE event header");
+            let data = data_line.strip_prefix("data: ").expect("SSE data");
+            let event: serde_json::Value = serde_json::from_str(data).expect("SSE data should be JSON");
+            assert_eq!(event["type"].as_str(), Some(event_name));
+            event
+        })
         .collect()
 }
 

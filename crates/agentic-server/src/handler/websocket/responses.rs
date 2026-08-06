@@ -375,7 +375,7 @@ async fn stream_ws_response(
                     let Some(line) = line else {
                         break;
                     };
-                    forward_ws_stream_line(sender, &line).await?;
+                    forward_ws_stream_chunk(sender, &line).await?;
                 }
             }
             continue;
@@ -410,7 +410,7 @@ async fn stream_ws_response(
         let Some(line) = next_line else {
             break;
         };
-        forward_ws_stream_line(sender, &line).await?;
+        forward_ws_stream_chunk(sender, &line).await?;
     }
 
     Ok(())
@@ -424,7 +424,7 @@ fn sse_json_data_lines(chunk: &str) -> impl Iterator<Item = &str> {
         .filter(|data| *data != "[DONE]")
 }
 
-async fn forward_ws_stream_line(sender: &mut WsSender, chunk: &str) -> Result<(), WsError> {
+async fn forward_ws_stream_chunk(sender: &mut WsSender, chunk: &str) -> Result<(), WsError> {
     for data in sse_json_data_lines(chunk) {
         let value = serde_json::from_str::<Value>(data)
             .map_err(ExecutorError::from)

@@ -163,16 +163,7 @@ fn assert_matching_native_mcp_requests(
 }
 
 fn streaming_events(turn: &support::Turn) -> Vec<Value> {
-    turn.response
-        .sse
-        .as_ref()
-        .expect("streaming SSE response")
-        .iter()
-        .flat_map(|entry| entry.lines())
-        .filter_map(|line| line.strip_prefix("data: "))
-        .filter(|data| *data != "[DONE]")
-        .filter_map(|data| serde_json::from_str(data).ok())
-        .collect()
+    support::recorded_named_sse_events(turn)
 }
 
 fn response_output(turn: &support::Turn) -> Vec<OutputItem> {

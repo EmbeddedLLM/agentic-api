@@ -86,13 +86,7 @@ async fn test_single_turn_streaming_emits_response_completed_event() {
         panic!("expected streaming response");
     };
     let chunks = stream.collect::<Vec<_>>().await;
-    let events = chunks
-        .iter()
-        .filter_map(|chunk| {
-            let data = chunk.trim_end_matches('\n').strip_prefix("data: ")?;
-            (data != "[DONE]").then(|| serde_json::from_str::<Value>(data).expect("stream event JSON"))
-        })
-        .collect::<Vec<_>>();
+    let events = support::streamed_sse_events(&chunks);
 
     assert!(
         !events
@@ -136,10 +130,7 @@ async fn test_stream_persists_when_client_disconnects_after_completion_event() {
         let Some(chunk) = stream.next().await else {
             panic!("stream ended before response.completed");
         };
-        let Some(data) = chunk.trim_end_matches('\n').strip_prefix("data: ") else {
-            continue;
-        };
-        let Ok(event) = serde_json::from_str::<Value>(data) else {
+        let Some(event) = support::streamed_sse_event(&chunk) else {
             continue;
         };
         if event["type"] == "response.completed" {

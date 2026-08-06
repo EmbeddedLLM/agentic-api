@@ -183,14 +183,21 @@ pub(super) fn emit_sse_frame(
 
 fn serialize_sse_frame(frame: &EventFrame) -> ExecutorResult<String> {
     let event_json = serialize_to_string(&frame.wire).map_err(ExecutorError::JsonError)?;
-    let Some(event_name) =
+    let event_name =
         frame.wire.event_type.as_deref().filter(|event_name| {
             !event_name.is_empty() && !event_name.bytes().any(|byte| matches!(byte, b'\r' | b'\n'))
-        })
-    else {
-        return Ok(format!("data: {event_json}\n\n"));
-    };
-    Ok(format!("event: {event_name}\ndata: {event_json}\n\n"))
+        });
+    let event_name_len = event_name.map_or(0, str::len);
+    let mut chunk = String::with_capacity(event_name_len + event_json.len() + 16);
+    if let Some(event_name) = event_name {
+        chunk.push_str("event: ");
+        chunk.push_str(event_name);
+        chunk.push('\n');
+    }
+    chunk.push_str("data: ");
+    chunk.push_str(&event_json);
+    chunk.push_str("\n\n");
+    Ok(chunk)
 }
 
 #[cfg(test)]
@@ -285,6 +292,7 @@ mod tests {
         let chunk = accumulator
             .terminal_response_chunk(&payload)
             .expect("terminal event serializes");
+        assert!(chunk.starts_with("event: response.in_progress\n"));
         assert!(chunk.contains("\"type\":\"response.in_progress\""));
         assert!(chunk.contains("\"sequence_number\":1"));
     }
