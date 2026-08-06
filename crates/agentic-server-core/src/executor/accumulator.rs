@@ -18,6 +18,7 @@ use crate::events::{EventFrame, EventPayload, SSEEventType, SSEItemType, normali
 use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::executor::function_sse::{FunctionSseTranslation, FunctionSseTranslator};
 use crate::types::event::{MessageStatus, ResponseStatus};
+use crate::types::io::output::McpListTools;
 use crate::types::io::{
     ApplyDone, CustomToolCall, FunctionToolCall, OutputItem, OutputMessage, OutputTextContent, ReasoningOutput,
     ReasoningTextContent, ResponseUsage,
@@ -36,6 +37,7 @@ enum InFlight {
     CustomToolCall { item: CustomToolCall, input: String },
     WebSearchCall { item: Option<WebSearchCall> },
     McpCall { item: McpCall },
+    McpListTools { item: McpListTools },
 }
 
 impl std::fmt::Debug for InFlight {
@@ -47,6 +49,7 @@ impl std::fmt::Debug for InFlight {
             Self::CustomToolCall { .. } => write!(f, "InFlight::CustomToolCall {{ .. }}"),
             Self::WebSearchCall { .. } => write!(f, "InFlight::WebSearchCall {{ .. }}"),
             Self::McpCall { .. } => write!(f, "InFlight::McpCall {{ .. }}"),
+            Self::McpListTools { .. } => write!(f, "InFlight::McpListTools {{ .. }}"),
         }
     }
 }
@@ -83,6 +86,7 @@ impl InFlight {
             }
             Self::WebSearchCall { item } => item.map(OutputItem::WebSearchCall),
             Self::McpCall { item } => Some(OutputItem::McpCall(item)),
+            Self::McpListTools { item } => Some(OutputItem::McpListTools(item)),
         }
     }
 }
@@ -458,6 +462,9 @@ impl ResponseAccumulator {
             SSEItemType::WebSearchCall if !item_id.is_empty() => Some(InFlight::WebSearchCall { item: None }),
             SSEItemType::WebSearchCall => None,
             SSEItemType::McpCall => McpCall::try_from(payload).ok().map(|item| InFlight::McpCall { item }),
+            SSEItemType::McpListTools => McpListTools::try_from(payload)
+                .ok()
+                .map(|item| InFlight::McpListTools { item }),
         };
         if let Some(item) = item {
             self.in_flight.insert(
@@ -494,6 +501,7 @@ impl ResponseAccumulator {
                 (InFlight::FunctionCall { item, arguments }, _) => item.apply_done(payload, arguments),
                 (InFlight::CustomToolCall { item, input }, _) => item.apply_done(payload, input),
                 (InFlight::McpCall { item }, _) => item.apply_done(payload, &mut String::new()),
+                (InFlight::McpListTools { item }, _) => item.apply_done(payload, &mut String::new()),
                 (InFlight::WebSearchCall { item }, Some(OutputItem::WebSearchCall(mut call))) => {
                     if call.id.is_empty() {
                         call.id = in_flight_key
@@ -512,7 +520,8 @@ impl ResponseAccumulator {
             mut output_item @ (OutputItem::FunctionCall(_)
             | OutputItem::CustomToolCall(_)
             | OutputItem::WebSearchCall(_)
-            | OutputItem::McpCall(_)),
+            | OutputItem::McpCall(_)
+            | OutputItem::McpListTools(_)),
         ) = done_item
         {
             let OutputItem::WebSearchCall(call) = &mut output_item else {
@@ -582,6 +591,7 @@ fn in_flight_matches_call_type(item: &InFlight, item_type: SSEItemType) -> bool 
             | (InFlight::CustomToolCall { .. }, SSEItemType::CustomToolCall)
             | (InFlight::WebSearchCall { .. }, SSEItemType::WebSearchCall)
             | (InFlight::McpCall { .. }, SSEItemType::McpCall)
+            | (InFlight::McpListTools { .. }, SSEItemType::McpListTools)
     )
 }
 
@@ -803,6 +813,45 @@ mod tests {
         assert_eq!(acc.status, ResponseStatus::Completed);
         assert_eq!(acc.output.len(), 1);
         assert!(matches!(acc.output[0], OutputItem::McpCall(_)));
+    }
+
+    #[test]
+    fn test_process_event_mcp_list_tools_done_accumulates_output() {
+        let added = r#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"mcp_list_tools","id":"mcpl_1","server_label":"counter","tools":[]}}"#;
+        let remaining = [
+            r#"data: {"type":"response.mcp_list_tools.in_progress","item_id":"mcpl_1","output_index":0}"#.to_string(),
+            r#"data: {"type":"response.mcp_list_tools.completed","item_id":"mcpl_1","output_index":0}"#.to_string(),
+            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"mcp_list_tools","id":"mcpl_1","server_label":"counter","tools":[{"name":"increment","description":"Increment the counter","input_schema":{"type":"object","properties":{}},"annotations":{"read_only":false}}]}}"#.to_string(),
+            r#"data: {"type":"response.done","response":{"id":"resp_1","status":"completed"}}"#.to_string(),
+        ];
+
+        let mut acc = ResponseAccumulator::new("resp_1".to_owned(), None);
+        acc.process_sse_line(added);
+        let Some(InFlightEntry {
+            output_index: 0,
+            item: InFlight::McpListTools { item },
+        }) = acc.in_flight.get("mcpl_1")
+        else {
+            panic!("expected in-flight mcp_list_tools");
+        };
+        assert!(item.server_label.is_empty());
+        assert!(item.tools.is_empty());
+
+        for line in remaining {
+            acc.process_sse_line(&line);
+        }
+        acc.finalize_all();
+
+        assert_eq!(acc.status, ResponseStatus::Completed);
+        assert_eq!(acc.output.len(), 1);
+        let OutputItem::McpListTools(item) = &acc.output[0] else {
+            panic!("expected mcp_list_tools");
+        };
+        assert_eq!(item.id, "mcpl_1");
+        assert_eq!(item.server_label, "counter");
+        assert_eq!(item.tools.len(), 1);
+        assert_eq!(item.tools[0].name, "increment");
+        assert_eq!(item.tools[0].annotations, Some(serde_json::json!({"read_only": false})));
     }
 
     #[test]

@@ -7,6 +7,9 @@ use crate::events::{EventFrame, SSEEventType, WireEvent};
 use crate::executor::accumulator::ResponseAccumulator;
 use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::executor::function_sse::FunctionSseTranslator;
+use crate::executor::gateway::{
+    emit_gateway_completed_events, emit_gateway_start_events, mcp_list_tools_event_plans, public_output_items,
+};
 use crate::executor::gateway_accumulator::{GatewayStreamAccumulator, StreamEvent, emit_sse_frame};
 use crate::executor::inference::{call_inference, fetch_response_json};
 use crate::executor::request::{ExecutionContext, RequestContext};
@@ -99,12 +102,16 @@ pub(super) async fn fetch_stream_payload(
                 };
                 for frame in translation.frames {
                     if !is_terminal_response_event(frame.event_type) {
-                        emit_or_defer_stream_frame(
+                        let event_type = frame.event_type;
+                        let emitted = emit_or_defer_stream_frame(
                             frame,
                             &mut emit_ctx,
                             defer_from_output_index,
                             &mut deferred_events,
                         )?;
+                        if event_type == SSEEventType::ResponseInProgress && emitted {
+                            emit_mcp_discovery_lifecycle(registry, emit_ctx.accumulator, emit_ctx.sender)?;
+                        }
                     }
                 }
                 if defer_from_output_index != previous_defer_from_output_index {
@@ -184,13 +191,14 @@ fn should_defer_stream_event(frame: &EventFrame, defer_from_output_index: Option
     })
 }
 
-fn emit_stream_frame(frame: &mut EventFrame, emit_ctx: &mut StreamEmitContext<'_>) -> ExecutorResult<()> {
+fn emit_stream_frame(frame: &mut EventFrame, emit_ctx: &mut StreamEmitContext<'_>) -> ExecutorResult<bool> {
     apply_context_response_ids(&mut frame.wire, emit_ctx.request);
     emit_ctx.registry.restore_stream_event_wire(&mut frame.wire);
-    if emit_ctx.accumulator.process_event(frame, emit_ctx.output_offset) {
+    let emitted = emit_ctx.accumulator.process_event(frame, emit_ctx.output_offset);
+    if emitted {
         emit_sse_frame(emit_ctx.sender, frame)?;
     }
-    Ok(())
+    Ok(emitted)
 }
 
 fn emit_or_defer_stream_frame(
@@ -198,10 +206,10 @@ fn emit_or_defer_stream_frame(
     emit_ctx: &mut StreamEmitContext<'_>,
     defer_from_output_index: Option<u64>,
     deferred_events: &mut Vec<EventFrame>,
-) -> ExecutorResult<()> {
+) -> ExecutorResult<bool> {
     if should_defer_stream_event(&frame, defer_from_output_index) {
         deferred_events.push(frame);
-        return Ok(());
+        return Ok(false);
     }
     emit_stream_frame(&mut frame, emit_ctx)
 }
@@ -216,6 +224,23 @@ fn flush_released_stream_frames(
         emit_or_defer_stream_frame(frame, emit_ctx, defer_from_output_index, deferred_events)?;
     }
     Ok(())
+}
+
+fn emit_mcp_discovery_lifecycle(
+    registry: &ToolRegistry,
+    stream_accumulator: &mut GatewayStreamAccumulator,
+    stream_sender: &tokio::sync::mpsc::UnboundedSender<StreamEvent>,
+) -> ExecutorResult<()> {
+    let discovered_output = registry
+        .mcp_list_tools_items()
+        .iter()
+        .map(crate::tool::mcp::handler::list_tools_output_item)
+        .collect::<Vec<_>>();
+    let public_output = public_output_items(&discovered_output, registry, &[]);
+    let event_plans = mcp_list_tools_event_plans(&public_output, 0);
+
+    emit_gateway_start_events(&event_plans, stream_accumulator, stream_sender)?;
+    emit_gateway_completed_events(&public_output, &event_plans, stream_accumulator, stream_sender)
 }
 
 fn is_terminal_response_event(event_type: SSEEventType) -> bool {

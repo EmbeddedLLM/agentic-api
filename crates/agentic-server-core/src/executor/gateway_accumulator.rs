@@ -154,7 +154,7 @@ pub(super) fn error_sse_chunk(message: &str, sequence_number: u64) -> String {
         wire,
     };
     serialize_sse_frame(&frame).unwrap_or_else(|_| {
-        format!("data: {{\"type\":\"error\",\"status\":500,\"sequence_number\":{sequence_number}}}\n\n")
+        format!("event: error\ndata: {{\"type\":\"error\",\"status\":500,\"sequence_number\":{sequence_number}}}\n\n")
     })
 }
 
@@ -183,13 +183,29 @@ pub(super) fn emit_sse_frame(
 
 fn serialize_sse_frame(frame: &EventFrame) -> ExecutorResult<String> {
     let event_json = serialize_to_string(&frame.wire).map_err(ExecutorError::JsonError)?;
-    Ok(format!("data: {event_json}\n\n"))
+    let Some(event_name) =
+        frame.wire.event_type.as_deref().filter(|event_name| {
+            !event_name.is_empty() && !event_name.bytes().any(|byte| matches!(byte, b'\r' | b'\n'))
+        })
+    else {
+        return Ok(format!("data: {event_json}\n\n"));
+    };
+    Ok(format!("event: {event_name}\ndata: {event_json}\n\n"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::StorageError;
+
+    fn parse_named_sse_event(chunk: &str) -> (&str, serde_json::Value) {
+        let body = chunk.strip_suffix("\n\n").expect("SSE event terminator");
+        let (event_line, data_line) = body.split_once('\n').expect("named SSE event and data lines");
+        let event_name = event_line.strip_prefix("event: ").expect("SSE event prefix");
+        let data = data_line.strip_prefix("data: ").expect("SSE data prefix");
+        let event = serde_json::from_str(data).expect("valid event JSON");
+        (event_name, event)
+    }
 
     #[test]
     fn process_sse_line_numbers_and_rebases_output_index() {
@@ -210,12 +226,9 @@ mod tests {
     #[test]
     fn error_sse_chunk_escapes_error_messages() {
         let chunk = error_sse_chunk("task failed: \"unexpected\"\nretry", 7);
-        let data = chunk
-            .trim_end_matches('\n')
-            .strip_prefix("data: ")
-            .expect("SSE data prefix");
-        let event: serde_json::Value = serde_json::from_str(data).expect("valid error event JSON");
+        let (event_name, event) = parse_named_sse_event(&chunk);
 
+        assert_eq!(event_name, "error");
         assert_eq!(event["type"], "error");
         assert_eq!(event["sequence_number"], 7);
         assert_eq!(event["error"]["message"], "task failed: \"unexpected\"\nretry");
@@ -230,12 +243,9 @@ mod tests {
             },
         }));
         let chunk = accumulator.executor_error_chunk(&error);
-        let data = chunk
-            .trim_end_matches('\n')
-            .strip_prefix("data: ")
-            .expect("SSE data prefix");
-        let event: serde_json::Value = serde_json::from_str(data).expect("valid error event JSON");
+        let (event_name, event) = parse_named_sse_event(&chunk);
 
+        assert_eq!(event_name, "error");
         assert_eq!(event["type"], "error");
         assert_eq!(event["status"], 400);
         assert_eq!(
@@ -277,5 +287,28 @@ mod tests {
             .expect("terminal event serializes");
         assert!(chunk.contains("\"type\":\"response.in_progress\""));
         assert!(chunk.contains("\"sequence_number\":1"));
+    }
+
+    #[test]
+    fn serialize_sse_frame_uses_wire_event_type_as_event_name() {
+        let frame = synthetic_event(SSEEventType::McpListToolsInProgress, []).expect("synthetic event");
+        let chunk = serialize_sse_frame(&frame).expect("event serializes");
+        let (event_name, event) = parse_named_sse_event(&chunk);
+
+        assert_eq!(event_name, "response.mcp_list_tools.in_progress");
+        assert_eq!(event["type"], event_name);
+    }
+
+    #[test]
+    fn serialize_sse_frame_omits_invalid_event_name() {
+        let frame = EventFrame {
+            event_type: SSEEventType::Other,
+            payload: EventPayload::None,
+            wire: WireEvent::new("error\nevent: injected"),
+        };
+        let chunk = serialize_sse_frame(&frame).expect("event serializes");
+
+        assert!(chunk.starts_with("data: "));
+        assert!(!chunk.contains("\nevent: injected\n"));
     }
 }

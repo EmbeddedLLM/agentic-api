@@ -68,6 +68,9 @@ fn extract_payload(event_type: SSEEventType, json: &Value) -> EventPayload {
         | SSEEventType::McpCallArgumentsDone
         | SSEEventType::McpCallCompleted
         | SSEEventType::McpCallFailed
+        | SSEEventType::McpListToolsInProgress
+        | SSEEventType::McpListToolsCompleted
+        | SSEEventType::McpListToolsFailed
         | SSEEventType::Other => EventPayload::Raw(json.clone()),
     }
 }
@@ -181,5 +184,34 @@ fn extract_reasoning_done(json: &Value) -> EventPayload {
     EventPayload::ReasoningDone {
         text: json_str(json, "text"),
         item_id: json_str(json, "item_id"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mcp_list_tools_lifecycle_events_preserve_raw_payloads() {
+        for (wire_name, expected_type) in [
+            (
+                "response.mcp_list_tools.in_progress",
+                SSEEventType::McpListToolsInProgress,
+            ),
+            ("response.mcp_list_tools.completed", SSEEventType::McpListToolsCompleted),
+            ("response.mcp_list_tools.failed", SSEEventType::McpListToolsFailed),
+        ] {
+            let line =
+                format!(r#"data: {{"type":"{wire_name}","item_id":"mcpl_1","output_index":0,"sequence_number":3}}"#);
+            let frame = normalize_sse_line(&line).expect("valid MCP list-tools lifecycle event");
+
+            assert_eq!(frame.event_type, expected_type);
+            let EventPayload::Raw(payload) = frame.payload else {
+                panic!("expected raw lifecycle payload");
+            };
+            assert_eq!(payload["item_id"], "mcpl_1");
+            assert_eq!(frame.wire.output_index, Some(0));
+            assert_eq!(frame.wire.sequence_number, Some(3));
+        }
     }
 }

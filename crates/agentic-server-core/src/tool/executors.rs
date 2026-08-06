@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use super::mcp::handler::McpServerToolSet;
 use super::mcp::{McpClientPool, McpDiscoveredHandler, McpHandler};
 use super::registry::ToolType;
 use super::web_search::WebSearchHandler;
@@ -89,6 +90,16 @@ impl GatewayExecutors {
     /// Returns a configuration error for an invalid declaration or an empty
     /// allowed tool set, and an execution error when the server cannot connect.
     pub async fn mcp_handler(&mut self, param: &McpToolParam) -> Result<Vec<McpDiscoveredHandler>, ToolError> {
+        Ok(self.mcp_server_tools(param).await?.discovered_handlers)
+    }
+
+    /// Returns the request-scoped tools and public discovery item for one MCP server.
+    ///
+    /// # Errors
+    ///
+    /// Returns a configuration error for an invalid declaration or an empty
+    /// allowed tool set, and an execution error when the server cannot connect.
+    pub(crate) async fn mcp_server_tools(&mut self, param: &McpToolParam) -> Result<McpServerToolSet, ToolError> {
         validate_mcp_execution_options(param)?;
 
         let server_label = param.server_label.trim();
@@ -98,10 +109,14 @@ impl GatewayExecutors {
             ));
         }
         if let Some(cached) = self.mcp.get(server_label) {
-            return require_non_empty_mcp_handlers(
+            let discovered_handlers = require_non_empty_mcp_handlers(
                 server_label,
                 filter_allowed_mcp_handlers(cached, param.allowed_tools.as_deref()),
-            );
+            )?;
+            return Ok(McpHandler::server_tool_set_from_handlers(
+                server_label,
+                discovered_handlers,
+            ));
         }
 
         let pool = McpClientPool::from_params(std::slice::from_ref(param)).await;
@@ -115,11 +130,16 @@ impl GatewayExecutors {
                 |error| ToolError::Execution(format!("MCP server '{server_label}' failed to connect: {error}")),
             ));
         };
-        let discovered =
-            McpHandler::discovered_tool_handlers(server_label, client, param.allowed_tools.as_deref()).await?;
-        let discovered = require_non_empty_mcp_handlers(server_label, discovered)?;
-        self.mcp.insert(server_label.to_owned(), discovered.clone());
-        Ok(discovered)
+        let McpServerToolSet {
+            discovered_handlers,
+            list_tools_item,
+        } = McpHandler::discover_tools(server_label, client, param.allowed_tools.as_deref()).await?;
+        let discovered_handlers = require_non_empty_mcp_handlers(server_label, discovered_handlers)?;
+        self.mcp.insert(server_label.to_owned(), discovered_handlers.clone());
+        Ok(McpServerToolSet {
+            discovered_handlers,
+            list_tools_item,
+        })
     }
 }
 
@@ -245,7 +265,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cached_mcp_handlers_apply_request_allowed_tools() {
+    async fn cached_mcp_server_tools_apply_request_allowed_tools_with_fresh_output_id() {
         let mut executors = GatewayExecutors::default();
         executors.insert(GatewayExecutorRegistration::Mcp {
             server_label: "counter".to_owned(),
@@ -257,10 +277,15 @@ mod tests {
             "require_approval": "never"
         }));
 
-        let handlers = executors.mcp_handler(&param).await.unwrap();
+        let first = executors.mcp_server_tools(&param).await.unwrap();
+        let first_output_id = first.list_tools_item.id.clone();
+        let second = executors.mcp_server_tools(&param).await.unwrap();
 
-        assert_eq!(handlers.len(), 1);
-        assert_eq!(handlers[0].param.tool_name, "read");
+        assert_eq!(first.discovered_handlers.len(), 1);
+        assert_eq!(first.discovered_handlers[0].param.tool_name, "read");
+        assert_eq!(first.list_tools_item.tools.len(), 1);
+        assert_eq!(first.list_tools_item.tools[0].name, "read");
+        assert_ne!(first_output_id, second.list_tools_item.id);
     }
 
     #[tokio::test]
@@ -276,7 +301,7 @@ mod tests {
             "require_approval": "never"
         }));
 
-        let Err(error) = executors.mcp_handler(&param).await else {
+        let Err(error) = executors.mcp_server_tools(&param).await else {
             panic!("expected empty allowed set to be rejected");
         };
 

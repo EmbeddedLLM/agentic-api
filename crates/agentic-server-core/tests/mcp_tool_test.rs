@@ -111,13 +111,13 @@ fn assert_matching_native_mcp_requests(
     let gateway_server_url = gateway_request.body.tools[0]["server_url"]
         .as_str()
         .expect("gateway MCP server_url");
-    assert_eq!(
-        gateway_server_url, openai_server_url,
-        "gateway and OpenAI cassettes must use the same MCP server"
-    );
     assert!(
         openai_server_url.starts_with("https://"),
         "OpenAI MCP cassette requires a public HTTPS server_url"
+    );
+    assert!(
+        gateway_server_url.starts_with("http://") || gateway_server_url.starts_with("https://"),
+        "gateway MCP cassette requires an HTTP(S) server_url"
     );
 
     for request in [openai_request, gateway_request] {
@@ -145,7 +145,20 @@ fn assert_matching_native_mcp_requests(
         }
     }
 
-    assert_eq!(openai_request.body.tools, gateway_request.body.tools);
+    // OpenAI requires a public HTTPS endpoint, while the gateway can use a local
+    // or otherwise separately reachable endpoint. Compare the MCP declarations
+    // without coupling the reference cassettes to the same recorded URL.
+    let mut openai_declaration = openai_request.body.tools[0].clone();
+    let mut gateway_declaration = gateway_request.body.tools[0].clone();
+    openai_declaration
+        .as_object_mut()
+        .expect("OpenAI MCP declaration")
+        .remove("server_url");
+    gateway_declaration
+        .as_object_mut()
+        .expect("gateway MCP declaration")
+        .remove("server_url");
+    assert_eq!(openai_declaration, gateway_declaration);
     assert_eq!(openai_request.body.tool_choice, gateway_request.body.tool_choice);
 }
 

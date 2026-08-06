@@ -15,9 +15,9 @@ use tracing::debug;
 use super::compaction::maybe_compact_context;
 use super::gateway::{
     GatewayCallResult, LoopDecision, append_gateway_calls_to_new_input, append_output_items_to_input,
-    append_tool_outputs, classify_round, emit_gateway_completed_events, emit_gateway_start_events,
-    execute_and_emit_output_calls, execute_output_calls, gateway_event_plans, has_client_owned_calls,
-    is_client_custom_call, is_gateway_owned_call, public_output_items,
+    append_tool_outputs, classify_round, complete_gateway_event_plans, emit_gateway_completed_events,
+    emit_gateway_start_events, execute_and_emit_output_calls, execute_output_calls, gateway_event_plans,
+    has_client_owned_calls, is_client_custom_call, is_gateway_owned_call, public_output_items,
 };
 use super::gateway_accumulator::{GatewayStreamAccumulator, StreamEvent, error_sse_chunk};
 use crate::events::EventFrame;
@@ -27,7 +27,7 @@ use crate::executor::persist::persist_if_needed;
 use crate::executor::rehydrate::rehydrate_conversation;
 use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::executor::upstream::{emit_deferred_stream_events, fetch_blocking_payload, fetch_stream_payload};
-use crate::tool::ToolRegistry;
+use crate::tool::{ToolRegistry, mcp};
 use crate::types::io::{OutputItem, ResponseUsage, ToolChoice};
 use crate::types::request_response::{IncompleteDetails, RequestPayload, ResponsePayload};
 
@@ -105,7 +105,11 @@ async fn run_until_gateway_tools_complete(
         Some(tools) => ToolRegistry::build_with_handlers(tools, &mut executors).await?,
         None => ToolRegistry::default(),
     };
-    let mut combined_output: Vec<crate::OutputItem> = Vec::new();
+    let mut combined_output: Vec<OutputItem> = registry
+        .mcp_list_tools_items()
+        .iter()
+        .map(mcp::handler::list_tools_output_item)
+        .collect();
     let mut combined_usage = None;
 
     for round in 0..MAX_GATEWAY_TOOL_ROUNDS {
@@ -258,7 +262,7 @@ async fn execute_and_emit_ordered_output_calls(
         events_by_output[output_index].push(frame);
     }
 
-    let event_plans = gateway_event_plans(output_items, registry, output_offset);
+    let mut event_plans = gateway_event_plans(output_items, registry, output_offset);
     let first_gateway_index = output_items
         .iter()
         .position(|item| matches!(item, OutputItem::FunctionCall(call) if is_gateway_owned_call(call, registry)));
@@ -281,6 +285,7 @@ async fn execute_and_emit_ordered_output_calls(
     emit_gateway_start_events(&event_plans[..first_gateway_run_len], stream_accumulator, stream_sender)?;
 
     let gateway_results = execute_output_calls(output_items, registry).await?;
+    complete_gateway_event_plans(&mut event_plans, &gateway_results);
     let mut gateway_index = 0;
     for (index, item) in output_items.iter().enumerate() {
         if matches!(item, OutputItem::FunctionCall(call) if is_gateway_owned_call(call, registry)) {
