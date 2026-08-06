@@ -1,13 +1,13 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 
 use axum::Router;
 use axum::middleware;
 use axum::routing::{get, post};
 use http::HeaderValue;
-use tokio::sync::Notify;
 #[cfg(debug_assertions)]
 use tokio::sync::oneshot;
+use tokio::sync::{Notify, Semaphore, SemaphorePermit};
 use tokio_util::sync::CancellationToken;
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
@@ -30,6 +30,69 @@ struct WebSocketTrackerInner {
     idle: Notify,
     #[cfg(debug_assertions)]
     local_completion_barrier: std::sync::Mutex<Option<LocalCompletionBarrier>>,
+}
+
+/// Bounds readiness work and records dependency health transitions per server.
+#[derive(Clone)]
+pub struct ReadinessTracker {
+    inner: Arc<ReadinessTrackerInner>,
+}
+
+struct ReadinessTrackerInner {
+    probe: Semaphore,
+    status: AtomicU8,
+}
+
+const READINESS_UNKNOWN: u8 = 0;
+const READINESS_READY: u8 = 1;
+const READINESS_NOT_READY: u8 = 2;
+
+/// Exclusive ownership of one dependency readiness probe.
+pub struct ReadinessProbe<'a> {
+    tracker: &'a ReadinessTracker,
+    _permit: SemaphorePermit<'a>,
+}
+
+impl Default for ReadinessTracker {
+    fn default() -> Self {
+        Self {
+            inner: Arc::new(ReadinessTrackerInner {
+                probe: Semaphore::new(1),
+                status: AtomicU8::new(READINESS_UNKNOWN),
+            }),
+        }
+    }
+}
+
+impl ReadinessTracker {
+    /// Start the only allowed in-flight dependency probe.
+    #[must_use]
+    pub fn try_start_probe(&self) -> Option<ReadinessProbe<'_>> {
+        let permit = self.inner.probe.try_acquire().ok()?;
+        Some(ReadinessProbe {
+            tracker: self,
+            _permit: permit,
+        })
+    }
+
+    /// Return the last completed dependency result, if any.
+    #[must_use]
+    pub fn last_result(&self) -> Option<bool> {
+        match self.inner.status.load(Ordering::Relaxed) {
+            READINESS_READY => Some(true),
+            READINESS_NOT_READY => Some(false),
+            _ => None,
+        }
+    }
+}
+
+impl ReadinessProbe<'_> {
+    /// Complete this probe and return whether dependency readiness changed.
+    #[must_use]
+    pub fn finish(self, ready: bool) -> bool {
+        let current = if ready { READINESS_READY } else { READINESS_NOT_READY };
+        self.tracker.inner.status.swap(current, Ordering::Relaxed) != current
+    }
 }
 
 #[cfg(debug_assertions)]
@@ -155,12 +218,18 @@ impl ServerConfig {
 pub struct AppState {
     pub proxy_state: ProxyState,
     pub exec_ctx: Arc<ExecutionContext>,
+    /// Dedicated no-redirect client for inference-service health probes.
+    pub llm_readiness_client: reqwest::Client,
+    /// Prevents public probes from multiplying dependency work and tracks transitions.
+    pub readiness_tracker: ReadinessTracker,
     /// Shared cancellation signal used to drain long-lived handlers.
     pub shutdown_token: CancellationToken,
     /// Tracks upgraded WebSocket tasks, which Axum does not await during HTTP drain.
     pub websocket_tracker: WebSocketTracker,
     /// vLLM base URL — used by the `/ready` health probe.
     pub llm_api_base: String,
+    /// Whether `/ready` should omit the upstream health check.
+    pub skip_llm_ready_check: bool,
     /// Server-configured API key; used as fallback when the request carries no
     /// `Authorization` header on the executor path.
     pub openai_api_key: Option<String>,

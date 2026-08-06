@@ -39,7 +39,7 @@ The image starts `agentic-server` in standalone mode. At minimum, set `LLM_API_B
 | `OPENAI_API_KEY` | none | Credential sent to the upstream service when the client does not supply one |
 | `OIDC_ISSUER` | none | Optional OIDC issuer for inbound bearer-token authentication |
 | `OIDC_AUDIENCE` | none | Required token audience when `OIDC_ISSUER` is set |
-| `SKIP_LLM_READY_CHECK` | `false` | Skip the startup probe for hosted providers without `/health` |
+| `SKIP_LLM_READY_CHECK` | `false` | Skip startup and recurring upstream probes for providers without `/health`; PostgreSQL readiness remains enforced |
 | `CORS_ALLOWED_ORIGINS` | none | Comma-separated browser origins |
 
 The container entrypoint rejects percent-encoded SQLite paths because SQLx decodes them before opening the database. Use a literal filesystem path or PostgreSQL instead.
@@ -179,3 +179,6 @@ spec:
 ```
 
 Mount writable storage at `/var/lib/agentic-api` only when using SQLite. PostgreSQL deployments do not need a persistent filesystem for the gateway.
+
+For a replicated PostgreSQL deployment, use the
+[Kubernetes manifests and operational guide](kubernetes.md).

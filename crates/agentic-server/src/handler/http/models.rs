@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::sync::OnceLock;
 
 use axum::extract::{Query, State};
@@ -5,9 +6,10 @@ use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
 use http::StatusCode;
 use serde_json::{Value, json};
-use tracing::warn;
+use tracing::{debug, info, warn};
 
 use agentic_core::proxy::{ProxyBody, ProxyResponse, error_response, proxy_get};
+use agentic_core::readiness::{LLM_READINESS_PROBE_TIMEOUT, LlmReadiness, probe_llm_readiness};
 
 use super::super::common::convert_response;
 use crate::app::AppState;
@@ -105,32 +107,103 @@ pub async fn health() -> impl IntoResponse {
     StatusCode::OK
 }
 
+async fn upstream_is_ready(state: &AppState) -> bool {
+    match probe_llm_readiness(
+        &state.llm_readiness_client,
+        &state.llm_api_base,
+        state.openai_api_key.as_deref(),
+        LLM_READINESS_PROBE_TIMEOUT,
+    )
+    .await
+    {
+        Ok(LlmReadiness::Ready) => true,
+        Ok(LlmReadiness::Rejected(status)) => {
+            debug!(http.status = %status, "LLM backend not ready");
+            false
+        }
+        Ok(LlmReadiness::Unreachable(error)) => {
+            debug!(error = ?error, "LLM backend unreachable");
+            false
+        }
+        Ok(LlmReadiness::TimedOut) => {
+            debug!("LLM backend readiness check timed out");
+            false
+        }
+        Ok(_) => {
+            debug!("LLM backend returned an unsupported readiness state");
+            false
+        }
+        Err(error) => {
+            debug!(error = ?error, "LLM backend readiness configuration invalid");
+            false
+        }
+    }
+}
+
+async fn configured_upstream_is_ready(state: &AppState) -> bool {
+    state.skip_llm_ready_check || upstream_is_ready(state).await
+}
+
+async fn dependencies_are_ready(
+    storage_ready: impl Future<Output = bool>,
+    upstream_ready: impl Future<Output = bool>,
+) -> bool {
+    tokio::pin!(storage_ready, upstream_ready);
+
+    tokio::select! {
+        storage_ready = &mut storage_ready => {
+            if storage_ready {
+                upstream_ready.await
+            } else {
+                debug!("database persistence not ready");
+                false
+            }
+        }
+        upstream_ready = &mut upstream_ready => {
+            if upstream_ready {
+                let storage_ready = storage_ready.await;
+                if !storage_ready {
+                    debug!("database persistence not ready");
+                }
+                storage_ready
+            } else {
+                false
+            }
+        }
+    }
+}
+
 pub async fn ready(State(state): State<AppState>) -> impl IntoResponse {
-    if !state.exec_ctx.storage_ready(std::time::Duration::from_secs(1)).await {
-        warn!("database persistence not ready");
-        return StatusCode::SERVICE_UNAVAILABLE;
+    let Some(probe) = state.readiness_tracker.try_start_probe() else {
+        let cached_ready = state.readiness_tracker.last_result().unwrap_or(false);
+        debug!(
+            readiness.ready = cached_ready,
+            "returning cached readiness while dependency probe is in progress"
+        );
+        return if cached_ready {
+            StatusCode::OK
+        } else {
+            StatusCode::SERVICE_UNAVAILABLE
+        };
+    };
+    let dependencies_ready = dependencies_are_ready(
+        state.exec_ctx.storage_ready(std::time::Duration::from_secs(1)),
+        configured_upstream_is_ready(&state),
+    )
+    .await;
+
+    if probe.finish(dependencies_ready) {
+        if dependencies_ready {
+            info!(readiness.ready = true, "gateway dependencies ready");
+        } else {
+            warn!(readiness.ready = false, "gateway dependencies not ready");
+        }
     }
 
-    let base = state.llm_api_base.trim_end_matches('/');
-    let url = format!("{base}/health");
-
-    match state
-        .exec_ctx
-        .client
-        .get(&url)
-        .timeout(std::time::Duration::from_secs(2))
-        .send()
-        .await
-    {
-        Ok(resp) if resp.status().is_success() => StatusCode::OK,
-        Ok(resp) => {
-            warn!("LLM backend not ready: {}", resp.status());
-            StatusCode::SERVICE_UNAVAILABLE
-        }
-        Err(e) => {
-            warn!("LLM backend unreachable: {e}");
-            StatusCode::SERVICE_UNAVAILABLE
-        }
+    if dependencies_ready {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
     }
 }
 
@@ -172,4 +245,52 @@ pub async fn models(State(state): State<AppState>, headers: HeaderMap, Query(par
     }
 
     axum::Json(build_codex_models_response(&upstream_bytes)).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future;
+    use std::time::Duration;
+
+    use super::dependencies_are_ready;
+    use crate::app::ReadinessTracker;
+
+    #[test]
+    fn readiness_tracker_reports_only_state_transitions() {
+        let tracker = ReadinessTracker::default();
+
+        assert_eq!(tracker.last_result(), None);
+        assert!(tracker.try_start_probe().unwrap().finish(false));
+        assert_eq!(tracker.last_result(), Some(false));
+        assert!(!tracker.try_start_probe().unwrap().finish(false));
+        assert!(tracker.try_start_probe().unwrap().finish(true));
+        assert_eq!(tracker.last_result(), Some(true));
+        assert!(!tracker.try_start_probe().unwrap().finish(true));
+        assert!(tracker.try_start_probe().unwrap().finish(false));
+        assert_eq!(tracker.last_result(), Some(false));
+    }
+
+    #[test]
+    fn unfinished_readiness_probe_releases_permit_without_changing_result() {
+        let tracker = ReadinessTracker::default();
+        assert!(tracker.try_start_probe().unwrap().finish(true));
+
+        let unfinished = tracker.try_start_probe().unwrap();
+        drop(unfinished);
+
+        assert_eq!(tracker.last_result(), Some(true));
+        assert!(tracker.try_start_probe().is_some());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn dependency_check_fails_fast_when_upstream_is_unready() {
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            dependencies_are_ready(future::pending(), future::ready(false)),
+        )
+        .await
+        .expect("upstream failure must win before the pending storage check");
+
+        assert!(!result);
+    }
 }
