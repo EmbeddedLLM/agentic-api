@@ -14,6 +14,8 @@ use crate::tool::ToolRegistry;
 use crate::types::request_response::ResponsePayload;
 use crate::utils::common::serialize_to_string;
 
+const MAX_DEFERRED_STREAM_BYTES: usize = 256 * 1024;
+
 struct StreamEmitContext<'a> {
     request: &'a RequestContext,
     registry: &'a ToolRegistry,
@@ -75,6 +77,7 @@ pub(super) async fn fetch_stream_payload(
     let mut function_sse = FunctionSseTranslator::new(registry.tool_type_map());
     let mut defer_from_output_index = None;
     let mut deferred_events = Vec::new();
+    let mut deferred_bytes = 0;
     while let Some(line_result) = line_stream.next().await {
         let line = line_result?;
         if stream.is_none() {
@@ -104,11 +107,17 @@ pub(super) async fn fetch_stream_payload(
                             &mut emit_ctx,
                             defer_from_output_index,
                             &mut deferred_events,
+                            &mut deferred_bytes,
                         )?;
                     }
                 }
                 if defer_from_output_index != previous_defer_from_output_index {
-                    flush_released_stream_frames(&mut emit_ctx, defer_from_output_index, &mut deferred_events)?;
+                    flush_released_stream_frames(
+                        &mut emit_ctx,
+                        defer_from_output_index,
+                        &mut deferred_events,
+                        &mut deferred_bytes,
+                    )?;
                 }
             }
         }
@@ -198,9 +207,20 @@ fn emit_or_defer_stream_frame(
     emit_ctx: &mut StreamEmitContext<'_>,
     defer_from_output_index: Option<u64>,
     deferred_events: &mut Vec<EventFrame>,
+    deferred_bytes: &mut usize,
 ) -> ExecutorResult<()> {
     if should_defer_stream_event(&frame, defer_from_output_index) {
+        let frame_bytes = serialize_to_string(&frame.wire)
+            .map_err(ExecutorError::JsonError)?
+            .len();
+        let next_bytes = deferred_bytes.saturating_add(frame_bytes);
+        if next_bytes > MAX_DEFERRED_STREAM_BYTES {
+            return Err(ExecutorError::StreamError(format!(
+                "deferred stream exceeded {MAX_DEFERRED_STREAM_BYTES} buffered bytes"
+            )));
+        }
         deferred_events.push(frame);
+        *deferred_bytes = next_bytes;
         return Ok(());
     }
     emit_stream_frame(&mut frame, emit_ctx)
@@ -210,10 +230,19 @@ fn flush_released_stream_frames(
     emit_ctx: &mut StreamEmitContext<'_>,
     defer_from_output_index: Option<u64>,
     deferred_events: &mut Vec<EventFrame>,
+    deferred_bytes: &mut usize,
 ) -> ExecutorResult<()> {
-    let pending = std::mem::take(deferred_events);
+    let mut pending = std::mem::take(deferred_events);
+    *deferred_bytes = 0;
+    pending.sort_by_key(|frame| frame.wire.output_index);
     for frame in pending {
-        emit_or_defer_stream_frame(frame, emit_ctx, defer_from_output_index, deferred_events)?;
+        emit_or_defer_stream_frame(
+            frame,
+            emit_ctx,
+            defer_from_output_index,
+            deferred_events,
+            deferred_bytes,
+        )?;
     }
     Ok(())
 }
@@ -238,5 +267,110 @@ fn apply_context_response_ids(wire: &mut WireEvent, ctx: &RequestContext) {
     }
     if let Some(conversation_id) = &ctx.conversation_id {
         response.insert("conversation_id".to_owned(), Value::String(conversation_id.clone()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::events::EventPayload;
+    use crate::types::io::ResponsesInput;
+    use crate::types::request_response::RequestPayload;
+
+    fn request_context() -> RequestContext {
+        let request = RequestPayload {
+            model: "test".to_owned(),
+            input: ResponsesInput::Text("hi".to_owned()),
+            instructions: None,
+            previous_response_id: None,
+            conversation_id: None,
+            tools: None,
+            tool_choice: None,
+            stream: true,
+            store: false,
+            include: None,
+            temperature: None,
+            top_p: None,
+            max_output_tokens: None,
+            truncation: None,
+            metadata: None,
+            parallel_tool_calls: None,
+            cache_salt: None,
+            context_management: None,
+        };
+        RequestContext {
+            original_request: request.clone(),
+            enriched_request: request,
+            new_input_items: Vec::new(),
+            response_id: "resp_test".to_owned(),
+            conversation_id: None,
+            conversation_version: None,
+        }
+    }
+
+    fn frame(output_index: u64, payload: Value) -> EventFrame {
+        let mut wire = WireEvent::new("response.output_item.added");
+        wire.output_index = Some(output_index);
+        wire.rest.insert("item".to_owned(), payload);
+        EventFrame {
+            event_type: SSEEventType::OutputItemAdded,
+            payload: EventPayload::None,
+            wire,
+        }
+    }
+
+    #[test]
+    fn released_frames_are_emitted_in_output_index_order() {
+        let request = request_context();
+        let registry = ToolRegistry::default();
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut accumulator = GatewayStreamAccumulator::new();
+        let mut emit_ctx = StreamEmitContext {
+            request: &request,
+            registry: &registry,
+            sender: &sender,
+            accumulator: &mut accumulator,
+            output_offset: 0,
+        };
+        let mut deferred = vec![
+            frame(3, serde_json::json!({"id": "msg_3"})),
+            frame(2, serde_json::json!({"id": "msg_2"})),
+        ];
+        let mut deferred_bytes = deferred
+            .iter()
+            .map(|frame| serialize_to_string(&frame.wire).unwrap().len())
+            .sum();
+
+        flush_released_stream_frames(&mut emit_ctx, None, &mut deferred, &mut deferred_bytes).expect("flush succeeds");
+        assert_eq!(deferred_bytes, 0);
+
+        let indices = [receiver.try_recv().unwrap(), receiver.try_recv().unwrap()].map(|event| {
+            crate::events::normalize_sse_line(event.content.trim())
+                .and_then(|frame| frame.wire.output_index)
+                .expect("output index")
+        });
+        assert_eq!(indices, [2, 3]);
+    }
+
+    #[test]
+    fn deferred_frames_have_a_shared_byte_limit() {
+        let request = request_context();
+        let registry = ToolRegistry::default();
+        let (sender, _receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut accumulator = GatewayStreamAccumulator::new();
+        let mut emit_ctx = StreamEmitContext {
+            request: &request,
+            registry: &registry,
+            sender: &sender,
+            accumulator: &mut accumulator,
+            output_offset: 0,
+        };
+        let mut deferred = Vec::new();
+        let mut deferred_bytes = 0;
+        let oversized = frame(0, Value::String("x".repeat(256 * 1024 + 1)));
+
+        let error = emit_or_defer_stream_frame(oversized, &mut emit_ctx, Some(0), &mut deferred, &mut deferred_bytes)
+            .expect_err("oversized deferred stream must fail");
+        assert!(error.to_string().contains("deferred stream exceeded"));
     }
 }

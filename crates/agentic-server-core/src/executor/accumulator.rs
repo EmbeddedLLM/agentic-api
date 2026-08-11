@@ -286,7 +286,7 @@ impl ResponseAccumulator {
         let entry = self
             .in_flight
             .get(item_id)
-            .filter(|entry| matches!(entry.item, InFlight::FunctionCall { .. }))
+            .filter(|entry| entry.output_index == output_index && matches!(entry.item, InFlight::FunctionCall { .. }))
             .or_else(|| {
                 self.in_flight.values().find(|entry| {
                     entry.output_index == output_index && matches!(entry.item, InFlight::FunctionCall { .. })
@@ -374,16 +374,35 @@ impl ResponseAccumulator {
                     item.apply_done(&frame.payload, text);
                 }
             }
-            (SSEEventType::FunctionCallArgumentsDelta, EventPayload::FunctionCallArgsDelta { delta, item_id, .. }) => {
-                if let Some(InFlight::FunctionCall { arguments, .. }) =
-                    self.in_flight.get_mut(item_id).map(|entry| &mut entry.item)
+            (
+                SSEEventType::FunctionCallArgumentsDelta,
+                EventPayload::FunctionCallArgsDelta {
+                    delta,
+                    item_id,
+                    output_index,
+                    ..
+                },
+            ) => {
+                let key = self.in_flight_call_key(item_id, SSEItemType::FunctionCall, *output_index);
+                if let Some(InFlight::FunctionCall { arguments, .. }) = key
+                    .as_deref()
+                    .and_then(|key| self.in_flight.get_mut(key))
+                    .map(|entry| &mut entry.item)
                 {
                     arguments.push_str(delta);
                 }
             }
-            (SSEEventType::FunctionCallArgumentsDone, EventPayload::FunctionCallArgsDone { item_id, .. }) => {
-                if let Some(InFlight::FunctionCall { item, arguments }) =
-                    self.in_flight.get_mut(item_id).map(|entry| &mut entry.item)
+            (
+                SSEEventType::FunctionCallArgumentsDone,
+                EventPayload::FunctionCallArgsDone {
+                    item_id, output_index, ..
+                },
+            ) => {
+                let key = self.in_flight_call_key(item_id, SSEItemType::FunctionCall, *output_index);
+                if let Some(InFlight::FunctionCall { item, arguments }) = key
+                    .as_deref()
+                    .and_then(|key| self.in_flight.get_mut(key))
+                    .map(|entry| &mut entry.item)
                 {
                     item.apply_done(&frame.payload, arguments);
                 }
@@ -460,8 +479,19 @@ impl ResponseAccumulator {
             SSEItemType::McpCall => McpCall::try_from(payload).ok().map(|item| InFlight::McpCall { item }),
         };
         if let Some(item) = item {
+            let needs_internal_key = matches!(&item, InFlight::FunctionCall { .. })
+                && (item_id.is_empty() || self.in_flight.contains_key(item_id));
+            let key = if needs_internal_key {
+                let mut key = format!("__output_index_{output_index}");
+                while self.in_flight.contains_key(&key) {
+                    key.push('_');
+                }
+                key
+            } else {
+                item_id.clone()
+            };
             self.in_flight.insert(
-                item_id.clone(),
+                key,
                 InFlightEntry {
                     output_index: *output_index,
                     item,
@@ -529,7 +559,7 @@ impl ResponseAccumulator {
     fn in_flight_call_key(&self, item_id: &str, item_type: SSEItemType, output_index: u32) -> Option<String> {
         self.in_flight
             .get(item_id)
-            .filter(|entry| in_flight_matches_call_type(&entry.item, item_type))
+            .filter(|entry| entry.output_index == output_index && in_flight_matches_call_type(&entry.item, item_type))
             .map(|_| item_id.to_owned())
             .or_else(|| {
                 self.in_flight.iter().find_map(|(key, entry)| {
