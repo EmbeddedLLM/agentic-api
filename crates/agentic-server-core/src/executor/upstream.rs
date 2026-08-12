@@ -345,7 +345,12 @@ mod tests {
         assert_eq!(deferred_bytes, 0);
 
         let indices = [receiver.try_recv().unwrap(), receiver.try_recv().unwrap()].map(|event| {
-            crate::events::normalize_sse_line(event.content.trim())
+            let data_line = event
+                .content
+                .lines()
+                .find(|line| line.starts_with("data: "))
+                .expect("SSE data line");
+            crate::events::normalize_sse_line(data_line)
                 .and_then(|frame| frame.wire.output_index)
                 .expect("output index")
         });
