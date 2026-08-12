@@ -22,7 +22,10 @@ turns:
     headers:
       content-type: text/event-stream; charset=utf-8
     sse:
-    - 'data: {"type":"response.created","sequence_number":0,"response":{"background":false,"created_at":1785502357,"ec_transfer_params":null,"frequency_penalty":0.0,"id":"resp_019fb83b-d721-7061-a039-96fb0507c3f7","incomplete_details":null,"input_messages":null,"instructions":null,"kv_transfer_params":null,"max_output_tokens":1024,"max_tool_calls":null,"metadata":null,"model":"Qwen/Qwen3.5-35B-A3B-FP8","object":"response","output":[],"output_messages":null,"parallel_tool_calls":false,"presence_penalty":0.0,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","temperature":1.0,"text":null,"tool_choice":"auto","tools":[{"allowed_callers":null,"defer_loading":null,"description":"Search
+    - 'event: response.created
+
+      '
+    - 'data: {"type":"response.created","sequence_number":0,"response":{"background":false,"created_at":1786000567,"ec_transfer_params":null,"frequency_penalty":0.0,"id":"resp_019fd5ed-ed8c-7501-85f7-8cada8fbadda","incomplete_details":null,"input_messages":null,"instructions":null,"kv_transfer_params":null,"max_output_tokens":1024,"max_tool_calls":null,"metadata":null,"model":"Qwen/Qwen3.5-35B-A3B-FP8","object":"response","output":[],"output_messages":null,"parallel_tool_calls":false,"presence_penalty":0.0,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","temperature":1.0,"text":null,"tool_choice":"auto","tools":[{"allowed_callers":null,"defer_loading":null,"description":"Search
       the public web for current information and return structured web and news results.","name":"web_search","output_schema":null,"parameters":{"properties":{"count":{"description":"Maximum
       results per section, from 1 to 100.","type":"integer"},"country":{"description":"Optional
       ISO 3166-1 alpha-2 country code.","type":"string"},"exclude_domains":{"description":"Optional
@@ -36,7 +39,10 @@ turns:
     - '
 
       '
-    - 'data: {"type":"response.in_progress","sequence_number":1,"response":{"background":false,"created_at":1785502357,"ec_transfer_params":null,"frequency_penalty":0.0,"id":"resp_019fb83b-d721-7061-a039-96fb0507c3f7","incomplete_details":null,"input_messages":null,"instructions":null,"kv_transfer_params":null,"max_output_tokens":1024,"max_tool_calls":null,"metadata":null,"model":"Qwen/Qwen3.5-35B-A3B-FP8","object":"response","output":[],"output_messages":null,"parallel_tool_calls":false,"presence_penalty":0.0,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","temperature":1.0,"text":null,"tool_choice":"auto","tools":[{"allowed_callers":null,"defer_loading":null,"description":"Search
+    - 'event: response.in_progress
+
+      '
+    - 'data: {"type":"response.in_progress","sequence_number":1,"response":{"background":false,"created_at":1786000567,"ec_transfer_params":null,"frequency_penalty":0.0,"id":"resp_019fd5ed-ed8c-7501-85f7-8cada8fbadda","incomplete_details":null,"input_messages":null,"instructions":null,"kv_transfer_params":null,"max_output_tokens":1024,"max_tool_calls":null,"metadata":null,"model":"Qwen/Qwen3.5-35B-A3B-FP8","object":"response","output":[],"output_messages":null,"parallel_tool_calls":false,"presence_penalty":0.0,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","temperature":1.0,"text":null,"tool_choice":"auto","tools":[{"allowed_callers":null,"defer_loading":null,"description":"Search
       the public web for current information and return structured web and news results.","name":"web_search","output_schema":null,"parameters":{"properties":{"count":{"description":"Maximum
       results per section, from 1 to 100.","type":"integer"},"country":{"description":"Optional
       ISO 3166-1 alpha-2 country code.","type":"string"},"exclude_domains":{"description":"Optional
@@ -50,2062 +56,2312 @@ turns:
     - '
 
       '
-    - 'data: {"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"content":null,"encrypted_content":null,"id":"a056d039d6f61314","status":"in_progress","summary":[],"type":"reasoning"}}
+    - 'event: response.output_item.added
+
+      '
+    - 'data: {"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"content":null,"encrypted_content":null,"id":"aa3219c98c03ed14","status":"in_progress","summary":[],"type":"reasoning"}}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_part.added","sequence_number":3,"output_index":0,"content_index":0,"item_id":"a056d039d6f61314","part":{"text":"","type":"reasoning_text"}}
+    - 'event: response.reasoning_part.added
+
+      '
+    - 'data: {"type":"response.reasoning_part.added","sequence_number":3,"output_index":0,"content_index":0,"item_id":"aa3219c98c03ed14","part":{"text":"","type":"reasoning_text"}}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":4,"output_index":0,"content_index":0,"delta":"The","item_id":"a056d039d6f61314"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":4,"output_index":0,"content_index":0,"delta":"The","item_id":"aa3219c98c03ed14"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":5,"output_index":0,"content_index":0,"delta":"
-      user","item_id":"a056d039d6f61314"}
+      user","item_id":"aa3219c98c03ed14"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":6,"output_index":0,"content_index":0,"delta":"
-      wants","item_id":"a056d039d6f61314"}
+      wants","item_id":"aa3219c98c03ed14"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":7,"output_index":0,"content_index":0,"delta":"
-      me","item_id":"a056d039d6f61314"}
+      me","item_id":"aa3219c98c03ed14"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":8,"output_index":0,"content_index":0,"delta":"
-      to","item_id":"a056d039d6f61314"}
+      to","item_id":"aa3219c98c03ed14"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":9,"output_index":0,"content_index":0,"delta":"
-      search","item_id":"a056d039d6f61314"}
+      search","item_id":"aa3219c98c03ed14"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":10,"output_index":0,"content_index":0,"delta":"
-      for","item_id":"a056d039d6f61314"}
+      for","item_id":"aa3219c98c03ed14"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":11,"output_index":0,"content_index":0,"delta":"
-      the","item_id":"a056d039d6f61314"}
+      the","item_id":"aa3219c98c03ed14"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":12,"output_index":0,"content_index":0,"delta":"
-      exact","item_id":"a056d039d6f61314"}
+      exact","item_id":"aa3219c98c03ed14"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":13,"output_index":0,"content_index":0,"delta":"
-      query","item_id":"a056d039d6f61314"}
+      query","item_id":"aa3219c98c03ed14"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":14,"output_index":0,"content_index":0,"delta":"
-      \"","item_id":"a056d039d6f61314"}
+      \"","item_id":"aa3219c98c03ed14"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":15,"output_index":0,"content_index":0,"delta":"pot","item_id":"a056d039d6f61314"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":15,"output_index":0,"content_index":0,"delta":"pot","item_id":"aa3219c98c03ed14"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":16,"output_index":0,"content_index":0,"delta":"ato","item_id":"a056d039d6f61314"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":16,"output_index":0,"content_index":0,"delta":"ato","item_id":"aa3219c98c03ed14"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":17,"output_index":0,"content_index":0,"delta":"\"","item_id":"a056d039d6f61314"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":17,"output_index":0,"content_index":0,"delta":"\"","item_id":"aa3219c98c03ed14"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":18,"output_index":0,"content_index":0,"delta":"
-      on","item_id":"a056d039d6f61314"}
+      and","item_id":"aa3219c98c03ed14"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":19,"output_index":0,"content_index":0,"delta":"
-      the","item_id":"a056d039d6f61314"}
+      summarize","item_id":"aa3219c98c03ed14"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":20,"output_index":0,"content_index":0,"delta":"
-      web","item_id":"a056d039d6f61314"}
+      the","item_id":"aa3219c98c03ed14"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":21,"output_index":0,"content_index":0,"delta":"
-      and","item_id":"a056d039d6f61314"}
+      results","item_id":"aa3219c98c03ed14"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":22,"output_index":0,"content_index":0,"delta":"
-      then","item_id":"a056d039d6f61314"}
+      in","item_id":"aa3219c98c03ed14"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":23,"output_index":0,"content_index":0,"delta":"
-      summarize","item_id":"a056d039d6f61314"}
+      one","item_id":"aa3219c98c03ed14"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":24,"output_index":0,"content_index":0,"delta":"
-      the","item_id":"a056d039d6f61314"}
+      sentence","item_id":"aa3219c98c03ed14"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":25,"output_index":0,"content_index":0,"delta":"
-      results","item_id":"a056d039d6f61314"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":25,"output_index":0,"content_index":0,"delta":".","item_id":"aa3219c98c03ed14"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":26,"output_index":0,"content_index":0,"delta":"
-      in","item_id":"a056d039d6f61314"}
+      I","item_id":"aa3219c98c03ed14"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":27,"output_index":0,"content_index":0,"delta":"
-      one","item_id":"a056d039d6f61314"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":27,"output_index":0,"content_index":0,"delta":"''ll","item_id":"aa3219c98c03ed14"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":28,"output_index":0,"content_index":0,"delta":"
-      sentence","item_id":"a056d039d6f61314"}
+      use","item_id":"aa3219c98c03ed14"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":29,"output_index":0,"content_index":0,"delta":".","item_id":"a056d039d6f61314"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":29,"output_index":0,"content_index":0,"delta":"
+      the","item_id":"aa3219c98c03ed14"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":30,"output_index":0,"content_index":0,"delta":"
-      I","item_id":"a056d039d6f61314"}
+      web","item_id":"aa3219c98c03ed14"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":31,"output_index":0,"content_index":0,"delta":"''ll","item_id":"a056d039d6f61314"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":31,"output_index":0,"content_index":0,"delta":"_search","item_id":"aa3219c98c03ed14"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":32,"output_index":0,"content_index":0,"delta":"
-      use","item_id":"a056d039d6f61314"}
+      function","item_id":"aa3219c98c03ed14"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":33,"output_index":0,"content_index":0,"delta":"
-      the","item_id":"a056d039d6f61314"}
+      with","item_id":"aa3219c98c03ed14"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":34,"output_index":0,"content_index":0,"delta":"
-      web","item_id":"a056d039d6f61314"}
+      the","item_id":"aa3219c98c03ed14"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":35,"output_index":0,"content_index":0,"delta":"_search","item_id":"a056d039d6f61314"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":35,"output_index":0,"content_index":0,"delta":"
+      exact","item_id":"aa3219c98c03ed14"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":36,"output_index":0,"content_index":0,"delta":"
-      function","item_id":"a056d039d6f61314"}
+      query","item_id":"aa3219c98c03ed14"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":37,"output_index":0,"content_index":0,"delta":"
-      with","item_id":"a056d039d6f61314"}
+      \"","item_id":"aa3219c98c03ed14"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":38,"output_index":0,"content_index":0,"delta":"
-      the","item_id":"a056d039d6f61314"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":38,"output_index":0,"content_index":0,"delta":"pot","item_id":"aa3219c98c03ed14"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":39,"output_index":0,"content_index":0,"delta":"
-      exact","item_id":"a056d039d6f61314"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":39,"output_index":0,"content_index":0,"delta":"ato","item_id":"aa3219c98c03ed14"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":40,"output_index":0,"content_index":0,"delta":"
-      query","item_id":"a056d039d6f61314"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":40,"output_index":0,"content_index":0,"delta":"\".","item_id":"aa3219c98c03ed14"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":41,"output_index":0,"content_index":0,"delta":"
-      they","item_id":"a056d039d6f61314"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":41,"output_index":0,"content_index":0,"delta":"\n","item_id":"aa3219c98c03ed14"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":42,"output_index":0,"content_index":0,"delta":"
-      specified","item_id":"a056d039d6f61314"}
+    - 'event: response.reasoning_text.done
+
+      '
+    - 'data: {"type":"response.reasoning_text.done","sequence_number":42,"output_index":0,"content_index":0,"item_id":"aa3219c98c03ed14","text":"The
+      user wants me to search for the exact query \"potato\" and summarize the results
+      in one sentence. I''ll use the web_search function with the exact query \"potato\".\n"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":43,"output_index":0,"content_index":0,"delta":".","item_id":"a056d039d6f61314"}
+    - 'event: response.reasoning_part.done
+
+      '
+    - 'data: {"type":"response.reasoning_part.done","sequence_number":43,"output_index":0,"content_index":0,"item_id":"aa3219c98c03ed14","part":{"text":"The
+      user wants me to search for the exact query \"potato\" and summarize the results
+      in one sentence. I''ll use the web_search function with the exact query \"potato\".\n","type":"reasoning_text"}}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":44,"output_index":0,"content_index":0,"delta":"\n","item_id":"a056d039d6f61314"}
+    - 'event: response.output_item.done
+
+      '
+    - 'data: {"type":"response.output_item.done","sequence_number":44,"output_index":0,"item":{"content":[{"text":"The
+      user wants me to search for the exact query \"potato\" and summarize the results
+      in one sentence. I''ll use the web_search function with the exact query \"potato\".\n","type":"reasoning_text"}],"encrypted_content":null,"id":"aa3219c98c03ed14","status":"completed","summary":[],"type":"reasoning"}}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.done","sequence_number":45,"output_index":0,"content_index":0,"item_id":"a056d039d6f61314","text":"The
-      user wants me to search for the exact query \"potato\" on the web and then summarize
-      the results in one sentence. I''ll use the web_search function with the exact
-      query they specified.\n"}
+    - 'event: response.output_item.added
+
+      '
+    - 'data: {"type":"response.output_item.added","sequence_number":45,"item":{"action":{"query":"potato","type":"search"},"id":"ws_adfb13c4cc71b2cc","status":"in_progress","type":"web_search_call"},"output_index":1}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_part.done","sequence_number":46,"output_index":0,"content_index":0,"item_id":"a056d039d6f61314","part":{"text":"The
-      user wants me to search for the exact query \"potato\" on the web and then summarize
-      the results in one sentence. I''ll use the web_search function with the exact
-      query they specified.\n","type":"reasoning_text"}}
+    - 'event: response.web_search_call.in_progress
+
+      '
+    - 'data: {"type":"response.web_search_call.in_progress","sequence_number":46,"item_id":"ws_adfb13c4cc71b2cc","output_index":1}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.output_item.done","sequence_number":47,"output_index":0,"item":{"content":[{"text":"The
-      user wants me to search for the exact query \"potato\" on the web and then summarize
-      the results in one sentence. I''ll use the web_search function with the exact
-      query they specified.\n","type":"reasoning_text"}],"encrypted_content":null,"id":"a056d039d6f61314","status":"completed","summary":[],"type":"reasoning"}}
+    - 'event: response.web_search_call.searching
+
+      '
+    - 'data: {"type":"response.web_search_call.searching","sequence_number":47,"item_id":"ws_adfb13c4cc71b2cc","output_index":1}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.output_item.added","sequence_number":48,"item":{"action":{"query":"potato","type":"search"},"id":"ws_9bc2e80d191aba9e","status":"in_progress","type":"web_search_call"},"output_index":1}
+    - 'event: response.web_search_call.completed
 
       '
-    - '
-
-      '
-    - 'data: {"type":"response.web_search_call.in_progress","sequence_number":49,"item_id":"ws_9bc2e80d191aba9e","output_index":1}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.web_search_call.searching","sequence_number":50,"item_id":"ws_9bc2e80d191aba9e","output_index":1}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.web_search_call.completed","sequence_number":51,"item":{"action":{"query":"potato","sources":[{"title":"Potato
+    - 'data: {"type":"response.web_search_call.completed","sequence_number":48,"item":{"action":{"query":"potato","sources":[{"title":"Potato
       - Wikipedia","url":"https://en.wikipedia.org/wiki/Potato"},{"title":"Potatoes
       | Potato Nutrition | Types of Potatoes | Recipes","url":"https://potatogoodness.com/"},{"title":"Potato
       Facts","url":"https://www.idahopotatomuseum.com/potato-facts/"},{"title":"16
       Types of Potatoes (And How to Use Them in Your Cooking!)","url":"https://www.thekitchn.com/potato-varieties-64061"},{"title":"Potato
       Facts and Figures - International Potato Center","url":"https://cipotato.org/potato/potato-facts-and-figures/"},{"title":"Understanding
       Potatoes","url":"https://www.thechoppingblock.com/blog/understanding-potatoes"},{"title":"Home
-      of U.S. Potato Farmers | Potatoes USA","url":"https://potatoesusa.com/"},{"title":"Growing
-      potatoes in home gardens | UMN Extension","url":"https://extension.umn.edu/vegetables/growing-potatoes"},{"title":"Potatoes
-      101: Nutrition Facts, Health Benefits, and Types","url":"https://www.healthline.com/nutrition/foods/potatoes"},{"title":"Potato
-      | Definition, Plant, Origin, & Facts | Britannica","url":"https://www.britannica.com/plant/potato"}],"type":"search"},"id":"ws_9bc2e80d191aba9e","status":"completed","type":"web_search_call"},"item_id":"ws_9bc2e80d191aba9e","output_index":1}
+      of U.S. Potato Farmers | Potatoes USA","url":"https://potatoesusa.com/"},{"title":"Potatoes
+      101: Nutrition Facts, Health Benefits, and Types","url":"https://www.healthline.com/nutrition/foods/potatoes"},{"title":"Growing
+      potatoes in home gardens | UMN Extension","url":"https://extension.umn.edu/vegetables/growing-potatoes"},{"title":"Potato
+      | Vegetable, Tuber, Nutrition, Diseases, Origin, & Facts ...","url":"https://www.britannica.com/plant/potato"}],"type":"search"},"id":"ws_adfb13c4cc71b2cc","status":"completed","type":"web_search_call"},"item_id":"ws_adfb13c4cc71b2cc","output_index":1}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.output_item.done","sequence_number":52,"item":{"action":{"query":"potato","sources":[{"title":"Potato
+    - 'event: response.output_item.done
+
+      '
+    - 'data: {"type":"response.output_item.done","sequence_number":49,"item":{"action":{"query":"potato","sources":[{"title":"Potato
       - Wikipedia","url":"https://en.wikipedia.org/wiki/Potato"},{"title":"Potatoes
       | Potato Nutrition | Types of Potatoes | Recipes","url":"https://potatogoodness.com/"},{"title":"Potato
       Facts","url":"https://www.idahopotatomuseum.com/potato-facts/"},{"title":"16
       Types of Potatoes (And How to Use Them in Your Cooking!)","url":"https://www.thekitchn.com/potato-varieties-64061"},{"title":"Potato
       Facts and Figures - International Potato Center","url":"https://cipotato.org/potato/potato-facts-and-figures/"},{"title":"Understanding
       Potatoes","url":"https://www.thechoppingblock.com/blog/understanding-potatoes"},{"title":"Home
-      of U.S. Potato Farmers | Potatoes USA","url":"https://potatoesusa.com/"},{"title":"Growing
-      potatoes in home gardens | UMN Extension","url":"https://extension.umn.edu/vegetables/growing-potatoes"},{"title":"Potatoes
-      101: Nutrition Facts, Health Benefits, and Types","url":"https://www.healthline.com/nutrition/foods/potatoes"},{"title":"Potato
-      | Definition, Plant, Origin, & Facts | Britannica","url":"https://www.britannica.com/plant/potato"}],"type":"search"},"id":"ws_9bc2e80d191aba9e","status":"completed","type":"web_search_call"},"output_index":1}
+      of U.S. Potato Farmers | Potatoes USA","url":"https://potatoesusa.com/"},{"title":"Potatoes
+      101: Nutrition Facts, Health Benefits, and Types","url":"https://www.healthline.com/nutrition/foods/potatoes"},{"title":"Growing
+      potatoes in home gardens | UMN Extension","url":"https://extension.umn.edu/vegetables/growing-potatoes"},{"title":"Potato
+      | Vegetable, Tuber, Nutrition, Diseases, Origin, & Facts ...","url":"https://www.britannica.com/plant/potato"}],"type":"search"},"id":"ws_adfb13c4cc71b2cc","status":"completed","type":"web_search_call"},"output_index":1}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.output_item.added","sequence_number":53,"output_index":2,"item":{"content":null,"encrypted_content":null,"id":"97f01571873d3200","status":"in_progress","summary":[],"type":"reasoning"}}
+    - 'event: response.output_item.added
+
+      '
+    - 'data: {"type":"response.output_item.added","sequence_number":50,"output_index":2,"item":{"content":null,"encrypted_content":null,"id":"b262e3bb30e85fcc","status":"in_progress","summary":[],"type":"reasoning"}}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_part.added","sequence_number":54,"output_index":2,"content_index":0,"item_id":"97f01571873d3200","part":{"text":"","type":"reasoning_text"}}
+    - 'event: response.reasoning_part.added
+
+      '
+    - 'data: {"type":"response.reasoning_part.added","sequence_number":51,"output_index":2,"content_index":0,"item_id":"b262e3bb30e85fcc","part":{"text":"","type":"reasoning_text"}}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":55,"output_index":2,"content_index":0,"delta":"The","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":52,"output_index":2,"content_index":0,"delta":"The","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":53,"output_index":2,"content_index":0,"delta":"
+      search","item_id":"b262e3bb30e85fcc"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":54,"output_index":2,"content_index":0,"delta":"
+      results","item_id":"b262e3bb30e85fcc"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":55,"output_index":2,"content_index":0,"delta":"
+      for","item_id":"b262e3bb30e85fcc"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":56,"output_index":2,"content_index":0,"delta":"
-      user","item_id":"97f01571873d3200"}
+      \"","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":57,"output_index":2,"content_index":0,"delta":"
-      asked","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":57,"output_index":2,"content_index":0,"delta":"pot","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":58,"output_index":2,"content_index":0,"delta":"
-      me","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":58,"output_index":2,"content_index":0,"delta":"ato","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":59,"output_index":2,"content_index":0,"delta":"
-      to","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":59,"output_index":2,"content_index":0,"delta":"\"","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":60,"output_index":2,"content_index":0,"delta":"
-      search","item_id":"97f01571873d3200"}
+      returned","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":61,"output_index":2,"content_index":0,"delta":"
-      for","item_id":"97f01571873d3200"}
+      various","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":62,"output_index":2,"content_index":0,"delta":"
-      the","item_id":"97f01571873d3200"}
+      information","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":63,"output_index":2,"content_index":0,"delta":"
-      exact","item_id":"97f01571873d3200"}
+      from","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":64,"output_index":2,"content_index":0,"delta":"
-      query","item_id":"97f01571873d3200"}
+      Wikipedia","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":65,"output_index":2,"content_index":0,"delta":"
-      \"","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":65,"output_index":2,"content_index":0,"delta":",","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":66,"output_index":2,"content_index":0,"delta":"pot","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":66,"output_index":2,"content_index":0,"delta":"
+      Britann","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":67,"output_index":2,"content_index":0,"delta":"ato","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":67,"output_index":2,"content_index":0,"delta":"ica","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":68,"output_index":2,"content_index":0,"delta":"\"","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":68,"output_index":2,"content_index":0,"delta":",","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":69,"output_index":2,"content_index":0,"delta":"
-      and","item_id":"97f01571873d3200"}
+      health","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":70,"output_index":2,"content_index":0,"delta":"
-      summarize","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":70,"output_index":2,"content_index":0,"delta":"line","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":71,"output_index":2,"content_index":0,"delta":"
-      the","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":71,"output_index":2,"content_index":0,"delta":",","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":72,"output_index":2,"content_index":0,"delta":"
-      results","item_id":"97f01571873d3200"}
+      and","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":73,"output_index":2,"content_index":0,"delta":"
-      in","item_id":"97f01571873d3200"}
+      other","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":74,"output_index":2,"content_index":0,"delta":"
-      one","item_id":"97f01571873d3200"}
+      sources","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":75,"output_index":2,"content_index":0,"delta":"
-      sentence","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":75,"output_index":2,"content_index":0,"delta":".","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":76,"output_index":2,"content_index":0,"delta":".","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":76,"output_index":2,"content_index":0,"delta":"
+      Let","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":77,"output_index":2,"content_index":0,"delta":"
-      Based","item_id":"97f01571873d3200"}
+      me","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":78,"output_index":2,"content_index":0,"delta":"
-      on","item_id":"97f01571873d3200"}
+      summarize","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":79,"output_index":2,"content_index":0,"delta":"
-      the","item_id":"97f01571873d3200"}
+      the","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":80,"output_index":2,"content_index":0,"delta":"
-      web","item_id":"97f01571873d3200"}
+      key","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":81,"output_index":2,"content_index":0,"delta":"
-      search","item_id":"97f01571873d3200"}
+      information","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":82,"output_index":2,"content_index":0,"delta":"
-      results","item_id":"97f01571873d3200"}
+      in","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":83,"output_index":2,"content_index":0,"delta":",","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":83,"output_index":2,"content_index":0,"delta":"
+      one","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":84,"output_index":2,"content_index":0,"delta":"
-      I","item_id":"97f01571873d3200"}
+      sentence","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":85,"output_index":2,"content_index":0,"delta":"
-      have","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":85,"output_index":2,"content_index":0,"delta":":","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":86,"output_index":2,"content_index":0,"delta":"
-      comprehensive","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":86,"output_index":2,"content_index":0,"delta":"\n\n","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":87,"output_index":2,"content_index":0,"delta":"
-      information","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":87,"output_index":2,"content_index":0,"delta":"The","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":88,"output_index":2,"content_index":0,"delta":"
-      about","item_id":"97f01571873d3200"}
+      potato","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":89,"output_index":2,"content_index":0,"delta":"
-      potatoes","item_id":"97f01571873d3200"}
+      is","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":90,"output_index":2,"content_index":0,"delta":"
-      from","item_id":"97f01571873d3200"}
+      a","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":91,"output_index":2,"content_index":0,"delta":"
-      multiple","item_id":"97f01571873d3200"}
+      st","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":92,"output_index":2,"content_index":0,"delta":"
-      sources","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":92,"output_index":2,"content_index":0,"delta":"archy","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":93,"output_index":2,"content_index":0,"delta":"
-      including","item_id":"97f01571873d3200"}
+      tuber","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":94,"output_index":2,"content_index":0,"delta":"
-      Wikipedia","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":94,"output_index":2,"content_index":0,"delta":"ous","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":95,"output_index":2,"content_index":0,"delta":",","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":95,"output_index":2,"content_index":0,"delta":"
+      vegetable","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":96,"output_index":2,"content_index":0,"delta":"
-      Britann","item_id":"97f01571873d3200"}
+      native","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":97,"output_index":2,"content_index":0,"delta":"ica","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":97,"output_index":2,"content_index":0,"delta":"
+      to","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":98,"output_index":2,"content_index":0,"delta":",","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":98,"output_index":2,"content_index":0,"delta":"
+      the","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":99,"output_index":2,"content_index":0,"delta":"
-      Health","item_id":"97f01571873d3200"}
+      Americas","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":100,"output_index":2,"content_index":0,"delta":"line","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":100,"output_index":2,"content_index":0,"delta":"
+      (","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":101,"output_index":2,"content_index":0,"delta":",","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":101,"output_index":2,"content_index":0,"delta":"specific","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":102,"output_index":2,"content_index":0,"delta":"
-      and","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":102,"output_index":2,"content_index":0,"delta":"ally","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":103,"output_index":2,"content_index":0,"delta":"
-      other","item_id":"97f01571873d3200"}
+      the","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":104,"output_index":2,"content_index":0,"delta":"
-      reputable","item_id":"97f01571873d3200"}
+      Per","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":105,"output_index":2,"content_index":0,"delta":"
-      sites","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":105,"output_index":2,"content_index":0,"delta":"uvian","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":106,"output_index":2,"content_index":0,"delta":".","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":106,"output_index":2,"content_index":0,"delta":"-B","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":107,"output_index":2,"content_index":0,"delta":"\n\n","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":107,"output_index":2,"content_index":0,"delta":"oliv","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":108,"output_index":2,"content_index":0,"delta":"Let","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":108,"output_index":2,"content_index":0,"delta":"ian","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":109,"output_index":2,"content_index":0,"delta":"
-      me","item_id":"97f01571873d3200"}
+      And","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":110,"output_index":2,"content_index":0,"delta":"
-      summarize","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":110,"output_index":2,"content_index":0,"delta":"es","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":111,"output_index":2,"content_index":0,"delta":"
-      the","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":111,"output_index":2,"content_index":0,"delta":")","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":112,"output_index":2,"content_index":0,"delta":"
-      key","item_id":"97f01571873d3200"}
+      that","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":113,"output_index":2,"content_index":0,"delta":"
-      findings","item_id":"97f01571873d3200"}
+      has","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":114,"output_index":2,"content_index":0,"delta":"
-      in","item_id":"97f01571873d3200"}
+      been","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":115,"output_index":2,"content_index":0,"delta":"
-      one","item_id":"97f01571873d3200"}
+      cultivated","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":116,"output_index":2,"content_index":0,"delta":"
-      sentence","item_id":"97f01571873d3200"}
+      for","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":117,"output_index":2,"content_index":0,"delta":":","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":117,"output_index":2,"content_index":0,"delta":"
+      over","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":118,"output_index":2,"content_index":0,"delta":"\n\n","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":118,"output_index":2,"content_index":0,"delta":"
+      ","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":119,"output_index":2,"content_index":0,"delta":"-","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":119,"output_index":2,"content_index":0,"delta":"7","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":120,"output_index":2,"content_index":0,"delta":"
-      Pot","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":120,"output_index":2,"content_index":0,"delta":",","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":121,"output_index":2,"content_index":0,"delta":"atoes","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":121,"output_index":2,"content_index":0,"delta":"0","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":122,"output_index":2,"content_index":0,"delta":"
-      are","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":122,"output_index":2,"content_index":0,"delta":"0","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":123,"output_index":2,"content_index":0,"delta":"
-      st","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":123,"output_index":2,"content_index":0,"delta":"0","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":124,"output_index":2,"content_index":0,"delta":"archy","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":124,"output_index":2,"content_index":0,"delta":"-","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":125,"output_index":2,"content_index":0,"delta":"
-      tub","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":125,"output_index":2,"content_index":0,"delta":"1","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":126,"output_index":2,"content_index":0,"delta":"ers","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":126,"output_index":2,"content_index":0,"delta":"0","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":127,"output_index":2,"content_index":0,"delta":"
-      native","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":127,"output_index":2,"content_index":0,"delta":",","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":128,"output_index":2,"content_index":0,"delta":"
-      to","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":128,"output_index":2,"content_index":0,"delta":"0","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":129,"output_index":2,"content_index":0,"delta":"
-      the","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":129,"output_index":2,"content_index":0,"delta":"0","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":130,"output_index":2,"content_index":0,"delta":"
-      Americas","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":130,"output_index":2,"content_index":0,"delta":"0","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":131,"output_index":2,"content_index":0,"delta":"
-      (","item_id":"97f01571873d3200"}
+      years","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":132,"output_index":2,"content_index":0,"delta":"Per","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":132,"output_index":2,"content_index":0,"delta":"
+      and","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":133,"output_index":2,"content_index":0,"delta":"u","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":133,"output_index":2,"content_index":0,"delta":"
+      is","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":134,"output_index":2,"content_index":0,"delta":"/B","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":134,"output_index":2,"content_index":0,"delta":"
+      now","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":135,"output_index":2,"content_index":0,"delta":"ol","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":135,"output_index":2,"content_index":0,"delta":"
+      one","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":136,"output_index":2,"content_index":0,"delta":"ivia","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":136,"output_index":2,"content_index":0,"delta":"
+      of","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":137,"output_index":2,"content_index":0,"delta":")","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":137,"output_index":2,"content_index":0,"delta":"
+      the","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":138,"output_index":2,"content_index":0,"delta":"\n","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":138,"output_index":2,"content_index":0,"delta":"
+      world","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":139,"output_index":2,"content_index":0,"delta":"-","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":139,"output_index":2,"content_index":0,"delta":"''s","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":140,"output_index":2,"content_index":0,"delta":"
-      They","item_id":"97f01571873d3200"}
+      most","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":141,"output_index":2,"content_index":0,"delta":"''re","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":141,"output_index":2,"content_index":0,"delta":"
+      important","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":142,"output_index":2,"content_index":0,"delta":"
-      a","item_id":"97f01571873d3200"}
+      food","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":143,"output_index":2,"content_index":0,"delta":"
-      staple","item_id":"97f01571873d3200"}
+      crops","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":144,"output_index":2,"content_index":0,"delta":"
-      food","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":144,"output_index":2,"content_index":0,"delta":",","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":145,"output_index":2,"content_index":0,"delta":"
-      worldwide","item_id":"97f01571873d3200"}
+      with","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":146,"output_index":2,"content_index":0,"delta":"\n","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":146,"output_index":2,"content_index":0,"delta":"
+      over","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":147,"output_index":2,"content_index":0,"delta":"-","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":147,"output_index":2,"content_index":0,"delta":"
+      ","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":148,"output_index":2,"content_index":0,"delta":"
-      They","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":148,"output_index":2,"content_index":0,"delta":"5","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":149,"output_index":2,"content_index":0,"delta":"
-      belong","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":149,"output_index":2,"content_index":0,"delta":",","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":150,"output_index":2,"content_index":0,"delta":"
-      to","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":150,"output_index":2,"content_index":0,"delta":"0","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":151,"output_index":2,"content_index":0,"delta":"
-      the","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":151,"output_index":2,"content_index":0,"delta":"0","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":152,"output_index":2,"content_index":0,"delta":"
-      night","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":152,"output_index":2,"content_index":0,"delta":"0","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":153,"output_index":2,"content_index":0,"delta":"shade","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":153,"output_index":2,"content_index":0,"delta":"
+      varieties","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":154,"output_index":2,"content_index":0,"delta":"
-      family","item_id":"97f01571873d3200"}
+      grown","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
+
+      '
+    - 'event: response.reasoning_text.delta
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":155,"output_index":2,"content_index":0,"delta":"
-      (","item_id":"97f01571873d3200"}
+      globally","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":156,"output_index":2,"content_index":0,"delta":"S","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":156,"output_index":2,"content_index":0,"delta":".","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":157,"output_index":2,"content_index":0,"delta":"olan","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":157,"output_index":2,"content_index":0,"delta":"\n","item_id":"b262e3bb30e85fcc"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":158,"output_index":2,"content_index":0,"delta":"um","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_text.done
+
+      '
+    - 'data: {"type":"response.reasoning_text.done","sequence_number":158,"output_index":2,"content_index":0,"item_id":"b262e3bb30e85fcc","text":"The
+      search results for \"potato\" returned various information from Wikipedia, Britannica,
+      healthline, and other sources. Let me summarize the key information in one sentence:\n\nThe
+      potato is a starchy tuberous vegetable native to the Americas (specifically
+      the Peruvian-Bolivian Andes) that has been cultivated for over 7,000-10,000
+      years and is now one of the world''s most important food crops, with over 5,000
+      varieties grown globally.\n"}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":159,"output_index":2,"content_index":0,"delta":"
-      tub","item_id":"97f01571873d3200"}
+    - 'event: response.reasoning_part.done
+
+      '
+    - 'data: {"type":"response.reasoning_part.done","sequence_number":159,"output_index":2,"content_index":0,"item_id":"b262e3bb30e85fcc","part":{"text":"The
+      search results for \"potato\" returned various information from Wikipedia, Britannica,
+      healthline, and other sources. Let me summarize the key information in one sentence:\n\nThe
+      potato is a starchy tuberous vegetable native to the Americas (specifically
+      the Peruvian-Bolivian Andes) that has been cultivated for over 7,000-10,000
+      years and is now one of the world''s most important food crops, with over 5,000
+      varieties grown globally.\n","type":"reasoning_text"}}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":160,"output_index":2,"content_index":0,"delta":"eros","item_id":"97f01571873d3200"}
+    - 'event: response.output_item.done
+
+      '
+    - 'data: {"type":"response.output_item.done","sequence_number":160,"output_index":2,"item":{"content":[{"text":"The
+      search results for \"potato\" returned various information from Wikipedia, Britannica,
+      healthline, and other sources. Let me summarize the key information in one sentence:\n\nThe
+      potato is a starchy tuberous vegetable native to the Americas (specifically
+      the Peruvian-Bolivian Andes) that has been cultivated for over 7,000-10,000
+      years and is now one of the world''s most important food crops, with over 5,000
+      varieties grown globally.\n","type":"reasoning_text"}],"encrypted_content":null,"id":"b262e3bb30e85fcc","status":"completed","summary":[],"type":"reasoning"}}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":161,"output_index":2,"content_index":0,"delta":"um","item_id":"97f01571873d3200"}
+    - 'event: response.output_item.added
+
+      '
+    - 'data: {"type":"response.output_item.added","sequence_number":161,"output_index":3,"item":{"content":[],"id":"945065162b0f91fb","phase":null,"role":"assistant","status":"in_progress","type":"message"}}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":162,"output_index":2,"content_index":0,"delta":")","item_id":"97f01571873d3200"}
+    - 'event: response.content_part.added
+
+      '
+    - 'data: {"type":"response.content_part.added","sequence_number":162,"output_index":3,"content_index":0,"item_id":"945065162b0f91fb","part":{"annotations":[],"logprobs":[],"text":"","type":"output_text"}}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":163,"output_index":2,"content_index":0,"delta":"\n","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":163,"output_index":3,"content_index":0,"delta":"\n\nThe","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":164,"output_index":2,"content_index":0,"delta":"-","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":164,"output_index":3,"content_index":0,"delta":"
+      potato","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":165,"output_index":2,"content_index":0,"delta":"
-      Over","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":165,"output_index":3,"content_index":0,"delta":"
+      is","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":166,"output_index":2,"content_index":0,"delta":"
-      ","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":166,"output_index":3,"content_index":0,"delta":"
+      a","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":167,"output_index":2,"content_index":0,"delta":"5","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":167,"output_index":3,"content_index":0,"delta":"
+      st","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":168,"output_index":2,"content_index":0,"delta":",","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":168,"output_index":3,"content_index":0,"delta":"archy","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":169,"output_index":2,"content_index":0,"delta":"0","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":169,"output_index":3,"content_index":0,"delta":"
+      tuber","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":170,"output_index":2,"content_index":0,"delta":"0","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":170,"output_index":3,"content_index":0,"delta":"ous","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":171,"output_index":2,"content_index":0,"delta":"0","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":171,"output_index":3,"content_index":0,"delta":"
+      vegetable","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":172,"output_index":2,"content_index":0,"delta":"
-      varieties","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":172,"output_index":3,"content_index":0,"delta":"
+      native","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":173,"output_index":2,"content_index":0,"delta":"
-      exist","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":173,"output_index":3,"content_index":0,"delta":"
+      to","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":174,"output_index":2,"content_index":0,"delta":"\n","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":174,"output_index":3,"content_index":0,"delta":"
+      the","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":175,"output_index":2,"content_index":0,"delta":"-","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":175,"output_index":3,"content_index":0,"delta":"
+      Americas","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":176,"output_index":2,"content_index":0,"delta":"
-      Third","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":176,"output_index":3,"content_index":0,"delta":"
+      (","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":177,"output_index":2,"content_index":0,"delta":"
-      most","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":177,"output_index":3,"content_index":0,"delta":"particularly","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":178,"output_index":2,"content_index":0,"delta":"
-      important","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":178,"output_index":3,"content_index":0,"delta":"
+      the","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":179,"output_index":2,"content_index":0,"delta":"
-      food","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":179,"output_index":3,"content_index":0,"delta":"
+      Per","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":180,"output_index":2,"content_index":0,"delta":"
-      crop","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":180,"output_index":3,"content_index":0,"delta":"uvian","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":181,"output_index":2,"content_index":0,"delta":"
-      globally","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":181,"output_index":3,"content_index":0,"delta":"-B","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":182,"output_index":2,"content_index":0,"delta":"
-      after","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":182,"output_index":3,"content_index":0,"delta":"oliv","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":183,"output_index":2,"content_index":0,"delta":"
-      rice","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":183,"output_index":3,"content_index":0,"delta":"ian","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":184,"output_index":2,"content_index":0,"delta":"
-      and","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":184,"output_index":3,"content_index":0,"delta":"
+      And","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":185,"output_index":2,"content_index":0,"delta":"
-      wheat","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":185,"output_index":3,"content_index":0,"delta":"es","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":186,"output_index":2,"content_index":0,"delta":"\n","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":186,"output_index":3,"content_index":0,"delta":"),","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":187,"output_index":2,"content_index":0,"delta":"-","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":187,"output_index":3,"content_index":0,"delta":"
+      domestic","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":188,"output_index":2,"content_index":0,"delta":"
-      High","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":188,"output_index":3,"content_index":0,"delta":"ated","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":189,"output_index":2,"content_index":0,"delta":"
-      in","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":189,"output_index":3,"content_index":0,"delta":"
+      over","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":190,"output_index":2,"content_index":0,"delta":"
-      nutrients","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":190,"output_index":3,"content_index":0,"delta":"
+      ","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":191,"output_index":2,"content_index":0,"delta":"
-      like","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":191,"output_index":3,"content_index":0,"delta":"7","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":192,"output_index":2,"content_index":0,"delta":"
-      potassium","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":192,"output_index":3,"content_index":0,"delta":",","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":193,"output_index":2,"content_index":0,"delta":"
-      and","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":193,"output_index":3,"content_index":0,"delta":"0","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":194,"output_index":2,"content_index":0,"delta":"
-      vitamin","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":194,"output_index":3,"content_index":0,"delta":"0","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":195,"output_index":2,"content_index":0,"delta":"
-      C","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":195,"output_index":3,"content_index":0,"delta":"0","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":196,"output_index":2,"content_index":0,"delta":"\n\n","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":196,"output_index":3,"content_index":0,"delta":"-","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":197,"output_index":2,"content_index":0,"delta":"I","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":197,"output_index":3,"content_index":0,"delta":"1","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":198,"output_index":2,"content_index":0,"delta":"''ll","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":198,"output_index":3,"content_index":0,"delta":"0","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":199,"output_index":2,"content_index":0,"delta":"
-      craft","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":199,"output_index":3,"content_index":0,"delta":",","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":200,"output_index":2,"content_index":0,"delta":"
-      a","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":200,"output_index":3,"content_index":0,"delta":"0","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":201,"output_index":2,"content_index":0,"delta":"
-      concise","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":201,"output_index":3,"content_index":0,"delta":"0","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":202,"output_index":2,"content_index":0,"delta":"
-      one","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":202,"output_index":3,"content_index":0,"delta":"0","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":203,"output_index":2,"content_index":0,"delta":"-s","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":203,"output_index":3,"content_index":0,"delta":"
+      years","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":204,"output_index":2,"content_index":0,"delta":"entence","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":204,"output_index":3,"content_index":0,"delta":"
+      ago","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":205,"output_index":2,"content_index":0,"delta":"
-      summary","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":205,"output_index":3,"content_index":0,"delta":",","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":206,"output_index":2,"content_index":0,"delta":".","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":206,"output_index":3,"content_index":0,"delta":"
+      and","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":207,"output_index":2,"content_index":0,"delta":"\n","item_id":"97f01571873d3200"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":207,"output_index":3,"content_index":0,"delta":"
+      is","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_text.done","sequence_number":208,"output_index":2,"content_index":0,"item_id":"97f01571873d3200","text":"The
-      user asked me to search for the exact query \"potato\" and summarize the results
-      in one sentence. Based on the web search results, I have comprehensive information
-      about potatoes from multiple sources including Wikipedia, Britannica, Healthline,
-      and other reputable sites.\n\nLet me summarize the key findings in one sentence:\n\n-
-      Potatoes are starchy tubers native to the Americas (Peru/Bolivia)\n- They''re
-      a staple food worldwide\n- They belong to the nightshade family (Solanum tuberosum)\n-
-      Over 5,000 varieties exist\n- Third most important food crop globally after
-      rice and wheat\n- High in nutrients like potassium and vitamin C\n\nI''ll craft
-      a concise one-sentence summary.\n"}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":208,"output_index":3,"content_index":0,"delta":"
+      now","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.reasoning_part.done","sequence_number":209,"output_index":2,"content_index":0,"item_id":"97f01571873d3200","part":{"text":"The
-      user asked me to search for the exact query \"potato\" and summarize the results
-      in one sentence. Based on the web search results, I have comprehensive information
-      about potatoes from multiple sources including Wikipedia, Britannica, Healthline,
-      and other reputable sites.\n\nLet me summarize the key findings in one sentence:\n\n-
-      Potatoes are starchy tubers native to the Americas (Peru/Bolivia)\n- They''re
-      a staple food worldwide\n- They belong to the nightshade family (Solanum tuberosum)\n-
-      Over 5,000 varieties exist\n- Third most important food crop globally after
-      rice and wheat\n- High in nutrients like potassium and vitamin C\n\nI''ll craft
-      a concise one-sentence summary.\n","type":"reasoning_text"}}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":209,"output_index":3,"content_index":0,"delta":"
+      one","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.output_item.done","sequence_number":210,"output_index":2,"item":{"content":[{"text":"The
-      user asked me to search for the exact query \"potato\" and summarize the results
-      in one sentence. Based on the web search results, I have comprehensive information
-      about potatoes from multiple sources including Wikipedia, Britannica, Healthline,
-      and other reputable sites.\n\nLet me summarize the key findings in one sentence:\n\n-
-      Potatoes are starchy tubers native to the Americas (Peru/Bolivia)\n- They''re
-      a staple food worldwide\n- They belong to the nightshade family (Solanum tuberosum)\n-
-      Over 5,000 varieties exist\n- Third most important food crop globally after
-      rice and wheat\n- High in nutrients like potassium and vitamin C\n\nI''ll craft
-      a concise one-sentence summary.\n","type":"reasoning_text"}],"encrypted_content":null,"id":"97f01571873d3200","status":"completed","summary":[],"type":"reasoning"}}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":210,"output_index":3,"content_index":0,"delta":"
+      of","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.output_item.added","sequence_number":211,"output_index":3,"item":{"content":[],"id":"b4f76217829dc525","phase":null,"role":"assistant","status":"in_progress","type":"message"}}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":211,"output_index":3,"content_index":0,"delta":"
+      the","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.content_part.added","sequence_number":212,"output_index":3,"content_index":0,"item_id":"b4f76217829dc525","part":{"annotations":[],"logprobs":[],"text":"","type":"output_text"}}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":212,"output_index":3,"content_index":0,"delta":"
+      world","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":213,"output_index":3,"content_index":0,"delta":"\n\nBased","item_id":"b4f76217829dc525","logprobs":[]}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":213,"output_index":3,"content_index":0,"delta":"''s","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
+
+      '
+    - 'event: response.output_text.delta
 
       '
     - 'data: {"type":"response.output_text.delta","sequence_number":214,"output_index":3,"content_index":0,"delta":"
-      on","item_id":"b4f76217829dc525","logprobs":[]}
+      three","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
+
+      '
+    - 'event: response.output_text.delta
 
       '
     - 'data: {"type":"response.output_text.delta","sequence_number":215,"output_index":3,"content_index":0,"delta":"
-      the","item_id":"b4f76217829dc525","logprobs":[]}
+      most","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
+
+      '
+    - 'event: response.output_text.delta
 
       '
     - 'data: {"type":"response.output_text.delta","sequence_number":216,"output_index":3,"content_index":0,"delta":"
-      web","item_id":"b4f76217829dc525","logprobs":[]}
+      important","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
+
+      '
+    - 'event: response.output_text.delta
 
       '
     - 'data: {"type":"response.output_text.delta","sequence_number":217,"output_index":3,"content_index":0,"delta":"
-      search","item_id":"b4f76217829dc525","logprobs":[]}
+      food","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
+
+      '
+    - 'event: response.output_text.delta
 
       '
     - 'data: {"type":"response.output_text.delta","sequence_number":218,"output_index":3,"content_index":0,"delta":"
-      results","item_id":"b4f76217829dc525","logprobs":[]}
+      crops","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":219,"output_index":3,"content_index":0,"delta":",","item_id":"b4f76217829dc525","logprobs":[]}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":219,"output_index":3,"content_index":0,"delta":"
+      with","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
+
+      '
+    - 'event: response.output_text.delta
 
       '
     - 'data: {"type":"response.output_text.delta","sequence_number":220,"output_index":3,"content_index":0,"delta":"
-      a","item_id":"b4f76217829dc525","logprobs":[]}
+      over","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
+
+      '
+    - 'event: response.output_text.delta
 
       '
     - 'data: {"type":"response.output_text.delta","sequence_number":221,"output_index":3,"content_index":0,"delta":"
-      potato","item_id":"b4f76217829dc525","logprobs":[]}
+      ","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":222,"output_index":3,"content_index":0,"delta":"
-      is","item_id":"b4f76217829dc525","logprobs":[]}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":222,"output_index":3,"content_index":0,"delta":"5","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":223,"output_index":3,"content_index":0,"delta":"
-      a","item_id":"b4f76217829dc525","logprobs":[]}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":223,"output_index":3,"content_index":0,"delta":",","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":224,"output_index":3,"content_index":0,"delta":"
-      st","item_id":"b4f76217829dc525","logprobs":[]}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":224,"output_index":3,"content_index":0,"delta":"0","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":225,"output_index":3,"content_index":0,"delta":"archy","item_id":"b4f76217829dc525","logprobs":[]}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":225,"output_index":3,"content_index":0,"delta":"0","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":226,"output_index":3,"content_index":0,"delta":"
-      tuber","item_id":"b4f76217829dc525","logprobs":[]}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":226,"output_index":3,"content_index":0,"delta":"0","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":227,"output_index":3,"content_index":0,"delta":"ous","item_id":"b4f76217829dc525","logprobs":[]}
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":227,"output_index":3,"content_index":0,"delta":"
+      different","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
+
+      '
+    - 'event: response.output_text.delta
 
       '
     - 'data: {"type":"response.output_text.delta","sequence_number":228,"output_index":3,"content_index":0,"delta":"
-      vegetable","item_id":"b4f76217829dc525","logprobs":[]}
+      varieties","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
+
+      '
+    - 'event: response.output_text.delta
 
       '
     - 'data: {"type":"response.output_text.delta","sequence_number":229,"output_index":3,"content_index":0,"delta":"
-      native","item_id":"b4f76217829dc525","logprobs":[]}
+      grown","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
+
+      '
+    - 'event: response.output_text.delta
 
       '
     - 'data: {"type":"response.output_text.delta","sequence_number":230,"output_index":3,"content_index":0,"delta":"
-      to","item_id":"b4f76217829dc525","logprobs":[]}
+      globally","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":231,"output_index":3,"content_index":0,"delta":"
-      the","item_id":"b4f76217829dc525","logprobs":[]}
+    - 'event: response.output_text.delta
 
       '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":232,"output_index":3,"content_index":0,"delta":"
-      Per","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":233,"output_index":3,"content_index":0,"delta":"uvian","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":234,"output_index":3,"content_index":0,"delta":"-B","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":235,"output_index":3,"content_index":0,"delta":"oliv","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":236,"output_index":3,"content_index":0,"delta":"ian","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":237,"output_index":3,"content_index":0,"delta":"
-      And","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":238,"output_index":3,"content_index":0,"delta":"es","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":239,"output_index":3,"content_index":0,"delta":"
-      in","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":240,"output_index":3,"content_index":0,"delta":"
-      the","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":241,"output_index":3,"content_index":0,"delta":"
-      night","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":242,"output_index":3,"content_index":0,"delta":"shade","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":243,"output_index":3,"content_index":0,"delta":"
-      family","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":244,"output_index":3,"content_index":0,"delta":"
-      (","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":245,"output_index":3,"content_index":0,"delta":"S","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":246,"output_index":3,"content_index":0,"delta":"olan","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":247,"output_index":3,"content_index":0,"delta":"um","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":248,"output_index":3,"content_index":0,"delta":"
-      tub","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":249,"output_index":3,"content_index":0,"delta":"eros","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":250,"output_index":3,"content_index":0,"delta":"um","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":251,"output_index":3,"content_index":0,"delta":")","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":252,"output_index":3,"content_index":0,"delta":"
-      that","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":253,"output_index":3,"content_index":0,"delta":"
-      has","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":254,"output_index":3,"content_index":0,"delta":"
-      been","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":255,"output_index":3,"content_index":0,"delta":"
-      cultivated","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":256,"output_index":3,"content_index":0,"delta":"
-      for","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":257,"output_index":3,"content_index":0,"delta":"
-      thousands","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":258,"output_index":3,"content_index":0,"delta":"
-      of","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":259,"output_index":3,"content_index":0,"delta":"
-      years","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":260,"output_index":3,"content_index":0,"delta":"
-      and","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":261,"output_index":3,"content_index":0,"delta":"
-      is","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":262,"output_index":3,"content_index":0,"delta":"
-      now","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":263,"output_index":3,"content_index":0,"delta":"
-      the","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":264,"output_index":3,"content_index":0,"delta":"
-      third","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":265,"output_index":3,"content_index":0,"delta":"
-      most","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":266,"output_index":3,"content_index":0,"delta":"
-      important","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":267,"output_index":3,"content_index":0,"delta":"
-      food","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":268,"output_index":3,"content_index":0,"delta":"
-      crop","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":269,"output_index":3,"content_index":0,"delta":"
-      globally","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":270,"output_index":3,"content_index":0,"delta":"
-      after","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":271,"output_index":3,"content_index":0,"delta":"
-      rice","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":272,"output_index":3,"content_index":0,"delta":"
-      and","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":273,"output_index":3,"content_index":0,"delta":"
-      wheat","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":274,"output_index":3,"content_index":0,"delta":",","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":275,"output_index":3,"content_index":0,"delta":"
-      with","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":276,"output_index":3,"content_index":0,"delta":"
-      over","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":277,"output_index":3,"content_index":0,"delta":"
-      ","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":278,"output_index":3,"content_index":0,"delta":"5","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":279,"output_index":3,"content_index":0,"delta":",","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":280,"output_index":3,"content_index":0,"delta":"0","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":281,"output_index":3,"content_index":0,"delta":"0","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":282,"output_index":3,"content_index":0,"delta":"0","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":283,"output_index":3,"content_index":0,"delta":"
-      varieties","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":284,"output_index":3,"content_index":0,"delta":"
-      used","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":285,"output_index":3,"content_index":0,"delta":"
-      as","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":286,"output_index":3,"content_index":0,"delta":"
-      a","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":287,"output_index":3,"content_index":0,"delta":"
-      staple","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
+    - 'data: {"type":"response.output_text.delta","sequence_number":231,"output_index":3,"content_index":0,"delta":".","item_id":"945065162b0f91fb","logprobs":[]}
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":288,"output_index":3,"content_index":0,"delta":"
-      food","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":289,"output_index":3,"content_index":0,"delta":"
-      in","item_id":"b4f76217829dc525","logprobs":[]}
-
-      '
     - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":290,"output_index":3,"content_index":0,"delta":"
-      countless","item_id":"b4f76217829dc525","logprobs":[]}
 
       '
-    - '
+    - 'event: response.output_text.done
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":291,"output_index":3,"content_index":0,"delta":"
-      dishes","item_id":"b4f76217829dc525","logprobs":[]}
+    - 'data: {"type":"response.output_text.done","sequence_number":232,"output_index":3,"content_index":0,"item_id":"945065162b0f91fb","logprobs":[],"text":"\n\nThe
+      potato is a starchy tuberous vegetable native to the Americas (particularly
+      the Peruvian-Bolivian Andes), domesticated over 7,000-10,000 years ago, and
+      is now one of the world''s three most important food crops with over 5,000 different
+      varieties grown globally."}
 
       '
     - '
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":292,"output_index":3,"content_index":0,"delta":"
-      worldwide","item_id":"b4f76217829dc525","logprobs":[]}
 
       '
-    - '
+    - 'event: response.content_part.done
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":293,"output_index":3,"content_index":0,"delta":".","item_id":"b4f76217829dc525","logprobs":[]}
+    - 'data: {"type":"response.content_part.done","sequence_number":233,"output_index":3,"content_index":0,"item_id":"945065162b0f91fb","part":{"annotations":[],"logprobs":null,"text":"\n\nThe
+      potato is a starchy tuberous vegetable native to the Americas (particularly
+      the Peruvian-Bolivian Andes), domesticated over 7,000-10,000 years ago, and
+      is now one of the world''s three most important food crops with over 5,000 different
+      varieties grown globally.","type":"output_text"}}
 
       '
     - '
-
-      '
-    - 'data: {"type":"response.output_text.done","sequence_number":294,"output_index":3,"content_index":0,"item_id":"b4f76217829dc525","logprobs":[],"text":"\n\nBased
-      on the web search results, a potato is a starchy tuberous vegetable native to
-      the Peruvian-Bolivian Andes in the nightshade family (Solanum tuberosum) that
-      has been cultivated for thousands of years and is now the third most important
-      food crop globally after rice and wheat, with over 5,000 varieties used as a
-      staple food in countless dishes worldwide."}
 
       '
-    - '
+    - 'event: response.output_item.done
 
       '
-    - 'data: {"type":"response.content_part.done","sequence_number":295,"output_index":3,"content_index":0,"item_id":"b4f76217829dc525","part":{"annotations":[],"logprobs":null,"text":"\n\nBased
-      on the web search results, a potato is a starchy tuberous vegetable native to
-      the Peruvian-Bolivian Andes in the nightshade family (Solanum tuberosum) that
-      has been cultivated for thousands of years and is now the third most important
-      food crop globally after rice and wheat, with over 5,000 varieties used as a
-      staple food in countless dishes worldwide.","type":"output_text"}}
+    - 'data: {"type":"response.output_item.done","sequence_number":234,"output_index":3,"item":{"content":[{"annotations":[],"logprobs":null,"text":"\n\nThe
+      potato is a starchy tuberous vegetable native to the Americas (particularly
+      the Peruvian-Bolivian Andes), domesticated over 7,000-10,000 years ago, and
+      is now one of the world''s three most important food crops with over 5,000 different
+      varieties grown globally.","type":"output_text"}],"id":"945065162b0f91fb","phase":null,"role":"assistant","status":"completed","summary":[],"type":"message"}}
 
       '
     - '
 
       '
-    - 'data: {"type":"response.output_item.done","sequence_number":296,"output_index":3,"item":{"content":[{"annotations":[],"logprobs":null,"text":"\n\nBased
-      on the web search results, a potato is a starchy tuberous vegetable native to
-      the Peruvian-Bolivian Andes in the nightshade family (Solanum tuberosum) that
-      has been cultivated for thousands of years and is now the third most important
-      food crop globally after rice and wheat, with over 5,000 varieties used as a
-      staple food in countless dishes worldwide.","type":"output_text"}],"id":"b4f76217829dc525","phase":null,"role":"assistant","status":"completed","summary":[],"type":"message"}}
-
-      '
-    - '
+    - 'event: response.completed
 
       '
-    - 'data: {"type":"response.completed","sequence_number":297,"response":{"conversation_id":null,"created_at":1785502360,"error":null,"id":"resp_019fb83b-d721-7061-a039-96fb0507c3f7","incomplete_details":null,"instructions":null,"model":"Qwen/Qwen3.5-35B-A3B-FP8","object":"response","output":[{"content":[{"text":"The
-      user wants me to search for the exact query \"potato\" on the web and then summarize
-      the results in one sentence. I''ll use the web_search function with the exact
-      query they specified.\n","type":"reasoning_text"}],"encrypted_content":null,"id":"a056d039d6f61314","status":null,"summary":[],"type":"reasoning"},{"action":{"query":"potato","sources":[{"title":"Potato
+    - 'data: {"type":"response.completed","sequence_number":235,"response":{"conversation_id":null,"created_at":1786000570,"error":null,"id":"resp_019fd5ed-ed8c-7501-85f7-8cada8fbadda","incomplete_details":null,"instructions":null,"model":"Qwen/Qwen3.5-35B-A3B-FP8","object":"response","output":[{"content":[{"text":"The
+      user wants me to search for the exact query \"potato\" and summarize the results
+      in one sentence. I''ll use the web_search function with the exact query \"potato\".\n","type":"reasoning_text"}],"encrypted_content":null,"id":"aa3219c98c03ed14","status":null,"summary":[],"type":"reasoning"},{"action":{"query":"potato","sources":[{"title":"Potato
       - Wikipedia","url":"https://en.wikipedia.org/wiki/Potato"},{"title":"Potatoes
       | Potato Nutrition | Types of Potatoes | Recipes","url":"https://potatogoodness.com/"},{"title":"Potato
       Facts","url":"https://www.idahopotatomuseum.com/potato-facts/"},{"title":"16
       Types of Potatoes (And How to Use Them in Your Cooking!)","url":"https://www.thekitchn.com/potato-varieties-64061"},{"title":"Potato
       Facts and Figures - International Potato Center","url":"https://cipotato.org/potato/potato-facts-and-figures/"},{"title":"Understanding
       Potatoes","url":"https://www.thechoppingblock.com/blog/understanding-potatoes"},{"title":"Home
-      of U.S. Potato Farmers | Potatoes USA","url":"https://potatoesusa.com/"},{"title":"Growing
-      potatoes in home gardens | UMN Extension","url":"https://extension.umn.edu/vegetables/growing-potatoes"},{"title":"Potatoes
-      101: Nutrition Facts, Health Benefits, and Types","url":"https://www.healthline.com/nutrition/foods/potatoes"},{"title":"Potato
-      | Definition, Plant, Origin, & Facts | Britannica","url":"https://www.britannica.com/plant/potato"}],"type":"search"},"id":"ws_9bc2e80d191aba9e","status":"completed","type":"web_search_call"},{"content":[{"text":"The
-      user asked me to search for the exact query \"potato\" and summarize the results
-      in one sentence. Based on the web search results, I have comprehensive information
-      about potatoes from multiple sources including Wikipedia, Britannica, Healthline,
-      and other reputable sites.\n\nLet me summarize the key findings in one sentence:\n\n-
-      Potatoes are starchy tubers native to the Americas (Peru/Bolivia)\n- They''re
-      a staple food worldwide\n- They belong to the nightshade family (Solanum tuberosum)\n-
-      Over 5,000 varieties exist\n- Third most important food crop globally after
-      rice and wheat\n- High in nutrients like potassium and vitamin C\n\nI''ll craft
-      a concise one-sentence summary.\n","type":"reasoning_text"}],"encrypted_content":null,"id":"97f01571873d3200","status":null,"summary":[],"type":"reasoning"},{"content":[{"annotations":[],"text":"\n\nBased
-      on the web search results, a potato is a starchy tuberous vegetable native to
-      the Peruvian-Bolivian Andes in the nightshade family (Solanum tuberosum) that
-      has been cultivated for thousands of years and is now the third most important
-      food crop globally after rice and wheat, with over 5,000 varieties used as a
-      staple food in countless dishes worldwide.","type":"output_text"}],"id":"b4f76217829dc525","role":"assistant","status":"completed","type":"message"}],"previous_response_id":null,"status":"completed","usage":{"input_tokens":4686,"input_tokens_details":{"cached_tokens":0},"output_tokens":307,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":4993}}}
+      of U.S. Potato Farmers | Potatoes USA","url":"https://potatoesusa.com/"},{"title":"Potatoes
+      101: Nutrition Facts, Health Benefits, and Types","url":"https://www.healthline.com/nutrition/foods/potatoes"},{"title":"Growing
+      potatoes in home gardens | UMN Extension","url":"https://extension.umn.edu/vegetables/growing-potatoes"},{"title":"Potato
+      | Vegetable, Tuber, Nutrition, Diseases, Origin, & Facts ...","url":"https://www.britannica.com/plant/potato"}],"type":"search"},"id":"ws_adfb13c4cc71b2cc","status":"completed","type":"web_search_call"},{"content":[{"text":"The
+      search results for \"potato\" returned various information from Wikipedia, Britannica,
+      healthline, and other sources. Let me summarize the key information in one sentence:\n\nThe
+      potato is a starchy tuberous vegetable native to the Americas (specifically
+      the Peruvian-Bolivian Andes) that has been cultivated for over 7,000-10,000
+      years and is now one of the world''s most important food crops, with over 5,000
+      varieties grown globally.\n","type":"reasoning_text"}],"encrypted_content":null,"id":"b262e3bb30e85fcc","status":null,"summary":[],"type":"reasoning"},{"content":[{"annotations":[],"text":"\n\nThe
+      potato is a starchy tuberous vegetable native to the Americas (particularly
+      the Peruvian-Bolivian Andes), domesticated over 7,000-10,000 years ago, and
+      is now one of the world''s three most important food crops with over 5,000 different
+      varieties grown globally.","type":"output_text"}],"id":"945065162b0f91fb","role":"assistant","status":"completed","type":"message"}],"previous_response_id":null,"status":"completed","usage":{"input_tokens":4772,"input_tokens_details":{"cached_tokens":0},"output_tokens":245,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":5017}}}
 
       '
     - '

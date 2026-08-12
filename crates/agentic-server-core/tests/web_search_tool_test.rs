@@ -39,16 +39,11 @@ fn load_recorded_web_search_pair(streaming: bool) -> (support::Cassette, support
 }
 
 fn recorded_sse_events(turn: &support::Turn) -> Vec<serde_json::Value> {
-    turn.response
-        .sse
-        .as_ref()
-        .expect("streaming cassette should contain SSE")
-        .iter()
-        .flat_map(|entry| entry.lines())
-        .filter_map(|line| line.strip_prefix("data: "))
-        .filter(|data| *data != "[DONE]")
-        .map(|data| serde_json::from_str(data).expect("cassette SSE data should be valid JSON"))
-        .collect()
+    support::recorded_named_sse_events(turn)
+}
+
+fn streamed_sse_events(chunks: &[String]) -> Vec<serde_json::Value> {
+    support::streamed_sse_events(chunks)
 }
 
 fn recorded_terminal_output(turn: &support::Turn) -> Vec<serde_json::Value> {
@@ -1353,16 +1348,7 @@ async fn stream_emits_web_search_lifecycle_events_before_final_payload() {
     let chunks: Vec<String> = stream.collect().await;
     captured_you.recv().await.expect("mock You.com should receive request");
 
-    let json_events: Vec<serde_json::Value> = chunks
-        .iter()
-        .filter_map(|chunk| {
-            let data = chunk.trim_end_matches('\n').strip_prefix("data: ")?;
-            if data == "[DONE]" {
-                return None;
-            }
-            serde_json::from_str(data).ok()
-        })
-        .collect();
+    let json_events = streamed_sse_events(&chunks);
     let event_types: Vec<&str> = json_events.iter().filter_map(|event| event["type"].as_str()).collect();
     assert!(event_types.contains(&"response.created"));
     assert!(event_types.contains(&"response.output_text.delta"));
@@ -1486,13 +1472,7 @@ async fn multi_round_stream_has_single_lifecycle_and_monotonic_public_sequence()
         .await
         .expect("mock You.com should receive second request");
 
-    let json_events: Vec<serde_json::Value> = chunks
-        .iter()
-        .filter_map(|chunk| {
-            let data = chunk.trim_end_matches('\n').strip_prefix("data: ")?;
-            (data != "[DONE]").then(|| serde_json::from_str(data).ok())?
-        })
-        .collect();
+    let json_events = streamed_sse_events(&chunks);
     assert_single_logical_lifecycle(&json_events);
     assert_contiguous_sequence_numbers(
         &json_events,
@@ -1563,16 +1543,7 @@ async fn stream_hides_web_search_function_events_when_name_arrives_on_done() {
     let chunks: Vec<String> = stream.collect().await;
     captured_you.recv().await.expect("mock You.com should receive request");
 
-    let json_events: Vec<serde_json::Value> = chunks
-        .iter()
-        .filter_map(|chunk| {
-            let data = chunk.trim_end_matches('\n').strip_prefix("data: ")?;
-            if data == "[DONE]" {
-                return None;
-            }
-            serde_json::from_str(data).ok()
-        })
-        .collect();
+    let json_events = streamed_sse_events(&chunks);
     assert!(
         !json_events.iter().any(|event| {
             event["item"]["type"] == "function_call"
@@ -1645,13 +1616,7 @@ async fn stream_orders_gateway_lifecycle_before_later_client_function_events() {
         .await
         .expect("mock You.com should receive second request");
 
-    let json_events: Vec<serde_json::Value> = chunks
-        .iter()
-        .filter_map(|chunk| {
-            let data = chunk.trim_end_matches('\n').strip_prefix("data: ")?;
-            (data != "[DONE]").then(|| serde_json::from_str(data).ok())?
-        })
-        .collect();
+    let json_events = streamed_sse_events(&chunks);
     assert_contiguous_sequence_numbers(
         &json_events,
         "mixed-call stream must retain contiguous sequence numbers",
@@ -2003,13 +1968,10 @@ async fn stream_error_events_escape_error_messages() {
         panic!("expected streaming response");
     };
     let chunks: Vec<String> = stream.collect().await;
-    let error_chunk = chunks
-        .iter()
-        .find(|chunk| chunk.starts_with("data: {") && chunk.contains("\"error\""))
+    let parsed = streamed_sse_events(&chunks)
+        .into_iter()
+        .find(|event| event["type"] == "error")
         .expect("stream should include error event");
-    let json = error_chunk.trim().strip_prefix("data: ").unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(json).expect("error event should be valid JSON");
-    assert_eq!(parsed["type"], "error");
     let error = parsed["error"]["message"].as_str().unwrap();
     assert!(error.contains(r#"bad \"quoted\" upstream response"#), "{error}");
 }
@@ -2181,13 +2143,7 @@ async fn stream_returns_incomplete_after_max_gateway_tool_rounds() {
     };
     let chunks: Vec<String> = stream.collect().await;
 
-    let json_events: Vec<serde_json::Value> = chunks
-        .iter()
-        .filter_map(|chunk| {
-            let data = chunk.trim_end_matches('\n').strip_prefix("data: ")?;
-            (data != "[DONE]").then(|| serde_json::from_str::<serde_json::Value>(data).ok())?
-        })
-        .collect();
+    let json_events = streamed_sse_events(&chunks);
     let sequence_numbers: Vec<u64> = json_events
         .iter()
         .map(|event| {

@@ -375,7 +375,7 @@ async fn stream_ws_response(
                     let Some(line) = line else {
                         break;
                     };
-                    forward_ws_stream_line(sender, &line).await?;
+                    forward_ws_stream_chunk(sender, &line).await?;
                 }
             }
             continue;
@@ -410,25 +410,28 @@ async fn stream_ws_response(
         let Some(line) = next_line else {
             break;
         };
-        forward_ws_stream_line(sender, &line).await?;
+        forward_ws_stream_chunk(sender, &line).await?;
     }
 
     Ok(())
 }
 
-async fn forward_ws_stream_line(sender: &mut WsSender, line: &str) -> Result<(), WsError> {
-    let Some(data) = line.strip_prefix("data: ") else {
-        return Ok(());
-    };
-    let data = data.trim();
-    if data == "[DONE]" {
-        return Ok(());
+fn sse_json_data_lines(chunk: &str) -> impl Iterator<Item = &str> {
+    chunk
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .map(str::trim)
+        .filter(|data| *data != "[DONE]")
+}
+
+async fn forward_ws_stream_chunk(sender: &mut WsSender, chunk: &str) -> Result<(), WsError> {
+    for data in sse_json_data_lines(chunk) {
+        let value = serde_json::from_str::<Value>(data)
+            .map_err(ExecutorError::from)
+            .map_err(WsError::Executor)?;
+        send_ws_json(sender, value).await?;
     }
-    let value = match serde_json::from_str::<Value>(data) {
-        Ok(value) => value,
-        Err(e) => return Err(WsError::Executor(ExecutorError::from(e))),
-    };
-    send_ws_json(sender, value).await
+    Ok(())
 }
 
 async fn handle_ws_error(sender: &mut WsSender, err: WsError) -> bool {
@@ -468,7 +471,7 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     use super::{
-        ShutdownInput, WsError, close_ws, keep_if_running, next_shutdown_input, next_ws_message,
+        ShutdownInput, WsError, close_ws, keep_if_running, next_shutdown_input, next_ws_message, sse_json_data_lines,
         websocket_identity_error_event,
     };
     use crate::auth::AuthenticatedPrincipal;
@@ -478,6 +481,20 @@ mod tests {
     struct CancellingStream {
         shutdown_token: CancellationToken,
         item: Option<&'static str>,
+    }
+
+    #[test]
+    fn sse_json_data_lines_accept_named_and_data_only_frames() {
+        let chunk = concat!(
+            "event: response.completed\n",
+            "data: {\"type\":\"response.completed\"}\n\n",
+            "data: [DONE]\n\n",
+        );
+
+        assert_eq!(
+            sse_json_data_lines(chunk).collect::<Vec<_>>(),
+            [r#"{"type":"response.completed"}"#]
+        );
     }
 
     impl Stream for CancellingStream {

@@ -283,13 +283,7 @@ async fn assert_web_search_then_namespace(cassette_rel_path: &str) {
         "gateway round + client-action round"
     );
 
-    let events: Vec<serde_json::Value> = chunks
-        .iter()
-        .filter_map(|chunk| {
-            let data = chunk.trim_end_matches('\n').strip_prefix("data: ")?;
-            (data != "[DONE]").then(|| serde_json::from_str(data).ok())?
-        })
-        .collect();
+    let events = support::streamed_sse_events(&chunks);
 
     // The gateway web_search surfaced as public web_search_call lifecycle events;
     // its raw function call never leaked to the client.
@@ -382,13 +376,7 @@ async fn assert_multi_round_web_search(cassette_rel_path: &str) {
         "two Continue rounds + a final answering round"
     );
 
-    let events: Vec<serde_json::Value> = chunks
-        .iter()
-        .filter_map(|chunk| {
-            let data = chunk.trim_end_matches('\n').strip_prefix("data: ")?;
-            (data != "[DONE]").then(|| serde_json::from_str(data).ok())?
-        })
-        .collect();
+    let events = support::streamed_sse_events(&chunks);
     // Both gateway calls surfaced as public web_search_call items in the terminal
     // response; the final turn produced a message.
     let terminal = events
@@ -468,13 +456,7 @@ async fn openai_web_search_and_namespace_same_turn_hands_back_in_one_round() {
         "mixed turn hands back immediately — no second model call"
     );
 
-    let events: Vec<serde_json::Value> = chunks
-        .iter()
-        .filter_map(|chunk| {
-            let data = chunk.trim_end_matches('\n').strip_prefix("data: ")?;
-            (data != "[DONE]").then(|| serde_json::from_str(data).ok())?
-        })
-        .collect();
+    let events = support::streamed_sse_events(&chunks);
     let terminal = events
         .iter()
         .rev()

@@ -121,6 +121,60 @@ pub fn expected_text(turn: &Turn) -> String {
     String::new()
 }
 
+/// Parse named SSE JSON events and verify every JSON `data:` line has exactly
+/// one preceding `event:` header matching its payload `type`.
+pub fn named_sse_events<'a>(lines: impl IntoIterator<Item = &'a str>) -> Vec<Value> {
+    let mut event_name = None;
+    let mut events = Vec::new();
+
+    for line in lines {
+        let line = line.trim_end_matches('\r');
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(name) = line.strip_prefix("event: ") {
+            assert!(event_name.is_none(), "SSE event header was not followed by data");
+            event_name = Some(name);
+            continue;
+        }
+
+        let data = line.strip_prefix("data: ").expect("unexpected SSE line");
+        if data == "[DONE]" {
+            assert!(event_name.is_none(), "[DONE] must not consume a named event header");
+            continue;
+        }
+
+        let event = serde_json::from_str::<Value>(data).expect("SSE data should be valid JSON");
+        let name = event_name.take().expect("SSE JSON data should have an event header");
+        assert_eq!(event["type"].as_str(), Some(name), "SSE header must match data type");
+        events.push(event);
+    }
+
+    assert!(event_name.is_none(), "SSE event header was not followed by data");
+    events
+}
+
+pub fn recorded_named_sse_events(turn: &Turn) -> Vec<Value> {
+    named_sse_events(
+        turn.response
+            .sse
+            .as_ref()
+            .expect("streaming cassette should contain SSE")
+            .iter()
+            .flat_map(|entry| entry.lines()),
+    )
+}
+
+pub fn streamed_sse_events(chunks: &[String]) -> Vec<Value> {
+    named_sse_events(chunks.iter().flat_map(|chunk| chunk.lines()))
+}
+
+pub fn streamed_sse_event(chunk: &str) -> Option<Value> {
+    let mut events = named_sse_events(chunk.lines());
+    assert!(events.len() <= 1, "stream chunk contained multiple JSON events");
+    events.pop()
+}
+
 /// A per-test HTTP mock server.  The server task is aborted when this struct
 /// is dropped, ensuring clean teardown even if a test panics.
 pub struct MockServer {
@@ -395,20 +449,13 @@ pub async fn collect_stream(result: Either<ResponsePayload, BoxStream>) -> Respo
     };
     let mut stream = Box::pin(stream);
     while let Some(chunk) = stream.next().await {
-        if let Some(data) = chunk.trim_end_matches('\n').strip_prefix("data: ") {
-            if data != "[DONE]" {
-                if let Ok(payload) = serde_json::from_str::<ResponsePayload>(data) {
-                    while stream.next().await.is_some() {}
-                    return payload;
-                }
-                if let Ok(mut event) = serde_json::from_str::<serde_json::Value>(data)
-                    && event.get("type").and_then(serde_json::Value::as_str) == Some("response.completed")
-                    && let Some(response) = event.get_mut("response")
-                    && let Ok(payload) = serde_json::from_value::<ResponsePayload>(response.take())
-                {
-                    while stream.next().await.is_some() {}
-                    return payload;
-                }
+        if let Some(mut event) = streamed_sse_event(&chunk) {
+            if event.get("type").and_then(Value::as_str) == Some("response.completed")
+                && let Some(response) = event.get_mut("response")
+                && let Ok(payload) = serde_json::from_value::<ResponsePayload>(response.take())
+            {
+                while stream.next().await.is_some() {}
+                return payload;
             }
         }
     }
