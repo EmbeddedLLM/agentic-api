@@ -365,8 +365,12 @@ impl YouSearchRequest {
             .filters
             .as_ref()
             .and_then(|filters| clean_vec(filters.allowed_domains.as_deref()));
+        let config_blocked_domains = config
+            .filters
+            .as_ref()
+            .and_then(|filters| clean_vec(filters.blocked_domains.as_deref()));
         let include_domains = config_domains.or_else(|| clean_vec(args.include_domains.as_deref()));
-        let exclude_domains = clean_vec(args.exclude_domains.as_deref());
+        let exclude_domains = config_blocked_domains.or_else(|| clean_vec(args.exclude_domains.as_deref()));
         let boost_domains = clean_vec(args.boost_domains.as_deref());
         if include_domains.is_some() && (exclude_domains.is_some() || boost_domains.is_some()) {
             return Err(ToolError::Config(

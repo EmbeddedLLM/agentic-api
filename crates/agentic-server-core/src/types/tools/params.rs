@@ -200,6 +200,7 @@ impl WebSearchContextSize {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct WebSearchFilters {
     pub allowed_domains: Option<Vec<String>>,
+    pub blocked_domains: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

@@ -180,17 +180,25 @@ Claude Code's own tools (Bash, Edit, Read, …) stay **client-owned** — Claude
 
 ### Running Claude Code's web search on the gateway
 
-Claude Code declares web search as a client tool named `WebSearch`, so by default it runs client-side. To have the gateway execute it instead — server-side against your configured search backend, hidden from the model like any gateway tool — opt in with one env var when starting the gateway:
+Current Claude Code versions declare Anthropic's native `web_search_20250305` server tool. Agentic API translates that
+declaration for the upstream model and executes the resulting search server-side against the configured search backend;
+no MCP server or tool alias is required:
 
 ```bash
 YOU_API_KEY=<you.com-key> YOU_API_BASE_URL=<you.com-base-url> \
-MESSAGES_GATEWAY_TOOL_ALIASES="WebSearch=web_search" \
   cargo run -p agentic-server -- --llm-api-base http://0.0.0.0:5050
 ```
 
-`MESSAGES_GATEWAY_TOOL_ALIASES` maps a client tool name to a gateway executor (`name=executor`, comma-separated). It is **empty by default** — a client function is only executed server-side when you configure it, mirroring the [tool ownership model](#-tool-ownership-model). The gateway adapts Claude Code's `WebSearch` arguments (`allowed_domains`/`blocked_domains`) to the executor's schema automatically.
+The gateway supports the basic `web_search_20250305` contract, including `max_uses`, `allowed_domains`,
+`blocked_domains`, and the country in `user_location`. Other versioned native web-search declarations are rejected rather
+than forwarded in a shape the upstream cannot execute.
 
-> Note: the search executor treats include/exclude domain lists as mutually exclusive, so a `WebSearch` call that sets both `allowed_domains` and `blocked_domains` returns an error result to the model.
+Older clients that declare a function tool named `WebSearch` can still opt in with
+`MESSAGES_GATEWAY_TOOL_ALIASES="WebSearch=web_search"`. This variable maps a client tool name to a gateway executor
+(`name=executor`, comma-separated) and remains empty by default. The gateway adapts the older `WebSearch` function's
+`allowed_domains`/`blocked_domains` arguments to the executor's schema automatically.
+
+> Note: allow and block domain lists are mutually exclusive, matching Anthropic's native tool contract.
 
 ## 🧩 Tool Ownership Model
 

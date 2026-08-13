@@ -16,13 +16,20 @@ use serde_json::{Map, Value, json};
 
 use crate::types::event::MessageStatus;
 use crate::types::io::output::FunctionToolCall;
-use crate::types::tools::{FunctionToolParam, ResponsesTool, WebSearchToolParam};
+use crate::types::tools::{
+    FunctionToolParam, ResponsesTool, WebSearchFilters, WebSearchToolParam, WebSearchUserLocation,
+};
+use crate::utils::common::deserialize_from_value_opt;
 
 use super::request::ToolParam;
 
 /// The one built-in gateway executor exposed on `/v1/messages` today. The
 /// registry keys it under this exact name (`tool::web_search`).
 pub const WEB_SEARCH_EXECUTOR: &str = "web_search";
+
+/// Claude's basic native web-search server tool version, supported by the
+/// Messages gateway loop as a gateway-owned tool.
+pub const NATIVE_WEB_SEARCH_TYPE: &str = "web_search_20250305";
 
 /// Operator-configured map of client-declared tool names to gateway executors.
 ///
@@ -106,10 +113,7 @@ pub fn registry_tools(tools: Option<&Vec<ToolParam>>, map: &GatewayToolMap) -> V
 
 fn map_tool(tool: &ToolParam, map: &GatewayToolMap) -> Option<ResponsesTool> {
     if map.canonical_executor(&tool.name) == Some(WEB_SEARCH_EXECUTOR) {
-        // Defaults are fine: the client's input_schema is the model-facing
-        // contract (forwarded to vLLM in the raw request), not the executor's
-        // config.
-        return Some(ResponsesTool::WebSearch(WebSearchToolParam::default()));
+        return Some(ResponsesTool::WebSearch(web_search_config(tool)));
     }
     let name = tool.name.clone().try_into().ok()?;
     Some(ResponsesTool::Function(FunctionToolParam {
@@ -120,6 +124,38 @@ fn map_tool(tool: &ToolParam, map: &GatewayToolMap) -> Option<ResponsesTool> {
         defer_loading: None,
         extra: std::collections::HashMap::new(),
     }))
+}
+
+fn web_search_config(tool: &ToolParam) -> WebSearchToolParam {
+    if tool.type_.as_deref() != Some(NATIVE_WEB_SEARCH_TYPE) {
+        return WebSearchToolParam::default();
+    }
+
+    let allowed_domains = tool
+        .extra
+        .get("allowed_domains")
+        .cloned()
+        .and_then(deserialize_from_value_opt);
+    let blocked_domains = tool
+        .extra
+        .get("blocked_domains")
+        .cloned()
+        .and_then(deserialize_from_value_opt);
+    let filters = (allowed_domains.is_some() || blocked_domains.is_some()).then_some(WebSearchFilters {
+        allowed_domains,
+        blocked_domains,
+    });
+    let user_location = tool
+        .extra
+        .get("user_location")
+        .cloned()
+        .and_then(deserialize_from_value_opt::<WebSearchUserLocation>);
+
+    WebSearchToolParam {
+        search_context_size: None,
+        filters,
+        user_location,
+    }
 }
 
 /// Turn an assistant `tool_use` block into the `FunctionToolCall` that

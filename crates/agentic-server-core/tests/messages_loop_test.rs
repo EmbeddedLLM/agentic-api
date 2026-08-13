@@ -220,6 +220,102 @@ async fn messages_loop_hides_gateway_tool_and_surfaces_final_text() {
     assert_eq!(result["stop_reason"], "end_turn");
 }
 
+#[tokio::test]
+async fn native_web_search_applies_domain_and_location_configuration() {
+    let (vllm_url, _upstream, _v) = spawn_mock_vllm_messages(cassette_turn_bodies()).await;
+    let (search_url, mut captured, _s) = spawn_mock_search().await;
+    let exec_ctx = build_exec_ctx(&vllm_url, &search_url).await;
+    let request = serde_json::json!({
+        "model": "qwen3", "max_tokens": 1024, "stream": false,
+        "messages": [{"role": "user", "content": "Search Rust's official site."}],
+        "tools": [{
+            "type": "web_search_20250305",
+            "name": "web_search",
+            "allowed_domains": ["rust-lang.org"],
+            "user_location": {"type": "approximate", "country": "ca"}
+        }]
+    });
+    let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
+    let registry = build_tool_registry(&tools, &exec_ctx).await;
+
+    run_messages_loop(request, &registry, &exec_ctx, None)
+        .await
+        .expect("loop runs");
+
+    let search = captured.recv().await.expect("search backend hit");
+    assert_eq!(search.body["include_domains"], serde_json::json!(["rust-lang.org"]));
+    assert_eq!(search.body["country"], "CA");
+}
+
+#[tokio::test]
+async fn native_web_search_applies_blocked_domains() {
+    let (vllm_url, _upstream, _v) = spawn_mock_vllm_messages(cassette_turn_bodies()).await;
+    let (search_url, mut captured, _s) = spawn_mock_search().await;
+    let exec_ctx = build_exec_ctx(&vllm_url, &search_url).await;
+    let request = serde_json::json!({
+        "model": "qwen3", "max_tokens": 1024, "stream": false,
+        "messages": [{"role": "user", "content": "Search outside an excluded site."}],
+        "tools": [{
+            "type": "web_search_20250305",
+            "name": "web_search",
+            "blocked_domains": ["example.com"]
+        }]
+    });
+    let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
+    let registry = build_tool_registry(&tools, &exec_ctx).await;
+
+    run_messages_loop(request, &registry, &exec_ctx, None)
+        .await
+        .expect("loop runs");
+
+    let search = captured.recv().await.expect("search backend hit");
+    assert_eq!(search.body["exclude_domains"], serde_json::json!(["example.com"]));
+}
+
+#[tokio::test]
+async fn native_web_search_enforces_max_uses() {
+    let round0 = serde_json::json!({
+        "id": "m", "type": "message", "role": "assistant", "model": "qwen3",
+        "content": [
+            {"type": "tool_use", "id": "t1", "name": "web_search", "input": {"query": "rust one"}},
+            {"type": "tool_use", "id": "t2", "name": "web_search", "input": {"query": "rust two"}}
+        ],
+        "stop_reason": "tool_use", "usage": {"input_tokens": 5, "output_tokens": 3}
+    });
+    let round1 = serde_json::json!({
+        "id": "m2", "type": "message", "role": "assistant", "model": "qwen3",
+        "content": [{"type": "text", "text": "Done."}],
+        "stop_reason": "end_turn", "usage": {"input_tokens": 5, "output_tokens": 3}
+    });
+    let (vllm_url, upstream, _v) = spawn_mock_vllm_messages(vec![round0, round1]).await;
+    let (search_url, mut captured, _s) = spawn_mock_search().await;
+    let exec_ctx = build_exec_ctx(&vllm_url, &search_url).await;
+    let request = serde_json::json!({
+        "model": "qwen3", "max_tokens": 1024, "stream": false,
+        "messages": [{"role": "user", "content": "Search twice."}],
+        "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 1}]
+    });
+    let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
+    let registry = build_tool_registry(&tools, &exec_ctx).await;
+
+    run_messages_loop(request, &registry, &exec_ctx, None)
+        .await
+        .expect("loop runs");
+
+    captured.recv().await.expect("first search runs");
+    assert!(captured.try_recv().is_err(), "second search must not run");
+    let requests = upstream.requests.lock().await;
+    let results = requests[1]["messages"]
+        .as_array()
+        .and_then(|messages| messages.last())
+        .and_then(|message| message["content"].as_array())
+        .expect("tool results fed back");
+    assert_eq!(results.len(), 2);
+    assert_eq!(results[0]["is_error"], false);
+    assert_eq!(results[1]["is_error"], true);
+    assert!(results[1]["content"].as_str().unwrap_or_default().contains("max_uses"));
+}
+
 // ── Repro tests for Maral's #131 review (currently FAILING — proves each bug) ──
 
 // F3: the assistant turn fed back on the next round must preserve preceding

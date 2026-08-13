@@ -1,10 +1,10 @@
 //! Anthropic Messages API request types (`POST /v1/messages`).
 //!
-//! These mirror the Anthropic wire shape. The gateway forwards the client's raw
-//! request to vLLM `/v1/messages` untouched (the loop is Messages-native), so
-//! fields the gateway does not itself act on are preserved via `extra` and pass
-//! through unchanged. The loop only needs to *read* the tools and the assistant
-//! turn; see [`super::tool_seam`] and [`crate::executor::messages_loop`].
+//! These mirror the Anthropic wire shape. Unmodeled fields are preserved via
+//! `extra` and pass through unchanged. The Messages-native loop normalizes
+//! gateway-owned native server-tool declarations before forwarding, then reads
+//! the tools and assistant turn; see [`super::tool_seam`] and
+//! [`crate::executor::messages_loop`].
 
 use std::collections::HashMap;
 

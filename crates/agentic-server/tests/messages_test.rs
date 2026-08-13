@@ -173,6 +173,29 @@ async fn messages_count_tokens_uses_matching_upstream_path() {
 }
 
 #[tokio::test]
+async fn messages_count_tokens_normalizes_native_web_search() {
+    let (llm_url, requests, _upstream) =
+        spawn_recording_upstream(StatusCode::OK, "application/json", r#"{"input_tokens":12}"#).await;
+    let (gateway_url, _gateway) = spawn_gateway(test_state(&test_config(&llm_url))).await;
+    let body = r#"{"model":"qwen3","messages":[{"role":"user","content":"search"}],"tools":[{"type":"web_search_20250305","name":"web_search","max_uses":5}]}"#;
+
+    let response = reqwest::Client::new()
+        .post(format!("{gateway_url}/v1/messages/count_tokens"))
+        .body(body)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let requests = requests.lock().await;
+    let forwarded: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert_eq!(forwarded["tools"][0]["name"], "web_search");
+    assert_eq!(forwarded["tools"][0]["input_schema"]["type"], "object");
+    assert!(forwarded["tools"][0].get("type").is_none());
+    assert!(forwarded["tools"][0].get("max_uses").is_none());
+}
+
+#[tokio::test]
 async fn messages_preserves_upstream_error_status_and_body() {
     let (llm_url, _requests, _upstream) = spawn_recording_upstream(
         StatusCode::BAD_REQUEST,
@@ -250,6 +273,50 @@ async fn spawn_mock_vllm_messages(body: &'static str) -> (String, Arc<Mutex<usiz
     (format!("http://{addr}"), calls, handle)
 }
 
+/// Mock vLLM `/v1/messages` that enforces its function-tool contract and
+/// records the accepted request body.
+async fn spawn_tool_validating_vllm_messages(
+    response_body: &'static str,
+) -> (String, Arc<Mutex<Vec<serde_json::Value>>>, tokio::task::JoinHandle<()>) {
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let route_requests = Arc::clone(&requests);
+    let app = Router::new().route(
+        "/v1/messages",
+        post(move |body: Bytes| {
+            let route_requests = Arc::clone(&route_requests);
+            async move {
+                let request: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                let has_invalid_tool = request["tools"]
+                    .as_array()
+                    .is_some_and(|tools| tools.iter().any(|tool| tool.get("input_schema").is_none()));
+
+                if has_invalid_tool {
+                    return Response::builder()
+                        .status(StatusCode::BAD_REQUEST)
+                        .header("content-type", "application/json")
+                        .body(axum::body::Body::from(
+                            r#"{"type":"error","error":{"type":"invalid_request_error","message":"body.tools.0.input_schema Field required"}}"#,
+                        ))
+                        .unwrap()
+                        .into_response();
+                }
+
+                route_requests.lock().await.push(request);
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .header("content-type", "application/json")
+                    .body(axum::body::Body::from(response_body))
+                    .unwrap()
+                    .into_response()
+            }
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (format!("http://{addr}"), requests, handle)
+}
+
 // A request declaring a gateway-owned `web_search` tool routes to the native
 // loop (hits vLLM /v1/messages) and returns an Anthropic message. The model
 // answers directly here (end_turn) so no search backend is needed.
@@ -275,6 +342,131 @@ async fn messages_with_web_search_tool_routes_to_native_loop() {
     assert_eq!(json["role"], "assistant");
     assert_eq!(json["content"][0]["text"], "Rust 1.89.0.");
     assert_eq!(json["stop_reason"], "end_turn");
+}
+
+#[tokio::test]
+async fn messages_normalizes_claude_native_web_search_for_vllm() {
+    let final_msg = r#"{"id":"m","type":"message","role":"assistant","model":"qwen3","content":[{"type":"text","text":"Search ready."}],"stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":3}}"#;
+    let (llm_url, requests, _upstream) = spawn_tool_validating_vllm_messages(final_msg).await;
+    let (gateway_url, _gateway) = spawn_gateway(test_state(&test_config(&llm_url))).await;
+    let body = br#"{"model":"qwen3","max_tokens":256,"stream":false,"messages":[{"role":"user","content":"latest rust?"}],"tools":[{"type":"web_search_20250305","name":"web_search","max_uses":8}]}"#;
+
+    let response = reqwest::Client::new()
+        .post(format!("{gateway_url}/v1/messages"))
+        .body(body.to_vec())
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let requests = requests.lock().await;
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0]["tools"][0]["name"], "web_search");
+    assert_eq!(requests[0]["tools"][0]["input_schema"]["type"], "object");
+    assert_eq!(requests[0]["tools"][0]["input_schema"]["required"][0], "query");
+    assert!(requests[0]["tools"][0].get("type").is_none());
+    assert!(requests[0]["tools"][0].get("max_uses").is_none());
+}
+
+#[tokio::test]
+async fn messages_treats_empty_native_domain_lists_as_no_filter() {
+    let final_msg = r#"{"id":"m","type":"message","role":"assistant","model":"qwen3","content":[{"type":"text","text":"Search ready."}],"stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":3}}"#;
+    let (llm_url, requests, _upstream) = spawn_tool_validating_vllm_messages(final_msg).await;
+    let (gateway_url, _gateway) = spawn_gateway(test_state(&test_config(&llm_url))).await;
+    let body = br#"{"model":"qwen3","max_tokens":256,"stream":false,"messages":[{"role":"user","content":"latest rust?"}],"tools":[{"type":"web_search_20250305","name":"web_search","allowed_domains":[],"blocked_domains":[]}]}"#;
+
+    let response = reqwest::Client::new()
+        .post(format!("{gateway_url}/v1/messages"))
+        .body(body.to_vec())
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let requests = requests.lock().await;
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0]["tools"][0]["name"], "web_search");
+    assert_eq!(requests[0]["tools"][0]["input_schema"]["type"], "object");
+}
+
+#[tokio::test]
+async fn messages_rejects_unsupported_native_web_search_version() {
+    let final_msg = r#"{"id":"m","type":"message","role":"assistant","model":"qwen3","content":[{"type":"text","text":"should not run"}],"stop_reason":"end_turn"}"#;
+    let (llm_url, calls, _upstream) = spawn_mock_vllm_messages(final_msg).await;
+    let (gateway_url, _gateway) = spawn_gateway(test_state(&test_config(&llm_url))).await;
+    let body = br#"{"model":"qwen3","max_tokens":256,"stream":false,"messages":[{"role":"user","content":"search"}],"tools":[{"type":"web_search_20990101","name":"web_search"}]}"#;
+
+    let response = reqwest::Client::new()
+        .post(format!("{gateway_url}/v1/messages"))
+        .body(body.to_vec())
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let response_body = response.text().await.unwrap();
+    assert!(response_body.contains("unsupported web_search tool type"));
+    assert_eq!(*calls.lock().await, 0, "unsupported versions must not reach vLLM");
+}
+
+#[tokio::test]
+async fn messages_reject_invalid_native_web_search_before_upstream_or_sse() {
+    let final_msg =
+        r#"{"id":"m","type":"message","role":"assistant","model":"qwen3","content":[],"stop_reason":"end_turn"}"#;
+    let (llm_url, calls, _upstream) = spawn_mock_vllm_messages(final_msg).await;
+    let (gateway_url, _gateway) = spawn_gateway(test_state(&test_config(&llm_url))).await;
+    let cases = [
+        (true, r#""max_uses":0"#, "max_uses must be a positive integer"),
+        (false, r#""max_uses":-1"#, "max_uses must be a positive integer"),
+        (true, r#""max_uses":"1""#, "max_uses must be a positive integer"),
+        (
+            false,
+            r#""allowed_domains":["rust-lang.org"],"blocked_domains":["example.com"]"#,
+            "allowed_domains and blocked_domains cannot be used together",
+        ),
+        (
+            true,
+            r#""allowed_domains":"rust-lang.org""#,
+            "allowed_domains must be an array of non-empty strings",
+        ),
+        (
+            false,
+            r#""user_location":{"type":"exact","country":"US"}"#,
+            "user_location.type must be approximate",
+        ),
+        (
+            true,
+            r#""allowed_callers":["code_execution_20260120"]"#,
+            "allowed_callers must permit direct",
+        ),
+    ];
+
+    for (stream, tool_options, expected_error) in cases {
+        let body = format!(
+            r#"{{"model":"qwen3","max_tokens":256,"stream":{stream},"messages":[{{"role":"user","content":"search"}}],"tools":[{{"type":"web_search_20250305","name":"web_search",{tool_options}}}]}}"#
+        );
+        let response = reqwest::Client::new()
+            .post(format!("{gateway_url}/v1/messages"))
+            .body(body)
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_ne!(
+            response
+                .headers()
+                .get("content-type")
+                .and_then(|value| value.to_str().ok()),
+            Some("text/event-stream; charset=utf-8")
+        );
+        let response_body = response.text().await.unwrap();
+        assert!(
+            response_body.contains(expected_error),
+            "unexpected error: {response_body}"
+        );
+    }
+    assert_eq!(*calls.lock().await, 0, "invalid requests must not reach vLLM");
 }
 
 // A request with NO gateway-owned tool stays on the transparent proxy — the

@@ -1,8 +1,9 @@
 //! Messages-native gateway tool loop.
 //!
 //! Runs the server-side gateway-tool loop for `/v1/messages` **natively**: the
-//! client's Anthropic request is forwarded to vLLM `/v1/messages` essentially
-//! untouched (preserving every Anthropic field), the assistant turn is
+//! client's Anthropic request is forwarded to vLLM `/v1/messages` while
+//! preserving Anthropic fields except for native server-tool declarations that
+//! must be normalized to the function-tool shape vLLM accepts. The assistant turn is
 //! inspected, any gateway-owned `tool_use` is executed server-side and hidden,
 //! the loop appends the `tool_result` and re-POSTs, until the model stops asking
 //! for a gateway tool. Only the final assistant message reaches the client.
@@ -19,6 +20,7 @@ use serde_json::{Value, json};
 
 use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::executor::inference::fetch_response_json;
+use crate::executor::messages_request::{normalize_native_web_search, web_search_budget_exhausted_result};
 use crate::executor::request::ExecutionContext;
 use crate::tool::ToolRegistry;
 use crate::types::messages::tool_seam;
@@ -59,6 +61,7 @@ pub async fn run_messages_loop(
     auth: Option<&str>,
 ) -> ExecutorResult<Value> {
     let url = format!("{}/v1/messages", exec_ctx.llm_base_url);
+    let mut web_search_budget = normalize_native_web_search(&mut request)?;
     // The loop drives turns itself; force non-streaming upstream regardless of
     // what the client asked (the handler routes streaming elsewhere).
     request["stream"] = Value::Bool(false);
@@ -117,7 +120,8 @@ pub async fn run_messages_loop(
         // assistant turn (thinking/text/tool_use, order preserved — F3) plus the
         // tool_results back for the next round. Gateway blocks stay internal.
         let assistant_content = content.clone();
-        let resolved = execute_gateway_calls(&gateway_calls, registry, gateway_map).await;
+        let allowed_searches = web_search_budget.reserve(gateway_calls.len());
+        let resolved = execute_gateway_calls(&gateway_calls, registry, gateway_map, allowed_searches).await;
         append_round_to_history(&mut request, &assistant_content, &resolved);
     }
 
@@ -140,10 +144,17 @@ async fn execute_gateway_calls(
     gateway_calls: &[Value],
     registry: &ToolRegistry,
     gateway_map: &tool_seam::GatewayToolMap,
+    allowed_searches: usize,
 ) -> Vec<ResolvedCall> {
-    let futures = gateway_calls.iter().map(|block| async move {
+    let futures = gateway_calls.iter().enumerate().map(|(index, block)| async move {
         let id = block.get("id").and_then(Value::as_str).unwrap_or_default();
         let name = block.get("name").and_then(Value::as_str).unwrap_or_default();
+
+        if index >= allowed_searches {
+            return ResolvedCall {
+                tool_result_block: web_search_budget_exhausted_result(id),
+            };
+        }
 
         // F4: reject a malformed/absent input rather than dispatching with args
         // the model never supplied. The block's `input` is already-parsed JSON
