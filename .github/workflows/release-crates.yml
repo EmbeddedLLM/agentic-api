@@ -10,6 +10,10 @@ on:
         required: true
         type: boolean
         default: true
+      version:
+        description: "Release version, such as 0.2.0"
+        required: true
+        type: string
       target_ref:
         description: "Git ref to release, such as a commit SHA or releases/vX.Y.Z branch; defaults to selected main commit"
         required: false
@@ -52,20 +56,53 @@ jobs:
         with:
           ref: ${{ inputs.target_ref || github.sha }}
 
-      - name: Resolve release target
-        id: target
+      - name: Update release version
+        id: version
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          target_sha="$(git rev-parse HEAD)"
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
 
-          echo "sha=$target_sha" >> "$GITHUB_OUTPUT"
-          echo "Release target: $target_sha"
+          version = os.environ["RELEASE_VERSION"]
+          if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?", version):
+              raise SystemExit(f"Invalid release version: {version!r}")
+
+          path = Path("Cargo.toml")
+          text = path.read_text()
+
+          workspace_pattern = r'(?m)^(version = ")[^"]+("\n)'
+          text, workspace_count = re.subn(workspace_pattern, rf'\g<1>{version}\g<2>', text, count=1)
+          if workspace_count != 1:
+              raise SystemExit("Expected exactly one workspace package version in Cargo.toml")
+
+          dependency_pattern = (
+              r'(?m)^(agentic-core = \{ package = "agentic-server-core", '
+              r'path = "crates/agentic-server-core", version = ")[^"]+(" \})$'
+          )
+          text, dependency_count = re.subn(dependency_pattern, rf'\g<1>{version}\g<2>', text, count=1)
+          if dependency_count != 1:
+              raise SystemExit("Expected exactly one agentic-core workspace dependency version in Cargo.toml")
+
+          path.write_text(text)
+          print(f"Updated workspace and agentic-core versions to {version}")
+          PY
+
+          echo "version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "release_branch=releases/v$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
           toolchain: stable
           components: clippy, rustfmt
+
+      - name: Refresh lockfile
+        run: cargo check --workspace
 
       - name: Cache cargo registry and build
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v4
@@ -88,10 +125,10 @@ jobs:
       - name: Run tests
         run: cargo test
 
-      - name: Read release version
-        id: version
+      - name: Verify package versions
         run: |
           set -euo pipefail
+          requested_version="${{ steps.version.outputs.version }}"
           core_version="$(cargo metadata --format-version 1 --no-deps \
             | jq -r '.packages[] | select(.name == "agentic-server-core") | .version')"
           server_version="$(cargo metadata --format-version 1 --no-deps \
@@ -107,10 +144,33 @@ jobs:
             exit 1
           fi
 
-          echo "version=$core_version" >> "$GITHUB_OUTPUT"
-          echo "tag=v$core_version" >> "$GITHUB_OUTPUT"
-          echo "release_branch=releases/v$core_version" >> "$GITHUB_OUTPUT"
+          if [ "$core_version" != "$requested_version" ]; then
+            echo "::error::package version $core_version does not match requested release version $requested_version"
+            exit 1
+          fi
+
           echo "Release version: $core_version"
+
+      - name: Commit release version to main
+        if: ${{ !inputs.dry_run }}
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock
+          git commit -s -m "chore: release v$RELEASE_VERSION"
+          git push origin HEAD:refs/heads/main
+
+      - name: Resolve release commit
+        id: target
+        run: |
+          set -euo pipefail
+          target_sha="$(git rev-parse HEAD)"
+
+          echo "sha=$target_sha" >> "$GITHUB_OUTPUT"
+          echo "Release target: $target_sha"
 
       - name: Check release refs
         run: |
