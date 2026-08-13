@@ -299,11 +299,11 @@ mod tests {
 
     #[test]
     fn serialize_sse_frame_uses_wire_event_type_as_event_name() {
-        let frame = synthetic_event(SSEEventType::McpListToolsInProgress, []).expect("synthetic event");
+        let frame = synthetic_event(SSEEventType::ResponseCreated, []).expect("synthetic event");
         let chunk = serialize_sse_frame(&frame).expect("event serializes");
         let (event_name, event) = parse_named_sse_event(&chunk);
 
-        assert_eq!(event_name, "response.mcp_list_tools.in_progress");
+        assert_eq!(event_name, "response.created");
         assert_eq!(event["type"], event_name);
     }
 

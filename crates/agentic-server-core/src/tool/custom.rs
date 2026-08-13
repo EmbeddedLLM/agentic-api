@@ -229,7 +229,11 @@ impl ToolHandler for CustomHandler {
     fn validate(&self, param: &serde_json::Value) -> Result<(), ToolError> {
         let param = serde_json::from_value::<CustomToolParam>(param.clone())
             .map_err(|error| ToolError::Config(format!("invalid custom tool config: {error}")))?;
-        if param.format.is_some() {
+        if param
+            .format
+            .as_ref()
+            .is_some_and(|format| format.get("type").and_then(Value::as_str) != Some("text"))
+        {
             return Err(ToolError::Config(format!(
                 "custom tool '{}' uses an unsupported format; gateway normalization cannot preserve constrained decoding",
                 param.name
@@ -297,7 +301,7 @@ pub(crate) fn input_from_arguments(arguments: &str) -> String {
 pub(crate) fn try_input_from_arguments(arguments: &str) -> Option<String> {
     match serde_json::from_str::<serde_json::Value>(arguments).ok()? {
         serde_json::Value::String(input) => Some(input),
-        serde_json::Value::Object(fields) if fields.len() == 1 => fields
+        serde_json::Value::Object(fields) => fields
             .get("input")
             .and_then(serde_json::Value::as_str)
             .map(str::to_owned),
@@ -380,6 +384,18 @@ mod tests {
             let error = CustomHandler.validate(&value).expect_err("grammar must be rejected");
             assert!(error.to_string().contains("cannot preserve constrained decoding"));
         }
+    }
+
+    #[test]
+    fn explicit_text_format_is_supported() {
+        let param = serde_json::json!({
+            "name": "freeform",
+            "format": {"type": "text"}
+        });
+
+        CustomHandler
+            .validate(&param)
+            .expect("unconstrained text is representable");
     }
 
     #[test]
