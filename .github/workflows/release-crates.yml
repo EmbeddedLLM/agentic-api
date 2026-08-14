@@ -108,7 +108,6 @@ jobs:
           echo "Release version: $core_version"
           echo "version=$core_version" >> "$GITHUB_OUTPUT"
           echo "tag=v$core_version" >> "$GITHUB_OUTPUT"
-          echo "release_branch=releases/v$core_version" >> "$GITHUB_OUTPUT"
 
       - name: Resolve release commit
         id: target
@@ -123,18 +122,10 @@ jobs:
         run: |
           set -euo pipefail
           tag="${{ steps.version.outputs.tag }}"
-          release_branch="${{ steps.version.outputs.release_branch }}"
           target_sha="${{ steps.target.outputs.sha }}"
 
           if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
             echo "::error::Tag $tag already exists"
-            exit 1
-          fi
-
-          existing_branch_sha="$(git ls-remote --heads origin "refs/heads/$release_branch" | awk '{print $1}')"
-
-          if [ -n "$existing_branch_sha" ] && [ "$existing_branch_sha" != "$target_sha" ]; then
-            echo "::error::Release branch $release_branch already exists at $existing_branch_sha, not target $target_sha"
             exit 1
           fi
 
@@ -161,7 +152,6 @@ jobs:
           cargo package -p agentic-server --no-verify
           echo "Would release commit ${{ steps.target.outputs.sha }}"
           echo "Would create tag ${{ steps.version.outputs.tag }}"
-          echo "Would create branch ${{ steps.version.outputs.release_branch }}"
           echo "Would create GitHub release ${{ steps.version.outputs.tag }} with generated notes"
 
       - name: Publish agentic-server-core
@@ -200,7 +190,6 @@ jobs:
         run: |
           set -euo pipefail
           tag="${{ steps.version.outputs.tag }}"
-          release_branch="${{ steps.version.outputs.release_branch }}"
           target_sha="${{ steps.target.outputs.sha }}"
 
           git config user.name "github-actions[bot]"
@@ -208,7 +197,6 @@ jobs:
 
           git tag -a "$tag" "$target_sha" -m "$tag"
           git push origin "$tag"
-          git push origin "$target_sha:refs/heads/$release_branch"
 
       - name: Create GitHub release
         if: ${{ !inputs.dry_run }}
