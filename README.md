@@ -112,7 +112,8 @@ Continue the conversation by passing the returned `id` as `previous_response_id`
 On startup, Agentic API creates `~/.agentic-api` and loads `~/.agentic-api/config.toml` when that file exists. On the
 first invocation with a resolved LLM base URL, a missing config file is generated from the effective
 `--llm-api-base`/`LLM_API_BASE` and non-secret tool settings. It records the name of the web-search API-key environment
-variable, never its value. The generated file uses owner-only permissions on Unix and is never overwritten on later
+variable, never its value. The generated file is group-readable but not group-writable on Unix (so a container restart
+under a different arbitrary UID sharing the same group can still read it) and is never overwritten on later
 runs. CLI arguments and process environment variables take precedence over file settings. A standalone server can
 therefore be started with just `agentic-server` after creating a config like this:
 
