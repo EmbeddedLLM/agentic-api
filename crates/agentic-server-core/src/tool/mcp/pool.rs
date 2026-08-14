@@ -12,14 +12,25 @@ use crate::types::tools::McpToolParam;
 // transport. Only add names whose DNS records are controlled by a trusted
 // administrator.
 const MCP_ALLOWED_HOSTS_ENV: &str = "AGENTIC_MCP_ALLOWED_HOSTS";
+static ALLOWED_HOSTS: OnceLock<Vec<String>> = OnceLock::new();
+
+pub(crate) fn set_configured_allowed_hosts(allowed_hosts: &[String]) {
+    if !allowed_hosts.is_empty() {
+        let _ = ALLOWED_HOSTS.set(allowed_hosts.to_vec());
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(untagged)]
+#[serde(untagged, deny_unknown_fields)]
 pub enum McpServerEntry {
     Http {
         url: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default, alias = "http_headers", skip_serializing_if = "Option::is_none")]
         headers: Option<HashMap<String, String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        allowed_tools: Option<Vec<String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        require_approval: Option<String>,
     },
     Stdio {
         command: String,
@@ -29,7 +40,27 @@ pub enum McpServerEntry {
         env: Option<HashMap<String, String>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cwd: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        allowed_tools: Option<Vec<String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        require_approval: Option<String>,
     },
+}
+
+impl McpServerEntry {
+    #[must_use]
+    pub fn allowed_tools(&self) -> Option<&[String]> {
+        match self {
+            Self::Http { allowed_tools, .. } | Self::Stdio { allowed_tools, .. } => allowed_tools.as_deref(),
+        }
+    }
+
+    #[must_use]
+    pub fn require_approval(&self) -> Option<&str> {
+        match self {
+            Self::Http { require_approval, .. } | Self::Stdio { require_approval, .. } => require_approval.as_deref(),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -50,12 +81,13 @@ impl McpClientPool {
 
         for (server_label, entry) in servers {
             let result = match entry {
-                McpServerEntry::Http { url, headers } => McpClient::connect(&url, headers).await,
+                McpServerEntry::Http { url, headers, .. } => McpClient::connect(&url, headers).await,
                 McpServerEntry::Stdio {
                     command,
                     args,
                     env,
                     cwd,
+                    ..
                 } => McpClient::connect_stdio(&command, &args, env.as_ref(), cwd.as_deref()).await,
             };
 
@@ -112,6 +144,8 @@ fn server_entry_from_param(param: &McpToolParam) -> Option<(String, McpServerEnt
             McpServerEntry::Http {
                 url,
                 headers: request_headers(param),
+                allowed_tools: None,
+                require_approval: None,
             },
         ));
     }
@@ -164,7 +198,6 @@ fn host_allowed_by_env(host: &str) -> bool {
 }
 
 fn allowed_hosts() -> &'static [String] {
-    static ALLOWED_HOSTS: OnceLock<Vec<String>> = OnceLock::new();
     ALLOWED_HOSTS.get_or_init(|| parse_allowed_hosts(&std::env::var(MCP_ALLOWED_HOSTS_ENV).unwrap_or_default()))
 }
 
@@ -193,14 +226,23 @@ mod tests {
     fn mcp_server_entry_deserializes_http_config() {
         let entry = serde_json::from_value::<McpServerEntry>(serde_json::json!({
             "url": "http://localhost:9000",
-            "headers": {"Authorization": "Bearer token"}
+            "headers": {"Authorization": "Bearer token"},
+            "allowed_tools": ["say_hello", "sum"],
+            "require_approval": "never"
         }))
         .unwrap();
 
         match entry {
-            McpServerEntry::Http { url, headers } => {
+            McpServerEntry::Http {
+                url,
+                headers,
+                allowed_tools,
+                require_approval,
+            } => {
                 assert_eq!(url, "http://localhost:9000");
                 assert_eq!(headers.unwrap()["Authorization"], "Bearer token");
+                assert_eq!(allowed_tools.unwrap(), ["say_hello", "sum"]);
+                assert_eq!(require_approval.as_deref(), Some("never"));
             }
             McpServerEntry::Stdio { .. } => panic!("expected HTTP MCP config"),
         }
@@ -222,11 +264,15 @@ mod tests {
                 args,
                 env,
                 cwd,
+                allowed_tools,
+                require_approval,
             } => {
                 assert_eq!(command, "python3");
                 assert_eq!(args, vec!["/tmp/server.py".to_owned()]);
                 assert_eq!(env.unwrap()["TOKEN"], "secret");
                 assert_eq!(cwd.as_deref(), Some("/tmp"));
+                assert!(allowed_tools.is_none());
+                assert!(require_approval.is_none());
             }
             McpServerEntry::Http { .. } => panic!("expected stdio MCP config"),
         }

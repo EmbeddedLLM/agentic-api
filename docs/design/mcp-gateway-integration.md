@@ -96,11 +96,16 @@ impl McpClient {
 ### `McpClientPool`
 
 `McpClientPool` owns clients keyed by `server_label`. Request-scoped HTTP clients are constructed from
-`McpToolParam`. Gateway configuration may also construct HTTP or stdio clients through `McpServerEntry`.
+`McpToolParam`. Gateway configuration can construct HTTP or stdio clients through an `McpServerEntry` under
+`~/.agentic-api/config.toml`; a request selects one by declaring the configured `server_label` without a `server_url`.
+Connection details from gateway configuration take precedence and cannot be overridden by a request. Configured
+`allowed_tools` form a policy ceiling that a request may narrow but cannot expand, and configured
+`require_approval = "never"` lets a request omit its approval setting.
 
 Request-provided URLs allow loopback hosts by default. Additional trusted hostnames may be configured through
-`AGENTIC_MCP_ALLOWED_HOSTS`. URL validation, pinned DNS addresses, disabled automatic proxy discovery, and disabled
-redirects prevent later routing changes from bypassing the configured trust boundary.
+`AGENTIC_MCP_ALLOWED_HOSTS` from the process environment or the `config.toml` `[mcp].allowed_hosts` array. URL
+validation, pinned DNS addresses, disabled automatic proxy discovery, and disabled redirects prevent later routing
+changes from bypassing the configured trust boundary.
 
 ### `GatewayExecutors`
 
@@ -185,12 +190,4 @@ build request-scoped registry
 Tool execution failures become failed tool call output and are returned to the model for the next round; they do not
 automatically fail the whole Responses request.
 
-## Delivery
 
-This design is being shipped across three PRs:
-
-1. Revisit MCP support by removing gateway-owned MCP resource handling and fixing tool discovery, normalization, and
-   registry routing for native MCP tools. MCP resources remain the responsibility of clients such as Codex and Claude
-   Code.
-2. PR #139 completes the OpenAI-compatible public `mcp_call` output item and streaming event lifecycle.
-3. A follow-up PR will expose MCP discovery through the public `mcp_list_tools` output item and streaming events.

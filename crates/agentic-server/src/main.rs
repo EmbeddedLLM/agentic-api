@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
@@ -8,12 +9,16 @@ use agentic_core::config::{
     DEFAULT_POSTGRES_LOCK_TIMEOUT_SECONDS, DEFAULT_POSTGRES_MAX_CONNECTIONS, DEFAULT_POSTGRES_MAX_LIFETIME_SECONDS,
     DEFAULT_POSTGRES_MIGRATION_TIMEOUT_SECONDS, DEFAULT_POSTGRES_STATEMENT_TIMEOUT_SECONDS,
     DEFAULT_SQLITE_JOURNAL_SIZE_LIMIT_BYTES, DEFAULT_SQLITE_MAX_CONNECTIONS, DEFAULT_SQLITE_MMAP_SIZE_BYTES,
-    PostgresConfig, SqliteConfig, SqliteTempStore, normalize_base_url,
+    PostgresConfig, SqliteConfig, SqliteTempStore, ToolRuntimeConfig, WebSearchProviderConfig, default_database_url,
+    ensure_agentic_api_home, normalize_base_url,
 };
 use agentic_core::error::Error;
 use agentic_server::auth::OidcConfig;
 
+mod config_file;
 mod server;
+
+use config_file::{FileConfig, McpFileConfig, MessagesGatewayFileConfig, WebSearchFileConfig};
 
 #[derive(Args, Clone)]
 struct CommonArgs {
@@ -45,15 +50,15 @@ struct CommonArgs {
     skip_llm_ready_check: bool,
 
     /// `SQLite` or `PostgreSQL` URL for conversation and response storage.
-    /// Defaults to a local `SQLite` file.
+    /// Defaults to `agentic_api.db` in the Agentic API home directory.
     #[arg(
         long,
+        visible_alias = "database-url",
         env = "DATABASE_URL",
         hide_env_values = true,
-        default_value = "sqlite://./agentic_api.db",
         global = true
     )]
-    db_url: String,
+    db_url: Option<String>,
 }
 
 fn oidc_config_from_values(
@@ -73,6 +78,7 @@ struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
 
+    /// Base URL for the standalone OpenAI-compatible inference server.
     #[arg(long, env = "LLM_API_BASE")]
     llm_api_base: Option<String>,
 
@@ -228,18 +234,74 @@ fn database_configs_from_env(database_url: &str) -> Result<(PostgresConfig, Sqli
     }
 }
 
-fn build_config(llm_api_base: String, common: &CommonArgs) -> Result<Config, Error> {
-    let (postgres, sqlite) = database_configs_from_env(&common.db_url)?;
+fn build_config(llm_api_base: String, common: &CommonArgs, file: &FileConfig) -> Result<Config, Error> {
+    let db_url = common
+        .db_url
+        .clone()
+        .or_else(|| file.database_url.clone())
+        .map_or_else(default_database_url, Ok)?;
+    let (postgres, sqlite) = database_configs_from_env(&db_url)?;
+    let web_search_api_key = file.web_search.api_key_env.as_deref().and_then(environment_value);
+    let web_search_base_url = environment_value("YOU_API_BASE_URL").or_else(|| file.web_search.base_url.clone());
+    let mcp_allowed_hosts = environment_value("AGENTIC_MCP_ALLOWED_HOSTS")
+        .map_or_else(|| file.mcp.allowed_hosts.clone(), |value| parse_comma_separated(&value));
     Ok(Config {
         llm_api_base,
         openai_api_key: common.openai_api_key.clone(),
         llm_ready_timeout_s: common.llm_ready_timeout_s,
         llm_ready_interval_s: common.llm_ready_interval_s,
         skip_llm_ready_check: common.skip_llm_ready_check,
-        db_url: Some(common.db_url.clone()),
+        db_url: Some(db_url),
         postgres,
         sqlite,
+        tools: ToolRuntimeConfig {
+            web_search: WebSearchProviderConfig {
+                api_key: web_search_api_key,
+                base_url: web_search_base_url,
+            },
+            mcp_servers: file.mcp_servers.clone(),
+            mcp_allowed_hosts,
+            messages_gateway_tool_aliases: file.messages_gateway.tool_aliases.clone(),
+        },
     })
+}
+
+fn generated_file_config(llm_api_base: String) -> FileConfig {
+    FileConfig {
+        llm_api_base: Some(llm_api_base),
+        web_search: WebSearchFileConfig {
+            base_url: environment_value("YOU_API_BASE_URL"),
+            api_key_env: Some("YOU_API_KEY".to_owned()),
+        },
+        mcp: McpFileConfig {
+            allowed_hosts: environment_value("AGENTIC_MCP_ALLOWED_HOSTS")
+                .map_or_else(Vec::new, |value| parse_comma_separated(&value)),
+        },
+        messages_gateway: MessagesGatewayFileConfig {
+            tool_aliases: environment_value("MESSAGES_GATEWAY_TOOL_ALIASES"),
+        },
+        mcp_servers: HashMap::new(),
+        ..FileConfig::default()
+    }
+}
+
+fn environment_value(name: &str) -> Option<String> {
+    clean_value(std::env::var(name).ok())
+}
+
+fn clean_value(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+}
+
+fn parse_comma_separated(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .collect()
 }
 
 #[tokio::main]
@@ -256,17 +318,26 @@ async fn main() -> Result<(), server::ServerError> {
         llm_api_base,
         common,
     } = Cli::parse();
+    let agentic_home = ensure_agentic_api_home()?;
+    let loaded_file_config = FileConfig::load(&agentic_home)?;
+    let config_file_missing = loaded_file_config.is_none();
+    let mut file_config = loaded_file_config.unwrap_or_default();
     let oidc_config = oidc_config_from_values(common.oidc_issuer.as_deref(), common.oidc_audience.as_deref())?;
 
     match command {
         None => {
-            let base = llm_api_base.ok_or_else(|| {
+            let base = llm_api_base
+                .or_else(|| file_config.llm_api_base.clone())
+                .ok_or_else(|| {
                 Error::Config(
-                    "standalone mode requires LLM_API_BASE (or --llm-api-base); use `agentic-server serve <model>` for integrated mode"
+                    "standalone mode requires llm_api_base in config.toml, LLM_API_BASE, or --llm-api-base; use `agentic-server serve <model>` for integrated mode"
                         .to_owned(),
                 )
             })?;
-            let config = build_config(normalize_base_url(&base), &common)?;
+            if config_file_missing {
+                file_config = generated_file_config(base.clone()).create_or_load(&agentic_home)?;
+            }
+            let config = build_config(normalize_base_url(&base), &common, &file_config)?;
             server::run(config, &common.gateway_host, common.gateway_port, oidc_config).await
         }
         Some(Commands::Serve { model, port, llm_args }) => {
@@ -276,7 +347,15 @@ async fn main() -> Result<(), server::ServerError> {
                 )
                 .into());
             }
-            let config = build_config(normalize_base_url(&format!("http://127.0.0.1:{port}")), &common)?;
+            if config_file_missing {
+                file_config =
+                    generated_file_config(format!("http://127.0.0.1:{port}")).create_or_load(&agentic_home)?;
+            }
+            let config = build_config(
+                normalize_base_url(&format!("http://127.0.0.1:{port}")),
+                &common,
+                &file_config,
+            )?;
             let mut args = vec!["--model".to_owned(), model];
             args.push("--port".to_owned());
             args.push(port.to_string());
@@ -326,6 +405,13 @@ mod tests {
             "--skip-llm-ready-check",
         ]);
         assert!(cli.common.skip_llm_ready_check);
+    }
+
+    #[test]
+    fn standalone_base_url_uses_llm_api_base_flag() {
+        let cli = Cli::parse_from(["agentic-server", "--llm-api-base", "http://localhost:8000"]);
+
+        assert_eq!(cli.llm_api_base.as_deref(), Some("http://localhost:8000"));
     }
 
     #[test]

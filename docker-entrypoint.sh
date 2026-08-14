@@ -7,7 +7,8 @@ umask 0002
 
 # Mirror the server's default only for permission preparation. Keep DATABASE_URL
 # unset so the Rust CLI remains authoritative for the actual connection URL.
-database_url=${DATABASE_URL:-sqlite://./agentic_api.db}
+agentic_api_home=${AGENTIC_API_HOME:-/var/lib/agentic-api}
+database_url=${DATABASE_URL:-sqlite://${agentic_api_home}/agentic_api.db}
 case "$database_url" in
     sqlite::memory:*)
         ;;

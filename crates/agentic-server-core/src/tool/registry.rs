@@ -184,8 +184,13 @@ impl ToolRegistry {
     /// # Errors
     ///
     /// Returns [`ToolError::Config`] when Codex namespace member flattening
-    /// would collide with another declared tool name, or when discovered MCP
-    /// tools derive the same internal model-visible name.
+    /// would collide with another declared tool name, when discovered MCP
+    /// tools derive the same internal model-visible name, or when an MCP
+    /// declaration is itself invalid (for example, a request tries to
+    /// override a gateway-configured server's connection). Transient MCP
+    /// discovery failures (the server could not be reached) are not
+    /// returned as errors; they are recorded as failed [`McpListTools`]
+    /// metadata so the rest of the request can proceed.
     ///
     /// # Panics
     ///
@@ -212,6 +217,8 @@ impl ToolRegistry {
                 ResponsesTool::Mcp(p) => {
                     let tool_set = match executors.mcp_server_tools(p).await {
                         Ok(tool_set) => tool_set,
+                        // Config errors mean the declaration is invalid; the client can fix it.
+                        Err(error @ ToolError::Config(_)) => return Err(error),
                         Err(error) => {
                             mcp_list_tools_items.push(McpHandler::failed_list_tools_item(&p.server_label, &error));
                             continue;
@@ -379,6 +386,17 @@ mod tests {
         .expect("MCP declaration")
     }
 
+    /// A request-declared MCP tool for a server the gateway already has
+    /// configured. Configured servers reject a request-supplied `server_url`,
+    /// so declarations for them must omit it.
+    fn configured_declaration(server_label: &str) -> ResponsesTool {
+        serde_json::from_value(serde_json::json!({
+            "type": "mcp",
+            "server_label": server_label
+        }))
+        .expect("MCP declaration")
+    }
+
     fn discovered_handler(server_label: &str, tool_name: &str, internal_name: &str) -> McpDiscoveredHandler {
         let param = McpDiscoveredToolParam {
             server_label: server_label.to_owned(),
@@ -406,9 +424,7 @@ mod tests {
             },
             {
                 "type": "mcp",
-                "server_label": "counter",
-                "server_url": "http://127.0.0.1:8000/mcp",
-                "require_approval": "never"
+                "server_label": "counter"
             },
             {"type": "web_search_preview", "search_context_size": "low"},
             {"type": "file_search", "vector_store_ids": ["vs_test"]},
@@ -614,7 +630,7 @@ mod tests {
             server_label: "foo__bar".to_owned(),
             handlers: vec![discovered_handler("foo__bar", "baz", internal_name)],
         });
-        let mut tools = vec![declaration("foo"), declaration("foo__bar")];
+        let mut tools = vec![configured_declaration("foo"), configured_declaration("foo__bar")];
 
         let error = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
             .await
@@ -637,7 +653,7 @@ mod tests {
                 "name": internal_name
             }))
             .expect("function declaration");
-            let mcp = declaration("counter");
+            let mcp = configured_declaration("counter");
             let mut tools = if mcp_first {
                 vec![mcp, function]
             } else {

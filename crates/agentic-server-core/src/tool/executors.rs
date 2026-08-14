@@ -6,6 +6,7 @@ use super::mcp::{McpClientPool, McpDiscoveredHandler, McpHandler};
 use super::registry::ToolType;
 use super::web_search::WebSearchHandler;
 use super::{GatewayExecutor, ToolError};
+use crate::config::ToolRuntimeConfig;
 use crate::types::tools::McpToolParam;
 
 pub enum GatewayExecutorRegistration {
@@ -34,9 +35,9 @@ impl From<Arc<dyn GatewayExecutor>> for GatewayExecutorRegistration {
 /// Shared, per-server registry of gateway-owned tool executors.
 ///
 /// Built once at startup ([`GatewayExecutors::from_env`]) and reused across
-/// every request. MCP tools are the exception: their handler depends on the
-/// per-request `McpToolParam`, so discovery builds them lazily unless a handler
-/// has been pre-registered via [`GatewayExecutors::insert`].
+/// every request. Configured MCP servers are discovered during
+/// [`GatewayExecutors::from_config`]; request-declared MCP servers are
+/// discovered lazily unless handlers were registered with [`Self::insert`].
 #[derive(Clone, Default)]
 pub struct GatewayExecutors {
     mcp: HashMap<String, Vec<McpDiscoveredHandler>>,
@@ -50,6 +51,58 @@ impl GatewayExecutors {
             mcp: HashMap::new(),
             web_search: Some(Arc::new(WebSearchHandler::from_env(client))),
         }
+    }
+
+    /// Builds the shared executors and discovers every configured MCP server.
+    ///
+    /// Configured `allowed_tools` are applied during discovery, so the stored
+    /// handler set is the maximum set that a request may use.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a configured MCP server has no supported approval
+    /// policy, cannot connect, cannot list its tools, or produces an empty
+    /// allowed tool set.
+    pub async fn from_config(client: Arc<reqwest::Client>, config: &ToolRuntimeConfig) -> Result<Self, ToolError> {
+        super::mcp::pool::set_configured_allowed_hosts(&config.mcp_allowed_hosts);
+        let mut executors = Self {
+            mcp: HashMap::new(),
+            web_search: Some(Arc::new(WebSearchHandler::from_values(
+                client,
+                config.web_search.api_key.clone(),
+                config.web_search.base_url.clone(),
+            ))),
+        };
+        if config.mcp_servers.is_empty() {
+            return Ok(executors);
+        }
+
+        for (server_label, entry) in &config.mcp_servers {
+            if entry.require_approval() != Some("never") {
+                return Err(ToolError::Config(format!(
+                    "configured MCP server '{server_label}' must set require_approval to 'never'"
+                )));
+            }
+        }
+
+        let pool = McpClientPool::from_config(config.mcp_servers.clone()).await;
+        for (server_label, entry) in &config.mcp_servers {
+            let Some(mcp_client) = pool.get(server_label).cloned() else {
+                return Err(ToolError::Execution(format!(
+                    "configured MCP server '{server_label}' failed to connect: {}",
+                    pool.connection_error(server_label)
+                        .unwrap_or("unknown connection error")
+                )));
+            };
+            let tool_set = McpHandler::discover_tools(server_label, mcp_client, entry.allowed_tools()).await?;
+            let handlers = require_non_empty_mcp_handlers(server_label, tool_set.discovered_handlers)?;
+            executors.insert(GatewayExecutorRegistration::Mcp {
+                server_label: server_label.clone(),
+                handlers,
+            });
+        }
+
+        Ok(executors)
     }
 
     pub fn insert(&mut self, registration: impl Into<GatewayExecutorRegistration>) {
@@ -100,18 +153,23 @@ impl GatewayExecutors {
     /// Returns a configuration error for an invalid declaration or an empty
     /// allowed tool set, and an execution error when the server cannot connect.
     pub(crate) async fn mcp_server_tools(&mut self, param: &McpToolParam) -> Result<McpServerToolSet, ToolError> {
-        validate_mcp_execution_options(param)?;
-
         let server_label = param.server_label.trim();
         if server_label.is_empty() {
             return Err(ToolError::Config(
                 "MCP declaration requires a non-empty server_label".to_owned(),
             ));
         }
-        if let Some(cached) = self.mcp.get(server_label) {
+        let configured_handlers = self.mcp.get(server_label);
+        validate_mcp_execution_options(param, configured_handlers.is_some())?;
+        if configured_handlers.is_some() && param.server_url.is_some() {
+            return Err(ToolError::Config(format!(
+                "MCP server '{server_label}' is configured by the gateway; omit server_url from the request"
+            )));
+        }
+        if let Some(configured_handlers) = configured_handlers {
             let discovered_handlers = require_non_empty_mcp_handlers(
                 server_label,
-                filter_allowed_mcp_handlers(cached, param.allowed_tools.as_deref()),
+                filter_allowed_mcp_handlers(configured_handlers, param.allowed_tools.as_deref()),
             )?;
             return Ok(McpHandler::server_tool_set_from_handlers(
                 server_label,
@@ -130,16 +188,13 @@ impl GatewayExecutors {
                 |error| ToolError::Execution(format!("MCP server '{server_label}' failed to connect: {error}")),
             ));
         };
-        let McpServerToolSet {
-            discovered_handlers,
-            list_tools_item,
-        } = McpHandler::discover_tools(server_label, client, param.allowed_tools.as_deref()).await?;
-        let discovered_handlers = require_non_empty_mcp_handlers(server_label, discovered_handlers)?;
+        let tool_set = McpHandler::discover_tools(server_label, client, param.allowed_tools.as_deref()).await?;
+        let discovered_handlers = require_non_empty_mcp_handlers(server_label, tool_set.discovered_handlers)?;
         self.mcp.insert(server_label.to_owned(), discovered_handlers.clone());
-        Ok(McpServerToolSet {
+        Ok(McpHandler::server_tool_set_from_handlers(
+            server_label,
             discovered_handlers,
-            list_tools_item,
-        })
+        ))
     }
 }
 
@@ -168,15 +223,24 @@ fn require_non_empty_mcp_handlers(
     Ok(handlers)
 }
 
-fn validate_mcp_execution_options(param: &McpToolParam) -> Result<(), ToolError> {
+fn validate_mcp_execution_options(param: &McpToolParam, configured_server: bool) -> Result<(), ToolError> {
     if param.connector_id.is_some() {
         return Err(ToolError::Config(
             "MCP connector_id is not supported; configure server_url instead".to_owned(),
         ));
     }
-    if param.require_approval.as_deref() != Some("never") {
+    if param
+        .require_approval
+        .as_deref()
+        .is_some_and(|policy| policy != "never")
+    {
         return Err(ToolError::Config(
-            "MCP require_approval must be explicitly set to 'never'; approval gating is not yet supported".to_owned(),
+            "MCP require_approval supports only 'never'; approval gating is not yet supported".to_owned(),
+        ));
+    }
+    if !configured_server && param.require_approval.is_none() {
+        return Err(ToolError::Config(
+            "MCP require_approval must be set to 'never' in gateway configuration or the request".to_owned(),
         ));
     }
     Ok(())
@@ -227,7 +291,16 @@ mod tests {
             "require_approval": "never"
         }));
 
-        validate_mcp_execution_options(&param).unwrap();
+        validate_mcp_execution_options(&param, false).unwrap();
+    }
+
+    #[test]
+    fn mcp_execution_uses_configured_never_approval_policy() {
+        let param = mcp_param(serde_json::json!({
+            "server_label": "counter"
+        }));
+
+        validate_mcp_execution_options(&param, true).unwrap();
     }
 
     #[test]
@@ -237,8 +310,8 @@ mod tests {
             "server_url": "http://localhost:8000/mcp"
         }));
 
-        let error = validate_mcp_execution_options(&param).unwrap_err();
-        assert!(error.to_string().contains("must be explicitly set to 'never'"));
+        let error = validate_mcp_execution_options(&param, false).unwrap_err();
+        assert!(error.to_string().contains("gateway configuration or the request"));
     }
 
     #[test]
@@ -249,7 +322,7 @@ mod tests {
             "require_approval": "always"
         }));
 
-        let error = validate_mcp_execution_options(&param).unwrap_err();
+        let error = validate_mcp_execution_options(&param, false).unwrap_err();
         assert!(error.to_string().contains("approval gating is not yet supported"));
     }
 
@@ -260,8 +333,46 @@ mod tests {
             "connector_id": "connector_dropbox"
         }));
 
-        let error = validate_mcp_execution_options(&param).unwrap_err();
+        let error = validate_mcp_execution_options(&param, false).unwrap_err();
         assert!(error.to_string().contains("connector_id is not supported"));
+    }
+
+    #[tokio::test]
+    async fn configured_mcp_server_rejects_request_connection_override() {
+        let mut executors = GatewayExecutors::default();
+        executors.insert(GatewayExecutorRegistration::Mcp {
+            server_label: "counter".to_owned(),
+            handlers: vec![discovered_handler("read")],
+        });
+        let param = mcp_param(serde_json::json!({
+            "server_label": "counter",
+            "server_url": "http://localhost:8000/mcp",
+            "require_approval": "never"
+        }));
+
+        let Err(error) = executors.mcp_server_tools(&param).await else {
+            panic!("request connection override must fail");
+        };
+        assert!(error.to_string().contains("configured by the gateway"));
+        assert!(error.to_string().contains("omit server_url"));
+    }
+
+    #[tokio::test]
+    async fn configured_allowed_tools_cannot_be_expanded_by_request() {
+        let mut executors = GatewayExecutors::default();
+        executors.insert(GatewayExecutorRegistration::Mcp {
+            server_label: "counter".to_owned(),
+            handlers: vec![discovered_handler("read")],
+        });
+        let param = mcp_param(serde_json::json!({
+            "server_label": "counter",
+            "allowed_tools": ["read", "delete"]
+        }));
+
+        let tools = executors.mcp_server_tools(&param).await.unwrap();
+
+        assert_eq!(tools.discovered_handlers.len(), 1);
+        assert_eq!(tools.discovered_handlers[0].param.tool_name, "read");
     }
 
     #[tokio::test]
