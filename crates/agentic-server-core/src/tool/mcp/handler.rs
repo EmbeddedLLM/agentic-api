@@ -8,11 +8,14 @@ use serde_json::Value;
 
 use crate::tool::{GatewayExecutor, ToolError, ToolHandler, ToolOutput, ToolType};
 use crate::types::io::FunctionTool;
-use crate::types::io::output::{FunctionToolCall, GatewayCallStatus, McpCall, McpCallError, McpCallStatus, OutputItem};
+use crate::types::io::output::{
+    FunctionToolCall, GatewayCallStatus, McpCall, McpCallError, McpCallStatus, McpListTool, McpListTools, OutputItem,
+};
 use crate::types::tools::{McpDiscoveredToolParam, ResponsesTool};
 use crate::utils::common::{
     deserialize_from_str, deserialize_from_str_opt, deserialize_from_value, serialize_to_string,
 };
+use crate::utils::uuid7_str;
 
 use super::{McpClient, McpError};
 
@@ -92,6 +95,16 @@ pub(crate) fn started_output_item(call: &FunctionToolCall, tool_ref: &McpToolRef
     ))
 }
 
+#[must_use]
+pub(crate) fn list_tools_output_item(item: &McpListTools) -> OutputItem {
+    OutputItem::McpListTools(item.clone())
+}
+
+#[must_use]
+pub(crate) fn started_list_tools_output_item(item: &McpListTools) -> OutputItem {
+    OutputItem::McpListTools(McpListTools::new(item.id.clone(), item.server_label.clone(), vec![]))
+}
+
 /// Executes one tool discovered from an MCP server.
 ///
 /// A handler with no client is used only while normalizing the discovered tool
@@ -110,6 +123,12 @@ struct McpToolNormalizationParams {
 pub struct McpDiscoveredHandler {
     pub param: McpDiscoveredToolParam,
     pub handler: Arc<McpHandler>,
+}
+
+#[derive(Clone)]
+pub(crate) struct McpServerToolSet {
+    pub discovered_handlers: Vec<McpDiscoveredHandler>,
+    pub list_tools_item: McpListTools,
 }
 
 impl McpHandler {
@@ -183,6 +202,31 @@ impl McpHandler {
         Ok(discovered_handlers)
     }
 
+    pub(crate) async fn discover_tools(
+        server_label: &str,
+        client: Arc<McpClient>,
+        allowed_tools: Option<&[String]>,
+    ) -> Result<McpServerToolSet, ToolError> {
+        let handlers = Self::discovered_tool_handlers(server_label, client, allowed_tools).await?;
+        Ok(Self::server_tool_set_from_handlers(server_label, handlers))
+    }
+
+    #[must_use]
+    pub(crate) fn server_tool_set_from_handlers(
+        server_label: &str,
+        discovered_handlers: Vec<McpDiscoveredHandler>,
+    ) -> McpServerToolSet {
+        let tools = discovered_handlers
+            .iter()
+            .map(|discovered| mcp_list_tool(&discovered.param))
+            .collect();
+
+        McpServerToolSet {
+            discovered_handlers,
+            list_tools_item: McpListTools::new(uuid7_str("mcpl_"), server_label, tools),
+        }
+    }
+
     /// Returns the spec-only MCP tool handler used during request normalization.
     #[must_use]
     pub const fn spec_from_param(_param: &Value) -> Self {
@@ -192,6 +236,23 @@ impl McpHandler {
 
 fn mcp_discovery_error(server_label: &str, error: &McpError) -> ToolError {
     ToolError::Execution(format!("tools/list failed for MCP server '{server_label}': {error}"))
+}
+
+fn mcp_list_tool(param: &McpDiscoveredToolParam) -> McpListTool {
+    let tool = &param.tool;
+    let read_only = tool
+        .annotations
+        .as_ref()
+        .and_then(|annotations| annotations.read_only_hint)
+        .unwrap_or(false);
+    let annotations = Value::Object([("read_only".to_owned(), Value::Bool(read_only))].into_iter().collect());
+
+    McpListTool::new(
+        param.tool_name.clone(),
+        tool.description.as_deref().map(str::to_owned),
+        Value::Object(tool.input_schema.as_ref().clone()),
+        Some(annotations),
+    )
 }
 
 impl ToolHandler for McpHandler {
@@ -435,6 +496,80 @@ mod tests {
             normalized[0].parameters.as_ref().unwrap()["properties"],
             serde_json::json!({})
         );
+    }
+
+    #[test]
+    fn discovery_builds_openai_list_tools_item_from_mcp_tools() {
+        let mut read_only_param = discovered_param();
+        read_only_param.tool_name = "get_value".to_owned();
+        read_only_param.internal_name = "mcp__counter__get_value".to_owned();
+        read_only_param.tool.name = "stale_raw_name".to_owned().into();
+        read_only_param.tool.annotations = Some(rmcp::model::ToolAnnotations::new().read_only(true));
+
+        let handlers = vec![discovered_param(), read_only_param]
+            .into_iter()
+            .map(|param| McpDiscoveredHandler {
+                param,
+                handler: Arc::new(McpHandler::discovered_tool_spec_only()),
+            })
+            .collect();
+
+        let tool_set = McpHandler::server_tool_set_from_handlers("counter", handlers);
+
+        assert!(tool_set.list_tools_item.id.starts_with("mcpl_"));
+        assert_eq!(tool_set.list_tools_item.server_label, "counter");
+        assert_eq!(tool_set.discovered_handlers.len(), 2);
+        assert_eq!(
+            tool_set
+                .list_tools_item
+                .tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            ["increment", "get_value"]
+        );
+        assert_eq!(
+            tool_set.list_tools_item.tools[0].input_schema,
+            serde_json::json!({"type": "object"})
+        );
+        assert_eq!(
+            tool_set.list_tools_item.tools[0].annotations,
+            Some(serde_json::json!({"read_only": false}))
+        );
+        assert_eq!(
+            tool_set.list_tools_item.tools[1].annotations,
+            Some(serde_json::json!({"read_only": true}))
+        );
+    }
+
+    #[test]
+    fn list_tools_output_items_share_identity_across_lifecycle() {
+        let list_tools = McpListTools::new(
+            "mcpl_1",
+            "counter",
+            vec![McpListTool::new(
+                "increment",
+                Some("Increment the counter".to_owned()),
+                serde_json::json!({"type": "object", "properties": {}}),
+                Some(serde_json::json!({"read_only": false})),
+            )],
+        );
+
+        let OutputItem::McpListTools(started) = started_list_tools_output_item(&list_tools) else {
+            panic!("expected started mcp_list_tools");
+        };
+        let OutputItem::McpListTools(completed) = list_tools_output_item(&list_tools) else {
+            panic!("expected completed mcp_list_tools");
+        };
+
+        assert_eq!(started.id, "mcpl_1");
+        assert_eq!(started.server_label, "counter");
+        assert!(started.tools.is_empty());
+        assert!(started.error.is_none());
+        assert_eq!(completed.id, started.id);
+        assert_eq!(completed.server_label, started.server_label);
+        assert_eq!(completed.tools.len(), 1);
+        assert_eq!(completed.tools[0].name, "increment");
     }
 
     #[test]

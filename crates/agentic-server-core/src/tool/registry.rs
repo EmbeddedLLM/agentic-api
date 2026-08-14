@@ -16,7 +16,7 @@ use super::{CodexNamespaceHandler, GatewayExecutor, McpHandler, NamespaceMap, To
 use crate::events::WireEvent;
 
 use crate::types::io::OutputItem;
-use crate::types::io::output::FunctionToolCall;
+use crate::types::io::output::{FunctionToolCall, McpListTools};
 use crate::types::tools::{CodeInterpreterToolParam, FileSearchToolParam, ResponsesTool};
 use crate::utils::common::serialize_to_value_or_custom_default;
 
@@ -173,6 +173,9 @@ pub struct ToolRegistry {
     /// Maps model-visible MCP function names back to their public server and
     /// tool identities without reparsing executor configuration.
     mcp_tool_map: McpToolMap,
+
+    /// Request-scoped MCP discovery output items retained in declaration order.
+    mcp_list_tools_items: Vec<McpListTools>,
 }
 
 impl ToolRegistry {
@@ -194,6 +197,7 @@ impl ToolRegistry {
     ) -> Result<Self, ToolError> {
         let mut entries = HashMap::with_capacity(tools.len());
         let mut mcp_tool_map = McpToolMap::default();
+        let mut mcp_list_tools_items = Vec::new();
         // Namespace members must be keyed by the same flat, model-visible name
         // the model will call, so resolve them first — the same pure pass used
         // to build the upstream request.
@@ -206,7 +210,9 @@ impl ToolRegistry {
                     insert_unique_tool_entries(&mut entries, |resolved| insert_function_entry(resolved, p))?;
                 }
                 ResponsesTool::Mcp(p) => {
-                    let handlers = executors.mcp_handler(p).await?;
+                    let tool_set = executors.mcp_server_tools(p).await?;
+                    let handlers = tool_set.discovered_handlers;
+                    mcp_list_tools_items.push(tool_set.list_tools_item);
                     if let ResponsesTool::Mcp(declaration) = &mut tools[index] {
                         declaration.discovered_tools = handlers.iter().map(|item| item.param.clone()).collect();
                     }
@@ -252,6 +258,7 @@ impl ToolRegistry {
             namespace_map,
             custom_tool_map,
             mcp_tool_map,
+            mcp_list_tools_items,
         })
     }
 
@@ -284,6 +291,11 @@ impl ToolRegistry {
 
     pub(crate) fn mcp_tool_ref(&self, internal_name: &str) -> Option<&McpToolRef> {
         self.mcp_tool_map.tool_ref(internal_name)
+    }
+
+    #[must_use]
+    pub(crate) fn mcp_list_tools_items(&self) -> &[McpListTools] {
+        &self.mcp_list_tools_items
     }
 
     pub fn restore_final_payload_output(&self, output: &mut [OutputItem]) {
@@ -423,6 +435,28 @@ mod tests {
         assert_eq!(call.name, "run");
     }
 
+    fn assert_mcp_list_tools_metadata(registry: &ToolRegistry) {
+        let [list_tools] = registry.mcp_list_tools_items() else {
+            panic!("expected one MCP list-tools item");
+        };
+        assert!(list_tools.id.starts_with("mcpl_"));
+        assert_eq!(list_tools.server_label, "counter");
+        assert_eq!(
+            list_tools
+                .tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
+            ["increment", "get_value"]
+        );
+        assert_eq!(list_tools.tools[0].description.as_deref(), Some("Discovered test tool"));
+        assert_eq!(list_tools.tools[0].input_schema, serde_json::json!({"type": "object"}));
+        assert_eq!(
+            list_tools.tools[0].annotations,
+            Some(serde_json::json!({"read_only": false}))
+        );
+    }
+
     #[tokio::test]
     async fn build_with_handlers_registers_mixed_tools_and_runtime_metadata() {
         let mut executors = GatewayExecutors::from_env(Arc::new(reqwest::Client::new()));
@@ -442,6 +476,7 @@ mod tests {
         assert_eq!(registry.len(), 8);
         assert!(registry.contains_mcp_server_label("counter"));
         assert!(!registry.contains_mcp_server_label("missing"));
+        assert_mcp_list_tools_metadata(&registry);
 
         let expected_entries = [
             ("echo", ToolType::Function, None, false),

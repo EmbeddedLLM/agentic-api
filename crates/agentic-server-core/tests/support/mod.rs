@@ -473,6 +473,7 @@ pub fn output_text(payload: &ResponsePayload) -> String {
             | OutputItem::CustomToolCall(_)
             | OutputItem::WebSearchCall(_)
             | OutputItem::McpCall(_)
+            | OutputItem::McpListTools(_)
             | OutputItem::Reasoning(_)
             | OutputItem::Unknown => None,
         })
