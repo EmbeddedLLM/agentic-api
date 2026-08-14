@@ -14,10 +14,6 @@ on:
         description: "Version already merged into main, such as 0.3.0"
         required: true
         type: string
-      target_ref:
-        description: "Git ref to release, such as a commit SHA or releases/vX.Y.Z branch; defaults to selected main commit"
-        required: false
-        type: string
 
 concurrency:
   group: release-crates
@@ -53,8 +49,6 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ inputs.target_ref || github.sha }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1

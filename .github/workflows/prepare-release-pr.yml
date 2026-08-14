@@ -1,0 +1,146 @@
+name: Prepare release PR
+
+run-name: Prepare release PR (v${{ inputs.version }})
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "New release version, such as 0.3.0"
+        required: true
+        type: string
+
+concurrency:
+  group: prepare-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  prepare:
+    name: Prepare release version bump
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Verify maintainer permission
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          permission="$(gh api \
+            "repos/${{ github.repository }}/collaborators/${{ github.actor }}/permission" \
+            --jq '.permission')"
+
+          case "$permission" in
+            admin|maintain)
+              echo "${{ github.actor }} has $permission permission"
+              ;;
+            *)
+              echo "::error::${{ github.actor }} has $permission permission; release preparation requires admin or maintain permission"
+              exit 1
+              ;;
+          esac
+
+      - name: Checkout main
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+          components: clippy, rustfmt
+
+      - name: Update release version
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          version = os.environ["RELEASE_VERSION"]
+          if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?", version):
+              raise SystemExit(f"Invalid release version: {version!r}")
+
+          path = Path("Cargo.toml")
+          text = path.read_text()
+
+          workspace_pattern = r'(?m)^(version = ")[^"]+("\n)'
+          text, workspace_count = re.subn(workspace_pattern, rf'\g<1>{version}\g<2>', text, count=1)
+          if workspace_count != 1:
+              raise SystemExit("Expected exactly one workspace package version in Cargo.toml")
+
+          dependency_pattern = (
+              r'(?m)^(agentic-core = \{ package = "agentic-server-core", '
+              r'path = "crates/agentic-server-core", version = ")[^"]+(" \})$'
+          )
+          text, dependency_count = re.subn(dependency_pattern, rf'\g<1>{version}\g<2>', text, count=1)
+          if dependency_count != 1:
+              raise SystemExit("Expected exactly one agentic-core workspace dependency version in Cargo.toml")
+
+          path.write_text(text)
+          print(f"Updated workspace and agentic-core versions to {version}")
+          PY
+
+      - name: Refresh lockfile
+        run: cargo check --workspace
+
+      - name: Check formatting
+        run: cargo fmt -- --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Run tests
+        run: cargo test
+
+      - name: Create release branch
+        id: branch
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          branch="release-prep/v$RELEASE_VERSION"
+
+          if git ls-remote --exit-code --heads origin "refs/heads/$branch" >/dev/null 2>&1; then
+            echo "::error::Branch $branch already exists"
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock
+          git commit -s -m "chore: prepare release v$RELEASE_VERSION"
+          git push origin "HEAD:refs/heads/$branch"
+          echo "name=$branch" >> "$GITHUB_OUTPUT"
+
+      - name: Open release PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_BRANCH: ${{ steps.branch.outputs.name }}
+        run: |
+          set -euo pipefail
+          body="$(cat <<EOF
+          ## Summary
+
+          Prepare the v$RELEASE_VERSION release by updating the workspace and published crate dependency versions.
+
+          ## Test Plan
+
+          Validated by the Prepare release PR workflow:
+          - cargo check --workspace
+          - cargo fmt -- --check
+          - cargo clippy --all-targets -- -D warnings
+          - cargo test
+          EOF
+          )"
+          gh pr create \
+            --base main \
+            --head "$RELEASE_BRANCH" \
+            --title "chore: prepare release v$RELEASE_VERSION" \
+            --body "$body"
