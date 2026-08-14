@@ -227,6 +227,13 @@ impl McpHandler {
         }
     }
 
+    #[must_use]
+    pub(crate) fn failed_list_tools_item(server_label: &str, error: &ToolError) -> McpListTools {
+        let mut item = McpListTools::new(uuid7_str("mcpl_"), server_label, Vec::new());
+        item.error = Some(error.to_string());
+        item
+    }
+
     /// Returns the spec-only MCP tool handler used during request normalization.
     #[must_use]
     pub const fn spec_from_param(_param: &Value) -> Self {

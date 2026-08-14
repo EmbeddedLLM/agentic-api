@@ -210,7 +210,13 @@ impl ToolRegistry {
                     insert_unique_tool_entries(&mut entries, |resolved| insert_function_entry(resolved, p))?;
                 }
                 ResponsesTool::Mcp(p) => {
-                    let tool_set = executors.mcp_server_tools(p).await?;
+                    let tool_set = match executors.mcp_server_tools(p).await {
+                        Ok(tool_set) => tool_set,
+                        Err(error) => {
+                            mcp_list_tools_items.push(McpHandler::failed_list_tools_item(&p.server_label, &error));
+                            continue;
+                        }
+                    };
                     let handlers = tool_set.discovered_handlers;
                     mcp_list_tools_items.push(tool_set.list_tools_item);
                     if let ResponsesTool::Mcp(declaration) = &mut tools[index] {
@@ -557,6 +563,29 @@ mod tests {
             [crate::types::tools::CodexNamespaceMember::Function(function)] if function.name.as_str() == "run"
         ));
         assert_namespace_call_restoration(&registry);
+    }
+
+    #[tokio::test]
+    async fn build_with_handlers_retains_mcp_discovery_failure_output() {
+        let mut tools = vec![declaration("unreachable")];
+        let mut executors = GatewayExecutors::default();
+
+        let registry = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
+            .await
+            .expect("discovery failures should become response metadata");
+
+        let [list_tools] = registry.mcp_list_tools_items() else {
+            panic!("expected one MCP list-tools item");
+        };
+        assert_eq!(list_tools.server_label, "unreachable");
+        assert!(list_tools.tools.is_empty());
+        assert!(
+            list_tools
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("failed"))
+        );
+        assert!(registry.is_empty());
     }
 
     #[tokio::test]
