@@ -49,6 +49,8 @@ Responses type:mcp declaration
 The OpenAI public contract uses:
 
 - `mcp_list_tools` for discovery output
+- `response.mcp_list_tools.in_progress`
+- `response.mcp_list_tools.completed` or `response.mcp_list_tools.failed`
 - `mcp_call` for a selected tool call
 - `response.mcp_call.in_progress`
 - `response.mcp_call_arguments.delta`
@@ -56,11 +58,10 @@ The OpenAI public contract uses:
 - `response.mcp_call.completed` or `response.mcp_call.failed`
 
 The internal function-tool representation is an implementation detail and must not leak as a public function call.
-The gateway exposes execution through the `mcp_call` lifecycle. Emitting the separate `mcp_list_tools` discovery
-lifecycle is an additional public representation of the same discovery step and does not change the tool execution
-design described here.
-
-Until that discovery lifecycle is implemented, gateway streams are a strict subset of OpenAI's MCP stream: they do not emit an `mcp_list_tools` output item before `mcp_call`.
+The gateway exposes discovery through the `mcp_list_tools` lifecycle before any selected tool is exposed through the
+`mcp_call` lifecycle. Blocking responses include the completed discovery item in `output`. Streaming responses emit
+the corresponding output-item and `response.mcp_list_tools.*` events. A discovery failure produces a failed
+`mcp_list_tools` item with its error and does not register tools from that server.
 
 ## Components
 
@@ -151,7 +152,8 @@ happens before `RequestPayload::to_upstream_request()` normalizes the request:
 
 ```text
 ResponsesTool::Mcp
-  -> GatewayExecutors::mcp_handler()
+  -> GatewayExecutors::mcp_server_tools()
+  -> mcp_list_tools discovery output is retained
   -> declaration._agentic_discovered_tools is populated
   -> each discovered handler is inserted into ToolRegistry
   -> ResponsesTool::to_function_tools()
@@ -189,5 +191,4 @@ build request-scoped registry
 
 Tool execution failures become failed tool call output and are returned to the model for the next round; they do not
 automatically fail the whole Responses request.
-
 
