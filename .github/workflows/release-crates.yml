@@ -11,7 +11,7 @@ on:
         type: boolean
         default: true
       version:
-        description: "Release version, such as 0.2.0"
+        description: "Version already merged into main, such as 0.3.0"
         required: true
         type: string
       target_ref:
@@ -56,45 +56,6 @@ jobs:
         with:
           ref: ${{ inputs.target_ref || github.sha }}
 
-      - name: Update release version
-        id: version
-        env:
-          RELEASE_VERSION: ${{ inputs.version }}
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import os
-          import re
-          from pathlib import Path
-
-          version = os.environ["RELEASE_VERSION"]
-          if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?", version):
-              raise SystemExit(f"Invalid release version: {version!r}")
-
-          path = Path("Cargo.toml")
-          text = path.read_text()
-
-          workspace_pattern = r'(?m)^(version = ")[^"]+("\n)'
-          text, workspace_count = re.subn(workspace_pattern, rf'\g<1>{version}\g<2>', text, count=1)
-          if workspace_count != 1:
-              raise SystemExit("Expected exactly one workspace package version in Cargo.toml")
-
-          dependency_pattern = (
-              r'(?m)^(agentic-core = \{ package = "agentic-server-core", '
-              r'path = "crates/agentic-server-core", version = ")[^"]+(" \})$'
-          )
-          text, dependency_count = re.subn(dependency_pattern, rf'\g<1>{version}\g<2>', text, count=1)
-          if dependency_count != 1:
-              raise SystemExit("Expected exactly one agentic-core workspace dependency version in Cargo.toml")
-
-          path.write_text(text)
-          print(f"Updated workspace and agentic-core versions to {version}")
-          PY
-
-          echo "version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
-          echo "release_branch=releases/v$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
-
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
@@ -125,10 +86,11 @@ jobs:
       - name: Run tests
         run: cargo test
 
-      - name: Verify package versions
+      - name: Read and verify package versions
+        id: version
         run: |
           set -euo pipefail
-          requested_version="${{ steps.version.outputs.version }}"
+          requested_version="${{ inputs.version }}"
           core_version="$(cargo metadata --format-version 1 --no-deps \
             | jq -r '.packages[] | select(.name == "agentic-server-core") | .version')"
           server_version="$(cargo metadata --format-version 1 --no-deps \
@@ -150,18 +112,9 @@ jobs:
           fi
 
           echo "Release version: $core_version"
-
-      - name: Commit release version to main
-        if: ${{ !inputs.dry_run }}
-        env:
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Cargo.toml Cargo.lock
-          git commit -s -m "chore: release v$RELEASE_VERSION"
-          git push origin HEAD:refs/heads/main
+          echo "version=$core_version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$core_version" >> "$GITHUB_OUTPUT"
+          echo "release_branch=releases/v$core_version" >> "$GITHUB_OUTPUT"
 
       - name: Resolve release commit
         id: target
