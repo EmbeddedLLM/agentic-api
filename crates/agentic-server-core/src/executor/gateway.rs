@@ -422,6 +422,7 @@ pub(super) fn emit_gateway_start_events(
             | OutputItem::FunctionCall(_)
             | OutputItem::CustomToolCall(_)
             | OutputItem::Reasoning(_)
+            | OutputItem::Compaction(_)
             | OutputItem::Unknown => {}
         }
     }
@@ -467,6 +468,7 @@ pub(super) fn emit_gateway_completed_events<T: GatewayPublicOutputSource>(
             | OutputItem::FunctionCall(_)
             | OutputItem::CustomToolCall(_)
             | OutputItem::Reasoning(_)
+            | OutputItem::Compaction(_)
             | OutputItem::Unknown => continue,
         };
         let item = output_item_value(public_output)?;

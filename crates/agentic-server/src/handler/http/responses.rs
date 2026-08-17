@@ -57,6 +57,7 @@ pub async fn responses(State(state): State<AppState>, req: Request) -> Response 
         || payload.previous_response_id.is_some()
         || payload.conversation_id.is_some()
         || payload.input.contains_compaction()
+        || payload.input.has_compaction_trigger()
         || payload
             .context_management
             .as_ref()
@@ -69,6 +70,7 @@ pub async fn responses(State(state): State<AppState>, req: Request) -> Response 
         has_previous_response_id = payload.previous_response_id.is_some(),
         has_conversation_id = payload.conversation_id.is_some(),
         has_compaction = payload.input.contains_compaction(),
+        has_compaction_trigger = payload.input.has_compaction_trigger(),
         context_management = payload.context_management.as_ref().map_or(0, Vec::len),
         tools = payload.tools.as_ref().map_or(0, Vec::len),
         "routing HTTP responses request"

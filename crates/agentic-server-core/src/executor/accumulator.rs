@@ -479,7 +479,7 @@ impl ResponseAccumulator {
                 text: String::with_capacity(256),
             }),
             SSEItemType::WebSearchCall if !item_id.is_empty() => Some(InFlight::WebSearchCall { item: None }),
-            SSEItemType::WebSearchCall => None,
+            SSEItemType::Compaction | SSEItemType::WebSearchCall => None,
             SSEItemType::McpCall => McpCall::try_from(payload).ok().map(|item| InFlight::McpCall { item }),
             SSEItemType::McpListTools => McpListTools::try_from(payload)
                 .ok()

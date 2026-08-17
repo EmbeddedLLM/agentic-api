@@ -111,7 +111,7 @@ Add a provider to `~/.codex/config.toml`:
 
 ```toml
 [model_providers.agentic-api]
-name = "agentic-api"
+name = "OpenAI"
 base_url = "http://localhost:9000/v1"
 wire_api = "responses"
 requires_openai_auth = false
@@ -129,7 +129,7 @@ If the gateway enables OIDC, configure Codex's supported command-backed bearer a
 
 ```toml
 [model_providers.agentic-api]
-name = "agentic-api"
+name = "OpenAI"
 base_url = "http://localhost:9000/v1"
 wire_api = "responses"
 supports_websockets = true

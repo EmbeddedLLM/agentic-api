@@ -12,24 +12,27 @@ use either::Either;
 use tokio::sync::mpsc;
 use tracing::debug;
 
-use super::compaction::maybe_compact_context;
+use super::compaction::{compact_items, maybe_compact_context};
 use super::gateway::{
     GatewayCallResult, LoopDecision, append_gateway_calls_to_new_input, append_output_items_to_input,
     append_tool_outputs, classify_round, complete_gateway_event_plans, emit_gateway_completed_events,
     emit_gateway_start_events, execute_and_emit_output_calls, execute_output_calls, gateway_event_plans,
     has_client_owned_calls, is_client_custom_call, is_gateway_owned_call, public_output_items,
 };
-use super::gateway_accumulator::{GatewayStreamAccumulator, StreamEvent, error_sse_chunk};
-use crate::events::EventFrame;
-use crate::executor::error::ExecutorResult;
+use super::gateway_accumulator::{
+    GatewayStreamAccumulator, StreamEvent, emit_sse_frame, error_sse_chunk, synthetic_event,
+};
+use crate::events::{EventFrame, SSEEventType};
+use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::executor::inference::DONE_MARKER;
 use crate::executor::persist::persist_if_needed;
 use crate::executor::rehydrate::rehydrate_conversation;
 use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::executor::upstream::{emit_deferred_stream_events, fetch_blocking_payload, fetch_stream_payload};
 use crate::tool::{ToolRegistry, mcp};
-use crate::types::io::{OutputItem, ResponseUsage, ToolChoice};
+use crate::types::io::{InputItem, OutputItem, ResponseUsage, ResponsesInput, ToolChoice};
 use crate::types::request_response::{IncompleteDetails, RequestPayload, ResponsePayload};
+use crate::utils::common::{serialize_to_value, utcnow_str};
 
 pub use crate::executor::inference::BoxStream;
 
@@ -93,6 +96,10 @@ impl<T> Drop for AbortOnDrop<T> {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "round-loop orchestrator keeps the full gateway tool lifecycle in one function"
+)]
 async fn run_until_gateway_tools_complete(
     mut ctx: RequestContext,
     exec_ctx: &ExecutionContext,
@@ -100,6 +107,9 @@ async fn run_until_gateway_tools_complete(
     stream_upstream: bool,
     mut stream: Option<(&mut GatewayStreamAccumulator, &mpsc::UnboundedSender<StreamEvent>)>,
 ) -> ExecutorResult<(ResponsePayload, RequestContext)> {
+    if ctx.enriched_request.input.has_compaction_trigger() {
+        return run_compaction_trigger(ctx, exec_ctx, auth, stream).await;
+    }
     let mut executors = exec_ctx.gateway_executors.request_scoped();
     let registry: ToolRegistry = match ctx.enriched_request.tools.as_mut() {
         Some(tools) => ToolRegistry::build_with_handlers(tools, &mut executors).await?,
@@ -209,6 +219,93 @@ async fn run_until_gateway_tools_complete(
     }
 
     unreachable!("the final round returns Done, RequiresClientAction, or Incomplete");
+}
+
+/// Codex CLI remote-compaction V2: the client appends a `compaction_trigger`
+/// item to the input and expects the server to run its own summarization turn
+/// and stream back exactly one `compaction` output item plus `response.completed`.
+/// The trigger never reaches the upstream model; the summary inference is a
+/// normal blocking call against the same backend as standalone compaction.
+async fn run_compaction_trigger(
+    mut ctx: RequestContext,
+    exec_ctx: &ExecutionContext,
+    auth: Option<&str>,
+    mut stream: Option<(&mut GatewayStreamAccumulator, &mpsc::UnboundedSender<StreamEvent>)>,
+) -> ExecutorResult<(ResponsePayload, RequestContext)> {
+    let model = ctx.enriched_request.model.clone();
+    let instructions = ctx.enriched_request.instructions.clone();
+    let input = std::mem::replace(&mut ctx.enriched_request.input, ResponsesInput::Items(Vec::new()));
+    let (compacted, usage) = compact_items(&model, input, instructions.as_deref(), exec_ctx, auth).await?;
+    let compaction = compacted
+        .iter()
+        .rev()
+        .find_map(|item| match item {
+            InputItem::Compaction(item) => Some(item.clone()),
+            _ => None,
+        })
+        .ok_or_else(|| ExecutorError::CompactionFailed {
+            status: "completed".to_owned(),
+            details: "compaction produced no checkpoint item".to_owned(),
+        })?;
+    ctx.new_input_items = compacted;
+    let mut payload = ResponsePayload {
+        id: ctx.response_id.clone(),
+        object: "response".to_owned(),
+        created_at: utcnow_str(),
+        model,
+        status: "completed".to_owned(),
+        output: vec![OutputItem::Compaction(compaction)],
+        usage: Some(usage),
+        incomplete_details: None,
+        error: None,
+        previous_response_id: ctx.original_request.previous_response_id.clone(),
+        conversation_id: ctx.conversation_id.clone(),
+        instructions,
+    };
+    ctx.inject_ids(&mut payload);
+    if let Some((accumulator, sender)) = stream.as_mut() {
+        emit_compaction_stream_events(accumulator, sender, &payload)?;
+    }
+    Ok((payload, ctx))
+}
+
+/// Emit the lifecycle and compaction-item events codex's V2 collector consumes:
+/// `response.created`/`response.in_progress`, then one `output_item.added` and
+/// `output_item.done` pair carrying the `compaction` item. `response.completed`
+/// is produced by the normal terminal framing from the returned payload.
+fn emit_compaction_stream_events(
+    accumulator: &mut GatewayStreamAccumulator,
+    sender: &mpsc::UnboundedSender<StreamEvent>,
+    payload: &ResponsePayload,
+) -> ExecutorResult<()> {
+    let mut created = payload.clone();
+    "in_progress".clone_into(&mut created.status);
+    let response_value = serialize_to_value(&created).map_err(ExecutorError::JsonError)?;
+    for event_type in [SSEEventType::ResponseCreated, SSEEventType::ResponseInProgress] {
+        let mut frame = synthetic_event(event_type, [("response".to_owned(), response_value.clone())])?;
+        if accumulator.process_event(&mut frame, 0) {
+            emit_sse_frame(sender, &frame)?;
+        }
+    }
+    let item = payload
+        .output
+        .iter()
+        .find(|item| matches!(item, OutputItem::Compaction(_)))
+        .expect("compaction payload always carries its compaction item");
+    let item_value = serialize_to_value(item).map_err(ExecutorError::JsonError)?;
+    for event_type in [SSEEventType::OutputItemAdded, SSEEventType::OutputItemDone] {
+        let mut frame = synthetic_event(
+            event_type,
+            [
+                ("output_index".to_owned(), serde_json::json!(0)),
+                ("item".to_owned(), item_value.clone()),
+            ],
+        )?;
+        if accumulator.process_event(&mut frame, 0) {
+            emit_sse_frame(sender, &frame)?;
+        }
+    }
+    Ok(())
 }
 
 async fn execute_and_emit_round_output_calls(
@@ -530,6 +627,178 @@ pub async fn execute(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::executor::modes::{ConversationHandler, ResponseHandler};
+    use crate::storage::{ConversationStore, ResponseStore};
+    use futures::StreamExt;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    fn summary_upstream_response() -> serde_json::Value {
+        serde_json::json!({
+            "id": "resp_upstream",
+            "object": "response",
+            "created_at": 0,
+            "model": "test-model",
+            "status": "completed",
+            "output": [{
+                "id": "msg_upstream",
+                "type": "message",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{
+                    "type": "output_text",
+                    "text": "durable summary",
+                    "annotations": []
+                }]
+            }],
+            "usage": {
+                "input_tokens": 12,
+                "output_tokens": 3,
+                "total_tokens": 15
+            },
+            "incomplete_details": null,
+            "error": null,
+            "previous_response_id": null,
+            "conversation_id": null,
+            "instructions": null
+        })
+    }
+
+    async fn trigger_execution_context(
+        captured: Arc<Mutex<Option<serde_json::Value>>>,
+    ) -> (ExecutionContext, tokio::task::JoinHandle<()>) {
+        let captured_for_route = Arc::clone(&captured);
+        let app = axum::Router::new().route(
+            "/v1/responses",
+            axum::routing::post(move |body: axum::body::Bytes| async move {
+                let value =
+                    serde_json::from_slice::<serde_json::Value>(&body).expect("captured upstream body must be JSON");
+                *captured_for_route.lock().await = Some(value);
+                axum::Json(summary_upstream_response())
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock inference server");
+        let address = listener.local_addr().expect("mock server address");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.ok();
+        });
+        let exec_ctx = ExecutionContext::new(
+            ConversationHandler::new(ConversationStore::disabled()),
+            ResponseHandler::new(ResponseStore::disabled()),
+            Arc::new(reqwest::Client::new()),
+            format!("http://{address}"),
+        );
+        (exec_ctx, server)
+    }
+
+    #[tokio::test]
+    async fn compaction_trigger_returns_single_compaction_item_without_upstream_trigger() {
+        let captured = Arc::new(Mutex::new(None));
+        let (exec_ctx, server) = trigger_execution_context(Arc::clone(&captured)).await;
+
+        let payload: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test-model",
+            "stream": false,
+            "store": false,
+            "input": [
+                {"role": "user", "content": "remember banana"},
+                {"type": "compaction_trigger"}
+            ]
+        }))
+        .expect("valid trigger request");
+        let Either::Left(response) = ExecuteRequest::new(payload, Arc::new(exec_ctx))
+            .run()
+            .await
+            .expect("trigger request succeeds")
+        else {
+            panic!("non-streaming trigger request must return a payload");
+        };
+
+        assert_eq!(response.status, "completed");
+        assert_eq!(response.output.len(), 1);
+        let OutputItem::Compaction(item) = &response.output[0] else {
+            panic!("expected exactly one compaction output item");
+        };
+        assert_eq!(item.encrypted_content, "durable summary");
+        assert!(item.id.as_deref().is_some_and(|id| id.starts_with("cmp_")));
+        assert_eq!(response.usage.as_ref().map(|usage| usage.total_tokens), Some(15));
+
+        let upstream = captured.lock().await.take().expect("summary inference ran");
+        assert!(
+            !upstream.to_string().contains("compaction_trigger"),
+            "trigger must never reach the upstream model"
+        );
+        assert!(upstream.to_string().contains("CONTEXT CHECKPOINT COMPACTION"));
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn compaction_trigger_streams_one_compaction_item_then_completed() {
+        let captured = Arc::new(Mutex::new(None));
+        let (exec_ctx, server) = trigger_execution_context(Arc::clone(&captured)).await;
+
+        let payload: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test-model",
+            "stream": true,
+            "store": false,
+            "input": [
+                {"role": "user", "content": "remember banana"},
+                {"type": "compaction_trigger"}
+            ]
+        }))
+        .expect("valid trigger request");
+        let Either::Right(stream) = ExecuteRequest::new(payload, Arc::new(exec_ctx))
+            .run()
+            .await
+            .expect("trigger request succeeds")
+        else {
+            panic!("streaming trigger request must return a stream");
+        };
+
+        let chunks: Vec<String> = stream.collect().await;
+        let mut event_types = Vec::new();
+        let mut compaction_done_count = 0;
+        for chunk in chunks {
+            let body = chunk.strip_suffix("\n\n").expect("SSE frame terminator");
+            let data = body
+                .lines()
+                .find_map(|line| line.strip_prefix("data: "))
+                .expect("SSE data line");
+            let Ok(event) = serde_json::from_str::<serde_json::Value>(data) else {
+                continue; // terminal [DONE] marker
+            };
+            let event_type = event["type"].as_str().expect("event type");
+            event_types.push(event_type.to_owned());
+            if event_type == "response.output_item.done" && event["item"]["type"] == "compaction" {
+                compaction_done_count += 1;
+                assert_eq!(event["item"]["encrypted_content"], "durable summary");
+            }
+        }
+
+        assert_eq!(
+            event_types,
+            [
+                "response.created",
+                "response.in_progress",
+                "response.output_item.added",
+                "response.output_item.done",
+                "response.completed",
+            ]
+        );
+        assert_eq!(compaction_done_count, 1);
+        assert!(
+            !captured
+                .lock()
+                .await
+                .take()
+                .expect("summary inference ran")
+                .to_string()
+                .contains("compaction_trigger")
+        );
+        server.abort();
+    }
 
     #[tokio::test]
     async fn stream_task_panic_after_event_uses_next_sequence_number_for_error() {

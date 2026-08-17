@@ -213,6 +213,11 @@ pub enum InputItem {
     Reasoning(ReasoningOutput),
     #[serde(rename = "compaction")]
     Compaction(CompactionItem),
+    /// Codex CLI's remote-compaction V2 marker. Signals the server to run its
+    /// own summarization turn and return exactly one `compaction` output item.
+    /// Carries no payload; it is never forwarded to the upstream model.
+    #[serde(rename = "compaction_trigger")]
+    CompactionTrigger,
     #[serde(other)]
     Unknown,
 }
@@ -231,6 +236,7 @@ impl<'de> Deserialize<'de> for InputItem {
             Some("custom_tool_call_output") => deserialize_from_value(value).map(Self::CustomToolCallOutput),
             Some("reasoning") => deserialize_from_value(value).map(Self::Reasoning),
             Some("compaction") => deserialize_from_value(value).map(Self::Compaction),
+            Some("compaction_trigger") => Ok(Self::CompactionTrigger),
             Some(_) => return Ok(Self::Unknown),
         };
         item.map_err(serde::de::Error::custom)
@@ -241,6 +247,11 @@ impl InputItem {
     #[must_use]
     pub(crate) fn is_unknown(&self) -> bool {
         matches!(self, Self::Unknown)
+    }
+
+    #[must_use]
+    pub fn is_compaction_trigger(&self) -> bool {
+        matches!(self, Self::CompactionTrigger)
     }
 }
 
@@ -303,11 +314,17 @@ impl ResponsesInput {
         matches!(self, Self::Items(items) if items.iter().any(|item| matches!(item, InputItem::Compaction(_))))
     }
 
+    #[must_use]
+    pub fn has_compaction_trigger(&self) -> bool {
+        matches!(self, Self::Items(items) if items.iter().any(InputItem::is_compaction_trigger))
+    }
+
     /// Return the canonical context sent to vLLM.
     ///
     /// vLLM does not understand public `compaction` items, so the latest item
     /// becomes an assistant message containing the locally generated summary.
     /// Items before that checkpoint are superseded and are omitted.
+    /// `compaction_trigger` markers are stripped and never reach the model.
     #[must_use]
     pub fn model_input(&self) -> Cow<'_, Self> {
         let Self::Items(items) = self else {
@@ -315,12 +332,21 @@ impl ResponsesInput {
         };
 
         let Some(window) = latest_compaction_window(items) else {
+            if items.iter().any(InputItem::is_compaction_trigger) {
+                let stripped = items
+                    .iter()
+                    .filter(|item| !item.is_compaction_trigger())
+                    .cloned()
+                    .collect();
+                return Cow::Owned(Self::Items(stripped));
+            }
             return Cow::Borrowed(self);
         };
 
         let model_items = window
             .retained_user_items(items)
             .chain(items[window.latest_index()..].iter())
+            .filter(|item| !item.is_compaction_trigger())
             .map(|item| match item {
                 InputItem::Compaction(compaction) => InputItem::Message(InputMessage {
                     id: None,
@@ -433,6 +459,57 @@ mod tests {
         assert_eq!(serialized[0]["role"], "assistant");
         assert_eq!(serialized[0]["content"][0]["type"], "output_text");
         assert_eq!(serialized[0]["content"][0]["text"], "summary");
+    }
+
+    #[test]
+    fn compaction_trigger_parses_as_dedicated_variant() {
+        let item: InputItem = serde_json::from_value(serde_json::json!({"type": "compaction_trigger"}))
+            .expect("compaction_trigger parses");
+        assert!(item.is_compaction_trigger());
+
+        let input: ResponsesInput = serde_json::from_value(serde_json::json!([
+            {"role": "user", "content": "history"},
+            {"type": "compaction_trigger"}
+        ]))
+        .expect("trigger input parses");
+        assert!(input.has_compaction_trigger());
+        assert!(!input.contains_compaction());
+    }
+
+    #[test]
+    fn model_input_strips_compaction_trigger_without_window() {
+        let input: ResponsesInput = serde_json::from_value(serde_json::json!([
+            {"role": "user", "content": "history"},
+            {"type": "compaction_trigger"}
+        ]))
+        .expect("trigger input parses");
+
+        let serialized = serde_json::to_value(input.model_input()).expect("model input serializes");
+        assert_eq!(serialized.as_array().map(Vec::len), Some(1));
+        assert_eq!(serialized[0]["type"], "message");
+        assert_eq!(serialized[0]["content"], "history");
+    }
+
+    #[test]
+    fn model_input_strips_compaction_trigger_after_window() {
+        let input: ResponsesInput = serde_json::from_value(serde_json::json!([
+            {"role": "user", "content": "discard me"},
+            {"type": "compaction", "encrypted_content": "summary"},
+            {"type": "message", "id": "msg_keep", "role": "user", "status": "completed", "content": "retained"},
+            {"type": "compaction_trigger"}
+        ]))
+        .expect("trigger input parses");
+
+        let serialized = serde_json::to_value(input.model_input()).expect("model input serializes");
+        assert_eq!(serialized.as_array().map(Vec::len), Some(2));
+        assert_eq!(serialized[0]["role"], "assistant");
+        assert_eq!(serialized[0]["content"][0]["text"], "summary");
+        assert_eq!(serialized[1]["content"], "retained");
+        assert!(
+            serialized
+                .as_array()
+                .is_some_and(|items| items.iter().all(|item| item["type"] != "compaction_trigger"))
+        );
     }
 
     #[test]
