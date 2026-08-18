@@ -15,15 +15,14 @@ use tracing::debug;
 use super::compaction::{compact_items, maybe_compact_context};
 use super::gateway::{
     GatewayCallResult, LoopDecision, append_gateway_calls_to_new_input, append_output_items_to_input,
-    append_tool_outputs, classify_round, complete_gateway_event_plans, emit_gateway_completed_events,
-    emit_gateway_start_events, execute_and_emit_output_calls, execute_output_calls, gateway_event_plans,
-    has_client_owned_calls, is_client_custom_call, is_gateway_owned_call, public_output_items,
+    append_tool_outputs, classify_round, compaction_event_plans, complete_gateway_event_plans,
+    emit_gateway_completed_events, emit_gateway_start_events, emit_response_start_events,
+    execute_and_emit_output_calls, execute_output_calls, gateway_event_plans, has_client_owned_calls,
+    is_client_custom_call, is_gateway_owned_call, public_output_items,
 };
-use super::gateway_accumulator::{
-    GatewayStreamAccumulator, StreamEvent, emit_sse_frame, error_sse_chunk, synthetic_event,
-};
-use crate::events::{EventFrame, SSEEventType};
-use crate::executor::error::{ExecutorError, ExecutorResult};
+use super::gateway_accumulator::{GatewayStreamAccumulator, StreamEvent, error_sse_chunk};
+use crate::events::EventFrame;
+use crate::executor::error::ExecutorResult;
 use crate::executor::inference::DONE_MARKER;
 use crate::executor::persist::persist_if_needed;
 use crate::executor::rehydrate::rehydrate_conversation;
@@ -32,7 +31,7 @@ use crate::executor::upstream::{emit_deferred_stream_events, fetch_blocking_payl
 use crate::tool::{ToolRegistry, mcp};
 use crate::types::io::{InputItem, OutputItem, ResponseUsage, ResponsesInput, ToolChoice};
 use crate::types::request_response::{IncompleteDetails, RequestPayload, ResponsePayload};
-use crate::utils::common::{serialize_to_value, utcnow_str};
+use crate::utils::common::utcnow_str;
 
 pub use crate::executor::inference::BoxStream;
 
@@ -96,20 +95,34 @@ impl<T> Drop for AbortOnDrop<T> {
     }
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "round-loop orchestrator keeps the full gateway tool lifecycle in one function"
-)]
 async fn run_until_gateway_tools_complete(
-    mut ctx: RequestContext,
+    ctx: RequestContext,
     exec_ctx: &ExecutionContext,
     auth: Option<&str>,
     stream_upstream: bool,
     mut stream: Option<(&mut GatewayStreamAccumulator, &mpsc::UnboundedSender<StreamEvent>)>,
 ) -> ExecutorResult<(ResponsePayload, RequestContext)> {
     if ctx.enriched_request.input.has_compaction_trigger() {
-        return run_compaction_trigger(ctx, exec_ctx, auth, stream).await;
+        let (payload, ctx) = run_compaction_trigger(ctx, exec_ctx, auth).await?;
+        if let Some((stream_accumulator, stream_sender)) = stream.as_mut() {
+            emit_response_start_events(&payload, stream_accumulator, stream_sender)?;
+            let event_plans = compaction_event_plans(&payload.output, 0);
+            emit_gateway_start_events(&event_plans, stream_accumulator, stream_sender)?;
+            emit_gateway_completed_events(&payload.output, &event_plans, stream_accumulator, stream_sender)?;
+        }
+        return Ok((payload, ctx));
     }
+
+    run_gateway_tool_loop(ctx, exec_ctx, auth, stream_upstream, stream).await
+}
+
+async fn run_gateway_tool_loop(
+    mut ctx: RequestContext,
+    exec_ctx: &ExecutionContext,
+    auth: Option<&str>,
+    stream_upstream: bool,
+    mut stream: Option<(&mut GatewayStreamAccumulator, &mpsc::UnboundedSender<StreamEvent>)>,
+) -> ExecutorResult<(ResponsePayload, RequestContext)> {
     let mut executors = exec_ctx.gateway_executors.request_scoped();
     let registry: ToolRegistry = match ctx.enriched_request.tools.as_mut() {
         Some(tools) => ToolRegistry::build_with_handlers(tools, &mut executors).await?,
@@ -230,7 +243,6 @@ async fn run_compaction_trigger(
     mut ctx: RequestContext,
     exec_ctx: &ExecutionContext,
     auth: Option<&str>,
-    mut stream: Option<(&mut GatewayStreamAccumulator, &mpsc::UnboundedSender<StreamEvent>)>,
 ) -> ExecutorResult<(ResponsePayload, RequestContext)> {
     let model = ctx.enriched_request.model.clone();
     let instructions = ctx.enriched_request.instructions.clone();
@@ -255,51 +267,7 @@ async fn run_compaction_trigger(
         instructions,
     };
     ctx.inject_ids(&mut payload);
-    if let Some((accumulator, sender)) = stream.as_mut() {
-        emit_compaction_stream_events(accumulator, sender, &payload)?;
-    }
     Ok((payload, ctx))
-}
-
-/// Emit the lifecycle and compaction-item events codex's V2 collector consumes:
-/// `response.created`/`response.in_progress`, then one `output_item.added` and
-/// `output_item.done` pair carrying the `compaction` item. `response.completed`
-/// is produced by the normal terminal framing from the returned payload.
-fn emit_compaction_stream_events(
-    accumulator: &mut GatewayStreamAccumulator,
-    sender: &mpsc::UnboundedSender<StreamEvent>,
-    payload: &ResponsePayload,
-) -> ExecutorResult<()> {
-    let mut created = payload.clone();
-    "in_progress".clone_into(&mut created.status);
-    created.output.clear();
-    created.usage = None;
-    let response_value = serialize_to_value(&created).map_err(ExecutorError::JsonError)?;
-    for event_type in [SSEEventType::ResponseCreated, SSEEventType::ResponseInProgress] {
-        let mut frame = synthetic_event(event_type, [("response".to_owned(), response_value.clone())])?;
-        if accumulator.process_event(&mut frame, 0) {
-            emit_sse_frame(sender, &frame)?;
-        }
-    }
-    let item = payload
-        .output
-        .iter()
-        .find(|item| matches!(item, OutputItem::Compaction(_)))
-        .expect("compaction payload always carries its compaction item");
-    let item_value = serialize_to_value(item).map_err(ExecutorError::JsonError)?;
-    for event_type in [SSEEventType::OutputItemAdded, SSEEventType::OutputItemDone] {
-        let mut frame = synthetic_event(
-            event_type,
-            [
-                ("output_index".to_owned(), serde_json::json!(0)),
-                ("item".to_owned(), item_value.clone()),
-            ],
-        )?;
-        if accumulator.process_event(&mut frame, 0) {
-            emit_sse_frame(sender, &frame)?;
-        }
-    }
-    Ok(())
 }
 
 async fn execute_and_emit_round_output_calls(

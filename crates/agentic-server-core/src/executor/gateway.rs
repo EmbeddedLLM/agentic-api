@@ -10,7 +10,8 @@ use crate::executor::request::RequestContext;
 use crate::tool::{GatewayDispatchResult, ToolError, ToolOutput, ToolRegistry, ToolType};
 use crate::types::io::output::{FunctionToolCall, GatewayCallStatus, McpCallStatus};
 use crate::types::io::{InputItem, OutputItem, ResponsesInput};
-use crate::utils::common::serialize_to_string;
+use crate::types::request_response::ResponsePayload;
+use crate::utils::common::{serialize_to_string, serialize_to_value};
 
 /// Max gateway tool calls executing at once within a round. A sliding window:
 /// as one call finishes, the next is admitted, so a round with N calls never
@@ -329,8 +330,42 @@ pub(super) fn mcp_list_tools_event_plans(
         .collect()
 }
 
+pub(super) fn compaction_event_plans(
+    public_output_items: &[OutputItem],
+    output_offset: usize,
+) -> Vec<GatewayEventPlan> {
+    public_output_items
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| matches!(item, OutputItem::Compaction(_)))
+        .map(|(index, item)| GatewayEventPlan {
+            output_index: u32::try_from(output_offset.saturating_add(index)).unwrap_or(u32::MAX),
+            started_output: Some(item.clone()),
+            completed_output: Some(item.clone()),
+            arguments: None,
+        })
+        .collect()
+}
+
 fn output_item_value(item: &OutputItem) -> ExecutorResult<serde_json::Value> {
     serde_json::to_value(item).map_err(ExecutorError::JsonError)
+}
+
+pub(super) fn emit_response_start_events(
+    payload: &ResponsePayload,
+    stream_accumulator: &mut GatewayStreamAccumulator,
+    stream_sender: &tokio::sync::mpsc::UnboundedSender<StreamEvent>,
+) -> ExecutorResult<()> {
+    let mut response = payload.clone();
+    "in_progress".clone_into(&mut response.status);
+    response.output.clear();
+    response.usage = None;
+    let response = serialize_to_value(&response).map_err(ExecutorError::JsonError)?;
+    for event_type in [SSEEventType::ResponseCreated, SSEEventType::ResponseInProgress] {
+        let mut event = synthetic_event(event_type, [("response".to_owned(), response.clone())])?;
+        emit_gateway_event(&mut event, stream_accumulator, stream_sender)?;
+    }
+    Ok(())
 }
 
 pub(super) fn complete_gateway_event_plans<T: GatewayPublicOutputSource>(
@@ -444,43 +479,45 @@ pub(super) fn emit_gateway_completed_events<T: GatewayPublicOutputSource>(
             continue;
         };
         let output_index = plan.output_index;
-        let (event_type, item_id) = match public_output {
+        let completed_event = match public_output {
             OutputItem::WebSearchCall(web_search_call) => {
-                (SSEEventType::WebSearchCallCompleted, web_search_call.id.as_str())
+                Some((SSEEventType::WebSearchCallCompleted, web_search_call.id.as_str()))
             }
-            OutputItem::McpCall(mcp_call) => (
+            OutputItem::McpCall(mcp_call) => Some((
                 if mcp_call.status == Some(McpCallStatus::Failed) {
                     SSEEventType::McpCallFailed
                 } else {
                     SSEEventType::McpCallCompleted
                 },
                 mcp_call.id.as_str(),
-            ),
-            OutputItem::McpListTools(list_tools) => (
+            )),
+            OutputItem::McpListTools(list_tools) => Some((
                 if list_tools.error.is_some() {
                     SSEEventType::McpListToolsFailed
                 } else {
                     SSEEventType::McpListToolsCompleted
                 },
                 list_tools.id.as_str(),
-            ),
+            )),
+            OutputItem::Compaction(_) => None,
             OutputItem::Message(_)
             | OutputItem::FunctionCall(_)
             | OutputItem::CustomToolCall(_)
             | OutputItem::Reasoning(_)
-            | OutputItem::Compaction(_)
             | OutputItem::Unknown => continue,
         };
         let item = output_item_value(public_output)?;
-        let mut completed_fields = serde_json::Map::from_iter([
-            ("item_id".to_owned(), serde_json::json!(item_id)),
-            ("output_index".to_owned(), serde_json::json!(output_index)),
-        ]);
-        if matches!(public_output, OutputItem::WebSearchCall(_)) {
-            completed_fields.insert("item".to_owned(), item.clone());
+        if let Some((event_type, item_id)) = completed_event {
+            let mut completed_fields = serde_json::Map::from_iter([
+                ("item_id".to_owned(), serde_json::json!(item_id)),
+                ("output_index".to_owned(), serde_json::json!(output_index)),
+            ]);
+            if matches!(public_output, OutputItem::WebSearchCall(_)) {
+                completed_fields.insert("item".to_owned(), item.clone());
+            }
+            let mut completed_event = synthetic_event(event_type, completed_fields)?;
+            emit_gateway_event(&mut completed_event, stream_accumulator, stream_sender)?;
         }
-        let mut completed_event = synthetic_event(event_type, completed_fields)?;
-        emit_gateway_event(&mut completed_event, stream_accumulator, stream_sender)?;
         let mut done_event = synthetic_event(
             SSEEventType::OutputItemDone,
             [
@@ -566,8 +603,9 @@ pub(super) fn append_gateway_calls_to_new_input(
 #[cfg(test)]
 mod tests {
     use super::{GatewayCallResult, LoopDecision, classify_round};
+    use crate::executor::accumulator::ResponseAccumulator;
     use crate::types::io::output::{FunctionToolCall, McpListTool, McpListTools};
-    use crate::types::io::{InputItem, McpCallStatus};
+    use crate::types::io::{CompactionItem, InputItem, McpCallStatus};
     use tokio::sync::mpsc;
 
     const MAX: usize = 10;
@@ -817,6 +855,45 @@ mod tests {
         );
         assert_eq!(events[0]["item"]["tools"], serde_json::json!([]));
         assert_eq!(events[3]["item"]["tools"][0]["name"], "increment");
+    }
+
+    #[test]
+    fn compaction_uses_shared_gateway_event_lifecycle_without_intermediate_event() {
+        let public_output = [OutputItem::Compaction(CompactionItem {
+            id: Some("cmp_1".to_owned()),
+            encrypted_content: "durable summary".to_owned(),
+        })];
+        let plans = super::compaction_event_plans(&public_output, 0);
+        let (sender, mut receiver) = mpsc::unbounded_channel();
+        let mut stream_accumulator = crate::executor::gateway_accumulator::GatewayStreamAccumulator::new();
+
+        super::emit_gateway_start_events(&plans, &mut stream_accumulator, &sender).expect("start events");
+        super::emit_gateway_completed_events(&public_output, &plans, &mut stream_accumulator, &sender)
+            .expect("completed events");
+
+        let chunks = std::iter::from_fn(|| receiver.try_recv().ok())
+            .map(|event| event.content)
+            .collect::<Vec<_>>();
+        let events = chunks
+            .iter()
+            .map(|chunk| parse_named_sse_event(chunk))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event["type"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["response.output_item.added", "response.output_item.done"]
+        );
+        assert_eq!(events[0]["item"], events[1]["item"]);
+        assert_eq!(events[1]["item"]["encrypted_content"], "durable summary");
+
+        let data_lines = chunks
+            .iter()
+            .filter_map(|chunk| chunk.lines().find(|line| line.starts_with("data: ")).map(str::to_owned));
+        let response = ResponseAccumulator::from_sse_lines(data_lines, None).finalize("test-model", None, None);
+        assert_eq!(response.output.len(), 1);
+        assert!(matches!(response.output[0], OutputItem::Compaction(_)));
     }
 
     #[test]

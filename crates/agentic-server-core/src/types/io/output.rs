@@ -199,6 +199,25 @@ impl TryFrom<&EventPayload> for CustomToolCall {
     }
 }
 
+impl TryFrom<&EventPayload> for CompactionItem {
+    type Error = ExecutorError;
+
+    fn try_from(payload: &EventPayload) -> Result<Self, Self::Error> {
+        let EventPayload::OutputItemAdded { item_id, .. } = payload else {
+            return Err(ExecutorError::ParseError("expected OutputItemAdded payload".into()));
+        };
+        let id = if item_id.is_empty() {
+            uuid7_str("cmp_")
+        } else {
+            item_id.clone()
+        };
+        Ok(Self {
+            id: Some(id),
+            encrypted_content: String::new(),
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GatewayCallStatus {
@@ -687,6 +706,21 @@ impl ApplyDone for McpListTools {
         if let Some(list_tools) = deserialize_from_value_opt(item.clone()) {
             *self = list_tools;
         }
+    }
+}
+
+impl ApplyDone for CompactionItem {
+    fn apply_done(&mut self, payload: &EventPayload, _buffer: &mut String) {
+        let EventPayload::OutputItemDone { item, .. } = payload else {
+            return;
+        };
+        let Some(mut compaction) = deserialize_from_value_opt::<Self>(item.clone()) else {
+            return;
+        };
+        if compaction.id.as_deref().is_none_or(str::is_empty) {
+            compaction.id.clone_from(&self.id);
+        }
+        *self = compaction;
     }
 }
 

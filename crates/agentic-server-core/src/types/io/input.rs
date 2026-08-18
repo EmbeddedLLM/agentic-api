@@ -250,7 +250,7 @@ impl InputItem {
     }
 
     #[must_use]
-    pub fn is_compaction_trigger(&self) -> bool {
+    pub(crate) fn is_compaction_trigger(&self) -> bool {
         matches!(self, Self::CompactionTrigger)
     }
 }
