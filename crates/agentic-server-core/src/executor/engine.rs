@@ -235,18 +235,10 @@ async fn run_compaction_trigger(
     let model = ctx.enriched_request.model.clone();
     let instructions = ctx.enriched_request.instructions.clone();
     let input = std::mem::replace(&mut ctx.enriched_request.input, ResponsesInput::Items(Vec::new()));
-    let (compacted, usage) = compact_items(&model, input, instructions.as_deref(), exec_ctx, auth).await?;
-    let compaction = compacted
-        .iter()
-        .rev()
-        .find_map(|item| match item {
-            InputItem::Compaction(item) => Some(item.clone()),
-            _ => None,
-        })
-        .ok_or_else(|| ExecutorError::CompactionFailed {
-            status: "completed".to_owned(),
-            details: "compaction produced no checkpoint item".to_owned(),
-        })?;
+    let (mut compacted, usage) = compact_items(&model, input, instructions.as_deref(), exec_ctx, auth).await?;
+    let Some(InputItem::Compaction(compaction)) = compacted.pop() else {
+        unreachable!("compact_items always appends a compaction item");
+    };
     ctx.new_input_items = compacted;
     let mut payload = ResponsePayload {
         id: ctx.response_id.clone(),
@@ -280,6 +272,8 @@ fn emit_compaction_stream_events(
 ) -> ExecutorResult<()> {
     let mut created = payload.clone();
     "in_progress".clone_into(&mut created.status);
+    created.output.clear();
+    created.usage = None;
     let response_value = serialize_to_value(&created).map_err(ExecutorError::JsonError)?;
     for event_type in [SSEEventType::ResponseCreated, SSEEventType::ResponseInProgress] {
         let mut frame = synthetic_event(event_type, [("response".to_owned(), response_value.clone())])?;
@@ -628,7 +622,7 @@ pub async fn execute(
 mod tests {
     use super::*;
     use crate::executor::modes::{ConversationHandler, ResponseHandler};
-    use crate::storage::{ConversationStore, ResponseStore};
+    use crate::storage::{ConversationStore, InOutItem, ResponseStore, create_pool_with_schema};
     use futures::StreamExt;
     use std::sync::Arc;
     use tokio::sync::Mutex;
@@ -735,6 +729,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn compaction_trigger_persists_checkpoint_only_as_output() {
+        let captured = Arc::new(Mutex::new(None));
+        let (mut exec_ctx, server) = trigger_execution_context(Arc::clone(&captured)).await;
+        let pool = create_pool_with_schema(Some("sqlite::memory:"))
+            .await
+            .expect("create response store");
+        let response_store = ResponseStore::new(pool);
+        exec_ctx.resp_handler = ResponseHandler::new(response_store.clone());
+
+        let payload: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test-model",
+            "store": true,
+            "input": [
+                {"role": "user", "content": "remember banana"},
+                {"type": "compaction_trigger"}
+            ]
+        }))
+        .expect("valid trigger request");
+        let Either::Left(response) = ExecuteRequest::new(payload, Arc::new(exec_ctx))
+            .run()
+            .await
+            .expect("trigger request succeeds")
+        else {
+            panic!("non-streaming trigger request must return a payload");
+        };
+
+        let history = response_store
+            .rehydrate(&response.id)
+            .await
+            .expect("compaction trigger response rehydrates");
+        assert_eq!(history.len(), 2);
+        assert!(matches!(history[0], InOutItem::Input(InputItem::Message(_))));
+        assert!(matches!(history[1], InOutItem::Output(OutputItem::Compaction(_))));
+
+        let model_input = ResponsesInput::Items(InOutItem::into_input_items(history));
+        let serialized = serde_json::to_value(model_input.model_input()).expect("model input serializes");
+        assert_eq!(serialized.as_array().map(Vec::len), Some(2));
+        assert_eq!(serialized[0]["content"], "remember banana");
+        assert_eq!(serialized[1]["role"], "assistant");
+        assert_eq!(serialized[1]["content"][0]["text"], "durable summary");
+        server.abort();
+    }
+
+    #[tokio::test]
     async fn compaction_trigger_streams_one_compaction_item_then_completed() {
         let captured = Arc::new(Mutex::new(None));
         let (exec_ctx, server) = trigger_execution_context(Arc::clone(&captured)).await;
@@ -771,6 +809,10 @@ mod tests {
             };
             let event_type = event["type"].as_str().expect("event type");
             event_types.push(event_type.to_owned());
+            if matches!(event_type, "response.created" | "response.in_progress") {
+                assert_eq!(event["response"]["output"], serde_json::json!([]));
+                assert!(event["response"]["usage"].is_null());
+            }
             if event_type == "response.output_item.done" && event["item"]["type"] == "compaction" {
                 compaction_done_count += 1;
                 assert_eq!(event["item"]["encrypted_content"], "durable summary");
