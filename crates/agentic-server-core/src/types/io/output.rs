@@ -9,7 +9,7 @@ use crate::utils::common::deserialize_from_value_opt;
 use crate::utils::uuid7_str;
 
 use super::input::{
-    InputContent, InputFunctionToolCall, InputItem, InputMessage, InputMessageContent, InputTextContent,
+    CompactionItem, InputContent, InputFunctionToolCall, InputItem, InputMessage, InputMessageContent, InputTextContent,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -195,6 +195,25 @@ impl TryFrom<&EventPayload> for CustomToolCall {
             call_id: call_id.as_deref().unwrap_or_default().to_owned(),
             name: name.as_deref().unwrap_or_default().to_owned(),
             input: String::new(),
+        })
+    }
+}
+
+impl TryFrom<&EventPayload> for CompactionItem {
+    type Error = ExecutorError;
+
+    fn try_from(payload: &EventPayload) -> Result<Self, Self::Error> {
+        let EventPayload::OutputItemAdded { item_id, .. } = payload else {
+            return Err(ExecutorError::ParseError("expected OutputItemAdded payload".into()));
+        };
+        let id = if item_id.is_empty() {
+            uuid7_str("cmp_")
+        } else {
+            item_id.clone()
+        };
+        Ok(Self {
+            id: Some(id),
+            encrypted_content: String::new(),
         })
     }
 }
@@ -690,6 +709,21 @@ impl ApplyDone for McpListTools {
     }
 }
 
+impl ApplyDone for CompactionItem {
+    fn apply_done(&mut self, payload: &EventPayload, _buffer: &mut String) {
+        let EventPayload::OutputItemDone { item, .. } = payload else {
+            return;
+        };
+        let Some(mut compaction) = deserialize_from_value_opt::<Self>(item.clone()) else {
+            return;
+        };
+        if compaction.id.as_deref().is_none_or(str::is_empty) {
+            compaction.id.clone_from(&self.id);
+        }
+        *self = compaction;
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum OutputItem {
@@ -707,6 +741,8 @@ pub enum OutputItem {
     McpListTools(McpListTools),
     #[serde(rename = "reasoning")]
     Reasoning(ReasoningOutput),
+    #[serde(rename = "compaction")]
+    Compaction(CompactionItem),
     #[serde(other)]
     Unknown,
 }
@@ -724,6 +760,7 @@ impl OutputItem {
             | Self::McpCall(_)
             | Self::McpListTools(_)
             | Self::Reasoning(_)
+            | Self::Compaction(_)
             | Self::Unknown => false,
         }
     }
@@ -735,6 +772,7 @@ impl OutputItem {
             Self::Reasoning(reasoning) => Some(InputItem::Reasoning(reasoning.clone())),
             Self::FunctionCall(call) => Some(InputItem::FunctionCall(InputFunctionToolCall::from(call.clone()))),
             Self::CustomToolCall(call) => Some(InputItem::FunctionCall(call.clone().into())),
+            Self::Compaction(item) => Some(InputItem::Compaction(item.clone())),
             Self::WebSearchCall(_) | Self::McpCall(_) | Self::McpListTools(_) | Self::Unknown => None,
         }
     }
@@ -744,6 +782,29 @@ impl OutputItem {
 mod tests {
     use super::*;
     use crate::types::io::InputItem;
+
+    #[test]
+    fn compaction_output_item_round_trips_with_type_tag() {
+        let item: OutputItem = serde_json::from_value(serde_json::json!({
+            "id": "cmp_1",
+            "type": "compaction",
+            "encrypted_content": "durable summary"
+        }))
+        .unwrap();
+
+        assert!(!item.requires_client_action(&ToolRegistry::default()));
+        let Some(InputItem::Compaction(compaction)) = item.to_input_item() else {
+            panic!("compaction should rehydrate as a compaction input item");
+        };
+        assert_eq!(compaction.id.as_deref(), Some("cmp_1"));
+        assert_eq!(compaction.encrypted_content, "durable summary");
+
+        let serialized = serde_json::to_value(&item).unwrap();
+        assert_eq!(serialized["type"], "compaction");
+        assert_eq!(serialized["encrypted_content"], "durable summary");
+        let parsed: OutputItem = serde_json::from_value(serialized).unwrap();
+        assert!(matches!(parsed, OutputItem::Compaction(_)));
+    }
 
     #[test]
     fn custom_tool_call_preserves_freeform_input_and_requires_client_action() {

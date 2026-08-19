@@ -95,7 +95,7 @@ fn item_has_meaningful_context(item: &InputItem) -> bool {
                 || reasoning.encrypted_content.as_ref().is_some_and(value_has_content)
         }
         InputItem::Compaction(compaction) => !compaction.encrypted_content.trim().is_empty(),
-        InputItem::Unknown => false,
+        InputItem::CompactionTrigger | InputItem::Unknown => false,
     }
 }
 
@@ -178,7 +178,10 @@ pub(crate) async fn compact_items(
     }
 
     let compacted = retained_user_window(&original_items);
-    let mut summary_items = original_items;
+    let mut summary_items: Vec<InputItem> = original_items
+        .into_iter()
+        .filter(|item| !item.is_compaction_trigger())
+        .collect();
     summary_items.push(InputItem::Message(InputMessage {
         id: None,
         role: "user".to_owned(),
