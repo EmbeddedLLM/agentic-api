@@ -48,3 +48,7 @@ harness = false
 
 [lints]
 workspace = true
+
+[[bin]]
+name = "agentic"
+path = "src/bin/agentic.rs"
