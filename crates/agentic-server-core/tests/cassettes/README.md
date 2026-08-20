@@ -45,8 +45,9 @@ The recorder scripts (`record_reasoning_cassettes.sh`, `record_tool_call_cassett
 ```
 --turns N              Number of turns
 --output PATH          Output YAML path
---mode MODE            responses | conv | isolation | mixed | store_true_then_store_false  (default: conv)
+--mode MODE            responses | messages | conv | isolation | mixed | store_true_then_store_false  (default: conv)
 --stream / --no-stream Streaming or non-streaming (default: streaming)
+--transport TRANSPORT  http | websocket  (default: http; WebSocket requires responses mode)
 --model NAME           Model name sent in requests
 --no-store             Set store=false
 --vllm URL             vLLM upstream, e.g. http://localhost:8000 (responses mode only)
@@ -54,6 +55,12 @@ The recorder scripts (`record_reasoning_cassettes.sh`, `record_tool_call_cassett
 --openai URL           OpenAI upstream (default https://api.openai.com)
 --tools FILE           JSON file containing a tools array (responses mode only)
 --tool-choice VALUE    "auto", "none", "required", or JSON e.g. '{"type":"function","name":"foo"}'
+--tool-outputs FILE    JSON object mapping called tool names to output strings
+--tool-search-output-tools FILE
+                       JSON array returned for a client tool-search call
+--tools-after-search FILE
+                       Effective tools after normalized direct-vLLM search
+--manual-item-replay   Replay accumulated items with store=false for direct-vLLM or gateway tool search
 --input-file FILE       JSON string or item array for one HTTP Responses turn
 --max-output-tokens N  max_output_tokens for Responses requests (default 1024; use 0 to omit)
 --proxy-port PORT      Local proxy port (default 7070)
@@ -169,6 +176,7 @@ turns:
 | `record_custom_tool_cassettes.sh` | Matching two-turn custom-tool flows (streaming + non-streaming) | gateway and OpenAI reference |
 | `record_mcp_cassettes.sh` | Native MCP counter tool discovery and calls (streaming + non-streaming) | gateway and OpenAI reference |
 | `record_web_search_cassettes.sh` | Matching web-search calls (streaming + non-streaming) | gateway and OpenAI reference |
+| `record_tool_search_cassettes.sh` | Three-turn client tool-search characterization; gateway blocking, HTTP/SSE, and WebSocket acceptance | OpenAI reference, direct vLLM, and gateway |
 
 ### Text-only (OpenAI)
 
@@ -191,6 +199,40 @@ VLLM_URL=http://0.0.0.0:5050 MODEL=Qwen/Qwen3-30B-A3B-FP8 bash tests/cassettes/r
 vllm serve Qwen/Qwen3-30B-A3B-FP8 --tool-call-parser hermes --enable-auto-tool-choice --port 5050 > server.log 2>&1
 
 VLLM_URL=http://0.0.0.0:5050 MODEL=Qwen/Qwen3-30B-A3B-FP8 bash tests/cassettes/record_tool_call_cassettes.sh
+```
+
+### Client tool search (OpenAI reference, direct vLLM, and gateway)
+
+The recorder captures three turns: search call, linked search output and loaded function call, then linked function
+output and final message. OpenAI and gateway use public `tool_search_call`/`tool_search_output`; direct vLLM uses a
+private synthetic `tool_search` function. Direct vLLM and gateway blocking use `store: false` full-item replay;
+gateway SSE/WebSocket profiles use stored continuation. The private projection is not the gateway-to-vLLM envelope.
+
+The complete set is exactly seven flows: OpenAI blocking/SSE, direct-vLLM blocking/SSE, and gateway blocking/SSE/WS.
+HTTP uses the embedded proxy; WebSocket uses bounded direct capture. Recorded vLLM was `0.25.1`; the target must expose
+the Responses API with a compatible function-call parser, but `/version` did not expose exact flags. Use a fresh gateway
+database.
+
+Start the gateway with this SQLite path absent:
+
+```bash
+GATEWAY_PORT=3099 \
+DATABASE_URL=sqlite:///tmp/agentic_api_tool_search_matrix.db \
+V_API_BASE=http://127.0.0.1:8000 \
+V_API_KEY="" \
+V_MODEL=Qwen/Qwen3.6-35B-A3B-FP8 \
+./scripts/codex-start-gateway.sh
+```
+
+```bash
+OPENAI_API_KEY=sk-... \
+TOOL_SEARCH_RECORD_SET=all \
+OPENAI_MODEL=gpt-5.6 \
+VLLM_URL=http://127.0.0.1:8000 \
+MODEL=Qwen/Qwen3.6-35B-A3B-FP8 \
+GATEWAY_URL=http://127.0.0.1:3099 \
+GATEWAY_MODEL=Qwen/Qwen3.6-35B-A3B-FP8 \
+bash crates/agentic-server-core/tests/cassettes/record_tool_search_cassettes.sh
 ```
 
 ### Web search (gateway and OpenAI)

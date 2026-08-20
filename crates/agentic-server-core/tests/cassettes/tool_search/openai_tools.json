@@ -1,0 +1,35 @@
+[
+  {
+    "type": "tool_search",
+    "execution": "client",
+    "description": "Search the client tool catalog for a tool that can satisfy the request.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "A concise description of the needed capability."
+        }
+      },
+      "required": ["query"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "get_weather",
+    "description": "Get the current weather for a city.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "city": {
+          "type": "string"
+        }
+      },
+      "required": ["city"],
+      "additionalProperties": false
+    },
+    "strict": true,
+    "defer_loading": true
+  }
+]

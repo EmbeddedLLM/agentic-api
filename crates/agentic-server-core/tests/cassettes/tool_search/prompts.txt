@@ -1,0 +1,3 @@
+First call tool_search exactly once to find a weather tool. Do not call get_weather yet.
+Now call get_weather exactly once with {"city":"Paris"}. Do not call tool_search again.
+Use the function output and call no more tools. Reply with exactly PARIS_WEATHER_OK.

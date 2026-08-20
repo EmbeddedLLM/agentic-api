@@ -1,0 +1,35 @@
+[
+  {
+    "type": "function",
+    "name": "tool_search",
+    "description": "Search the client tool catalog. Available catalog entry: get_weather — Get the current weather for a city.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "A concise description of the needed capability."
+        }
+      },
+      "required": ["query"],
+      "additionalProperties": false
+    },
+    "strict": true
+  },
+  {
+    "type": "function",
+    "name": "get_weather",
+    "description": "Get the current weather for a city.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "city": {
+          "type": "string"
+        }
+      },
+      "required": ["city"],
+      "additionalProperties": false
+    },
+    "strict": true
+  }
+]

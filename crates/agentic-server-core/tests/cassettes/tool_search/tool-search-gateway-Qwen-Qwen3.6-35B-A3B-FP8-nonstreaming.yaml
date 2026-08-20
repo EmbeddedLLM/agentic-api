@@ -1,0 +1,391 @@
+turns:
+- filename: t1
+  request:
+    body:
+      input:
+      - content: First call tool_search exactly once to find a weather tool. Do not
+          call get_weather yet.
+        role: user
+        type: message
+      max_output_tokens: 4096
+      model: Qwen/Qwen3.6-35B-A3B-FP8
+      parallel_tool_calls: false
+      store: false
+      stream: false
+      tool_choice: auto
+      tools:
+      - description: Search the client tool catalog for a tool that can satisfy the
+          request.
+        execution: client
+        parameters:
+          additionalProperties: false
+          properties:
+            query:
+              description: A concise description of the needed capability.
+              type: string
+          required:
+          - query
+          type: object
+        type: tool_search
+      - defer_loading: true
+        description: Get the current weather for a city.
+        name: get_weather
+        parameters:
+          additionalProperties: false
+          properties:
+            city:
+              type: string
+          required:
+          - city
+          type: object
+        strict: true
+        type: function
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      conversation_id: null
+      created_at: 1787143209
+      error: null
+      id: resp_01a01a09-3976-7c02-8339-d626463f9f50
+      incomplete_details: null
+      instructions: null
+      model: Qwen/Qwen3.6-35B-A3B-FP8
+      object: response
+      output:
+      - content:
+        - text: "The user wants me to call `tool_search` exactly once with a query\
+            \ related to finding a weather tool.\nI should not call `get_weather`\
+            \ yet.\nThe available tool is `get_weather`.\nI need to construct the\
+            \ `tool_search` call.\nQuery: \"weather\" or \"get weather\".\nLet's use\
+            \ \"Get the current weather\".\nI will call `tool_search` with query \"\
+            Get the current weather\".\nNo other steps needed.\nI will generate the\
+            \ tool call. \nWait, checking the prompt: \"First call tool_search exactly\
+            \ once to find a weather tool. Do not call get_weather yet.\"\nI will\
+            \ proceed. \nQuery: \"weather\" or \"get weather tool\". \nLet's use \"\
+            weather\".\nDone. \nGenerating response. \nActually, the prompt says \"\
+            First call tool_search exactly once to find a weather tool.\"\nI will\
+            \ call `tool_search` with `query: \"weather\"`.\nProceed. \n[Output Generation]\n\
+            Call `tool_search` with `query=\"weather\"`.\nCheck tool definition: `tool_search`\
+            \ takes `query` (string).\nReady. \nProceed. \n[Tool Call]\n`tool_search(query=\"\
+            weather\")`\nDone. \nI will output the tool call now. \n(Self-Correction/Verification)\n\
+            The instruction says \"First call tool_search exactly once to find a weather\
+            \ tool. Do not call get_weather yet.\"\nSo I just output the tool call.\n\
+            Query should be concise. \"weather\" works.\nDone. \nProceeding. \n[Output]\n\
+            Calling tool_search...\n"
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_ad4906c13b6d5210
+        status: null
+        summary: []
+        type: reasoning
+      - arguments:
+          query: weather
+        call_id: chatcmpl-tool-814996d1dda1ff69
+        execution: client
+        id: tsc_b68f545efa494bdf
+        status: completed
+        type: tool_search_call
+      previous_response_id: null
+      status: completed
+      usage:
+        input_tokens: 357
+        input_tokens_details:
+          cached_tokens: 0
+        output_tokens: 364
+        output_tokens_details:
+          reasoning_tokens: 0
+        total_tokens: 721
+    headers:
+      content-type: application/json
+    status_code: 200
+- filename: t2
+  request:
+    body:
+      input:
+      - content: First call tool_search exactly once to find a weather tool. Do not
+          call get_weather yet.
+        role: user
+        type: message
+      - content:
+        - text: "The user wants me to call `tool_search` exactly once with a query\
+            \ related to finding a weather tool.\nI should not call `get_weather`\
+            \ yet.\nThe available tool is `get_weather`.\nI need to construct the\
+            \ `tool_search` call.\nQuery: \"weather\" or \"get weather\".\nLet's use\
+            \ \"Get the current weather\".\nI will call `tool_search` with query \"\
+            Get the current weather\".\nNo other steps needed.\nI will generate the\
+            \ tool call. \nWait, checking the prompt: \"First call tool_search exactly\
+            \ once to find a weather tool. Do not call get_weather yet.\"\nI will\
+            \ proceed. \nQuery: \"weather\" or \"get weather tool\". \nLet's use \"\
+            weather\".\nDone. \nGenerating response. \nActually, the prompt says \"\
+            First call tool_search exactly once to find a weather tool.\"\nI will\
+            \ call `tool_search` with `query: \"weather\"`.\nProceed. \n[Output Generation]\n\
+            Call `tool_search` with `query=\"weather\"`.\nCheck tool definition: `tool_search`\
+            \ takes `query` (string).\nReady. \nProceed. \n[Tool Call]\n`tool_search(query=\"\
+            weather\")`\nDone. \nI will output the tool call now. \n(Self-Correction/Verification)\n\
+            The instruction says \"First call tool_search exactly once to find a weather\
+            \ tool. Do not call get_weather yet.\"\nSo I just output the tool call.\n\
+            Query should be concise. \"weather\" works.\nDone. \nProceeding. \n[Output]\n\
+            Calling tool_search...\n"
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_ad4906c13b6d5210
+        status: null
+        summary: []
+        type: reasoning
+      - arguments:
+          query: weather
+        call_id: chatcmpl-tool-814996d1dda1ff69
+        execution: client
+        id: tsc_b68f545efa494bdf
+        status: completed
+        type: tool_search_call
+      - call_id: chatcmpl-tool-814996d1dda1ff69
+        execution: client
+        status: completed
+        tools:
+        - defer_loading: true
+          description: Get the current weather for a city.
+          name: get_weather
+          parameters:
+            additionalProperties: false
+            properties:
+              city:
+                type: string
+            required:
+            - city
+            type: object
+          strict: true
+          type: function
+        type: tool_search_output
+      - content: Now call get_weather exactly once with {"city":"Paris"}. Do not call
+          tool_search again.
+        role: user
+        type: message
+      max_output_tokens: 4096
+      model: Qwen/Qwen3.6-35B-A3B-FP8
+      parallel_tool_calls: false
+      store: false
+      stream: false
+      tool_choice: auto
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      conversation_id: null
+      created_at: 1787143209
+      error: null
+      id: resp_01a01a09-4133-79a2-9d5d-1e3b3de51748
+      incomplete_details: null
+      instructions: null
+      model: Qwen/Qwen3.6-35B-A3B-FP8
+      object: response
+      output:
+      - content:
+        - text: 'The user wants me to call the `get_weather` tool with the argument
+            `{"city":"Paris"}`.
+
+            I must follow the instruction to call it exactly once and not call `tool_search`
+            again.
+
+            The previous `tool_search` result confirmed the existence of the `get_weather`
+            tool.
+
+            I will now proceed with calling `get_weather`.
+
+            '
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_911e09fba32ab331
+        status: null
+        summary: []
+        type: reasoning
+      - arguments: '{"city": "Paris"}'
+        call_id: chatcmpl-tool-97872ecbe52a4fe5
+        id: fc_8a4c66d835ca3882
+        name: get_weather
+        status: completed
+        type: function_call
+      previous_response_id: null
+      status: completed
+      usage:
+        input_tokens: 443
+        input_tokens_details:
+          cached_tokens: 0
+        output_tokens: 102
+        output_tokens_details:
+          reasoning_tokens: 0
+        total_tokens: 545
+    headers:
+      content-type: application/json
+    status_code: 200
+- filename: t3
+  request:
+    body:
+      input:
+      - content: First call tool_search exactly once to find a weather tool. Do not
+          call get_weather yet.
+        role: user
+        type: message
+      - content:
+        - text: "The user wants me to call `tool_search` exactly once with a query\
+            \ related to finding a weather tool.\nI should not call `get_weather`\
+            \ yet.\nThe available tool is `get_weather`.\nI need to construct the\
+            \ `tool_search` call.\nQuery: \"weather\" or \"get weather\".\nLet's use\
+            \ \"Get the current weather\".\nI will call `tool_search` with query \"\
+            Get the current weather\".\nNo other steps needed.\nI will generate the\
+            \ tool call. \nWait, checking the prompt: \"First call tool_search exactly\
+            \ once to find a weather tool. Do not call get_weather yet.\"\nI will\
+            \ proceed. \nQuery: \"weather\" or \"get weather tool\". \nLet's use \"\
+            weather\".\nDone. \nGenerating response. \nActually, the prompt says \"\
+            First call tool_search exactly once to find a weather tool.\"\nI will\
+            \ call `tool_search` with `query: \"weather\"`.\nProceed. \n[Output Generation]\n\
+            Call `tool_search` with `query=\"weather\"`.\nCheck tool definition: `tool_search`\
+            \ takes `query` (string).\nReady. \nProceed. \n[Tool Call]\n`tool_search(query=\"\
+            weather\")`\nDone. \nI will output the tool call now. \n(Self-Correction/Verification)\n\
+            The instruction says \"First call tool_search exactly once to find a weather\
+            \ tool. Do not call get_weather yet.\"\nSo I just output the tool call.\n\
+            Query should be concise. \"weather\" works.\nDone. \nProceeding. \n[Output]\n\
+            Calling tool_search...\n"
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_ad4906c13b6d5210
+        status: null
+        summary: []
+        type: reasoning
+      - arguments:
+          query: weather
+        call_id: chatcmpl-tool-814996d1dda1ff69
+        execution: client
+        id: tsc_b68f545efa494bdf
+        status: completed
+        type: tool_search_call
+      - call_id: chatcmpl-tool-814996d1dda1ff69
+        execution: client
+        status: completed
+        tools:
+        - defer_loading: true
+          description: Get the current weather for a city.
+          name: get_weather
+          parameters:
+            additionalProperties: false
+            properties:
+              city:
+                type: string
+            required:
+            - city
+            type: object
+          strict: true
+          type: function
+        type: tool_search_output
+      - content: Now call get_weather exactly once with {"city":"Paris"}. Do not call
+          tool_search again.
+        role: user
+        type: message
+      - content:
+        - text: 'The user wants me to call the `get_weather` tool with the argument
+            `{"city":"Paris"}`.
+
+            I must follow the instruction to call it exactly once and not call `tool_search`
+            again.
+
+            The previous `tool_search` result confirmed the existence of the `get_weather`
+            tool.
+
+            I will now proceed with calling `get_weather`.
+
+            '
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_911e09fba32ab331
+        status: null
+        summary: []
+        type: reasoning
+      - arguments: '{"city": "Paris"}'
+        call_id: chatcmpl-tool-97872ecbe52a4fe5
+        id: fc_8a4c66d835ca3882
+        name: get_weather
+        status: completed
+        type: function_call
+      - call_id: chatcmpl-tool-97872ecbe52a4fe5
+        output: '{"city":"Paris","condition":"clear","temperature_c":21}'
+        type: function_call_output
+      - content: Use the function output and call no more tools. Reply with exactly
+          PARIS_WEATHER_OK.
+        role: user
+        type: message
+      max_output_tokens: 4096
+      model: Qwen/Qwen3.6-35B-A3B-FP8
+      parallel_tool_calls: false
+      store: false
+      stream: false
+      tool_choice: auto
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      conversation_id: null
+      created_at: 1787143211
+      error: null
+      id: resp_01a01a09-445a-7220-99bc-668e286b2deb
+      incomplete_details: null
+      instructions: null
+      model: Qwen/Qwen3.6-35B-A3B-FP8
+      object: response
+      output:
+      - content:
+        - text: "The user wants me to use the function output and reply with exactly\
+            \ \"PARIS_WEATHER_OK\".\nThe previous function call returned: {\"city\"\
+            :\"Paris\",\"condition\":\"clear\",\"temperature_c\":21}\nThe user's instruction\
+            \ is clear: \"Use the function output and call no more tools. Reply with\
+            \ exactly PARIS_WEATHER_OK.\"\nSo I will just output \"PARIS_WEATHER_OK\"\
+            .\nNo additional tools should be called.\nDone. \nWait, let's double check.\
+            \ The prompt says \"Use the function output and call no more tools. Reply\
+            \ with exactly PARIS_WEATHER_OK.\"\nThis is a simple instruction to just\
+            \ output the exact string.\nI will output exactly \"PARIS_WEATHER_OK\"\
+            .\nAll steps followed.\nProceeding. \nOutput matches requirement.✅\n"
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_8c483526383fac76
+        status: null
+        summary: []
+        type: reasoning
+      - content:
+        - annotations: []
+          text: '
+
+
+            PARIS_WEATHER_OK'
+          type: output_text
+        id: msg_be93fa93eeadeadd
+        role: assistant
+        status: completed
+        type: message
+      previous_response_id: null
+      status: completed
+      usage:
+        input_tokens: 520
+        input_tokens_details:
+          cached_tokens: 0
+        output_tokens: 172
+        output_tokens_details:
+          reasoning_tokens: 0
+        total_tokens: 692
+    headers:
+      content-type: application/json
+    status_code: 200

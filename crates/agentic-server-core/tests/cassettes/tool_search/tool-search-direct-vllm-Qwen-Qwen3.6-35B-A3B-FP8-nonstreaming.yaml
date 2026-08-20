@@ -1,0 +1,575 @@
+turns:
+- filename: t1
+  request:
+    body:
+      input:
+      - content: First call tool_search exactly once to find a weather tool. Do not
+          call get_weather yet.
+        role: user
+        type: message
+      max_output_tokens: 4096
+      model: Qwen/Qwen3.6-35B-A3B-FP8
+      parallel_tool_calls: false
+      store: false
+      stream: false
+      tool_choice: auto
+      tools:
+      - description: 'Search the client tool catalog. Available catalog entry: get_weather
+          — Get the current weather for a city.'
+        name: tool_search
+        parameters:
+          additionalProperties: false
+          properties:
+            query:
+              description: A concise description of the needed capability.
+              type: string
+          required:
+          - query
+          type: object
+        strict: true
+        type: function
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      background: false
+      created_at: 1787143221
+      frequency_penalty: 0.0
+      id: resp_89e5972151968df7
+      incomplete_details: null
+      input_messages: null
+      instructions: null
+      kv_transfer_params: null
+      max_output_tokens: 4096
+      max_tool_calls: null
+      metadata: null
+      model: Qwen/Qwen3.6-35B-A3B-FP8
+      object: response
+      output:
+      - content:
+        - text: "The user wants me to call `tool_search` exactly once to find a weather\
+            \ tool.\nI should use the `tool_search` function with a query like \"\
+            weather\" or \"current weather\".\nThe description says: \"Get the current\
+            \ weather for a city.\"\nI will call `tool_search` with query \"weather\
+            \ tool\".\nAfter this, I will not call `get_weather` yet as per instructions.\n\
+            Let's proceed. \nQuery: \"weather\" or \"get weather\"\nParameters: {\"\
+            query\": \"weather\"}\nTool: tool_search\nStrict: true.\nDone. \nProceeding.\
+            \ \n`tool_search(query=\"weather\")`\nOutput matches requirement.\nWait,\
+            \ let's verify the exact parameters. `tool_search` requires `query`.\n\
+            I will call it now. \nResult: `tool_search(query=\"weather\")`\nNo other\
+            \ calls.\nDone. \nLet's generate the tool call. \n[Tool Call]\ntool_search(query=\"\
+            weather\")\n[End] \nProceeds. \n(Self-Correction/Verification during thought)\n\
+            The prompt says: \"First call tool_search exactly once to find a weather\
+            \ tool. Do not call get_weather yet.\"\nSo I just call `tool_search` with\
+            \ a relevant query.\nQuery: \"weather tool\"\nAll good.\nProceeds. \n\
+            Output matches.\n"
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_86d01db313ae56e6
+        status: null
+        summary: []
+        type: reasoning
+      - arguments: '{"query": "weather tool"}'
+        call_id: chatcmpl-tool-aca6cd11d99339b4
+        caller: null
+        id: fc_9ee5ffe95a32e0b8
+        name: tool_search
+        namespace: null
+        status: completed
+        type: function_call
+      output_messages: null
+      parallel_tool_calls: false
+      presence_penalty: 0.0
+      previous_response_id: null
+      prompt: null
+      reasoning: null
+      service_tier: auto
+      status: completed
+      temperature: 1.0
+      text: null
+      tool_choice: auto
+      tools:
+      - allowed_callers: null
+        defer_loading: null
+        description: 'Search the client tool catalog. Available catalog entry: get_weather
+          — Get the current weather for a city.'
+        name: tool_search
+        output_schema: null
+        parameters:
+          additionalProperties: false
+          properties:
+            query:
+              description: A concise description of the needed capability.
+              type: string
+          required:
+          - query
+          type: object
+        strict: true
+        type: function
+      top_logprobs: null
+      top_p: 0.95
+      truncation: disabled
+      usage:
+        input_tokens: 348
+        input_tokens_details:
+          cached_tokens: 0
+          cached_tokens_per_turn: []
+          input_tokens_per_turn: []
+        output_tokens: 311
+        output_tokens_details:
+          output_tokens_per_turn: []
+          reasoning_tokens: 0
+          tool_output_tokens: 0
+          tool_output_tokens_per_turn: []
+        total_tokens: 659
+      user: null
+    headers:
+      content-type: application/json
+    status_code: 200
+- filename: t2
+  request:
+    body:
+      input:
+      - content: First call tool_search exactly once to find a weather tool. Do not
+          call get_weather yet.
+        role: user
+        type: message
+      - content:
+        - text: "The user wants me to call `tool_search` exactly once to find a weather\
+            \ tool.\nI should use the `tool_search` function with a query like \"\
+            weather\" or \"current weather\".\nThe description says: \"Get the current\
+            \ weather for a city.\"\nI will call `tool_search` with query \"weather\
+            \ tool\".\nAfter this, I will not call `get_weather` yet as per instructions.\n\
+            Let's proceed. \nQuery: \"weather\" or \"get weather\"\nParameters: {\"\
+            query\": \"weather\"}\nTool: tool_search\nStrict: true.\nDone. \nProceeding.\
+            \ \n`tool_search(query=\"weather\")`\nOutput matches requirement.\nWait,\
+            \ let's verify the exact parameters. `tool_search` requires `query`.\n\
+            I will call it now. \nResult: `tool_search(query=\"weather\")`\nNo other\
+            \ calls.\nDone. \nLet's generate the tool call. \n[Tool Call]\ntool_search(query=\"\
+            weather\")\n[End] \nProceeds. \n(Self-Correction/Verification during thought)\n\
+            The prompt says: \"First call tool_search exactly once to find a weather\
+            \ tool. Do not call get_weather yet.\"\nSo I just call `tool_search` with\
+            \ a relevant query.\nQuery: \"weather tool\"\nAll good.\nProceeds. \n\
+            Output matches.\n"
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_86d01db313ae56e6
+        status: null
+        summary: []
+        type: reasoning
+      - arguments: '{"query": "weather tool"}'
+        call_id: chatcmpl-tool-aca6cd11d99339b4
+        caller: null
+        id: fc_9ee5ffe95a32e0b8
+        name: tool_search
+        namespace: null
+        status: completed
+        type: function_call
+      - call_id: chatcmpl-tool-aca6cd11d99339b4
+        output: '{"tools":[{"defer_loading":true,"description":"Get the current weather
+          for a city.","name":"get_weather","parameters":{"additionalProperties":false,"properties":{"city":{"type":"string"}},"required":["city"],"type":"object"},"strict":true,"type":"function"}]}'
+        type: function_call_output
+      - content: Now call get_weather exactly once with {"city":"Paris"}. Do not call
+          tool_search again.
+        role: user
+        type: message
+      max_output_tokens: 4096
+      model: Qwen/Qwen3.6-35B-A3B-FP8
+      parallel_tool_calls: false
+      store: false
+      stream: false
+      tool_choice: auto
+      tools:
+      - description: 'Search the client tool catalog. Available catalog entry: get_weather
+          — Get the current weather for a city.'
+        name: tool_search
+        parameters:
+          additionalProperties: false
+          properties:
+            query:
+              description: A concise description of the needed capability.
+              type: string
+          required:
+          - query
+          type: object
+        strict: true
+        type: function
+      - description: Get the current weather for a city.
+        name: get_weather
+        parameters:
+          additionalProperties: false
+          properties:
+            city:
+              type: string
+          required:
+          - city
+          type: object
+        strict: true
+        type: function
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      background: false
+      created_at: 1787143223
+      frequency_penalty: 0.0
+      id: resp_afbd31d42786a8a2
+      incomplete_details: null
+      input_messages: null
+      instructions: null
+      kv_transfer_params: null
+      max_output_tokens: 4096
+      max_tool_calls: null
+      metadata: null
+      model: Qwen/Qwen3.6-35B-A3B-FP8
+      object: response
+      output:
+      - content:
+        - text: 'The user wants me to call `get_weather` with the city "Paris".
+
+            The instruction specifies "exactly once" and "Do not call tool_search
+            again".
+
+            I have found the tool `get_weather` in the previous step.
+
+            I need to construct the function call with the parameter `{"city": "Paris"}`.
+
+            The tool signature is `get_weather(city: string)`.
+
+            The parameter matches.
+
+            I will call `get_weather(city="Paris")`.
+
+            No tool_search call will be made.
+
+            Done.
+
+            '
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_93c3775bd42c986b
+        status: null
+        summary: []
+        type: reasoning
+      - arguments: '{"city": "Paris"}'
+        call_id: chatcmpl-tool-8479880974982f23
+        caller: null
+        id: fc_87049b418f2fe733
+        name: get_weather
+        namespace: null
+        status: completed
+        type: function_call
+      output_messages: null
+      parallel_tool_calls: false
+      presence_penalty: 0.0
+      previous_response_id: null
+      prompt: null
+      reasoning: null
+      service_tier: auto
+      status: completed
+      temperature: 1.0
+      text: null
+      tool_choice: auto
+      tools:
+      - allowed_callers: null
+        defer_loading: null
+        description: 'Search the client tool catalog. Available catalog entry: get_weather
+          — Get the current weather for a city.'
+        name: tool_search
+        output_schema: null
+        parameters:
+          additionalProperties: false
+          properties:
+            query:
+              description: A concise description of the needed capability.
+              type: string
+          required:
+          - query
+          type: object
+        strict: true
+        type: function
+      - allowed_callers: null
+        defer_loading: null
+        description: Get the current weather for a city.
+        name: get_weather
+        output_schema: null
+        parameters:
+          additionalProperties: false
+          properties:
+            city:
+              type: string
+          required:
+          - city
+          type: object
+        strict: true
+        type: function
+      top_logprobs: null
+      top_p: 0.95
+      truncation: disabled
+      usage:
+        input_tokens: 562
+        input_tokens_details:
+          cached_tokens: 0
+          cached_tokens_per_turn: []
+          input_tokens_per_turn: []
+        output_tokens: 140
+        output_tokens_details:
+          output_tokens_per_turn: []
+          reasoning_tokens: 0
+          tool_output_tokens: 0
+          tool_output_tokens_per_turn: []
+        total_tokens: 702
+      user: null
+    headers:
+      content-type: application/json
+    status_code: 200
+- filename: t3
+  request:
+    body:
+      input:
+      - content: First call tool_search exactly once to find a weather tool. Do not
+          call get_weather yet.
+        role: user
+        type: message
+      - content:
+        - text: "The user wants me to call `tool_search` exactly once to find a weather\
+            \ tool.\nI should use the `tool_search` function with a query like \"\
+            weather\" or \"current weather\".\nThe description says: \"Get the current\
+            \ weather for a city.\"\nI will call `tool_search` with query \"weather\
+            \ tool\".\nAfter this, I will not call `get_weather` yet as per instructions.\n\
+            Let's proceed. \nQuery: \"weather\" or \"get weather\"\nParameters: {\"\
+            query\": \"weather\"}\nTool: tool_search\nStrict: true.\nDone. \nProceeding.\
+            \ \n`tool_search(query=\"weather\")`\nOutput matches requirement.\nWait,\
+            \ let's verify the exact parameters. `tool_search` requires `query`.\n\
+            I will call it now. \nResult: `tool_search(query=\"weather\")`\nNo other\
+            \ calls.\nDone. \nLet's generate the tool call. \n[Tool Call]\ntool_search(query=\"\
+            weather\")\n[End] \nProceeds. \n(Self-Correction/Verification during thought)\n\
+            The prompt says: \"First call tool_search exactly once to find a weather\
+            \ tool. Do not call get_weather yet.\"\nSo I just call `tool_search` with\
+            \ a relevant query.\nQuery: \"weather tool\"\nAll good.\nProceeds. \n\
+            Output matches.\n"
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_86d01db313ae56e6
+        status: null
+        summary: []
+        type: reasoning
+      - arguments: '{"query": "weather tool"}'
+        call_id: chatcmpl-tool-aca6cd11d99339b4
+        caller: null
+        id: fc_9ee5ffe95a32e0b8
+        name: tool_search
+        namespace: null
+        status: completed
+        type: function_call
+      - call_id: chatcmpl-tool-aca6cd11d99339b4
+        output: '{"tools":[{"defer_loading":true,"description":"Get the current weather
+          for a city.","name":"get_weather","parameters":{"additionalProperties":false,"properties":{"city":{"type":"string"}},"required":["city"],"type":"object"},"strict":true,"type":"function"}]}'
+        type: function_call_output
+      - content: Now call get_weather exactly once with {"city":"Paris"}. Do not call
+          tool_search again.
+        role: user
+        type: message
+      - content:
+        - text: 'The user wants me to call `get_weather` with the city "Paris".
+
+            The instruction specifies "exactly once" and "Do not call tool_search
+            again".
+
+            I have found the tool `get_weather` in the previous step.
+
+            I need to construct the function call with the parameter `{"city": "Paris"}`.
+
+            The tool signature is `get_weather(city: string)`.
+
+            The parameter matches.
+
+            I will call `get_weather(city="Paris")`.
+
+            No tool_search call will be made.
+
+            Done.
+
+            '
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_93c3775bd42c986b
+        status: null
+        summary: []
+        type: reasoning
+      - arguments: '{"city": "Paris"}'
+        call_id: chatcmpl-tool-8479880974982f23
+        caller: null
+        id: fc_87049b418f2fe733
+        name: get_weather
+        namespace: null
+        status: completed
+        type: function_call
+      - call_id: chatcmpl-tool-8479880974982f23
+        output: '{"city":"Paris","condition":"clear","temperature_c":21}'
+        type: function_call_output
+      - content: Use the function output and call no more tools. Reply with exactly
+          PARIS_WEATHER_OK.
+        role: user
+        type: message
+      max_output_tokens: 4096
+      model: Qwen/Qwen3.6-35B-A3B-FP8
+      parallel_tool_calls: false
+      store: false
+      stream: false
+      tool_choice: auto
+      tools:
+      - description: 'Search the client tool catalog. Available catalog entry: get_weather
+          — Get the current weather for a city.'
+        name: tool_search
+        parameters:
+          additionalProperties: false
+          properties:
+            query:
+              description: A concise description of the needed capability.
+              type: string
+          required:
+          - query
+          type: object
+        strict: true
+        type: function
+      - description: Get the current weather for a city.
+        name: get_weather
+        parameters:
+          additionalProperties: false
+          properties:
+            city:
+              type: string
+          required:
+          - city
+          type: object
+        strict: true
+        type: function
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      background: false
+      created_at: 1787143224
+      frequency_penalty: 0.0
+      id: resp_b8ebf173c78f5ec6
+      incomplete_details: null
+      input_messages: null
+      instructions: null
+      kv_transfer_params: null
+      max_output_tokens: 4096
+      max_tool_calls: null
+      metadata: null
+      model: Qwen/Qwen3.6-35B-A3B-FP8
+      object: response
+      output:
+      - content:
+        - text: 'The user wants me to call no more tools and reply with a specific
+            string based on the previous tool output.
+
+            I already called `get_weather` and got the result `{"city":"Paris","condition":"clear","temperature_c":21}`.
+
+            The user''s instruction is: "Use the function output and call no more
+            tools. Reply with exactly PARIS_WEATHER_OK."
+
+            So I will just output "PARIS_WEATHER_OK".
+
+            '
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_b6140caa04ab505a
+        status: null
+        summary: []
+        type: reasoning
+      - content:
+        - annotations: []
+          logprobs: null
+          text: '
+
+
+            PARIS_WEATHER_OK'
+          type: output_text
+        id: msg_bf2b600626377798
+        phase: null
+        role: assistant
+        status: completed
+        type: message
+      output_messages: null
+      parallel_tool_calls: false
+      presence_penalty: 0.0
+      previous_response_id: null
+      prompt: null
+      reasoning: null
+      service_tier: auto
+      status: completed
+      temperature: 1.0
+      text: null
+      tool_choice: auto
+      tools:
+      - allowed_callers: null
+        defer_loading: null
+        description: 'Search the client tool catalog. Available catalog entry: get_weather
+          — Get the current weather for a city.'
+        name: tool_search
+        output_schema: null
+        parameters:
+          additionalProperties: false
+          properties:
+            query:
+              description: A concise description of the needed capability.
+              type: string
+          required:
+          - query
+          type: object
+        strict: true
+        type: function
+      - allowed_callers: null
+        defer_loading: null
+        description: Get the current weather for a city.
+        name: get_weather
+        output_schema: null
+        parameters:
+          additionalProperties: false
+          properties:
+            city:
+              type: string
+          required:
+          - city
+          type: object
+        strict: true
+        type: function
+      top_logprobs: null
+      top_p: 0.95
+      truncation: disabled
+      usage:
+        input_tokens: 639
+        input_tokens_details:
+          cached_tokens: 0
+          cached_tokens_per_turn: []
+          input_tokens_per_turn: []
+        output_tokens: 99
+        output_tokens_details:
+          output_tokens_per_turn: []
+          reasoning_tokens: 0
+          tool_output_tokens: 0
+          tool_output_tokens_per_turn: []
+        total_tokens: 738
+      user: null
+    headers:
+      content-type: application/json
+    status_code: 200

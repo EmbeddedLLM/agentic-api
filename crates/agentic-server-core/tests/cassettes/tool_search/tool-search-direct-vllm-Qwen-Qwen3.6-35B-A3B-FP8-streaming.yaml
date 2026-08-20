@@ -1,0 +1,2803 @@
+turns:
+- filename: t1
+  request:
+    body:
+      input:
+      - content: First call tool_search exactly once to find a weather tool. Do not
+          call get_weather yet.
+        role: user
+        type: message
+      max_output_tokens: 4096
+      model: Qwen/Qwen3.6-35B-A3B-FP8
+      parallel_tool_calls: false
+      store: false
+      stream: true
+      tool_choice: auto
+      tools:
+      - description: 'Search the client tool catalog. Available catalog entry: get_weather
+          — Get the current weather for a city.'
+        name: tool_search
+        parameters:
+          additionalProperties: false
+          properties:
+            query:
+              description: A concise description of the needed capability.
+              type: string
+          required:
+          - query
+          type: object
+        strict: true
+        type: function
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    headers:
+      content-type: text/event-stream; charset=utf-8
+    sse:
+    - 'event: response.created
+
+      '
+    - 'data: {"response":{"id":"resp_95ce5dc1e26dc70f","created_at":1787143227,"incomplete_details":null,"instructions":null,"metadata":null,"model":"Qwen/Qwen3.6-35B-A3B-FP8","object":"response","output":[],"parallel_tool_calls":false,"temperature":1.0,"tool_choice":"auto","tools":[{"name":"tool_search","parameters":{"type":"object","properties":{"query":{"type":"string","description":"A
+      concise description of the needed capability."}},"required":["query"],"additionalProperties":false},"strict":true,"type":"function","allowed_callers":null,"defer_loading":null,"description":"Search
+      the client tool catalog. Available catalog entry: get_weather — Get the current
+      weather for a city.","output_schema":null}],"top_p":0.95,"background":false,"max_output_tokens":4096,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","text":null,"top_logprobs":null,"truncation":"disabled","usage":null,"user":null,"presence_penalty":0.0,"frequency_penalty":0.0,"kv_transfer_params":null,"input_messages":null,"output_messages":null},"sequence_number":0,"type":"response.created"}
+
+      '
+    - '
+
+      '
+    - 'event: response.in_progress
+
+      '
+    - 'data: {"response":{"id":"resp_95ce5dc1e26dc70f","created_at":1787143227,"incomplete_details":null,"instructions":null,"metadata":null,"model":"Qwen/Qwen3.6-35B-A3B-FP8","object":"response","output":[],"parallel_tool_calls":false,"temperature":1.0,"tool_choice":"auto","tools":[{"name":"tool_search","parameters":{"type":"object","properties":{"query":{"type":"string","description":"A
+      concise description of the needed capability."}},"required":["query"],"additionalProperties":false},"strict":true,"type":"function","allowed_callers":null,"defer_loading":null,"description":"Search
+      the client tool catalog. Available catalog entry: get_weather — Get the current
+      weather for a city.","output_schema":null}],"top_p":0.95,"background":false,"max_output_tokens":4096,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","text":null,"top_logprobs":null,"truncation":"disabled","usage":null,"user":null,"presence_penalty":0.0,"frequency_penalty":0.0,"kv_transfer_params":null,"input_messages":null,"output_messages":null},"sequence_number":1,"type":"response.in_progress"}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.added
+
+      '
+    - 'data: {"item":{"id":"abb83b715b53c8ad","summary":[],"type":"reasoning","content":null,"encrypted_content":null,"status":"in_progress"},"output_index":0,"sequence_number":2,"type":"response.output_item.added"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_part.added
+
+      '
+    - 'data: {"content_index":0,"item_id":"abb83b715b53c8ad","output_index":0,"part":{"text":"","type":"reasoning_text"},"sequence_number":3,"type":"response.reasoning_part.added"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"The","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":4,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" user wants me","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":5,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" to call","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":6,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" `tool_search","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":7,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"` exactly once","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":8,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" to find a","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":9,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" weather tool.","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":10,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"\nI","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":11,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" should not call","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":12,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" `get_weather","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":13,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"` yet.","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":14,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"\nThe","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":15,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" description","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":16,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" for `tool","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":17,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"_search` says","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":18,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":": \"Search","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":19,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" the client tool","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":20,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" catalog. Available","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":21,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" catalog entry:","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":22,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" get_weather —","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":23,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" Get the current","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":24,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" weather for a","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":25,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" city.\"\n","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":26,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"I need","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":27,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" to provide","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":28,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" a query for","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":29,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":30,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" tool search.","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":31,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"\nQuery:","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":32,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" \"find","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":33,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" a weather tool","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":34,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"\"\n","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":35,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"I will call","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":36,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" `tool_search","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":37,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"` with this","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":38,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" query.\n","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":39,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"Wait","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":40,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":", the prompt","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":41,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" says \"First","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":42,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" call tool_search","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":43,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" exactly once to","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":44,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" find a weather","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":45,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" tool.","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":46,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" Do not call","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":47,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" get_weather yet","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":48,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":".\"\nSo","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":49,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" I just","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":50,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" call","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":51,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" `tool_search","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":52,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"`.","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":53,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"\nLet''s","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":54,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" do it","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":55,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":".\nQuery","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":56,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":": \"weather","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":57,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" tool\"\n","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":58,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"Parameters","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":59,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":": `{\"","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":60,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"query\": \"","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":61,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"weather tool\"","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":62,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"}`\nDone","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":63,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":". \nChecking","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":64,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" strict","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":65,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"ness","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":66,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":": `","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":67,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"allowed","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":68,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"_callers`","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":69,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" is null,","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":70,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" `defer_loading","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":71,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"` is null","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":72,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":". Only","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":73,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" `tool","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":74,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"_search` is","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":75,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" available.\n","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":76,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"Proceed","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":77,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":". \nOutput","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":78,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" matches the","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":79,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" format","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":80,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":".\nI","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":81,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" will generate the","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":82,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" tool call.","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":83,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" \nNote","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":84,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":": I","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":85,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" should","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":86,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" just output","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":87,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" the tool call","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":88,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":".\n```","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":89,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"json\n{","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":90,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"\n  \"","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":91,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"name\": \"","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":92,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"tool_search\",","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":93,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"\n  \"","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":94,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"parameters\": {","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":95,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"\n    \"","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":96,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"query\": \"","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":97,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"weather tool\"","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":98,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"\n  }","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":99,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"\n}\n","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":100,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"```\nActually","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":101,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":", the prompt","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":102,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" says \"First","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":103,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" call tool_search","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":104,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" exactly once to","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":105,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" find a weather","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":106,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" tool.\" I","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":107,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"''ll","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":108,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" just make","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":109,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" the call.","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":110,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"\nDone.","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":111,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" \nWait","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":112,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":", let''s","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":113,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" verify the schema","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":114,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":":","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":115,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" `tool","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":116,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"_search` takes","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":117,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" `query`","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":118,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" (string).","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":119,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"\nAll","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":120,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" good.\n","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":121,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"Proceed.","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":122,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" \nOutput matches","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":123,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":". \nDone","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":124,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":". \n(Self","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":125,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"-Correction","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":126,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"/Ref","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":127,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"inement during thought","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":128,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":")\nShould","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":129,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" I be","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":130,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" more specific in","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":131,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" the query?","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":132,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" \"find a","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":133,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" weather tool\"","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":134,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" is fine.","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":135,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"\nI will","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":136,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" generate","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":137,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" the call","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":138,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":".","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":139,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" \nDone","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":140,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":". \nProceed","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":141,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"ing. \n","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":142,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"[Output Generation","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":143,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"]\ntool","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":144,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"_search(query=\"","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":145,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"weather tool\")","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":146,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"\nDone","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":147,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":". \n(Note","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":148,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":": I''ll","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":149,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" format it correctly","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":150,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" as a","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":151,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" tool call)","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":152,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"\n","item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":153,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.done
+
+      '
+    - 'data: {"content_index":0,"item_id":"abb83b715b53c8ad","output_index":0,"sequence_number":154,"text":"The
+      user wants me to call `tool_search` exactly once to find a weather tool.\nI
+      should not call `get_weather` yet.\nThe description for `tool_search` says:
+      \"Search the client tool catalog. Available catalog entry: get_weather — Get
+      the current weather for a city.\"\nI need to provide a query for the tool search.\nQuery:
+      \"find a weather tool\"\nI will call `tool_search` with this query.\nWait, the
+      prompt says \"First call tool_search exactly once to find a weather tool. Do
+      not call get_weather yet.\"\nSo I just call `tool_search`.\nLet''s do it.\nQuery:
+      \"weather tool\"\nParameters: `{\"query\": \"weather tool\"}`\nDone. \nChecking
+      strictness: `allowed_callers` is null, `defer_loading` is null. Only `tool_search`
+      is available.\nProceed. \nOutput matches the format.\nI will generate the tool
+      call. \nNote: I should just output the tool call.\n```json\n{\n  \"name\": \"tool_search\",\n  \"parameters\":
+      {\n    \"query\": \"weather tool\"\n  }\n}\n```\nActually, the prompt says \"First
+      call tool_search exactly once to find a weather tool.\" I''ll just make the
+      call.\nDone. \nWait, let''s verify the schema: `tool_search` takes `query` (string).\nAll
+      good.\nProceed. \nOutput matches. \nDone. \n(Self-Correction/Refinement during
+      thought)\nShould I be more specific in the query? \"find a weather tool\" is
+      fine.\nI will generate the call. \nDone. \nProceeding. \n[Output Generation]\ntool_search(query=\"weather
+      tool\")\nDone. \n(Note: I''ll format it correctly as a tool call)\n","type":"response.reasoning_text.done"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_part.done
+
+      '
+    - 'data: {"content_index":0,"item_id":"abb83b715b53c8ad","output_index":0,"part":{"text":"The
+      user wants me to call `tool_search` exactly once to find a weather tool.\nI
+      should not call `get_weather` yet.\nThe description for `tool_search` says:
+      \"Search the client tool catalog. Available catalog entry: get_weather — Get
+      the current weather for a city.\"\nI need to provide a query for the tool search.\nQuery:
+      \"find a weather tool\"\nI will call `tool_search` with this query.\nWait, the
+      prompt says \"First call tool_search exactly once to find a weather tool. Do
+      not call get_weather yet.\"\nSo I just call `tool_search`.\nLet''s do it.\nQuery:
+      \"weather tool\"\nParameters: `{\"query\": \"weather tool\"}`\nDone. \nChecking
+      strictness: `allowed_callers` is null, `defer_loading` is null. Only `tool_search`
+      is available.\nProceed. \nOutput matches the format.\nI will generate the tool
+      call. \nNote: I should just output the tool call.\n```json\n{\n  \"name\": \"tool_search\",\n  \"parameters\":
+      {\n    \"query\": \"weather tool\"\n  }\n}\n```\nActually, the prompt says \"First
+      call tool_search exactly once to find a weather tool.\" I''ll just make the
+      call.\nDone. \nWait, let''s verify the schema: `tool_search` takes `query` (string).\nAll
+      good.\nProceed. \nOutput matches. \nDone. \n(Self-Correction/Refinement during
+      thought)\nShould I be more specific in the query? \"find a weather tool\" is
+      fine.\nI will generate the call. \nDone. \nProceeding. \n[Output Generation]\ntool_search(query=\"weather
+      tool\")\nDone. \n(Note: I''ll format it correctly as a tool call)\n","type":"reasoning_text"},"sequence_number":155,"type":"response.reasoning_part.done"}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.done
+
+      '
+    - 'data: {"item":{"id":"abb83b715b53c8ad","summary":[],"type":"reasoning","content":[{"text":"The
+      user wants me to call `tool_search` exactly once to find a weather tool.\nI
+      should not call `get_weather` yet.\nThe description for `tool_search` says:
+      \"Search the client tool catalog. Available catalog entry: get_weather — Get
+      the current weather for a city.\"\nI need to provide a query for the tool search.\nQuery:
+      \"find a weather tool\"\nI will call `tool_search` with this query.\nWait, the
+      prompt says \"First call tool_search exactly once to find a weather tool. Do
+      not call get_weather yet.\"\nSo I just call `tool_search`.\nLet''s do it.\nQuery:
+      \"weather tool\"\nParameters: `{\"query\": \"weather tool\"}`\nDone. \nChecking
+      strictness: `allowed_callers` is null, `defer_loading` is null. Only `tool_search`
+      is available.\nProceed. \nOutput matches the format.\nI will generate the tool
+      call. \nNote: I should just output the tool call.\n```json\n{\n  \"name\": \"tool_search\",\n  \"parameters\":
+      {\n    \"query\": \"weather tool\"\n  }\n}\n```\nActually, the prompt says \"First
+      call tool_search exactly once to find a weather tool.\" I''ll just make the
+      call.\nDone. \nWait, let''s verify the schema: `tool_search` takes `query` (string).\nAll
+      good.\nProceed. \nOutput matches. \nDone. \n(Self-Correction/Refinement during
+      thought)\nShould I be more specific in the query? \"find a weather tool\" is
+      fine.\nI will generate the call. \nDone. \nProceeding. \n[Output Generation]\ntool_search(query=\"weather
+      tool\")\nDone. \n(Note: I''ll format it correctly as a tool call)\n","type":"reasoning_text"}],"encrypted_content":null,"status":"completed"},"output_index":0,"sequence_number":156,"type":"response.output_item.done"}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.added
+
+      '
+    - 'data: {"item":{"arguments":"","call_id":"call_85ac6429f2576051","name":"tool_search","type":"function_call","id":"b388db0be9780d3a","caller":null,"namespace":null,"status":"in_progress"},"output_index":1,"sequence_number":157,"type":"response.output_item.added"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"{\"query\": \"","item_id":"b388db0be9780d3a","output_index":1,"sequence_number":158,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"weather tool","item_id":"b388db0be9780d3a","output_index":1,"sequence_number":159,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"\"}","item_id":"b388db0be9780d3a","output_index":1,"sequence_number":160,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.done
+
+      '
+    - 'data: {"arguments":"{\"query\": \"weather tool\"}","item_id":"b388db0be9780d3a","name":"tool_search","output_index":1,"sequence_number":161,"type":"response.function_call_arguments.done"}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.done
+
+      '
+    - 'data: {"item":{"arguments":"{\"query\": \"weather tool\"}","call_id":"call_85ac6429f2576051","name":"tool_search","type":"function_call","id":"b388db0be9780d3a","caller":null,"namespace":null,"status":"completed"},"output_index":1,"sequence_number":162,"type":"response.output_item.done"}
+
+      '
+    - '
+
+      '
+    - 'event: response.completed
+
+      '
+    - 'data: {"response":{"id":"resp_95ce5dc1e26dc70f","created_at":1787143227,"incomplete_details":null,"instructions":null,"metadata":null,"model":"Qwen/Qwen3.6-35B-A3B-FP8","object":"response","output":[{"id":"rs_9327d10a4a99e129","summary":[],"type":"reasoning","content":[{"text":"The
+      user wants me to call `tool_search` exactly once to find a weather tool.\nI
+      should not call `get_weather` yet.\nThe description for `tool_search` says:
+      \"Search the client tool catalog. Available catalog entry: get_weather — Get
+      the current weather for a city.\"\nI need to provide a query for the tool search.\nQuery:
+      \"find a weather tool\"\nI will call `tool_search` with this query.\nWait, the
+      prompt says \"First call tool_search exactly once to find a weather tool. Do
+      not call get_weather yet.\"\nSo I just call `tool_search`.\nLet''s do it.\nQuery:
+      \"weather tool\"\nParameters: `{\"query\": \"weather tool\"}`\nDone. \nChecking
+      strictness: `allowed_callers` is null, `defer_loading` is null. Only `tool_search`
+      is available.\nProceed. \nOutput matches the format.\nI will generate the tool
+      call. \nNote: I should just output the tool call.\n```json\n{\n  \"name\": \"tool_search\",\n  \"parameters\":
+      {\n    \"query\": \"weather tool\"\n  }\n}\n```\nActually, the prompt says \"First
+      call tool_search exactly once to find a weather tool.\" I''ll just make the
+      call.\nDone. \nWait, let''s verify the schema: `tool_search` takes `query` (string).\nAll
+      good.\nProceed. \nOutput matches. \nDone. \n(Self-Correction/Refinement during
+      thought)\nShould I be more specific in the query? \"find a weather tool\" is
+      fine.\nI will generate the call. \nDone. \nProceeding. \n[Output Generation]\ntool_search(query=\"weather
+      tool\")\nDone. \n(Note: I''ll format it correctly as a tool call)\n","type":"reasoning_text"}],"encrypted_content":null,"status":null},{"arguments":"{\"query\":
+      \"weather tool\"}","call_id":"chatcmpl-tool-a8fc33ab402e4ff0","name":"tool_search","type":"function_call","id":"fc_857408fee70af6a5","caller":null,"namespace":null,"status":"completed"}],"parallel_tool_calls":false,"temperature":1.0,"tool_choice":"auto","tools":[{"name":"tool_search","parameters":{"type":"object","properties":{"query":{"type":"string","description":"A
+      concise description of the needed capability."}},"required":["query"],"additionalProperties":false},"strict":true,"type":"function","allowed_callers":null,"defer_loading":null,"description":"Search
+      the client tool catalog. Available catalog entry: get_weather — Get the current
+      weather for a city.","output_schema":null}],"top_p":0.95,"background":false,"max_output_tokens":4096,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"completed","text":null,"top_logprobs":null,"truncation":"disabled","usage":{"input_tokens":348,"input_tokens_details":{"cached_tokens":0,"input_tokens_per_turn":[],"cached_tokens_per_turn":[]},"output_tokens":415,"output_tokens_details":{"reasoning_tokens":0,"tool_output_tokens":0,"output_tokens_per_turn":[],"tool_output_tokens_per_turn":[]},"total_tokens":763},"user":null,"presence_penalty":0.0,"frequency_penalty":0.0,"kv_transfer_params":null,"input_messages":null,"output_messages":null},"sequence_number":163,"type":"response.completed"}
+
+      '
+    - '
+
+      '
+    status_code: 200
+- filename: t2
+  request:
+    body:
+      input:
+      - content: First call tool_search exactly once to find a weather tool. Do not
+          call get_weather yet.
+        role: user
+        type: message
+      - content:
+        - text: "The user wants me to call `tool_search` exactly once to find a weather\
+            \ tool.\nI should not call `get_weather` yet.\nThe description for `tool_search`\
+            \ says: \"Search the client tool catalog. Available catalog entry: get_weather\
+            \ — Get the current weather for a city.\"\nI need to provide a query for\
+            \ the tool search.\nQuery: \"find a weather tool\"\nI will call `tool_search`\
+            \ with this query.\nWait, the prompt says \"First call tool_search exactly\
+            \ once to find a weather tool. Do not call get_weather yet.\"\nSo I just\
+            \ call `tool_search`.\nLet's do it.\nQuery: \"weather tool\"\nParameters:\
+            \ `{\"query\": \"weather tool\"}`\nDone. \nChecking strictness: `allowed_callers`\
+            \ is null, `defer_loading` is null. Only `tool_search` is available.\n\
+            Proceed. \nOutput matches the format.\nI will generate the tool call.\
+            \ \nNote: I should just output the tool call.\n```json\n{\n  \"name\"\
+            : \"tool_search\",\n  \"parameters\": {\n    \"query\": \"weather tool\"\
+            \n  }\n}\n```\nActually, the prompt says \"First call tool_search exactly\
+            \ once to find a weather tool.\" I'll just make the call.\nDone. \nWait,\
+            \ let's verify the schema: `tool_search` takes `query` (string).\nAll\
+            \ good.\nProceed. \nOutput matches. \nDone. \n(Self-Correction/Refinement\
+            \ during thought)\nShould I be more specific in the query? \"find a weather\
+            \ tool\" is fine.\nI will generate the call. \nDone. \nProceeding. \n\
+            [Output Generation]\ntool_search(query=\"weather tool\")\nDone. \n(Note:\
+            \ I'll format it correctly as a tool call)\n"
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_9327d10a4a99e129
+        status: null
+        summary: []
+        type: reasoning
+      - arguments: '{"query": "weather tool"}'
+        call_id: chatcmpl-tool-a8fc33ab402e4ff0
+        caller: null
+        id: fc_857408fee70af6a5
+        name: tool_search
+        namespace: null
+        status: completed
+        type: function_call
+      - call_id: chatcmpl-tool-a8fc33ab402e4ff0
+        output: '{"tools":[{"defer_loading":true,"description":"Get the current weather
+          for a city.","name":"get_weather","parameters":{"additionalProperties":false,"properties":{"city":{"type":"string"}},"required":["city"],"type":"object"},"strict":true,"type":"function"}]}'
+        type: function_call_output
+      - content: Now call get_weather exactly once with {"city":"Paris"}. Do not call
+          tool_search again.
+        role: user
+        type: message
+      max_output_tokens: 4096
+      model: Qwen/Qwen3.6-35B-A3B-FP8
+      parallel_tool_calls: false
+      store: false
+      stream: true
+      tool_choice: auto
+      tools:
+      - description: 'Search the client tool catalog. Available catalog entry: get_weather
+          — Get the current weather for a city.'
+        name: tool_search
+        parameters:
+          additionalProperties: false
+          properties:
+            query:
+              description: A concise description of the needed capability.
+              type: string
+          required:
+          - query
+          type: object
+        strict: true
+        type: function
+      - description: Get the current weather for a city.
+        name: get_weather
+        parameters:
+          additionalProperties: false
+          properties:
+            city:
+              type: string
+          required:
+          - city
+          type: object
+        strict: true
+        type: function
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    headers:
+      content-type: text/event-stream; charset=utf-8
+    sse:
+    - 'event: response.created
+
+      '
+    - 'data: {"response":{"id":"resp_b2bb35b4afbde3cb","created_at":1787143229,"incomplete_details":null,"instructions":null,"metadata":null,"model":"Qwen/Qwen3.6-35B-A3B-FP8","object":"response","output":[],"parallel_tool_calls":false,"temperature":1.0,"tool_choice":"auto","tools":[{"name":"tool_search","parameters":{"type":"object","properties":{"query":{"type":"string","description":"A
+      concise description of the needed capability."}},"required":["query"],"additionalProperties":false},"strict":true,"type":"function","allowed_callers":null,"defer_loading":null,"description":"Search
+      the client tool catalog. Available catalog entry: get_weather — Get the current
+      weather for a city.","output_schema":null},{"name":"get_weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"],"additionalProperties":false},"strict":true,"type":"function","allowed_callers":null,"defer_loading":null,"description":"Get
+      the current weather for a city.","output_schema":null}],"top_p":0.95,"background":false,"max_output_tokens":4096,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","text":null,"top_logprobs":null,"truncation":"disabled","usage":null,"user":null,"presence_penalty":0.0,"frequency_penalty":0.0,"kv_transfer_params":null,"input_messages":null,"output_messages":null},"sequence_number":0,"type":"response.created"}
+
+      '
+    - '
+
+      '
+    - 'event: response.in_progress
+
+      '
+    - 'data: {"response":{"id":"resp_b2bb35b4afbde3cb","created_at":1787143229,"incomplete_details":null,"instructions":null,"metadata":null,"model":"Qwen/Qwen3.6-35B-A3B-FP8","object":"response","output":[],"parallel_tool_calls":false,"temperature":1.0,"tool_choice":"auto","tools":[{"name":"tool_search","parameters":{"type":"object","properties":{"query":{"type":"string","description":"A
+      concise description of the needed capability."}},"required":["query"],"additionalProperties":false},"strict":true,"type":"function","allowed_callers":null,"defer_loading":null,"description":"Search
+      the client tool catalog. Available catalog entry: get_weather — Get the current
+      weather for a city.","output_schema":null},{"name":"get_weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"],"additionalProperties":false},"strict":true,"type":"function","allowed_callers":null,"defer_loading":null,"description":"Get
+      the current weather for a city.","output_schema":null}],"top_p":0.95,"background":false,"max_output_tokens":4096,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","text":null,"top_logprobs":null,"truncation":"disabled","usage":null,"user":null,"presence_penalty":0.0,"frequency_penalty":0.0,"kv_transfer_params":null,"input_messages":null,"output_messages":null},"sequence_number":1,"type":"response.in_progress"}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.added
+
+      '
+    - 'data: {"item":{"id":"82d95d7ea20b54de","summary":[],"type":"reasoning","content":null,"encrypted_content":null,"status":"in_progress"},"output_index":0,"sequence_number":2,"type":"response.output_item.added"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_part.added
+
+      '
+    - 'data: {"content_index":0,"item_id":"82d95d7ea20b54de","output_index":0,"part":{"text":"","type":"reasoning_text"},"sequence_number":3,"type":"response.reasoning_part.added"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"The","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":4,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" user wants me","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":5,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" to call the","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":6,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" `get_weather","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":7,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"` tool exactly","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":8,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" once with the","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":9,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" city","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":10,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" \"Paris\".","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":11,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"\nI have","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":12,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" already called","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":13,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" `tool_search","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":14,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"` as","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":15,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" requested in","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":16,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" the previous turn","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":17,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":".\nThe","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":18,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" current request explicitly","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":19,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" tells","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":20,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" me to use","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":21,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":22,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" tool","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":23,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" `","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":24,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"get_weather`","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":25,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" with parameters","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":26,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" `{\"city","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":27,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"\":\"","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":28,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"Paris\"}`","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":29,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" and","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":30,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" not to call","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":31,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" `tool_search","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":32,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"` again.","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":33,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"\nI will","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":34,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" construct","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":35,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" the function","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":36,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" call for `","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":37,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"get_weather`.","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":38,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"\nParameters","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":39,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":": city =","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":40,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" \"Paris\".","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":41,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"\nFunction","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":42,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" name","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":43,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":": get_weather","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":44,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":".\nCall","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":45,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" the","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":46,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" tool.\n","item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":47,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.done
+
+      '
+    - 'data: {"content_index":0,"item_id":"82d95d7ea20b54de","output_index":0,"sequence_number":48,"text":"The
+      user wants me to call the `get_weather` tool exactly once with the city \"Paris\".\nI
+      have already called `tool_search` as requested in the previous turn.\nThe current
+      request explicitly tells me to use the tool `get_weather` with parameters `{\"city\":\"Paris\"}`
+      and not to call `tool_search` again.\nI will construct the function call for
+      `get_weather`.\nParameters: city = \"Paris\".\nFunction name: get_weather.\nCall
+      the tool.\n","type":"response.reasoning_text.done"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_part.done
+
+      '
+    - 'data: {"content_index":0,"item_id":"82d95d7ea20b54de","output_index":0,"part":{"text":"The
+      user wants me to call the `get_weather` tool exactly once with the city \"Paris\".\nI
+      have already called `tool_search` as requested in the previous turn.\nThe current
+      request explicitly tells me to use the tool `get_weather` with parameters `{\"city\":\"Paris\"}`
+      and not to call `tool_search` again.\nI will construct the function call for
+      `get_weather`.\nParameters: city = \"Paris\".\nFunction name: get_weather.\nCall
+      the tool.\n","type":"reasoning_text"},"sequence_number":49,"type":"response.reasoning_part.done"}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.done
+
+      '
+    - 'data: {"item":{"id":"82d95d7ea20b54de","summary":[],"type":"reasoning","content":[{"text":"The
+      user wants me to call the `get_weather` tool exactly once with the city \"Paris\".\nI
+      have already called `tool_search` as requested in the previous turn.\nThe current
+      request explicitly tells me to use the tool `get_weather` with parameters `{\"city\":\"Paris\"}`
+      and not to call `tool_search` again.\nI will construct the function call for
+      `get_weather`.\nParameters: city = \"Paris\".\nFunction name: get_weather.\nCall
+      the tool.\n","type":"reasoning_text"}],"encrypted_content":null,"status":"completed"},"output_index":0,"sequence_number":50,"type":"response.output_item.done"}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.added
+
+      '
+    - 'data: {"item":{"arguments":"","call_id":"call_bbdce13c58516370","name":"get_weather","type":"function_call","id":"91decd0f7ded9c1c","caller":null,"namespace":null,"status":"in_progress"},"output_index":1,"sequence_number":51,"type":"response.output_item.added"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"{\"city\": \"","item_id":"91decd0f7ded9c1c","output_index":1,"sequence_number":52,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"Paris","item_id":"91decd0f7ded9c1c","output_index":1,"sequence_number":53,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.delta
+
+      '
+    - 'data: {"delta":"\"}","item_id":"91decd0f7ded9c1c","output_index":1,"sequence_number":54,"type":"response.function_call_arguments.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.function_call_arguments.done
+
+      '
+    - 'data: {"arguments":"{\"city\": \"Paris\"}","item_id":"91decd0f7ded9c1c","name":"get_weather","output_index":1,"sequence_number":55,"type":"response.function_call_arguments.done"}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.done
+
+      '
+    - 'data: {"item":{"arguments":"{\"city\": \"Paris\"}","call_id":"call_bbdce13c58516370","name":"get_weather","type":"function_call","id":"91decd0f7ded9c1c","caller":null,"namespace":null,"status":"completed"},"output_index":1,"sequence_number":56,"type":"response.output_item.done"}
+
+      '
+    - '
+
+      '
+    - 'event: response.completed
+
+      '
+    - 'data: {"response":{"id":"resp_b2bb35b4afbde3cb","created_at":1787143229,"incomplete_details":null,"instructions":null,"metadata":null,"model":"Qwen/Qwen3.6-35B-A3B-FP8","object":"response","output":[{"id":"rs_8249dd1d18d7cab2","summary":[],"type":"reasoning","content":[{"text":"The
+      user wants me to call the `get_weather` tool exactly once with the city \"Paris\".\nI
+      have already called `tool_search` as requested in the previous turn.\nThe current
+      request explicitly tells me to use the tool `get_weather` with parameters `{\"city\":\"Paris\"}`
+      and not to call `tool_search` again.\nI will construct the function call for
+      `get_weather`.\nParameters: city = \"Paris\".\nFunction name: get_weather.\nCall
+      the tool.\n","type":"reasoning_text"}],"encrypted_content":null,"status":null},{"arguments":"{\"city\":
+      \"Paris\"}","call_id":"chatcmpl-tool-8289918f90de051c","name":"get_weather","type":"function_call","id":"fc_bb8169afc12efa5f","caller":null,"namespace":null,"status":"completed"}],"parallel_tool_calls":false,"temperature":1.0,"tool_choice":"auto","tools":[{"name":"tool_search","parameters":{"type":"object","properties":{"query":{"type":"string","description":"A
+      concise description of the needed capability."}},"required":["query"],"additionalProperties":false},"strict":true,"type":"function","allowed_callers":null,"defer_loading":null,"description":"Search
+      the client tool catalog. Available catalog entry: get_weather — Get the current
+      weather for a city.","output_schema":null},{"name":"get_weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"],"additionalProperties":false},"strict":true,"type":"function","allowed_callers":null,"defer_loading":null,"description":"Get
+      the current weather for a city.","output_schema":null}],"top_p":0.95,"background":false,"max_output_tokens":4096,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"completed","text":null,"top_logprobs":null,"truncation":"disabled","usage":{"input_tokens":562,"input_tokens_details":{"cached_tokens":0,"input_tokens_per_turn":[],"cached_tokens_per_turn":[]},"output_tokens":131,"output_tokens_details":{"reasoning_tokens":0,"tool_output_tokens":0,"output_tokens_per_turn":[],"tool_output_tokens_per_turn":[]},"total_tokens":693},"user":null,"presence_penalty":0.0,"frequency_penalty":0.0,"kv_transfer_params":null,"input_messages":null,"output_messages":null},"sequence_number":57,"type":"response.completed"}
+
+      '
+    - '
+
+      '
+    status_code: 200
+- filename: t3
+  request:
+    body:
+      input:
+      - content: First call tool_search exactly once to find a weather tool. Do not
+          call get_weather yet.
+        role: user
+        type: message
+      - content:
+        - text: "The user wants me to call `tool_search` exactly once to find a weather\
+            \ tool.\nI should not call `get_weather` yet.\nThe description for `tool_search`\
+            \ says: \"Search the client tool catalog. Available catalog entry: get_weather\
+            \ — Get the current weather for a city.\"\nI need to provide a query for\
+            \ the tool search.\nQuery: \"find a weather tool\"\nI will call `tool_search`\
+            \ with this query.\nWait, the prompt says \"First call tool_search exactly\
+            \ once to find a weather tool. Do not call get_weather yet.\"\nSo I just\
+            \ call `tool_search`.\nLet's do it.\nQuery: \"weather tool\"\nParameters:\
+            \ `{\"query\": \"weather tool\"}`\nDone. \nChecking strictness: `allowed_callers`\
+            \ is null, `defer_loading` is null. Only `tool_search` is available.\n\
+            Proceed. \nOutput matches the format.\nI will generate the tool call.\
+            \ \nNote: I should just output the tool call.\n```json\n{\n  \"name\"\
+            : \"tool_search\",\n  \"parameters\": {\n    \"query\": \"weather tool\"\
+            \n  }\n}\n```\nActually, the prompt says \"First call tool_search exactly\
+            \ once to find a weather tool.\" I'll just make the call.\nDone. \nWait,\
+            \ let's verify the schema: `tool_search` takes `query` (string).\nAll\
+            \ good.\nProceed. \nOutput matches. \nDone. \n(Self-Correction/Refinement\
+            \ during thought)\nShould I be more specific in the query? \"find a weather\
+            \ tool\" is fine.\nI will generate the call. \nDone. \nProceeding. \n\
+            [Output Generation]\ntool_search(query=\"weather tool\")\nDone. \n(Note:\
+            \ I'll format it correctly as a tool call)\n"
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_9327d10a4a99e129
+        status: null
+        summary: []
+        type: reasoning
+      - arguments: '{"query": "weather tool"}'
+        call_id: chatcmpl-tool-a8fc33ab402e4ff0
+        caller: null
+        id: fc_857408fee70af6a5
+        name: tool_search
+        namespace: null
+        status: completed
+        type: function_call
+      - call_id: chatcmpl-tool-a8fc33ab402e4ff0
+        output: '{"tools":[{"defer_loading":true,"description":"Get the current weather
+          for a city.","name":"get_weather","parameters":{"additionalProperties":false,"properties":{"city":{"type":"string"}},"required":["city"],"type":"object"},"strict":true,"type":"function"}]}'
+        type: function_call_output
+      - content: Now call get_weather exactly once with {"city":"Paris"}. Do not call
+          tool_search again.
+        role: user
+        type: message
+      - content:
+        - text: 'The user wants me to call the `get_weather` tool exactly once with
+            the city "Paris".
+
+            I have already called `tool_search` as requested in the previous turn.
+
+            The current request explicitly tells me to use the tool `get_weather`
+            with parameters `{"city":"Paris"}` and not to call `tool_search` again.
+
+            I will construct the function call for `get_weather`.
+
+            Parameters: city = "Paris".
+
+            Function name: get_weather.
+
+            Call the tool.
+
+            '
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_8249dd1d18d7cab2
+        status: null
+        summary: []
+        type: reasoning
+      - arguments: '{"city": "Paris"}'
+        call_id: chatcmpl-tool-8289918f90de051c
+        caller: null
+        id: fc_bb8169afc12efa5f
+        name: get_weather
+        namespace: null
+        status: completed
+        type: function_call
+      - call_id: chatcmpl-tool-8289918f90de051c
+        output: '{"city":"Paris","condition":"clear","temperature_c":21}'
+        type: function_call_output
+      - content: Use the function output and call no more tools. Reply with exactly
+          PARIS_WEATHER_OK.
+        role: user
+        type: message
+      max_output_tokens: 4096
+      model: Qwen/Qwen3.6-35B-A3B-FP8
+      parallel_tool_calls: false
+      store: false
+      stream: true
+      tool_choice: auto
+      tools:
+      - description: 'Search the client tool catalog. Available catalog entry: get_weather
+          — Get the current weather for a city.'
+        name: tool_search
+        parameters:
+          additionalProperties: false
+          properties:
+            query:
+              description: A concise description of the needed capability.
+              type: string
+          required:
+          - query
+          type: object
+        strict: true
+        type: function
+      - description: Get the current weather for a city.
+        name: get_weather
+        parameters:
+          additionalProperties: false
+          properties:
+            city:
+              type: string
+          required:
+          - city
+          type: object
+        strict: true
+        type: function
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    headers:
+      content-type: text/event-stream; charset=utf-8
+    sse:
+    - 'event: response.created
+
+      '
+    - 'data: {"response":{"id":"resp_a185021a83a4d2e5","created_at":1787143230,"incomplete_details":null,"instructions":null,"metadata":null,"model":"Qwen/Qwen3.6-35B-A3B-FP8","object":"response","output":[],"parallel_tool_calls":false,"temperature":1.0,"tool_choice":"auto","tools":[{"name":"tool_search","parameters":{"type":"object","properties":{"query":{"type":"string","description":"A
+      concise description of the needed capability."}},"required":["query"],"additionalProperties":false},"strict":true,"type":"function","allowed_callers":null,"defer_loading":null,"description":"Search
+      the client tool catalog. Available catalog entry: get_weather — Get the current
+      weather for a city.","output_schema":null},{"name":"get_weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"],"additionalProperties":false},"strict":true,"type":"function","allowed_callers":null,"defer_loading":null,"description":"Get
+      the current weather for a city.","output_schema":null}],"top_p":0.95,"background":false,"max_output_tokens":4096,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","text":null,"top_logprobs":null,"truncation":"disabled","usage":null,"user":null,"presence_penalty":0.0,"frequency_penalty":0.0,"kv_transfer_params":null,"input_messages":null,"output_messages":null},"sequence_number":0,"type":"response.created"}
+
+      '
+    - '
+
+      '
+    - 'event: response.in_progress
+
+      '
+    - 'data: {"response":{"id":"resp_a185021a83a4d2e5","created_at":1787143230,"incomplete_details":null,"instructions":null,"metadata":null,"model":"Qwen/Qwen3.6-35B-A3B-FP8","object":"response","output":[],"parallel_tool_calls":false,"temperature":1.0,"tool_choice":"auto","tools":[{"name":"tool_search","parameters":{"type":"object","properties":{"query":{"type":"string","description":"A
+      concise description of the needed capability."}},"required":["query"],"additionalProperties":false},"strict":true,"type":"function","allowed_callers":null,"defer_loading":null,"description":"Search
+      the client tool catalog. Available catalog entry: get_weather — Get the current
+      weather for a city.","output_schema":null},{"name":"get_weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"],"additionalProperties":false},"strict":true,"type":"function","allowed_callers":null,"defer_loading":null,"description":"Get
+      the current weather for a city.","output_schema":null}],"top_p":0.95,"background":false,"max_output_tokens":4096,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","text":null,"top_logprobs":null,"truncation":"disabled","usage":null,"user":null,"presence_penalty":0.0,"frequency_penalty":0.0,"kv_transfer_params":null,"input_messages":null,"output_messages":null},"sequence_number":1,"type":"response.in_progress"}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.added
+
+      '
+    - 'data: {"item":{"id":"905f67d33894f159","summary":[],"type":"reasoning","content":null,"encrypted_content":null,"status":"in_progress"},"output_index":0,"sequence_number":2,"type":"response.output_item.added"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_part.added
+
+      '
+    - 'data: {"content_index":0,"item_id":"905f67d33894f159","output_index":0,"part":{"text":"","type":"reasoning_text"},"sequence_number":3,"type":"response.reasoning_part.added"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"The","item_id":"905f67d33894f159","output_index":0,"sequence_number":4,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" user wants me","item_id":"905f67d33894f159","output_index":0,"sequence_number":5,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" to use","item_id":"905f67d33894f159","output_index":0,"sequence_number":6,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" the function output","item_id":"905f67d33894f159","output_index":0,"sequence_number":7,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" and reply with","item_id":"905f67d33894f159","output_index":0,"sequence_number":8,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" exactly \"PAR","item_id":"905f67d33894f159","output_index":0,"sequence_number":9,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"IS_WEATHER","item_id":"905f67d33894f159","output_index":0,"sequence_number":10,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"_OK\".\n","item_id":"905f67d33894f159","output_index":0,"sequence_number":11,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"No","item_id":"905f67d33894f159","output_index":0,"sequence_number":12,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" more","item_id":"905f67d33894f159","output_index":0,"sequence_number":13,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" tools should be","item_id":"905f67d33894f159","output_index":0,"sequence_number":14,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" called.\n","item_id":"905f67d33894f159","output_index":0,"sequence_number":15,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"The function output","item_id":"905f67d33894f159","output_index":0,"sequence_number":16,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" for","item_id":"905f67d33894f159","output_index":0,"sequence_number":17,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" Paris","item_id":"905f67d33894f159","output_index":0,"sequence_number":18,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" is","item_id":"905f67d33894f159","output_index":0,"sequence_number":19,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":": {\"city","item_id":"905f67d33894f159","output_index":0,"sequence_number":20,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"\":\"Paris\",\"","item_id":"905f67d33894f159","output_index":0,"sequence_number":21,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"condition\":\"clear","item_id":"905f67d33894f159","output_index":0,"sequence_number":22,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"\",\"temperature_c","item_id":"905f67d33894f159","output_index":0,"sequence_number":23,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"\":21","item_id":"905f67d33894f159","output_index":0,"sequence_number":24,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"}\nI","item_id":"905f67d33894f159","output_index":0,"sequence_number":25,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" need","item_id":"905f67d33894f159","output_index":0,"sequence_number":26,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" to output exactly","item_id":"905f67d33894f159","output_index":0,"sequence_number":27,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":" \"PARIS","item_id":"905f67d33894f159","output_index":0,"sequence_number":28,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"_WEATHER_OK","item_id":"905f67d33894f159","output_index":0,"sequence_number":29,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"\".\nDone","item_id":"905f67d33894f159","output_index":0,"sequence_number":30,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":".\n","item_id":"905f67d33894f159","output_index":0,"sequence_number":31,"type":"response.reasoning_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.done
+
+      '
+    - 'data: {"content_index":0,"item_id":"905f67d33894f159","output_index":0,"sequence_number":32,"text":"The
+      user wants me to use the function output and reply with exactly \"PARIS_WEATHER_OK\".\nNo
+      more tools should be called.\nThe function output for Paris is: {\"city\":\"Paris\",\"condition\":\"clear\",\"temperature_c\":21}\nI
+      need to output exactly \"PARIS_WEATHER_OK\".\nDone.\n","type":"response.reasoning_text.done"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_part.done
+
+      '
+    - 'data: {"content_index":0,"item_id":"905f67d33894f159","output_index":0,"part":{"text":"The
+      user wants me to use the function output and reply with exactly \"PARIS_WEATHER_OK\".\nNo
+      more tools should be called.\nThe function output for Paris is: {\"city\":\"Paris\",\"condition\":\"clear\",\"temperature_c\":21}\nI
+      need to output exactly \"PARIS_WEATHER_OK\".\nDone.\n","type":"reasoning_text"},"sequence_number":33,"type":"response.reasoning_part.done"}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.done
+
+      '
+    - 'data: {"item":{"id":"905f67d33894f159","summary":[],"type":"reasoning","content":[{"text":"The
+      user wants me to use the function output and reply with exactly \"PARIS_WEATHER_OK\".\nNo
+      more tools should be called.\nThe function output for Paris is: {\"city\":\"Paris\",\"condition\":\"clear\",\"temperature_c\":21}\nI
+      need to output exactly \"PARIS_WEATHER_OK\".\nDone.\n","type":"reasoning_text"}],"encrypted_content":null,"status":"completed"},"output_index":0,"sequence_number":34,"type":"response.output_item.done"}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.added
+
+      '
+    - 'data: {"item":{"id":"8e30a80425578155","content":[],"role":"assistant","status":"in_progress","type":"message","phase":null},"output_index":1,"sequence_number":35,"type":"response.output_item.added"}
+
+      '
+    - '
+
+      '
+    - 'event: response.content_part.added
+
+      '
+    - 'data: {"content_index":0,"item_id":"8e30a80425578155","output_index":1,"part":{"annotations":[],"text":"","type":"output_text","logprobs":[]},"sequence_number":36,"type":"response.content_part.added"}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"\n\nPARIS","item_id":"8e30a80425578155","logprobs":[],"output_index":1,"sequence_number":37,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"content_index":0,"delta":"_WEATHER_OK","item_id":"8e30a80425578155","logprobs":[],"output_index":1,"sequence_number":38,"type":"response.output_text.delta"}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.done
+
+      '
+    - 'data: {"content_index":0,"item_id":"8e30a80425578155","logprobs":[],"output_index":1,"sequence_number":39,"text":"\n\nPARIS_WEATHER_OK","type":"response.output_text.done"}
+
+      '
+    - '
+
+      '
+    - 'event: response.content_part.done
+
+      '
+    - 'data: {"content_index":0,"item_id":"8e30a80425578155","output_index":1,"part":{"annotations":[],"text":"\n\nPARIS_WEATHER_OK","type":"output_text","logprobs":null},"sequence_number":40,"type":"response.content_part.done"}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.done
+
+      '
+    - 'data: {"item":{"id":"8e30a80425578155","content":[{"annotations":[],"text":"\n\nPARIS_WEATHER_OK","type":"output_text","logprobs":null}],"role":"assistant","status":"completed","type":"message","phase":null,"summary":[]},"output_index":1,"sequence_number":41,"type":"response.output_item.done"}
+
+      '
+    - '
+
+      '
+    - 'event: response.completed
+
+      '
+    - 'data: {"response":{"id":"resp_a185021a83a4d2e5","created_at":1787143230,"incomplete_details":null,"instructions":null,"metadata":null,"model":"Qwen/Qwen3.6-35B-A3B-FP8","object":"response","output":[{"id":"rs_985f3beffd5ba701","summary":[],"type":"reasoning","content":[{"text":"The
+      user wants me to use the function output and reply with exactly \"PARIS_WEATHER_OK\".\nNo
+      more tools should be called.\nThe function output for Paris is: {\"city\":\"Paris\",\"condition\":\"clear\",\"temperature_c\":21}\nI
+      need to output exactly \"PARIS_WEATHER_OK\".\nDone.\n","type":"reasoning_text"}],"encrypted_content":null,"status":null},{"id":"msg_9a4dd17402285ad2","content":[{"annotations":[],"text":"\n\nPARIS_WEATHER_OK","type":"output_text","logprobs":null}],"role":"assistant","status":"completed","type":"message","phase":null}],"parallel_tool_calls":false,"temperature":1.0,"tool_choice":"auto","tools":[{"name":"tool_search","parameters":{"type":"object","properties":{"query":{"type":"string","description":"A
+      concise description of the needed capability."}},"required":["query"],"additionalProperties":false},"strict":true,"type":"function","allowed_callers":null,"defer_loading":null,"description":"Search
+      the client tool catalog. Available catalog entry: get_weather — Get the current
+      weather for a city.","output_schema":null},{"name":"get_weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"],"additionalProperties":false},"strict":true,"type":"function","allowed_callers":null,"defer_loading":null,"description":"Get
+      the current weather for a city.","output_schema":null}],"top_p":0.95,"background":false,"max_output_tokens":4096,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"completed","text":null,"top_logprobs":null,"truncation":"disabled","usage":{"input_tokens":639,"input_tokens_details":{"cached_tokens":0,"input_tokens_per_turn":[],"cached_tokens_per_turn":[]},"output_tokens":76,"output_tokens_details":{"reasoning_tokens":0,"tool_output_tokens":0,"output_tokens_per_turn":[],"tool_output_tokens_per_turn":[]},"total_tokens":715},"user":null,"presence_penalty":0.0,"frequency_penalty":0.0,"kv_transfer_params":null,"input_messages":null,"output_messages":null},"sequence_number":42,"type":"response.completed"}
+
+      '
+    - '
+
+      '
+    status_code: 200

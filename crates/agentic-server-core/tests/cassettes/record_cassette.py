@@ -33,6 +33,7 @@ Usage:
 """
 
 import base64
+import copy
 import hashlib
 import json
 import logging
@@ -40,14 +41,17 @@ import os
 import secrets
 import socket
 import ssl
+import stat
 import struct
 import sys
+import tempfile
 import threading
 import time
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncGenerator
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse
 
 import click
 import httpx
@@ -55,7 +59,8 @@ import uvicorn
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from httpx import AsyncClient
-from yaml import dump as yaml_dump, safe_load as yaml_load
+from yaml import dump as yaml_dump
+from yaml import safe_load as yaml_load
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger("cassette_proxy")
@@ -64,6 +69,12 @@ MODEL = "gpt-4o"
 PROXY_HOST = "127.0.0.1"
 PROXY_PORT = 7070
 TIMEOUT = 60 * 5
+MAX_WEBSOCKET_HANDSHAKE_BYTES = 64 * 1024
+MAX_WEBSOCKET_FRAME_BYTES = 16 * 1024 * 1024
+MAX_WEBSOCKET_MESSAGE_BYTES = 32 * 1024 * 1024
+MAX_WEBSOCKET_MESSAGE_FRAMES = 10_000
+MAX_WEBSOCKET_CAPTURE_BYTES = 64 * 1024 * 1024
+MAX_WEBSOCKET_CAPTURE_MESSAGES = 10_000
 
 EXCLUDED_RESPONSE_HEADERS = {
     "content-encoding",
@@ -79,6 +90,63 @@ RECORDED_HEADERS = {
     "accept",
     "x-run-id",
 }
+
+SENSITIVE_FIELD_NAMES = {
+    "access_token",
+    "api_key",
+    "apikey",
+    "auth_token",
+    "authorization",
+    "credential",
+    "cookie",
+    "client_secret",
+    "password",
+    "proxy_authorization",
+    "refresh_token",
+    "secret",
+    "set_cookie",
+    "sig",
+    "signature",
+    "token",
+    "x_auth_token",
+    "x_api_key",
+    "x_amz_credential",
+    "x_amz_signature",
+    "x_goog_credential",
+    "x_goog_signature",
+}
+
+SENSITIVE_ENV_NAME_PARTS = (
+    "API_KEY",
+    "AUTHORIZATION",
+    "BEARER",
+    "COOKIE",
+    "CREDENTIAL",
+    "PASSWORD",
+    "PRIVATE_KEY",
+    "SECRET",
+    "TOKEN",
+)
+
+
+class SecretRecordingError(ValueError):
+    """Raised before a cassette write could persist sensitive material."""
+
+
+@dataclass(frozen=True)
+class ToolContinuation:
+    """Input items for one client-tool continuation step."""
+
+    input_items: list[dict]
+    loaded_search_tools: bool
+
+
+@dataclass(frozen=True)
+class ProxyHandle:
+    """Owned recorder proxy lifecycle."""
+
+    server: uvicorn.Server
+    thread: threading.Thread
 
 
 def _mask_authorization(value: str) -> str:
@@ -104,6 +172,159 @@ def _filter_response_headers(headers) -> dict:
     }
 
 
+def _normalized_sensitive_name(name: object) -> str:
+    return str(name).strip().lower().replace("-", "_")
+
+
+def _is_masked_secret(value: object) -> bool:
+    return isinstance(value, str) and value.strip() in {"***", "Bearer ***"}
+
+
+def _has_secret_material(value: object) -> bool:
+    if value is None or value is False:
+        return False
+    if _is_masked_secret(value):
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    # Containers are traversed recursively. This keeps JSON Schema properties
+    # named `password` or `token` recordable while still rejecting actual values.
+    return not isinstance(value, (list, tuple, set, dict))
+
+
+def _sensitive_environment_values(environment: dict[str, str]) -> tuple[str, ...]:
+    values = {
+        value
+        for name, value in environment.items()
+        if value
+        and len(value) >= 8
+        and any(part in name.upper() for part in SENSITIVE_ENV_NAME_PARTS)
+        and not _is_masked_secret(value)
+    }
+    return tuple(sorted(values, key=len, reverse=True))
+
+
+def _reject_sensitive_url(value: str, path: str) -> None:
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https", "ws", "wss"}:
+        return
+    if parsed.username or parsed.password:
+        raise SecretRecordingError(f"refusing to record URL credentials at {path}")
+    for query_name, query_value in parse_qsl(parsed.query, keep_blank_values=True):
+        if (
+            _normalized_sensitive_name(query_name) in SENSITIVE_FIELD_NAMES
+            and _has_secret_material(query_value)
+        ):
+            raise SecretRecordingError(f"refusing to record URL query credentials at {path}")
+
+
+def _has_nonempty_header_value(value: object) -> bool:
+    if value is None or value is False:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple, set, dict)):
+        return bool(value)
+    return True
+
+
+def _reject_mcp_credentials(value: dict, path: str) -> None:
+    if value.get("type") != "mcp":
+        return
+    headers = value.get("headers")
+    if isinstance(headers, dict) and any(
+        _has_nonempty_header_value(header_value)
+        for header_value in headers.values()
+    ):
+        raise SecretRecordingError(
+            f"refusing to record non-empty MCP headers at {path}.headers"
+        )
+
+    server_url = value.get("server_url")
+    if not isinstance(server_url, str) or not server_url:
+        return
+    parsed = urlparse(server_url)
+    if parsed.username or parsed.password or parsed.query:
+        raise SecretRecordingError(
+            f"refusing to record MCP server_url credentials or query at {path}.server_url"
+        )
+
+
+def _reject_sensitive_value(
+    value: object,
+    *,
+    path: str,
+    environment_values: tuple[str, ...],
+) -> None:
+    if isinstance(value, dict):
+        _reject_mcp_credentials(value, path)
+        for raw_name, nested in value.items():
+            name = _normalized_sensitive_name(raw_name)
+            nested_path = f"{path}.{raw_name}" if path else str(raw_name)
+            if name in SENSITIVE_FIELD_NAMES and _has_secret_material(nested):
+                raise SecretRecordingError(f"refusing to record sensitive field at {nested_path}")
+            _reject_sensitive_value(
+                nested,
+                path=nested_path,
+                environment_values=environment_values,
+            )
+        return
+    if isinstance(value, (list, tuple)):
+        for index, nested in enumerate(value):
+            _reject_sensitive_value(
+                nested,
+                path=f"{path}[{index}]",
+                environment_values=environment_values,
+            )
+        return
+    if not isinstance(value, str):
+        return
+
+    for secret in environment_values:
+        if secret in value:
+            raise SecretRecordingError(f"refusing to record an environment secret at {path}")
+    stripped = value.strip()
+    if stripped.startswith(("{", "[")):
+        try:
+            decoded = json.loads(stripped)
+        except json.JSONDecodeError:
+            decoded = None
+        if isinstance(decoded, (dict, list)):
+            _reject_sensitive_value(
+                decoded,
+                path=f"{path}.json",
+                environment_values=environment_values,
+            )
+    _reject_sensitive_url(value, path)
+
+
+def _prepare_turn_for_write(
+    turn: dict[str, Any],
+    *,
+    environment: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Mask envelope authorization headers, then reject all other secrets.
+
+    Request and response bodies remain byte-for-byte semantically intact. Sensitive
+    values nested in bodies, query parameters, provider errors, or environment-derived
+    strings fail the recording instead of being silently rewritten.
+    """
+    prepared = copy.deepcopy(turn)
+    for side in ("request", "response"):
+        headers = prepared.get(side, {}).get("headers")
+        if not isinstance(headers, dict):
+            continue
+        for name, value in list(headers.items()):
+            if str(name).lower() == "authorization":
+                headers[name] = _mask_authorization(str(value))
+
+    environment_values = _sensitive_environment_values(
+        dict(os.environ) if environment is None else environment
+    )
+    _reject_sensitive_value(prepared, path="turn", environment_values=environment_values)
+    return prepared
+
+
 def _turn_number(output_file: Path) -> int:
     if not output_file.exists():
         return 1
@@ -116,17 +337,51 @@ def _turn_number(output_file: Path) -> int:
     return len(data["turns"]) + 1
 
 
-def _append_turn(output_file: Path, turn: dict[str, Any]) -> None:
-    output_file.parent.mkdir(parents=True, exist_ok=True)
+def _append_turn(
+    output_file: Path,
+    turn: dict[str, Any],
+    *,
+    environment: dict[str, str] | None = None,
+) -> None:
+    prepared_turn = _prepare_turn_for_write(turn, environment=environment)
+    existing_mode = (
+        stat.S_IMODE(output_file.stat().st_mode) if output_file.exists() else None
+    )
     if output_file.exists() and output_file.stat().st_size > 0:
         data = yaml_load(output_file.read_text(encoding="utf-8")) or {}
     else:
         data = {}
     turns: list = data.get("turns", [])
-    turns.append(turn)
+    turns.append(prepared_turn)
     data["turns"] = turns
-    with open(output_file, "w", encoding="utf-8") as f:
-        yaml_dump(data, f, allow_unicode=True, default_flow_style=False)
+    _reject_sensitive_value(
+        data,
+        path="cassette",
+        environment_values=_sensitive_environment_values(
+            dict(os.environ) if environment is None else environment
+        ),
+    )
+
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=output_file.parent,
+            prefix=f".{output_file.name}.",
+            delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            yaml_dump(data, temporary, allow_unicode=True, default_flow_style=False)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        if existing_mode is not None:
+            os.chmod(temporary_path, existing_mode)
+        os.replace(temporary_path, output_file)
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
 
 
 @asynccontextmanager
@@ -252,7 +507,7 @@ async def proxy_request(request: Request, path: str) -> Response:
 # ── proxy lifecycle ───────────────────────────────────────────────────────────
 
 
-def _start_proxy(output_file: Path, target_host: str, port: int) -> uvicorn.Server:
+def _start_proxy(output_file: Path, target_host: str, port: int) -> ProxyHandle:
     output_file.parent.mkdir(parents=True, exist_ok=True)
     output_file.write_text("", encoding="utf-8")
     proxy_app.state.output_file = output_file
@@ -264,20 +519,26 @@ def _start_proxy(output_file: Path, target_host: str, port: int) -> uvicorn.Serv
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
 
-    # TCP-only readiness check — no HTTP request forwarded to upstream
     for _ in range(40):
-        try:
-            with socket.create_connection((PROXY_HOST, port), timeout=0.3):
-                break
-        except OSError:
-            time.sleep(0.3)
+        if server.started and thread.is_alive():
+            return ProxyHandle(server=server, thread=thread)
+        if not thread.is_alive():
+            break
+        time.sleep(0.3)
 
-    return server
-
-
-def _stop_proxy(server: uvicorn.Server) -> None:
     server.should_exit = True
-    time.sleep(0.5)
+    thread.join(timeout=2)
+    raise RuntimeError(f"recorder proxy failed to own {PROXY_HOST}:{port}")
+
+
+def _stop_proxy(handle: ProxyHandle) -> None:
+    handle.server.should_exit = True
+    handle.thread.join(timeout=5)
+    if handle.thread.is_alive():
+        handle.server.force_exit = True
+        handle.thread.join(timeout=2)
+    if handle.thread.is_alive():
+        raise RuntimeError("recorder proxy did not stop within the bounded shutdown window")
 
 
 def _create_conversation(client: httpx.Client, proxy_url: str) -> str:
@@ -288,12 +549,16 @@ def _create_conversation(client: httpx.Client, proxy_url: str) -> str:
     return conv_id
 
 
-def _send_nonstreaming(client: httpx.Client, body: dict, proxy_url: str) -> dict | None:
+def _send_nonstreaming(
+    client: httpx.Client,
+    body: dict,
+    proxy_url: str,
+) -> dict | None:
     resp = client.post(f"{proxy_url}/v1/responses", json=body, timeout=300)
-    resp.raise_for_status()
     data = resp.json()
+    resp.raise_for_status()
     print(f"\n[Response]\n{json.dumps(data, indent=2)}\n")
-    return data
+    return data if isinstance(data, dict) else None
 
 
 def _send_streaming(client: httpx.Client, body: dict, proxy_url: str) -> dict | None:
@@ -389,6 +654,7 @@ class WebSocketClient:
         self.url = url
         self.headers = headers
         self.sock: socket.socket | ssl.SSLSocket | None = None
+        self._receive_buffer = bytearray()
 
     def __enter__(self) -> "WebSocketClient":
         parsed = urlparse(self.url)
@@ -445,6 +711,10 @@ class WebSocketClient:
     def _read_exact(self, size: int) -> bytes:
         assert self.sock is not None
         chunks = bytearray()
+        if self._receive_buffer:
+            buffered = min(size, len(self._receive_buffer))
+            chunks.extend(self._receive_buffer[:buffered])
+            del self._receive_buffer[:buffered]
         while len(chunks) < size:
             chunk = self.sock.recv(size - len(chunks))
             if not chunk:
@@ -460,7 +730,11 @@ class WebSocketClient:
             if not chunk:
                 raise EOFError("websocket closed during handshake")
             data.extend(chunk)
-        return data.decode("iso-8859-1")
+            if len(data) > MAX_WEBSOCKET_HANDSHAKE_BYTES:
+                raise ValueError("websocket handshake exceeded the recording limit")
+        header_end = data.index(b"\r\n\r\n") + 4
+        self._receive_buffer.extend(data[header_end:])
+        return data[:header_end].decode("iso-8859-1")
 
     def send_text(self, text: str) -> None:
         self._send_frame(0x1, text.encode("utf-8"))
@@ -491,7 +765,11 @@ class WebSocketClient:
 
     def receive_text(self) -> str | None:
         message = bytearray()
+        frame_count = 0
         while True:
+            frame_count += 1
+            if frame_count > MAX_WEBSOCKET_MESSAGE_FRAMES:
+                raise ValueError("websocket message exceeded the frame-count recording limit")
             first, second = self._read_exact(2)
             fin = bool(first & 0x80)
             opcode = first & 0x0F
@@ -501,6 +779,10 @@ class WebSocketClient:
                 length = struct.unpack("!H", self._read_exact(2))[0]
             elif length == 127:
                 length = struct.unpack("!Q", self._read_exact(8))[0]
+            if length > MAX_WEBSOCKET_FRAME_BYTES:
+                raise ValueError("websocket frame exceeded the recording limit")
+            if len(message) + length > MAX_WEBSOCKET_MESSAGE_BYTES:
+                raise ValueError("websocket message exceeded the recording limit")
             mask = self._read_exact(4) if masked else b""
             payload = self._read_exact(length)
             if masked:
@@ -576,6 +858,8 @@ def _send_websocket(
     }
 
     response_data = None
+    captured_bytes = 0
+    captured_messages = 0
     print("\n[WebSocket response]")
     with WebSocketClient(websocket_url, headers) as ws:
         ws.send_text(json.dumps(wire_body, separators=(",", ":")))
@@ -583,6 +867,12 @@ def _send_websocket(
             message = ws.receive_text()
             if message is None:
                 break
+            captured_messages += 1
+            captured_bytes += len(message.encode("utf-8"))
+            if captured_messages > MAX_WEBSOCKET_CAPTURE_MESSAGES:
+                raise ValueError("websocket capture exceeded the message-count limit")
+            if captured_bytes > MAX_WEBSOCKET_CAPTURE_BYTES:
+                raise ValueError("websocket capture exceeded the byte recording limit")
             print(message)
             turn["response"]["websocket"].append(message)
             try:
@@ -590,10 +880,14 @@ def _send_websocket(
             except json.JSONDecodeError:
                 continue
             turn["response"]["sse"].append(
+                f"event: {event.get('type', '')}\n"
                 f"data: {json.dumps(event, separators=(',', ':'))}\n"
             )
             event_type = event.get("type")
             if event_type == "response.completed":
+                response_data = event.get("response")
+                break
+            if event_type == "response.failed":
                 response_data = event.get("response")
                 break
             if event_type == "error":
@@ -654,15 +948,191 @@ def _inject_tools(body: dict, tools: list | None, tool_choice: Any) -> None:
 
 
 def _extract_tool_calls(response_data: dict | None) -> list[dict]:
-    """Extract client-owned function and custom tool calls from a response."""
+    """Extract client-owned tool calls and reject unusable call linkage."""
     if not response_data:
         return []
     output = response_data.get("output", [])
-    return [
+    tool_calls = [
         item
         for item in output
-        if item.get("type") in {"function_call", "custom_tool_call"}
+        if item.get("type")
+        in {"function_call", "custom_tool_call", "tool_search_call"}
     ]
+    for call in tool_calls:
+        call_id = call.get("call_id")
+        if not isinstance(call_id, str) or not call_id.strip():
+            raise ValueError(
+                f"{call.get('type', 'tool')} item has no non-empty call_id"
+            )
+    return tool_calls
+
+
+def _canonical_tool_search_output(tools: list[dict]) -> str:
+    return json.dumps(
+        {"tools": tools},
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
+def _build_tool_continuation(
+    tool_calls: list[dict],
+    tool_outputs: dict[str, str],
+    tool_search_tools: list[dict] | None,
+    user_prompt: str | None,
+) -> ToolContinuation:
+    """Project one semantic client-tool transition onto public or normalized wire."""
+    input_items: list[dict] = []
+    loaded_search_tools = False
+    for call in tool_calls:
+        call_id = call.get("call_id")
+        if not isinstance(call_id, str) or not call_id.strip():
+            raise ValueError(
+                f"{call.get('type', 'tool')} item has no non-empty call_id"
+            )
+
+        call_type = call.get("type")
+        name = call.get("name", "")
+        is_public_search = call_type == "tool_search_call"
+        is_normalized_search = call_type == "function_call" and name == "tool_search"
+        if is_public_search or is_normalized_search:
+            if tool_search_tools is None:
+                raise ValueError(
+                    "a tool-search call requires --tool-search-output-tools"
+                )
+            loaded_search_tools = True
+            if is_public_search:
+                input_items.append(
+                    {
+                        "type": "tool_search_output",
+                        "call_id": call_id,
+                        "execution": "client",
+                        "status": "completed",
+                        "tools": copy.deepcopy(tool_search_tools),
+                    }
+                )
+            else:
+                input_items.append(
+                    {
+                        "type": "function_call_output",
+                        "call_id": call_id,
+                        "output": _canonical_tool_search_output(tool_search_tools),
+                    }
+                )
+            continue
+
+        if tool_search_tools is not None and name not in tool_outputs:
+            raise ValueError(
+                f"loaded function {name!r} requires an explicit output fixture"
+            )
+        output = tool_outputs.get(
+            name, json.dumps({"result": f"mock output for {name}"})
+        )
+        input_items.append(
+            {
+                "type": (
+                    "custom_tool_call_output"
+                    if call_type == "custom_tool_call"
+                    else "function_call_output"
+                ),
+                "call_id": call_id,
+                "output": output,
+            }
+        )
+
+    if user_prompt:
+        input_items.append(
+            {
+                "type": "message",
+                "role": "user",
+                "content": user_prompt,
+            }
+        )
+    return ToolContinuation(
+        input_items=input_items,
+        loaded_search_tools=loaded_search_tools,
+    )
+
+
+def _is_tool_search_call(call: dict) -> bool:
+    return call.get("type") == "tool_search_call" or (
+        call.get("type") == "function_call" and call.get("name") == "tool_search"
+    )
+
+
+def _validate_tool_search_turn_calls(
+    turn: int,
+    calls: list[dict],
+    returned_tools: list[dict],
+) -> None:
+    if turn == 2:
+        if len(calls) != 1 or not _is_tool_search_call(calls[0]):
+            raise ValueError(
+                "tool-search turn one must emit exactly one search call"
+            )
+        call = calls[0]
+        arguments = call.get("arguments")
+        if call.get("type") == "tool_search_call":
+            if call.get("execution") != "client" or call.get("status") != "completed":
+                raise ValueError(
+                    "public tool-search call must be explicitly client/completed"
+                )
+            if not isinstance(arguments, dict) or not arguments:
+                raise ValueError(
+                    "public tool-search arguments must be a non-empty object"
+                )
+            query = arguments.get("query")
+        else:
+            if call.get("status") != "completed":
+                raise ValueError(
+                    "normalized tool-search call must be explicitly completed"
+                )
+            if not isinstance(arguments, str):
+                raise ValueError(
+                    "normalized tool-search arguments must be JSON text"
+                )
+            try:
+                decoded = json.loads(arguments)
+            except json.JSONDecodeError as error:
+                raise ValueError(
+                    "normalized tool-search arguments must be valid JSON"
+                ) from error
+            if not isinstance(decoded, dict) or not decoded:
+                raise ValueError(
+                    "normalized tool-search arguments must be a non-empty object"
+                )
+            query = decoded.get("query")
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError("tool-search arguments must contain a non-empty query")
+        return
+    if turn != 3:
+        return
+
+    returned_function_names = {
+        tool.get("name")
+        for tool in returned_tools
+        if tool.get("type") == "function" and isinstance(tool.get("name"), str)
+    }
+    if (
+        len(calls) != 1
+        or calls[0].get("type") != "function_call"
+        or calls[0].get("name") not in returned_function_names
+    ):
+        raise ValueError(
+            "tool-search turn two must emit exactly one loaded function call"
+        )
+    if calls[0].get("status") != "completed":
+        raise ValueError("loaded function call must be explicitly completed")
+    arguments = calls[0].get("arguments")
+    if not isinstance(arguments, str):
+        raise ValueError("loaded function arguments must be JSON text")
+    try:
+        decoded = json.loads(arguments)
+    except json.JSONDecodeError as error:
+        raise ValueError("loaded function arguments must be valid JSON") from error
+    if not isinstance(decoded, dict):
+        raise ValueError("loaded function arguments must decode to an object")
 
 
 def _build_tool_output_input(
@@ -680,33 +1150,12 @@ def _build_tool_output_input(
     Returns:
         A list suitable for the `input` field of the next request.
     """
-    input_items: list[dict] = []
-    for call in tool_calls:
-        call_id = call.get("call_id", "")
-        name = call.get("name", "")
-        output = tool_outputs.get(
-            name, json.dumps({"result": f"mock output for {name}"})
-        )
-        input_items.append(
-            {
-                "type": (
-                    "custom_tool_call_output"
-                    if call.get("type") == "custom_tool_call"
-                    else "function_call_output"
-                ),
-                "call_id": call_id,
-                "output": output,
-            }
-        )
-    if user_prompt:
-        input_items.append(
-            {
-                "type": "message",
-                "role": "user",
-                "content": user_prompt,
-            }
-        )
-    return input_items
+    return _build_tool_continuation(
+        tool_calls,
+        tool_outputs,
+        None,
+        user_prompt,
+    ).input_items
 
 
 def run_conv(
@@ -927,9 +1376,31 @@ def run_responses(
     tools: list | None = None,
     tool_choice: Any = None,
     tool_outputs: dict[str, str] | None = None,
+    tool_search_output_tools: list[dict] | None = None,
+    tools_after_search: list | None = None,
     max_output_tokens: int | None = None,
     preset_input: str | list | None = None,
+    manual_item_replay: bool = False,
 ) -> None:
+    tool_search_recording = (
+        tool_search_output_tools is not None or tools_after_search is not None
+    )
+    if tool_search_recording and turns != 3:
+        raise click.UsageError(
+            "tool-search recorder fixtures require three Responses turns"
+        )
+    if manual_item_replay and (not tool_search_recording or store or preset_input is not None):
+        raise click.UsageError(
+            "manual item replay requires store=false tool-search recording without preset input"
+        )
+    if tool_search_recording and not store and not manual_item_replay:
+        raise click.UsageError(
+            "store=false tool-search recording requires manual item replay"
+        )
+    if tool_search_recording and branches:
+        raise click.UsageError(
+            "tool-search recorder fixtures do not support response branching"
+        )
     response_ids: dict[int, str] = {}
     responses: dict[int, dict] = {}
     branch_map: dict[int, int] = {}
@@ -942,6 +1413,8 @@ def run_responses(
 
     previous_response_id: str | None = None
     last_response: dict | None = None
+    search_tools_loaded = False
+    manual_history: list[dict] = []
     for turn in range(1, turns + 1):
         if turn in branch_map:
             branch_from = branch_map[turn]
@@ -960,11 +1433,29 @@ def run_responses(
         else:
             prompt = _prompt(f"Turn {turn}/{turns} — enter prompt: ")
 
-            # Inject matching function/custom output items before the user message.
-            pending_calls = _extract_tool_calls(last_response) if tool_outputs else []
-            if pending_calls and tool_outputs:
-                input_value = _build_tool_output_input(
-                    pending_calls, tool_outputs, prompt if prompt else None
+            # Inject matching client-tool outputs before the user message.
+            has_output_fixtures = (
+                tool_outputs is not None or tool_search_output_tools is not None
+            )
+            pending_calls = (
+                _extract_tool_calls(last_response) if has_output_fixtures else []
+            )
+            if tool_search_recording:
+                _validate_tool_search_turn_calls(
+                    turn,
+                    pending_calls,
+                    tool_search_output_tools or [],
+                )
+            if pending_calls:
+                continuation = _build_tool_continuation(
+                    pending_calls,
+                    tool_outputs or {},
+                    tool_search_output_tools,
+                    prompt if prompt else None,
+                )
+                input_value = continuation.input_items
+                search_tools_loaded = (
+                    search_tools_loaded or continuation.loaded_search_tools
                 )
                 click.echo(
                     f"  [injecting {len(pending_calls)} tool output(s) before user message]"
@@ -972,12 +1463,31 @@ def run_responses(
             else:
                 input_value = prompt
 
+        if manual_item_replay:
+            if isinstance(input_value, str):
+                new_input_items = [
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": input_value,
+                    }
+                ]
+            elif isinstance(input_value, list):
+                new_input_items = copy.deepcopy(input_value)
+            else:
+                raise ValueError("manual item replay input must be a string or item array")
+            manual_history.extend(new_input_items)
+            input_value = copy.deepcopy(manual_history)
+
         body: dict = {"model": model, "input": input_value, "stream": stream, "store": store}
         if max_output_tokens is not None:
             body["max_output_tokens"] = max_output_tokens
         if previous_response_id and store:
             body["previous_response_id"] = previous_response_id
-        _inject_tools(body, tools, tool_choice)
+        if tool_search_output_tools is not None:
+            body["parallel_tool_calls"] = False
+        effective_tools = tools_after_search if search_tools_loaded else tools
+        _inject_tools(body, effective_tools, tool_choice)
         response_data = _send(
             client,
             body,
@@ -989,6 +1499,19 @@ def run_responses(
             output_file,
         )
         response_id = response_data.get("id") if response_data else None
+        if manual_item_replay:
+            response_output = response_data.get("output") if response_data else None
+            if not isinstance(response_output, list):
+                raise ValueError(
+                    "manual item replay requires every response to contain an output array"
+                )
+            manual_history.extend(copy.deepcopy(response_output))
+        if tool_search_recording and turn == turns:
+            final_calls = _extract_tool_calls(response_data)
+            if final_calls:
+                raise ValueError(
+                    "tool-search final response must not contain client tool calls"
+                )
         previous_response_id = response_id if store else None
         last_response = response_data
         if response_id:
@@ -1147,6 +1670,28 @@ def run_responses(
     "between turns (required for OpenAI Responses API).",
 )
 @click.option(
+    "--tool-search-output-tools",
+    "tool_search_output_tools_file",
+    metavar="FILE",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    help="JSON array returned by a client tool-search continuation.",
+)
+@click.option(
+    "--tools-after-search",
+    "tools_after_search_file",
+    metavar="FILE",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Effective JSON tools array used after search (required for direct vLLM characterization).",
+)
+@click.option(
+    "--manual-item-replay",
+    is_flag=True,
+    default=False,
+    help="Replay full accumulated item history with store=false (direct-vLLM or gateway tool-search).",
+)
+@click.option(
     "--input-file",
     type=click.Path(exists=True, dir_okay=False),
     help="JSON file containing one Responses input value; requires HTTP --mode responses --turns 1.",
@@ -1175,6 +1720,9 @@ def main(
     tools_file: str | None,
     tool_choice_raw: str | None,
     tool_outputs_file: str | None,
+    tool_search_output_tools_file: str | None,
+    tools_after_search_file: str | None,
+    manual_item_replay: bool,
     input_file: str | None,
     max_output_tokens: int,
 ) -> None:
@@ -1190,6 +1738,43 @@ def main(
         (bf, branch_turn_number[i] if i < len(branch_turn_number) else None)
         for i, bf in enumerate(branch_from)
     ]
+    tool_search_recording = (
+        tool_search_output_tools_file is not None
+        or tools_after_search_file is not None
+    )
+    if tools_after_search_file and not tool_search_output_tools_file:
+        raise click.UsageError(
+            "--tools-after-search requires --tool-search-output-tools."
+        )
+    if tool_search_recording:
+        if mode != "responses":
+            raise click.UsageError(
+                "tool-search recorder fixtures require --mode responses."
+            )
+        if turns != 3:
+            raise click.UsageError(
+                "tool-search recorder fixtures require exactly --turns 3."
+            )
+        if branches:
+            raise click.UsageError(
+                "tool-search recorder fixtures do not support --branch-from."
+            )
+        if no_store and not manual_item_replay:
+            raise click.UsageError(
+                "store=false tool-search characterization requires --manual-item-replay."
+            )
+        if manual_item_replay and not no_store:
+            raise click.UsageError(
+                "--manual-item-replay requires --no-store."
+            )
+        if input_file:
+            raise click.UsageError(
+                "tool-search recorder fixtures do not support --input-file."
+            )
+        if not tools_file or not tool_outputs_file:
+            raise click.UsageError(
+                "tool-search recording requires --tools and --tool-outputs."
+            )
     backend_count = sum(bool(url) for url in (openai_url, vllm_url, gateway_url))
     if backend_count > 1:
         raise click.UsageError("--openai, --vllm, and --gateway are mutually exclusive.")
@@ -1232,6 +1817,43 @@ def main(
             raise click.UsageError("--tool-outputs file must contain a JSON object (name -> output string).")
         click.echo(f"Tool outputs: {list(tool_outputs.keys())}")
 
+    tool_search_output_tools: list[dict] | None = None
+    if tool_search_output_tools_file:
+        with open(tool_search_output_tools_file, encoding="utf-8") as f:
+            tool_search_output_tools = json.load(f)
+        if not isinstance(tool_search_output_tools, list) or not all(
+            isinstance(tool, dict) for tool in tool_search_output_tools
+        ):
+            raise click.UsageError(
+                "--tool-search-output-tools must contain a JSON array of objects."
+            )
+        if not tool_search_output_tools:
+            raise click.UsageError(
+                "--tool-search-output-tools must contain at least one tool."
+            )
+
+    tools_after_search: list | None = None
+    if tools_after_search_file:
+        with open(tools_after_search_file, encoding="utf-8") as f:
+            tools_after_search = json.load(f)
+        if not isinstance(tools_after_search, list):
+            raise click.UsageError(
+                "--tools-after-search must contain a JSON array."
+            )
+
+    if tool_search_recording and vllm_url and tools_after_search is None:
+        raise click.UsageError(
+            "direct vLLM tool-search characterization requires --tools-after-search."
+        )
+    if tool_search_recording and vllm_url and not manual_item_replay:
+        raise click.UsageError(
+            "direct vLLM tool-search characterization requires --manual-item-replay."
+        )
+    if tool_search_recording and not (vllm_url or gateway_url) and manual_item_replay:
+        raise click.UsageError(
+            "--manual-item-replay is reserved for direct vLLM or gateway tool-search recording."
+        )
+
     if gateway_url:
         target = gateway_url.rstrip("/")
         headers = {}
@@ -1249,6 +1871,8 @@ def main(
             )
         headers = {"Authorization": f"Bearer {api_key}"}
         backend_label = f"OpenAI: {target}"
+
+    _reject_sensitive_url(target, "upstream URL")
 
     output_file = Path(output).resolve()
     proxy_url = f"http://{PROXY_HOST}:{proxy_port}"
@@ -1281,15 +1905,18 @@ def main(
                 target,
                 headers,
                 output_file,
-                tools,
-                tool_choice,
-                tool_outputs,
-                response_max_output_tokens,
-                preset_input,
+                tools=tools,
+                tool_choice=tool_choice,
+                tool_outputs=tool_outputs,
+                tool_search_output_tools=tool_search_output_tools,
+                tools_after_search=tools_after_search,
+                max_output_tokens=response_max_output_tokens,
+                preset_input=preset_input,
+                manual_item_replay=manual_item_replay,
             )
     else:
         click.echo(f"Proxy:   {proxy_url}  (requests go through here for recording)")
-        server = _start_proxy(output_file, target, proxy_port)
+        proxy = _start_proxy(output_file, target, proxy_port)
         click.echo(f"Proxy ready on {proxy_url}\n")
 
         try:
@@ -1313,11 +1940,14 @@ def main(
                         target,
                         headers,
                         output_file,
-                        tools,
-                        tool_choice,
-                        tool_outputs,
-                        response_max_output_tokens,
-                        preset_input,
+                        tools=tools,
+                        tool_choice=tool_choice,
+                        tool_outputs=tool_outputs,
+                        tool_search_output_tools=tool_search_output_tools,
+                        tools_after_search=tools_after_search,
+                        max_output_tokens=response_max_output_tokens,
+                        preset_input=preset_input,
+                        manual_item_replay=manual_item_replay,
                     )
                 elif mode == "messages":
                     run_messages(
@@ -1334,7 +1964,7 @@ def main(
                 elif mode == "store_true_then_store_false":
                     run_store_true_then_store_false(client, turns, model, stream, proxy_url)
         finally:
-            _stop_proxy(server)
+            _stop_proxy(proxy)
 
     click.echo(f"\nAll turns recorded -> {output_file}")
 

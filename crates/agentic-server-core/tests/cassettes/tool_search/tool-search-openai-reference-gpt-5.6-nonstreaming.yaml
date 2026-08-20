@@ -1,0 +1,398 @@
+turns:
+- filename: t1
+  request:
+    body:
+      input: First call tool_search exactly once to find a weather tool. Do not call
+        get_weather yet.
+      max_output_tokens: 4096
+      model: gpt-5.6
+      parallel_tool_calls: false
+      store: true
+      stream: false
+      tool_choice: auto
+      tools:
+      - description: Search the client tool catalog for a tool that can satisfy the
+          request.
+        execution: client
+        parameters:
+          additionalProperties: false
+          properties:
+            query:
+              description: A concise description of the needed capability.
+              type: string
+          required:
+          - query
+          type: object
+        type: tool_search
+      - defer_loading: true
+        description: Get the current weather for a city.
+        name: get_weather
+        parameters:
+          additionalProperties: false
+          properties:
+            city:
+              type: string
+          required:
+          - city
+          type: object
+        strict: true
+        type: function
+    headers:
+      accept: '*/*'
+      authorization: Bearer ***
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      background: false
+      billing:
+        payer: developer
+      completed_at: 1787143193
+      created_at: 1787143192
+      error: null
+      frequency_penalty: 0.0
+      id: resp_0380aab4c0242690006a85a41807bc8198a038cc4a06319b77
+      incomplete_details: null
+      instructions: null
+      max_output_tokens: 4096
+      max_tool_calls: null
+      metadata: {}
+      model: gpt-5.6-sol
+      moderation: null
+      object: response
+      output:
+      - arguments:
+          query: Find a weather tool that can retrieve current weather or forecasts
+            for a specified location.
+        call_id: call_91mV1KhBtJ05ArOW1Y9Tqy9p
+        execution: client
+        id: tsc_0380aab4c0242690006a85a418cf1c8198b139d12cac6deecb
+        status: completed
+        type: tool_search_call
+      parallel_tool_calls: false
+      presence_penalty: 0.0
+      previous_response_id: null
+      prompt_cache_key: null
+      prompt_cache_retention: 24h
+      reasoning:
+        context: all_turns
+        effort: medium
+        mode: standard
+        summary: null
+      safety_identifier: null
+      service_tier: default
+      status: completed
+      store: true
+      temperature: 1.0
+      text:
+        format:
+          type: text
+        verbosity: medium
+      tool_choice: auto
+      tool_usage:
+        image_gen:
+          input_tokens: 0
+          input_tokens_details:
+            image_tokens: 0
+            text_tokens: 0
+          output_tokens: 0
+          output_tokens_details:
+            image_tokens: 0
+            text_tokens: 0
+          total_tokens: 0
+        web_search:
+          num_requests: 0
+      tools:
+      - defer_loading: true
+        description: Get the current weather for a city.
+        name: get_weather
+        output_schema: null
+        parameters:
+          additionalProperties: false
+          properties:
+            city:
+              type: string
+          required:
+          - city
+          type: object
+        strict: true
+        type: function
+      - description: Search the client tool catalog for a tool that can satisfy the
+          request.
+        execution: client
+        parameters:
+          additionalProperties: false
+          properties:
+            query:
+              description: A concise description of the needed capability.
+              type: string
+          required:
+          - query
+          type: object
+        type: tool_search
+      top_logprobs: 0
+      top_p: 0.98
+      truncation: disabled
+      usage:
+        input_tokens: 158
+        input_tokens_details:
+          cache_write_tokens: 0
+          cached_tokens: 0
+        output_tokens: 35
+        output_tokens_details:
+          reasoning_tokens: 0
+        total_tokens: 193
+      user: null
+    headers:
+      content-type: application/json
+    status_code: 200
+- filename: t2
+  request:
+    body:
+      input:
+      - call_id: call_91mV1KhBtJ05ArOW1Y9Tqy9p
+        execution: client
+        status: completed
+        tools:
+        - defer_loading: true
+          description: Get the current weather for a city.
+          name: get_weather
+          parameters:
+            additionalProperties: false
+            properties:
+              city:
+                type: string
+            required:
+            - city
+            type: object
+          strict: true
+          type: function
+        type: tool_search_output
+      - content: Now call get_weather exactly once with {"city":"Paris"}. Do not call
+          tool_search again.
+        role: user
+        type: message
+      max_output_tokens: 4096
+      model: gpt-5.6
+      parallel_tool_calls: false
+      previous_response_id: resp_0380aab4c0242690006a85a41807bc8198a038cc4a06319b77
+      store: true
+      stream: false
+      tool_choice: auto
+    headers:
+      accept: '*/*'
+      authorization: Bearer ***
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      background: false
+      billing:
+        payer: developer
+      completed_at: 1787143196
+      created_at: 1787143193
+      error: null
+      frequency_penalty: 0.0
+      id: resp_0380aab4c0242690006a85a419c6548198ac6a7f703e650341
+      incomplete_details: null
+      instructions: null
+      max_output_tokens: 4096
+      max_tool_calls: null
+      metadata: {}
+      model: gpt-5.6-sol
+      moderation: null
+      object: response
+      output:
+      - arguments: '{"city":"Paris"}'
+        call_id: call_QPFOdlc7uFi7ErezgobLOClb
+        id: fc_0380aab4c0242690006a85a41b8dc081989bfd45b69d354b77
+        name: get_weather
+        status: completed
+        type: function_call
+      parallel_tool_calls: false
+      presence_penalty: 0.0
+      previous_response_id: resp_0380aab4c0242690006a85a41807bc8198a038cc4a06319b77
+      prompt_cache_key: null
+      prompt_cache_retention: 24h
+      reasoning:
+        context: all_turns
+        effort: medium
+        mode: standard
+        summary: null
+      safety_identifier: null
+      service_tier: default
+      status: completed
+      store: true
+      temperature: 1.0
+      text:
+        format:
+          type: text
+        verbosity: medium
+      tool_choice: auto
+      tool_usage:
+        image_gen:
+          input_tokens: 0
+          input_tokens_details:
+            image_tokens: 0
+            text_tokens: 0
+          output_tokens: 0
+          output_tokens_details:
+            image_tokens: 0
+            text_tokens: 0
+          total_tokens: 0
+        web_search:
+          num_requests: 0
+      tools:
+      - description: Get the current weather for a city.
+        name: get_weather
+        output_schema: null
+        parameters:
+          additionalProperties: false
+          properties:
+            city:
+              type: string
+          required:
+          - city
+          type: object
+        strict: true
+        type: function
+      top_logprobs: 0
+      top_p: 0.98
+      truncation: disabled
+      usage:
+        input_tokens: 228
+        input_tokens_details:
+          cache_write_tokens: 0
+          cached_tokens: 0
+        output_tokens: 18
+        output_tokens_details:
+          reasoning_tokens: 0
+        total_tokens: 246
+      user: null
+    headers:
+      content-type: application/json
+    status_code: 200
+- filename: t3
+  request:
+    body:
+      input:
+      - call_id: call_QPFOdlc7uFi7ErezgobLOClb
+        output: '{"city":"Paris","condition":"clear","temperature_c":21}'
+        type: function_call_output
+      - content: Use the function output and call no more tools. Reply with exactly
+          PARIS_WEATHER_OK.
+        role: user
+        type: message
+      max_output_tokens: 4096
+      model: gpt-5.6
+      parallel_tool_calls: false
+      previous_response_id: resp_0380aab4c0242690006a85a419c6548198ac6a7f703e650341
+      store: true
+      stream: false
+      tool_choice: auto
+    headers:
+      accept: '*/*'
+      authorization: Bearer ***
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      background: false
+      billing:
+        payer: developer
+      completed_at: 1787143198
+      created_at: 1787143197
+      error: null
+      frequency_penalty: 0.0
+      id: resp_0380aab4c0242690006a85a41cdc948198b7bbbdc8ee5b8dbc
+      incomplete_details: null
+      instructions: null
+      max_output_tokens: 4096
+      max_tool_calls: null
+      metadata: {}
+      model: gpt-5.6-sol
+      moderation: null
+      object: response
+      output:
+      - content:
+        - annotations: []
+          logprobs: []
+          text: PARIS_WEATHER_OK
+          type: output_text
+        id: msg_0380aab4c0242690006a85a41dbdf08198acde9c13de42635a
+        phase: final_answer
+        role: assistant
+        status: completed
+        type: message
+      parallel_tool_calls: false
+      presence_penalty: 0.0
+      previous_response_id: resp_0380aab4c0242690006a85a419c6548198ac6a7f703e650341
+      prompt_cache_key: null
+      prompt_cache_retention: 24h
+      reasoning:
+        context: all_turns
+        effort: medium
+        mode: standard
+        summary: null
+      safety_identifier: null
+      service_tier: default
+      status: completed
+      store: true
+      temperature: 1.0
+      text:
+        format:
+          type: text
+        verbosity: medium
+      tool_choice: auto
+      tool_usage:
+        image_gen:
+          input_tokens: 0
+          input_tokens_details:
+            image_tokens: 0
+            text_tokens: 0
+          output_tokens: 0
+          output_tokens_details:
+            image_tokens: 0
+            text_tokens: 0
+          total_tokens: 0
+        web_search:
+          num_requests: 0
+      tools:
+      - description: Get the current weather for a city.
+        name: get_weather
+        output_schema: null
+        parameters:
+          additionalProperties: false
+          properties:
+            city:
+              type: string
+          required:
+          - city
+          type: object
+        strict: true
+        type: function
+      top_logprobs: 0
+      top_p: 0.98
+      truncation: disabled
+      usage:
+        input_tokens: 294
+        input_tokens_details:
+          cache_write_tokens: 0
+          cached_tokens: 0
+        output_tokens: 9
+        output_tokens_details:
+          reasoning_tokens: 0
+        total_tokens: 303
+      user: null
+    headers:
+      content-type: application/json
+    status_code: 200
