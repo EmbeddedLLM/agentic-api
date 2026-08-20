@@ -361,7 +361,7 @@ pub async fn require_oidc(
         .headers()
         .get_all("x-api-key")
         .iter()
-        .any(|value| value.to_str().ok().is_some_and(|value| value.trim() == token));
+        .any(|value| value.to_str().is_ok_and(|value| value.trim() == token));
 
     match authenticator.authenticate(token).await {
         Ok(principal) => {
