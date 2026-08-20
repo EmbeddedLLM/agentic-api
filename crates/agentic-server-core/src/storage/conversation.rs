@@ -3,6 +3,7 @@
 use std::convert::TryFrom;
 use std::sync::Arc;
 
+use super::backend::DatabaseBackend;
 use super::models::{conversation, item, response};
 use super::pool::DbPool;
 use super::types::{
@@ -89,7 +90,24 @@ impl ConversationStore {
     /// Returns an error if a stored item is missing its sequence number or if the database query fails.
     pub async fn rehydrate_snapshot(&self, conversation_id: &str) -> StoreResult<ConversationSnapshot> {
         let pool = self.pool()?;
-        let rows = item::get_items_by_conversation(pool, conversation_id).await?;
+        let mut tx = pool.begin().await?;
+        if DatabaseBackend::from_connection(tx.as_mut()) == DatabaseBackend::Postgres {
+            sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+                .execute(&mut *tx)
+                .await?;
+        }
+        let rows = item::get_items_by_conversation_in_tx(&mut tx, conversation_id).await?;
+        let latest_item_id = rows.last().map(|row| row.id.as_str());
+        let conversation_turns = response::get_conversation_turns_in_tx(&mut tx, conversation_id).await?;
+        let latest_response = latest_item_id.and_then(|latest_item_id| {
+            conversation_turns.into_iter().find(|response| {
+                response
+                    .history_item_ids_vec()
+                    .last()
+                    .is_some_and(|item_id| item_id == latest_item_id)
+            })
+        });
+        tx.commit().await?;
 
         let mut last_sequence = None;
         for row in &rows {
@@ -102,6 +120,7 @@ impl ConversationStore {
         Ok(ConversationSnapshot {
             items: rows.into_iter().filter_map(|row| row.as_inout()).collect(),
             version: ConversationVersion::from_last_sequence(last_sequence),
+            latest_response_metadata: latest_response.and_then(|row| row.metadata_as()),
         })
     }
 

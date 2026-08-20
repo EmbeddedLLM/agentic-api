@@ -13,9 +13,7 @@ use tracing::error;
 
 #[must_use]
 pub(crate) fn should_persist(ctx: &RequestContext) -> bool {
-    ctx.original_request.store
-        || ctx.original_request.previous_response_id.is_some()
-        || ctx.original_request.conversation_id.is_some()
+    ctx.original_request.store || ctx.original_request.conversation_id.is_some()
 }
 
 pub(crate) async fn persist_if_needed(

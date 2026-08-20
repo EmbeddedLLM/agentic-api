@@ -1,4 +1,5 @@
 use crate::executor::error::{ExecutorError, ExecutorResult};
+use crate::executor::prepare::prepare_tool_search;
 use crate::executor::rehydrate::rehydrate_conversation;
 use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::executor::upstream::fetch_blocking_payload;
@@ -87,6 +88,8 @@ fn item_has_meaningful_context(item: &InputItem) -> bool {
         },
         InputItem::FunctionCall(call) => !call.name.trim().is_empty() || !call.arguments.trim().is_empty(),
         InputItem::FunctionCallOutput(output) => output.output.has_content(),
+        InputItem::ToolSearchCall(call) => !call.call_id.trim().is_empty() || !call.arguments.is_empty(),
+        InputItem::ToolSearchOutput(output) => !output.call_id.trim().is_empty() || !output.tools.is_empty(),
         InputItem::CustomToolCall(call) => !call.name.trim().is_empty() || !call.input.trim().is_empty(),
         InputItem::CustomToolCallOutput(output) => output.output.has_content(),
         InputItem::Reasoning(reasoning) => {
@@ -195,12 +198,15 @@ pub(crate) async fn compact_items(
     let ctx = RequestContext {
         original_request,
         enriched_request,
+        tool_search_state: None,
+        tool_search_private_request: None,
+        tool_search_loaded_tools: None,
         new_input_items: Vec::new(),
         response_id: uuid7_str("resp_"),
         conversation_id: None,
         conversation_version: None,
     };
-    let response = fetch_blocking_payload(&ctx, exec_ctx, auth).await?;
+    let response = fetch_blocking_payload(&ctx, exec_ctx, auth, &crate::tool::ToolRegistry::default()).await?;
     let summary = completed_summary_text(&response)?;
 
     Ok((
@@ -233,7 +239,7 @@ pub(crate) async fn maybe_compact_context(
     let Some(threshold) = threshold else {
         return Ok(None);
     };
-    let estimated_tokens = estimate_input_tokens(&ctx.enriched_request.input);
+    let estimated_tokens = estimate_input_tokens(&ctx.inference_request().input);
     if estimated_tokens <= threshold {
         return Ok(None);
     }
@@ -245,8 +251,15 @@ pub(crate) async fn maybe_compact_context(
     );
     let model = ctx.enriched_request.model.clone();
     let instructions = ctx.enriched_request.instructions.clone();
-    let input = std::mem::replace(&mut ctx.enriched_request.input, ResponsesInput::Items(Vec::new()));
+    let has_private_request = ctx.tool_search_private_request.is_some();
+    let input = std::mem::replace(
+        &mut ctx.inference_request_mut().input,
+        ResponsesInput::Items(Vec::new()),
+    );
     let (compacted, usage) = compact_items(&model, input, instructions.as_deref(), exec_ctx, auth).await?;
+    if has_private_request {
+        ctx.inference_request_mut().input = ResponsesInput::Items(compacted.clone());
+    }
     ctx.enriched_request.input = ResponsesInput::Items(compacted.clone());
     ctx.new_input_items = compacted;
     Ok(Some(usage))
@@ -276,9 +289,13 @@ pub async fn compact_response(
     );
     payload.previous_response_id = request.previous_response_id;
     let mut ctx = rehydrate_conversation(payload, exec_ctx).await?;
+    prepare_tool_search(&mut ctx)?;
     let model = ctx.enriched_request.model.clone();
     let instructions = ctx.enriched_request.instructions.clone();
-    let input = std::mem::replace(&mut ctx.enriched_request.input, ResponsesInput::Items(Vec::new()));
+    let input = std::mem::replace(
+        &mut ctx.inference_request_mut().input,
+        ResponsesInput::Items(Vec::new()),
+    );
     let (output, usage) = compact_items(&model, input, instructions.as_deref(), exec_ctx, auth).await?;
 
     let response_id = ctx.response_id.clone();
@@ -546,6 +563,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn compaction_prepares_tool_search_before_summarization() {
+        let (exec_ctx, server) = mock_execution_context(ResponseStore::disabled()).await;
+        let request = serde_json::from_value(serde_json::json!({
+            "model": "test-model",
+            "input": [{
+                "type": "tool_search_call",
+                "id": "tsc_1",
+                "call_id": "call_search_1",
+                "arguments": {"query": "weather"}
+            }, {
+                "type": "tool_search_output",
+                "call_id": "call_search_1",
+                "tools": []
+            }]
+        }))
+        .expect("valid compact request");
+
+        let compacted = compact_response(request, &exec_ctx, None)
+            .await
+            .expect("compaction prepares and summarizes public search history");
+
+        assert!(matches!(compacted.output.last(), Some(InputItem::Compaction(_))));
+        assert!(
+            compacted
+                .output
+                .iter()
+                .all(|item| !matches!(item, InputItem::ToolSearchCall(_) | InputItem::ToolSearchOutput(_)))
+        );
+        server.abort();
+    }
+
+    #[tokio::test]
     async fn compaction_persists_a_reusable_response_checkpoint() {
         let pool = create_pool_with_schema(Some("sqlite::memory:"))
             .await
@@ -582,6 +631,7 @@ mod tests {
                     model: "test-model".to_owned(),
                     previous_response_id: None,
                     effective_tools: None,
+                    tool_search_loaded_tools: None,
                     effective_tool_choice: crate::ToolChoice::Auto,
                     effective_instructions: None,
                 },

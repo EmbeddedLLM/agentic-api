@@ -28,6 +28,19 @@ impl ResponsesTool {
                     "function tool config serialization failed".to_owned(),
                 )),
             ),
+            Self::ToolSearch(param) => {
+                if param.description.trim().is_empty() {
+                    return Err(ToolError::Config(
+                        "tool_search description must not be empty or whitespace".to_owned(),
+                    ));
+                }
+                if param.parameters.get("type").and_then(serde_json::Value::as_str) != Some("object") {
+                    return Err(ToolError::Config(
+                        "tool_search parameters must declare top-level JSON Schema type 'object'".to_owned(),
+                    ));
+                }
+                Ok(())
+            }
             Self::Mcp(param) => serialize_to_value_or_custom_default(
                 param,
                 "MCP tool config serialization failed",
@@ -57,6 +70,7 @@ impl ResponsesTool {
     pub fn tool_type(&self) -> Option<ToolType> {
         match self {
             Self::Function(_) => Some(ToolType::Function),
+            Self::ToolSearch(_) => Some(ToolType::ToolSearch),
             Self::Mcp(_) => Some(ToolType::Mcp),
             Self::WebSearch(_) => Some(ToolType::WebSearch),
             Self::FileSearch(_) => Some(ToolType::FileSearch),
@@ -97,6 +111,10 @@ impl ResponsesTool {
                 |param| FunctionHandler.normalize(&param).into_iter().take(1).collect(),
                 vec![],
             ),
+            Self::ToolSearch(_) => {
+                tracing::debug!("tool_search declaration skipped until request-scoped state preparation");
+                vec![]
+            }
             Self::Mcp(p) => serialize_to_value_or_custom_default(
                 p,
                 "MCP tool config serialization failed",

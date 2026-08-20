@@ -8,7 +8,7 @@ use super::super::models::Response as StorageDbResponse;
 use super::errors::StorageError;
 use crate::types::io::ToolChoice;
 use crate::types::tools::ResponsesTool;
-use crate::utils::common::serialize_to_string;
+use crate::utils::common::{serialize_to_string, serialize_to_value};
 
 /// Response metadata with effective configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -16,8 +16,22 @@ pub struct ResponseMetadata {
     pub model: String,
     pub previous_response_id: Option<String>,
     pub effective_tools: Option<Vec<ResponsesTool>>,
+    /// Public definitions whose deferred availability was resolved by tool search.
+    ///
+    /// This is separate from `effective_tools` so public `defer_loading` stays
+    /// unchanged while compaction may remove the call/output pair that loaded it.
+    pub tool_search_loaded_tools: Option<Vec<ResponsesTool>>,
     pub effective_tool_choice: ToolChoice,
     pub effective_instructions: Option<String>,
+}
+
+impl PartialEq for ResponseMetadata {
+    fn eq(&self, other: &Self) -> bool {
+        // Tool wire models intentionally do not expose a broad `PartialEq`
+        // contract. Metadata equality follows their complete serialized public
+        // representation so `ConversationSnapshot` retains its existing API.
+        serialize_to_value(self).ok() == serialize_to_value(other).ok()
+    }
 }
 
 /// Domain entity for a stored LLM response.
@@ -59,6 +73,11 @@ impl TryFrom<&ResponseMetadata> for String {
     fn try_from(metadata: &ResponseMetadata) -> Result<Self, Self::Error> {
         let mut persisted = metadata.clone();
         if let Some(tools) = persisted.effective_tools.as_mut() {
+            for tool in tools {
+                tool.sanitize_for_persistence();
+            }
+        }
+        if let Some(tools) = persisted.tool_search_loaded_tools.as_mut() {
             for tool in tools {
                 tool.sanitize_for_persistence();
             }
@@ -117,6 +136,7 @@ mod tests {
             model: "gpt-4".to_string(),
             previous_response_id: Some("resp_1".to_string()),
             effective_tools: None,
+            tool_search_loaded_tools: None,
             effective_tool_choice: ToolChoice::Auto,
             effective_instructions: Some("be helpful".to_string()),
         };
@@ -132,7 +152,9 @@ mod tests {
         let mut tool = serde_json::from_value(serde_json::json!({
             "type": "mcp",
             "server_label": "counter",
+            "server_description": "Counter tools",
             "server_url": "https://mcp.example.com/mcp",
+            "defer_loading": true,
             "headers": {"X-API-Key": "secret"},
             "authorization": "bearer-secret",
             "require_approval": "never"
@@ -154,7 +176,8 @@ mod tests {
                 .expect("discovered MCP tool"),
             });
         let metadata = ResponseMetadata {
-            effective_tools: Some(vec![tool]),
+            effective_tools: Some(vec![tool.clone()]),
+            tool_search_loaded_tools: Some(vec![tool]),
             ..ResponseMetadata::default()
         };
 
@@ -175,6 +198,16 @@ mod tests {
 
         assert!(tool.headers.is_none());
         assert!(tool.authorization.is_none());
+        assert_eq!(tool.server_description.as_deref(), Some("Counter tools"));
+        assert_eq!(tool.defer_loading, Some(true));
+
+        let loaded = persisted.tool_search_loaded_tools.expect("persisted loaded tools");
+        let ResponsesTool::Mcp(loaded) = &loaded[0] else {
+            panic!("expected loaded MCP tool");
+        };
+        assert!(loaded.headers.is_none());
+        assert!(loaded.authorization.is_none());
+        assert!(loaded.discovered_tools.is_empty());
     }
 
     #[test]
@@ -183,6 +216,7 @@ mod tests {
         assert_eq!(metadata.model, "");
         assert!(metadata.previous_response_id.is_none());
         assert!(metadata.effective_tools.is_none());
+        assert!(metadata.tool_search_loaded_tools.is_none());
         assert!(metadata.effective_instructions.is_none());
     }
 

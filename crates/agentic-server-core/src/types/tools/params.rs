@@ -80,6 +80,8 @@ impl std::fmt::Display for NonEmptyToolName {
 pub enum ResponsesTool {
     #[serde(rename = "function")]
     Function(FunctionToolParam),
+    #[serde(rename = "tool_search")]
+    ToolSearch(ToolSearchToolParam),
     #[serde(rename = "mcp")]
     Mcp(McpToolParam),
     #[serde(
@@ -143,10 +145,39 @@ pub struct CustomToolParam {
     pub extra: HashMap<String, Value>,
 }
 
+/// Only client-executed tool search is part of the public gateway contract.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolSearchExecution {
+    #[default]
+    Client,
+}
+
+/// Terminal tool-search calls and outputs are accepted only after completion.
+/// Streaming `in_progress` state belongs to event lifecycle payloads rather
+/// than this persisted public-item status.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolSearchStatus {
+    #[default]
+    Completed,
+}
+
+/// Parameters for a client-executed tool-search declaration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ToolSearchToolParam {
+    pub execution: ToolSearchExecution,
+    pub description: String,
+    pub parameters: serde_json::Map<String, Value>,
+}
+
 /// Parameters for a gateway MCP built-in tool declaration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpToolParam {
     pub server_label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -159,6 +190,8 @@ pub struct McpToolParam {
     pub allowed_tools: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub require_approval: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub defer_loading: Option<bool>,
     /// Request-scoped `tools/list` results used by MCP normalization. This
     /// field is populated internally and ignored on the public request wire.
     #[serde(
@@ -257,6 +290,7 @@ impl ResponsesTool {
     pub fn original_type(&self) -> Option<&str> {
         match self {
             Self::Function(_) => Some("function"),
+            Self::ToolSearch(_) => Some("tool_search"),
             Self::Mcp(_) => Some("mcp"),
             Self::WebSearch(_) => Some("web_search_preview"),
             Self::FileSearch(_) => Some("file_search"),
@@ -354,7 +388,9 @@ mod tests {
         let mut tool = serde_json::from_value::<ResponsesTool>(serde_json::json!({
             "type": "mcp",
             "server_label": "repo",
-            "server_url": "https://mcp.example.test/mcp",
+            "server_description": "Repository tools",
+            "server_url": "https://mcp.example.test/mcp?continuation_token=query-secret",
+            "defer_loading": true,
             "headers": {
                 "Authorization": "Bearer header-secret",
                 "X-Request-ID": "request-1"
@@ -386,9 +422,97 @@ mod tests {
         assert!(persisted.get("authorization").is_none());
         assert!(persisted.get("_agentic_discovered_tools").is_none());
         assert_eq!(persisted["server_label"], "repo");
-        assert_eq!(persisted["server_url"], "https://mcp.example.test/mcp");
+        assert_eq!(persisted["server_description"], "Repository tools");
+        assert_eq!(
+            persisted["server_url"], "https://mcp.example.test/mcp?continuation_token=query-secret",
+            "persistence preserves the complete endpoint for continuation; model-visible catalogs and public failures must redact it"
+        );
+        assert_eq!(persisted["defer_loading"], true);
         assert_eq!(persisted["allowed_tools"], serde_json::json!(["read_file"]));
         assert_eq!(persisted["require_approval"], "never");
+    }
+
+    #[test]
+    fn responses_tool_search_declaration_round_trips_exactly() {
+        let declaration = serde_json::json!({
+            "type": "tool_search",
+            "execution": "client",
+            "description": "Find a tool for the requested task",
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"]
+            }
+        });
+
+        let tool: ResponsesTool = serde_json::from_value(declaration.clone()).expect("valid tool-search declaration");
+
+        assert_eq!(tool.original_type(), Some("tool_search"));
+        assert_eq!(tool.tool_type(), Some(crate::tool::ToolType::ToolSearch));
+        assert!(
+            !tool.is_gateway_owned(),
+            "client-executed tool search must bypass gateway dispatch"
+        );
+        assert!(
+            tool.to_function_tools().is_empty(),
+            "client-executed tool search must bypass generic upstream normalization"
+        );
+        assert_eq!(serde_json::to_value(tool).expect("tool serializes"), declaration);
+    }
+
+    #[test]
+    fn responses_tool_search_declaration_rejects_invalid_wire_shapes() {
+        for declaration in [
+            serde_json::json!({
+                "type": "tool_search",
+                "description": "Missing execution",
+                "parameters": {"type": "object"}
+            }),
+            serde_json::json!({
+                "type": "tool_search",
+                "execution": "server",
+                "description": "Hosted execution is excluded",
+                "parameters": {"type": "object"}
+            }),
+            serde_json::json!({
+                "type": "tool_search",
+                "execution": "client",
+                "description": "Missing parameters"
+            }),
+            serde_json::json!({
+                "type": "tool_search",
+                "execution": "client",
+                "description": "Parameters must be an object",
+                "parameters": "not an object"
+            }),
+        ] {
+            assert!(
+                serde_json::from_value::<ResponsesTool>(declaration).is_err(),
+                "invalid tool-search wire shape must not fall back to an unknown tool"
+            );
+        }
+    }
+
+    #[test]
+    fn responses_tool_search_declaration_rejects_bad_description_or_schema() {
+        for (description, parameters) in [
+            ("   ", serde_json::json!({"type": "object"})),
+            ("Find a tool", serde_json::json!({})),
+            ("Find a tool", serde_json::json!({"type": "array"})),
+        ] {
+            let tool: ResponsesTool = serde_json::from_value(serde_json::json!({
+                "type": "tool_search",
+                "execution": "client",
+                "description": description,
+                "parameters": parameters
+            }))
+            .expect("structurally valid declaration");
+
+            assert!(
+                tool.validate().is_err(),
+                "invalid declaration semantics must fail validation"
+            );
+        }
     }
 
     #[test]

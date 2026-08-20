@@ -67,6 +67,23 @@ pub async fn get(pool: &DbPool, id: &str) -> DbResult<Option<Response>> {
         .await
 }
 
+/// Get responses written by conversation turns within an existing transaction.
+///
+/// Responses branched through `previous_response_id` retain the originating
+/// conversation ID for response-chain rehydration, but are not conversation turns.
+///
+/// # Errors
+/// Returns `DbResult::Err` if the database query fails.
+pub async fn get_conversation_turns_in_tx(
+    tx: &mut DbTransaction<'_>,
+    conversation_id: &str,
+) -> DbResult<Vec<Response>> {
+    sqlx::query_as::<_, Response>("SELECT * FROM responses WHERE conversation_id = $1 AND previous_response_id IS NULL")
+        .bind(conversation_id)
+        .fetch_all(&mut **tx)
+        .await
+}
+
 impl Response {
     /// Deserialize `history_item_ids` from JSON string to Vec<String>.
     #[must_use]

@@ -15,7 +15,7 @@ use crate::executor::inference::{call_inference, fetch_response_json};
 use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::tool::ToolRegistry;
 use crate::types::request_response::ResponsePayload;
-use crate::utils::common::serialize_to_string;
+use crate::utils::common::{deserialize_from_str, serialize_to_string, serialize_to_value};
 
 const MAX_DEFERRED_STREAM_BYTES: usize = 256 * 1024;
 
@@ -36,15 +36,17 @@ pub(super) async fn fetch_blocking_payload(
     ctx: &RequestContext,
     exec_ctx: &ExecutionContext,
     auth: Option<&str>,
+    registry: &ToolRegistry,
 ) -> ExecutorResult<ResponsePayload> {
     let url = exec_ctx.responses_url();
     // Non-streaming request: stream=false -> full JSON body -> from_json.
-    let upstream_request = ctx.enriched_request.to_upstream_request(false)?;
+    let upstream_request = ctx.inference_request().to_upstream_request(false)?;
     let upstream_json = serialize_to_string(&upstream_request).map_err(ExecutorError::JsonError)?;
 
     let body = fetch_response_json(upstream_json, &url, &exec_ctx.client, auth).await?;
-
-    let acc = ResponseAccumulator::from_json(&body, ctx.conversation_id.as_deref())?;
+    let mut raw: Value = deserialize_from_str(&body).map_err(ExecutorError::JsonError)?;
+    registry.normalize_blocking_response(&mut raw)?;
+    let acc = ResponseAccumulator::from_value(raw, ctx.conversation_id.as_deref())?;
     let mut payload = acc.finalize(
         &ctx.enriched_request.model,
         ctx.original_request.previous_response_id.as_deref(),
@@ -67,7 +69,7 @@ pub(super) async fn fetch_stream_payload(
     output_offset: usize,
 ) -> ExecutorResult<StreamPayload> {
     let url = exec_ctx.responses_url();
-    let upstream_request = ctx.enriched_request.to_upstream_request(true)?;
+    let upstream_request = ctx.inference_request().to_upstream_request(true)?;
     let upstream_json = serialize_to_string(&upstream_request).map_err(ExecutorError::JsonError)?;
     let mut line_stream = Box::pin(call_inference(
         upstream_json,
@@ -77,7 +79,8 @@ pub(super) async fn fetch_stream_payload(
         exec_ctx.streaming_timeout,
     ));
     let mut acc = ResponseAccumulator::new(ctx.response_id.clone(), ctx.conversation_id.clone());
-    let mut function_sse = FunctionSseTranslator::new(registry.tool_type_map());
+    let mut function_sse = FunctionSseTranslator::new(registry.tool_type_map())
+        .with_withheld_function_names(registry.withheld_function_names());
     let mut defer_from_output_index = None;
     let mut deferred_events = Vec::new();
     let mut deferred_bytes = 0;
@@ -129,12 +132,29 @@ pub(super) async fn fetch_stream_payload(
             }
         }
     }
+    let unfinished_search_item_ids = function_sse
+        .unfinished_search_item_ids()
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<std::collections::HashSet<_>>();
+    if stream.is_some() {
+        function_sse.finish()?;
+    }
     acc.finish_stream();
     let mut payload = acc.finalize(
         &ctx.enriched_request.model,
         ctx.original_request.previous_response_id.as_deref(),
         ctx.original_request.instructions.as_deref(),
     );
+    if matches!(payload.status.as_str(), "error" | "failed" | "incomplete") {
+        payload.output.retain(|item| {
+            !matches!(
+                item,
+                crate::types::io::OutputItem::FunctionCall(call)
+                    if unfinished_search_item_ids.contains(&call.id)
+            )
+        });
+    }
     ctx.inject_ids(&mut payload);
     Ok(StreamPayload {
         payload,
@@ -202,12 +222,30 @@ fn should_defer_stream_event(frame: &EventFrame, defer_from_output_index: Option
 
 fn emit_stream_frame(frame: &mut EventFrame, emit_ctx: &mut StreamEmitContext<'_>) -> ExecutorResult<bool> {
     apply_context_response_ids(&mut frame.wire, emit_ctx.request);
+    restore_public_tool_search_response_tools(&mut frame.wire, emit_ctx.request)?;
     emit_ctx.registry.restore_stream_event_wire(&mut frame.wire);
     let emitted = emit_ctx.accumulator.process_event(frame, emit_ctx.output_offset);
     if emitted {
         emit_sse_frame(emit_ctx.sender, frame)?;
     }
     Ok(emitted)
+}
+
+fn restore_public_tool_search_response_tools(wire: &mut WireEvent, request: &RequestContext) -> ExecutorResult<()> {
+    let Some(response) = wire.rest.get_mut("response").and_then(Value::as_object_mut) else {
+        return Ok(());
+    };
+    if !response.contains_key("tools") {
+        return Ok(());
+    }
+    let Some(tools) = request.tool_search_response_tools() else {
+        return Ok(());
+    };
+    response.insert(
+        "tools".to_owned(),
+        serialize_to_value(&tools).map_err(ExecutorError::JsonError)?,
+    );
+    Ok(())
 }
 
 fn emit_or_defer_stream_frame(
@@ -326,6 +364,9 @@ mod tests {
         RequestContext {
             original_request: request.clone(),
             enriched_request: request,
+            tool_search_state: None,
+            tool_search_private_request: None,
+            tool_search_loaded_tools: None,
             new_input_items: Vec::new(),
             response_id: "resp_test".to_owned(),
             conversation_id: None,

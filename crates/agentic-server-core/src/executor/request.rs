@@ -6,12 +6,14 @@ use crate::error::Error;
 use crate::executor::modes::{ConversationHandler, ResponseHandler};
 use crate::storage::backend::redact_database_urls;
 use crate::storage::{
-    ConversationStore, ConversationVersion, DatabaseBackend, ResponseStore, create_pool_with_schema_and_configs,
+    ConversationStore, ConversationVersion, DatabaseBackend, ResponseMetadata, ResponseStore,
+    create_pool_with_schema_and_configs,
 };
-use crate::tool::{GatewayExecutor, GatewayExecutors};
+use crate::tool::{GatewayExecutor, GatewayExecutors, ToolSearchState};
 use crate::types::io::InputItem;
 use crate::types::messages::GatewayToolMap;
 use crate::types::request_response::{RequestPayload, ResponsePayload};
+use crate::types::tools::ResponsesTool;
 
 /// Env var configuring client-tool → gateway-executor aliases for `/v1/messages`
 /// (e.g. `WebSearch=web_search`). Empty/unset means no aliases — client
@@ -26,6 +28,16 @@ pub struct RequestContext {
     /// Enriched request with rehydrated conversation history injected into `.input`.
     /// This is the request forwarded to the LLM.
     pub enriched_request: RequestPayload,
+    /// Pure request-scoped tool-search views prepared after full rehydration.
+    /// Public state remains separate from the private model request.
+    pub tool_search_state: Option<ToolSearchState>,
+    /// Private inference request prepared once for active tool search.
+    /// Blocking and streaming execution consume this exact instance while
+    /// `enriched_request` remains the public representation.
+    pub tool_search_private_request: Option<Box<RequestPayload>>,
+    /// Public definitions known to have been loaded before compaction removed
+    /// their search call/output pair.
+    pub tool_search_loaded_tools: Option<Vec<crate::types::tools::ResponsesTool>>,
     /// Only the new input items submitted by the client this turn (used for persistence).
     pub new_input_items: Vec<InputItem>,
     /// Our generated response ID (uuid7 with "resp_" prefix).
@@ -38,6 +50,52 @@ pub struct RequestContext {
 }
 
 impl RequestContext {
+    #[must_use]
+    pub(crate) fn inference_request(&self) -> &RequestPayload {
+        self.tool_search_private_request
+            .as_deref()
+            .unwrap_or(&self.enriched_request)
+    }
+
+    #[must_use]
+    pub(crate) fn inference_request_mut(&mut self) -> &mut RequestPayload {
+        self.tool_search_private_request
+            .as_deref_mut()
+            .unwrap_or(&mut self.enriched_request)
+    }
+
+    /// Construct the effective public metadata shared by response and
+    /// conversation persistence.
+    #[must_use]
+    pub(crate) fn response_metadata(&self) -> ResponseMetadata {
+        let active_search = self.tool_search_state.as_ref().filter(|state| state.is_active());
+        ResponseMetadata {
+            model: self.enriched_request.model.clone(),
+            previous_response_id: self.original_request.previous_response_id.clone(),
+            effective_tools: active_search
+                .and_then(|state| state.public_effective_tools().map(<[_]>::to_vec))
+                .or_else(|| self.enriched_request.tools.clone()),
+            tool_search_loaded_tools: active_search.map(|state| state.loaded_public_tools().to_vec()),
+            effective_tool_choice: self.enriched_request.tool_choice.clone().unwrap_or_default(),
+            effective_instructions: self.enriched_request.instructions.clone(),
+        }
+    }
+
+    /// Return the public effective declarations for an active tool-search
+    /// response envelope without request-scoped MCP credentials or discovery
+    /// state. `Some([])` distinguishes an active declaration-free replay from
+    /// an inactive request, so private upstream declarations can never pass
+    /// through unchanged.
+    #[must_use]
+    pub(crate) fn tool_search_response_tools(&self) -> Option<Vec<ResponsesTool>> {
+        let state = self.tool_search_state.as_ref().filter(|state| state.is_active())?;
+        let mut tools = state.public_effective_tools().unwrap_or_default().to_vec();
+        for tool in &mut tools {
+            tool.sanitize_for_persistence();
+        }
+        Some(tools)
+    }
+
     /// Inject our `response_id` and `conversation_id` into a `ResponsePayload`
     /// received from the LLM (which carries the upstream's own IDs).
     pub(crate) fn inject_ids(&self, payload: &mut ResponsePayload) {
@@ -204,9 +262,75 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use super::{ExecutionContext, database_open_error};
+    use super::{ExecutionContext, RequestContext, database_open_error};
     use crate::executor::{ConversationHandler, ResponseHandler};
     use crate::storage::{ConversationStore, DatabaseBackend, ResponseStore, create_pool_with_schema};
+    use crate::tool::ToolSearchState;
+    use crate::types::request_response::RequestPayload;
+    use crate::types::tools::{McpDiscoveredToolParam, ResponsesTool};
+
+    #[test]
+    fn tool_search_response_tools_restore_public_declarations_without_mcp_secrets() {
+        let mut request: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test",
+            "input": "find weather",
+            "parallel_tool_calls": false,
+            "tools": [
+                {
+                    "type": "tool_search",
+                    "execution": "client",
+                    "description": "Search tools",
+                    "parameters": {"type": "object"}
+                },
+                {
+                    "type": "mcp",
+                    "server_label": "weather",
+                    "server_description": "Weather tools",
+                    "server_url": "https://mcp.example.test/mcp",
+                    "headers": {"Authorization": "Bearer header-secret"},
+                    "authorization": "field-secret",
+                    "defer_loading": true
+                }
+            ]
+        }))
+        .expect("request shape");
+        let ResponsesTool::Mcp(mcp) = &mut request.tools.as_mut().expect("tools")[1] else {
+            panic!("expected MCP declaration")
+        };
+        mcp.discovered_tools.push(McpDiscoveredToolParam {
+            server_label: "weather".to_owned(),
+            tool_name: "forecast".to_owned(),
+            internal_name: "mcp__weather__forecast".to_owned(),
+            tool: serde_json::from_value(serde_json::json!({
+                "name": "forecast",
+                "inputSchema": {"type": "object"}
+            }))
+            .expect("discovered MCP tool"),
+        });
+        let state = ToolSearchState::build(&request).expect("tool-search state");
+        let context = RequestContext {
+            original_request: request.clone(),
+            enriched_request: request,
+            tool_search_state: Some(state),
+            tool_search_private_request: None,
+            tool_search_loaded_tools: None,
+            new_input_items: Vec::new(),
+            response_id: "resp_test".to_owned(),
+            conversation_id: None,
+            conversation_version: None,
+        };
+
+        let tools =
+            serde_json::to_value(context.tool_search_response_tools().expect("active tools")).expect("tools serialize");
+        assert_eq!(tools[1]["server_description"], "Weather tools");
+        assert_eq!(tools[1]["defer_loading"], true);
+        assert!(tools[1].get("headers").is_none());
+        assert!(tools[1].get("authorization").is_none());
+        assert!(tools[1].get("_agentic_discovered_tools").is_none());
+        for secret in ["header-secret", "field-secret", "mcp__weather__forecast"] {
+            assert!(!tools.to_string().contains(secret));
+        }
+    }
 
     #[test]
     fn database_errors_are_actionable_without_exposing_credentials() {

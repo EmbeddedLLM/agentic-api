@@ -24,12 +24,13 @@ use crate::events::EventFrame;
 use crate::executor::error::ExecutorResult;
 use crate::executor::inference::DONE_MARKER;
 use crate::executor::persist::persist_if_needed;
-use crate::executor::rehydrate::rehydrate_conversation;
+use crate::executor::rehydrate::rehydrate_for_execution;
 use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::executor::upstream::{emit_deferred_stream_events, fetch_blocking_payload, fetch_stream_payload};
 use crate::tool::{ToolRegistry, mcp};
 use crate::types::io::{OutputItem, ResponseUsage, ToolChoice};
 use crate::types::request_response::{IncompleteDetails, RequestPayload, ResponsePayload};
+use crate::utils::common::utcnow_str;
 
 pub use crate::executor::inference::BoxStream;
 
@@ -100,11 +101,7 @@ async fn run_until_gateway_tools_complete(
     stream_upstream: bool,
     mut stream: Option<(&mut GatewayStreamAccumulator, &mpsc::UnboundedSender<StreamEvent>)>,
 ) -> ExecutorResult<(ResponsePayload, RequestContext)> {
-    let mut executors = exec_ctx.gateway_executors.request_scoped();
-    let registry: ToolRegistry = match ctx.enriched_request.tools.as_mut() {
-        Some(tools) => ToolRegistry::build_with_handlers(tools, &mut executors).await?,
-        None => ToolRegistry::default(),
-    };
+    let registry = build_request_tool_registry(&mut ctx, exec_ctx).await?;
     let mut combined_output: Vec<OutputItem> = registry
         .mcp_list_tools_items()
         .iter()
@@ -130,22 +127,20 @@ async fn run_until_gateway_tools_complete(
             .await?;
             (stream_payload.payload, stream_payload.deferred_events)
         } else {
-            (fetch_blocking_payload(&ctx, exec_ctx, auth).await?, Vec::new())
+            (
+                fetch_blocking_payload(&ctx, exec_ctx, auth, &registry).await?,
+                Vec::new(),
+            )
         };
-        registry.restore_final_payload_output(&mut payload.output);
+        registry.restore_final_payload_output(&mut payload.output)?;
         accumulate_usage(&mut combined_usage, payload.usage.take());
         let current_output = std::mem::take(&mut payload.output);
-        for item in &current_output {
-            if let OutputItem::CustomToolCall(call) = item {
-                debug!(
-                    response_id = %ctx.response_id,
-                    call_id = %call.call_id,
-                    name = %call.name,
-                    input_bytes = call.input.len(),
-                    "custom tool call requires client execution"
-                );
-            }
+        if matches!(payload.status.as_str(), "error" | "failed" | "incomplete") {
+            combined_output.extend(current_output);
+            finalize_loop(&mut payload, combined_output, combined_usage, &ctx);
+            return Ok((payload, ctx));
         }
+        log_custom_tool_calls(&current_output, &ctx.response_id);
         let has_client_owned = has_client_owned_calls(&current_output, &registry);
         let gateway_results = execute_and_emit_round_output_calls(
             &current_output,
@@ -197,8 +192,8 @@ async fn run_until_gateway_tools_complete(
             }
             // Gateway tools ran and rounds remain; feed outputs back and loop.
             LoopDecision::Continue => {
-                ctx.enriched_request.tool_choice = Some(ToolChoice::Auto);
-                append_output_items_to_input(&mut ctx.enriched_request.input, &current_output);
+                ctx.inference_request_mut().tool_choice = Some(ToolChoice::Auto);
+                append_output_items_to_input(&mut ctx.inference_request_mut().input, &current_output);
                 append_gateway_calls_to_new_input(&mut ctx, &current_output, &registry);
                 append_tool_outputs(
                     &mut ctx,
@@ -209,6 +204,35 @@ async fn run_until_gateway_tools_complete(
     }
 
     unreachable!("the final round returns Done, RequiresClientAction, or Incomplete");
+}
+
+fn log_custom_tool_calls(output: &[OutputItem], response_id: &str) {
+    for item in output {
+        if let OutputItem::CustomToolCall(call) = item {
+            debug!(
+                response_id,
+                call_id = %call.call_id,
+                name = %call.name,
+                input_bytes = call.input.len(),
+                "custom tool call requires client execution"
+            );
+        }
+    }
+}
+
+async fn build_request_tool_registry(
+    ctx: &mut RequestContext,
+    exec_ctx: &ExecutionContext,
+) -> ExecutorResult<ToolRegistry> {
+    let mut executors = exec_ctx.gateway_executors.request_scoped();
+    let mut registry = match ctx.inference_request_mut().tools.as_mut() {
+        Some(tools) => ToolRegistry::build_with_handlers(tools, &mut executors).await?,
+        None => ToolRegistry::default(),
+    };
+    if let Some(state) = &ctx.tool_search_state {
+        registry.classify_tool_search(state)?;
+    }
+    Ok(registry)
 }
 
 async fn execute_and_emit_round_output_calls(
@@ -356,6 +380,7 @@ async fn run_blocking(
 
 fn run_stream(ctx: RequestContext, exec_ctx: Arc<ExecutionContext>, auth: Option<String>) -> BoxStream {
     Box::pin(stream! {
+        let failure_context = StreamFailureContext::from(&ctx);
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
         let exec_ctx_for_run = Arc::clone(&exec_ctx);
         let event_tx_for_run = event_tx.clone();
@@ -390,7 +415,15 @@ fn run_stream(ctx: RequestContext, exec_ctx: Arc<ExecutionContext>, auth: Option
                             while let Ok(event) = event_rx.try_recv() {
                                 yield consume_stream_event(event, &mut next_sequence_number);
                             }
-                            yield stream_accumulator.executor_error_chunk(&e);
+                            if e.is_invalid_upstream_tool_search() {
+                                let payload = failure_context.failed_payload(&e);
+                                match stream_accumulator.terminal_response_chunk(&payload) {
+                                    Ok(chunk) => yield chunk,
+                                    Err(serialize_error) => yield stream_accumulator.executor_error_chunk(&serialize_error),
+                                }
+                            } else {
+                                yield stream_accumulator.executor_error_chunk(&e);
+                            }
                             yield DONE_MARKER.to_string();
                         }
                         Ok((Ok((payload, ctx)), mut stream_accumulator)) => {
@@ -420,6 +453,49 @@ fn run_stream(ctx: RequestContext, exec_ctx: Arc<ExecutionContext>, auth: Option
             }
         }
     })
+}
+
+struct StreamFailureContext {
+    response_id: String,
+    conversation_id: Option<String>,
+    model: String,
+    previous_response_id: Option<String>,
+    instructions: Option<String>,
+}
+
+impl From<&RequestContext> for StreamFailureContext {
+    fn from(ctx: &RequestContext) -> Self {
+        Self {
+            response_id: ctx.response_id.clone(),
+            conversation_id: ctx.conversation_id.clone(),
+            model: ctx.enriched_request.model.clone(),
+            previous_response_id: ctx.original_request.previous_response_id.clone(),
+            instructions: ctx.original_request.instructions.clone(),
+        }
+    }
+}
+
+impl StreamFailureContext {
+    fn failed_payload(&self, error: &crate::executor::error::ExecutorError) -> ResponsePayload {
+        ResponsePayload {
+            id: self.response_id.clone(),
+            object: "response".to_owned(),
+            created_at: utcnow_str(),
+            model: self.model.clone(),
+            status: "failed".to_owned(),
+            output: Vec::new(),
+            usage: None,
+            incomplete_details: None,
+            error: Some(serde_json::json!({
+                "message": error.error_message(),
+                "type": error.error_type(),
+                "code": error.error_code(),
+            })),
+            previous_response_id: self.previous_response_id.clone(),
+            conversation_id: self.conversation_id.clone(),
+            instructions: self.instructions.clone(),
+        }
+    }
 }
 
 fn consume_stream_event(event: StreamEvent, next_sequence_number: &mut u64) -> String {
@@ -503,7 +579,7 @@ impl ExecuteRequest {
             tools = self.payload.tools.as_ref().map_or(0, Vec::len),
             "executor received responses request"
         );
-        let ctx = rehydrate_conversation(self.payload, &self.exec_ctx).await?;
+        let ctx = rehydrate_for_execution(self.payload, &self.exec_ctx).await?;
         if ctx.original_request.stream {
             Ok(Either::Right(run_stream(ctx, self.exec_ctx, self.client_auth)))
         } else {

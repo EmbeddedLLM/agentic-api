@@ -5,11 +5,13 @@ use crate::events::EventPayload;
 use crate::executor::error::ExecutorError;
 use crate::tool::ToolRegistry;
 use crate::types::event::MessageStatus;
+use crate::types::tools::{ToolSearchExecution, ToolSearchStatus};
 use crate::utils::common::deserialize_from_value_opt;
 use crate::utils::uuid7_str;
 
 use super::input::{
     InputContent, InputFunctionToolCall, InputItem, InputMessage, InputMessageContent, InputTextContent,
+    deserialize_non_blank_string,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -100,6 +102,34 @@ pub struct FunctionToolCall {
     #[serde(default = "default_completed_status")]
     #[serde(deserialize_with = "deserialize_status_or_default")]
     pub status: MessageStatus,
+}
+
+/// A newly emitted public client tool-search call.
+///
+/// Unlike replay input, execution and status have no serde defaults: response
+/// translation must populate both fields explicitly.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolSearchCall {
+    #[serde(deserialize_with = "deserialize_tool_search_item_id")]
+    pub id: String,
+    #[serde(deserialize_with = "deserialize_non_blank_string")]
+    pub call_id: String,
+    pub execution: ToolSearchExecution,
+    pub arguments: serde_json::Map<String, Value>,
+    pub status: ToolSearchStatus,
+}
+
+fn deserialize_tool_search_item_id<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let id = deserialize_non_blank_string(deserializer)?;
+    if id.strip_prefix("tsc_").is_none_or(str::is_empty) {
+        return Err(serde::de::Error::custom(
+            "emitted tool_search_call id must use the 'tsc_' prefix with a non-empty suffix",
+        ));
+    }
+    Ok(id)
 }
 
 /// A freeform custom tool invocation.
@@ -697,6 +727,8 @@ pub enum OutputItem {
     Message(OutputMessage),
     #[serde(rename = "function_call")]
     FunctionCall(FunctionToolCall),
+    #[serde(rename = "tool_search_call")]
+    ToolSearchCall(ToolSearchCall),
     #[serde(rename = "custom_tool_call")]
     CustomToolCall(CustomToolCall),
     #[serde(rename = "web_search_call")]
@@ -718,7 +750,7 @@ impl OutputItem {
             Self::FunctionCall(call) => registry
                 .lookup(&call.name)
                 .is_none_or(|entry| !entry.tool_type.is_gateway_owned()),
-            Self::CustomToolCall(_) => true,
+            Self::ToolSearchCall(_) | Self::CustomToolCall(_) => true,
             Self::Message(_)
             | Self::WebSearchCall(_)
             | Self::McpCall(_)
@@ -734,6 +766,7 @@ impl OutputItem {
             Self::Message(message) => Some(InputItem::Message(message.clone().into())),
             Self::Reasoning(reasoning) => Some(InputItem::Reasoning(reasoning.clone())),
             Self::FunctionCall(call) => Some(InputItem::FunctionCall(InputFunctionToolCall::from(call.clone()))),
+            Self::ToolSearchCall(call) => Some(InputItem::ToolSearchCall(call.clone().into())),
             Self::CustomToolCall(call) => Some(InputItem::FunctionCall(call.clone().into())),
             Self::WebSearchCall(_) | Self::McpCall(_) | Self::McpListTools(_) | Self::Unknown => None,
         }
@@ -744,6 +777,67 @@ impl OutputItem {
 mod tests {
     use super::*;
     use crate::types::io::InputItem;
+
+    #[test]
+    fn emitted_tool_search_call_is_explicit_and_requires_client_action() {
+        let wire = serde_json::json!({
+            "type": "tool_search_call",
+            "id": "tsc_1",
+            "call_id": "call_search_1",
+            "execution": "client",
+            "arguments": {"query": "weather"},
+            "status": "completed"
+        });
+        let item: OutputItem = serde_json::from_value(wire.clone()).expect("valid emitted search call");
+
+        assert_eq!(serde_json::to_value(&item).expect("call serializes"), wire);
+        assert!(item.requires_client_action(&ToolRegistry::default()));
+        let replay = item.to_input_item().expect("search call must remain public on replay");
+        assert_eq!(serde_json::to_value(replay).expect("replay serializes"), wire);
+    }
+
+    #[test]
+    fn emitted_tool_search_call_rejects_missing_or_invalid_required_fields() {
+        for missing in ["execution", "status"] {
+            let mut wire = serde_json::json!({
+                "type": "tool_search_call",
+                "id": "tsc_1",
+                "call_id": "call_search_1",
+                "execution": "client",
+                "arguments": {"query": "weather"},
+                "status": "completed"
+            });
+            wire.as_object_mut().expect("object").remove(missing);
+
+            assert!(
+                serde_json::from_value::<OutputItem>(wire).is_err(),
+                "newly emitted calls require explicit {missing}"
+            );
+        }
+
+        for (field, value) in [
+            ("id", serde_json::json!("   ")),
+            ("id", serde_json::json!("fc_1")),
+            ("id", serde_json::json!("tsc_")),
+            ("call_id", serde_json::json!("   ")),
+            ("arguments", serde_json::json!("not an object")),
+        ] {
+            let mut wire = serde_json::json!({
+                "type": "tool_search_call",
+                "id": "tsc_1",
+                "call_id": "call_search_1",
+                "execution": "client",
+                "arguments": {"query": "weather"},
+                "status": "completed"
+            });
+            wire[field] = value;
+
+            assert!(
+                serde_json::from_value::<OutputItem>(wire).is_err(),
+                "newly emitted calls reject invalid {field}"
+            );
+        }
+    }
 
     #[test]
     fn custom_tool_call_preserves_freeform_input_and_requires_client_action() {

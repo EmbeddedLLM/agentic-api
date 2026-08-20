@@ -218,6 +218,7 @@ fn gateway_public_output(
             .mcp_tool_ref(&call.name)
             .map(|tool_ref| crate::tool::mcp::handler::output_item(call, output, status, tool_ref)),
         ToolType::Function
+        | ToolType::ToolSearch
         | ToolType::Custom
         | ToolType::CodexNamespace
         | ToolType::FileSearch
@@ -295,6 +296,7 @@ pub(super) fn gateway_event_plans(
                         .mcp_tool_ref(&call.name)
                         .map(|tool_ref| crate::tool::mcp::handler::started_output_item(call, tool_ref)),
                     ToolType::Function
+                    | ToolType::ToolSearch
                     | ToolType::Custom
                     | ToolType::CodexNamespace
                     | ToolType::FileSearch
@@ -420,6 +422,7 @@ pub(super) fn emit_gateway_start_events(
             }
             OutputItem::Message(_)
             | OutputItem::FunctionCall(_)
+            | OutputItem::ToolSearchCall(_)
             | OutputItem::CustomToolCall(_)
             | OutputItem::Reasoning(_)
             | OutputItem::Unknown => {}
@@ -465,6 +468,7 @@ pub(super) fn emit_gateway_completed_events<T: GatewayPublicOutputSource>(
             ),
             OutputItem::Message(_)
             | OutputItem::FunctionCall(_)
+            | OutputItem::ToolSearchCall(_)
             | OutputItem::CustomToolCall(_)
             | OutputItem::Reasoning(_)
             | OutputItem::Unknown => continue,
@@ -544,7 +548,7 @@ pub(super) fn append_output_items_to_input(input: &mut ResponsesInput, output_it
 pub(super) fn append_tool_outputs(ctx: &mut RequestContext, tool_outputs: Vec<InputItem>) {
     for output in tool_outputs {
         ctx.new_input_items.push(output.clone());
-        append_input_item(&mut ctx.enriched_request.input, output);
+        append_input_item(&mut ctx.inference_request_mut().input, output);
     }
 }
 

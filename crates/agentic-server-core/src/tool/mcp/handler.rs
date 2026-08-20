@@ -55,6 +55,19 @@ impl McpToolMap {
             .values()
             .any(|tool_ref| tool_ref.server_label == server_label)
     }
+
+    pub(crate) fn resolves_call_before_load(
+        &self,
+        load_positions: &HashMap<String, usize>,
+        call_positions: &HashMap<String, usize>,
+    ) -> bool {
+        self.calls.iter().any(|(name, tool_ref)| {
+            load_positions
+                .get(&tool_ref.server_label)
+                .zip(call_positions.get(name))
+                .is_some_and(|(load, call)| call < load)
+        })
+    }
 }
 
 #[must_use]
@@ -228,9 +241,10 @@ impl McpHandler {
     }
 
     #[must_use]
-    pub(crate) fn failed_list_tools_item(server_label: &str, error: &ToolError) -> McpListTools {
+    pub(crate) fn failed_list_tools_item(server_label: &str, _error: &ToolError) -> McpListTools {
+        tracing::warn!(server_label, "MCP server connection or tools/list failed");
         let mut item = McpListTools::new(uuid7_str("mcpl_"), server_label, Vec::new());
-        item.error = Some(error.to_string());
+        item.error = Some(format!("MCP server '{server_label}' failed to connect or list tools"));
         item
     }
 
@@ -590,6 +604,30 @@ mod tests {
         assert!(matches!(error, ToolError::Execution(_)));
         assert!(error.to_string().contains("tools/list failed for MCP server 'counter'"));
         assert!(error.to_string().contains("timed out during tools/list"));
+    }
+
+    #[test]
+    fn public_list_tools_failure_redacts_transport_and_request_secrets() {
+        let error = ToolError::Execution(
+            "failed https://url-user:url-password@mcp.example.test/private?token=query-secret \
+             Authorization: Bearer authorization-secret X-Private-Token: header-secret"
+                .to_owned(),
+        );
+
+        let item = McpHandler::failed_list_tools_item("weather", &error);
+        let public_error = item.error.expect("public list failure");
+
+        assert!(public_error.contains("weather"));
+        for secret in [
+            "mcp.example.test",
+            "url-user",
+            "url-password",
+            "query-secret",
+            "authorization-secret",
+            "header-secret",
+        ] {
+            assert!(!public_error.contains(secret), "public error leaked {secret}");
+        }
     }
 
     #[test]

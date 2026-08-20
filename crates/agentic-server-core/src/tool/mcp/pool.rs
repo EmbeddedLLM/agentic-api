@@ -59,19 +59,14 @@ impl McpClientPool {
                 } => McpClient::connect_stdio(&command, &args, env.as_ref(), cwd.as_deref()).await,
             };
 
-            match result {
-                Ok(client) => {
-                    clients.insert(server_label, Arc::new(client));
-                }
-                Err(error) => {
-                    let error_message = error.to_string();
-                    tracing::warn!(
-                        server_label = %server_label,
-                        error = %error_message,
-                        "failed to connect MCP server from config"
-                    );
-                    connection_errors.insert(server_label, error_message);
-                }
+            if let Ok(client) = result {
+                clients.insert(server_label, Arc::new(client));
+            } else {
+                tracing::warn!(
+                    server_label = %server_label,
+                    "failed to connect MCP server from config"
+                );
+                connection_errors.insert(server_label, "MCP transport connection failed".to_owned());
             }
         }
 
@@ -99,12 +94,9 @@ fn server_entry_from_param(param: &McpToolParam) -> Option<(String, McpServerEnt
     };
 
     if let Some(url) = clean_string(param.server_url.as_deref()) {
-        let url = match validate_request_server_url(&url) {
-            Ok(url) => url,
-            Err(reason) => {
-                tracing::warn!(server_label, url, reason, "MCP tool param server_url rejected");
-                return None;
-            }
+        let Ok(url) = validate_request_server_url(&url) else {
+            tracing::warn!(server_label, "MCP tool param server_url rejected");
+            return None;
         };
 
         return Some((

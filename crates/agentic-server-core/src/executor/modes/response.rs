@@ -1,6 +1,6 @@
 //! Response storage handler — owns all response store operations.
 
-use crate::storage::{InOutItem, ResponseData, ResponseMetadata, ResponseStore};
+use crate::storage::{InOutItem, ResponseData, ResponseStore};
 use crate::types::io::OutputItem;
 
 use crate::executor::error::{ExecutorError, ExecutorResult};
@@ -63,19 +63,13 @@ impl ResponseHandler {
     /// Persists a response record — only the new items from this turn.
     ///
     /// Takes `ctx` and `output_items` by value so fields can be moved directly
-    /// into [`ResponseMetadata`] without cloning. Prior history must not be
+    /// into [`crate::storage::ResponseMetadata`]. Prior history must not be
     /// re-inserted; the response store records item IDs for this response only.
     ///
     /// # Errors
     /// Returns `ExecutorError` if the store is disabled or the database operation fails.
     pub async fn execute_turn(&self, ctx: RequestContext, output_items: Vec<OutputItem>) -> ExecutorResult<()> {
-        let metadata = ResponseMetadata {
-            model: ctx.enriched_request.model,
-            previous_response_id: ctx.original_request.previous_response_id,
-            effective_tools: ctx.enriched_request.tools,
-            effective_tool_choice: ctx.enriched_request.tool_choice.unwrap_or_default(),
-            effective_instructions: ctx.enriched_request.instructions,
-        };
+        let metadata = ctx.response_metadata();
 
         let mut new_items = Vec::with_capacity(ctx.new_input_items.len() + output_items.len());
         new_items.extend(ctx.new_input_items.into_iter().map(InOutItem::Input));
@@ -128,6 +122,9 @@ mod tests {
         RequestContext {
             enriched_request: req.clone(),
             original_request: req,
+            tool_search_state: None,
+            tool_search_private_request: None,
+            tool_search_loaded_tools: None,
             new_input_items: vec![],
             response_id: "resp_test".into(),
             conversation_id: None,

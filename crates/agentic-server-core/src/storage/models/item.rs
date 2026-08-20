@@ -232,6 +232,17 @@ pub async fn get_items_by_conversation(pool: &DbPool, conversation_id: &str) -> 
         .await
 }
 
+/// Get conversation items in sequence order within an existing transaction.
+///
+/// # Errors
+/// Returns `DbResult::Err` if the database query fails.
+pub async fn get_items_by_conversation_in_tx(tx: &mut DbTransaction<'_>, conversation_id: &str) -> DbResult<Vec<Item>> {
+    sqlx::query_as::<_, Item>("SELECT * FROM items WHERE conversation_id = $1 ORDER BY seq ASC")
+        .bind(conversation_id)
+        .fetch_all(&mut **tx)
+        .await
+}
+
 /// Returns the last stored item sequence for a conversation inside a transaction.
 ///
 /// # Errors

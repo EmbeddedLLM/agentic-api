@@ -57,6 +57,7 @@ pub async fn responses(State(state): State<AppState>, req: Request) -> Response 
         || payload.previous_response_id.is_some()
         || payload.conversation_id.is_some()
         || payload.input.contains_compaction()
+        || payload.contains_tool_search_state()
         || payload
             .context_management
             .as_ref()

@@ -152,8 +152,13 @@ impl ResponseAccumulator {
     /// # Errors
     /// Returns `ExecutorError::ParseError` if JSON parsing fails or required fields are missing.
     pub fn from_json(body: &str, conversation_id: Option<&str>) -> ExecutorResult<Self> {
-        let mut json: serde_json::Value = deserialize_from_str(body).map_err(ExecutorError::JsonError)?;
+        let json: serde_json::Value = deserialize_from_str(body).map_err(ExecutorError::JsonError)?;
+        Self::from_value(json, conversation_id)
+    }
 
+    /// Rehydrate a parsed non-streaming response without parsing the body a
+    /// second time after raw protocol validation.
+    pub(super) fn from_value(mut json: serde_json::Value, conversation_id: Option<&str>) -> ExecutorResult<Self> {
         let response_id = json["id"]
             .as_str()
             .ok_or_else(|| ExecutorError::ParseError("missing 'id' field in response".into()))?
@@ -278,10 +283,14 @@ impl ResponseAccumulator {
         line: &str,
         translator: &mut FunctionSseTranslator,
     ) -> ExecutorResult<Option<FunctionSseTranslation>> {
-        let Some(frame) = self.process_sse_line(line) else {
+        let Some(frame) = normalize_sse_line(line) else {
             return Ok(None);
         };
         let call_key = function_event_key(&frame.payload);
+        let call = call_key.and_then(|(item_id, output_index)| self.accumulated_function_call(item_id, output_index));
+        translator.validate_before_accumulation(&frame, call)?;
+        self.capture_terminal_details_if_needed(&frame);
+        self.process_event(&frame);
         let call = call_key.and_then(|(item_id, output_index)| self.accumulated_function_call(item_id, output_index));
         translator.translate(frame, call).map(Some)
     }
