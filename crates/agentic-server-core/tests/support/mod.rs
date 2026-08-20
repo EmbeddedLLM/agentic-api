@@ -546,6 +546,7 @@ pub fn output_text(payload: &ResponsePayload) -> String {
             | OutputItem::McpCall(_)
             | OutputItem::McpListTools(_)
             | OutputItem::Reasoning(_)
+            | OutputItem::Compaction(_)
             | OutputItem::Unknown => None,
         })
         .collect::<String>()

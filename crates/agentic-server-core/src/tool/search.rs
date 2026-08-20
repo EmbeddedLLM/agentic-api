@@ -794,6 +794,7 @@ fn prepare_history(
                 ensure_history_call_is_available(call, &mut definition_accumulator)?;
                 private_items.push(item.clone());
             }
+            InputItem::CompactionTrigger => {}
             InputItem::Message(_)
             | InputItem::FunctionCallOutput(_)
             | InputItem::CustomToolCall(_)

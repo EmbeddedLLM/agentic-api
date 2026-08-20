@@ -20,8 +20,8 @@ use crate::executor::function_sse::{FunctionSseTranslation, FunctionSseTranslato
 use crate::types::event::{MessageStatus, ResponseStatus};
 use crate::types::io::output::McpListTools;
 use crate::types::io::{
-    ApplyDone, CustomToolCall, FunctionToolCall, OutputItem, OutputMessage, OutputTextContent, ReasoningOutput,
-    ReasoningTextContent, ResponseUsage,
+    ApplyDone, CompactionItem, CustomToolCall, FunctionToolCall, OutputItem, OutputMessage, OutputTextContent,
+    ReasoningOutput, ReasoningTextContent, ResponseUsage,
 };
 use crate::types::io::{McpCall, WebSearchCall};
 use crate::types::request_response::{IncompleteDetails, ResponsePayload};
@@ -38,6 +38,7 @@ enum InFlight {
     WebSearchCall { item: Option<WebSearchCall> },
     McpCall { item: McpCall },
     McpListTools { item: McpListTools },
+    Compaction { item: CompactionItem },
 }
 
 impl std::fmt::Debug for InFlight {
@@ -50,6 +51,7 @@ impl std::fmt::Debug for InFlight {
             Self::WebSearchCall { .. } => write!(f, "InFlight::WebSearchCall {{ .. }}"),
             Self::McpCall { .. } => write!(f, "InFlight::McpCall {{ .. }}"),
             Self::McpListTools { .. } => write!(f, "InFlight::McpListTools {{ .. }}"),
+            Self::Compaction { .. } => write!(f, "InFlight::Compaction {{ .. }}"),
         }
     }
 }
@@ -87,6 +89,7 @@ impl InFlight {
             Self::WebSearchCall { item } => item.map(OutputItem::WebSearchCall),
             Self::McpCall { item } => Some(OutputItem::McpCall(item)),
             Self::McpListTools { item } => Some(OutputItem::McpListTools(item)),
+            Self::Compaction { item } => Some(OutputItem::Compaction(item)),
         }
     }
 }
@@ -488,6 +491,9 @@ impl ResponseAccumulator {
                 text: String::with_capacity(256),
             }),
             SSEItemType::WebSearchCall if !item_id.is_empty() => Some(InFlight::WebSearchCall { item: None }),
+            SSEItemType::Compaction => CompactionItem::try_from(payload)
+                .ok()
+                .map(|item| InFlight::Compaction { item }),
             SSEItemType::WebSearchCall => None,
             SSEItemType::McpCall => McpCall::try_from(payload).ok().map(|item| InFlight::McpCall { item }),
             SSEItemType::McpListTools => McpListTools::try_from(payload)
@@ -541,6 +547,7 @@ impl ResponseAccumulator {
                 (InFlight::CustomToolCall { item, input }, _) => item.apply_done(payload, input),
                 (InFlight::McpCall { item }, _) => item.apply_done(payload, &mut String::new()),
                 (InFlight::McpListTools { item }, _) => item.apply_done(payload, &mut String::new()),
+                (InFlight::Compaction { item }, _) => item.apply_done(payload, &mut String::new()),
                 (InFlight::WebSearchCall { item }, Some(OutputItem::WebSearchCall(mut call))) => {
                     if call.id.is_empty() {
                         call.id = in_flight_key
@@ -560,7 +567,8 @@ impl ResponseAccumulator {
             | OutputItem::CustomToolCall(_)
             | OutputItem::WebSearchCall(_)
             | OutputItem::McpCall(_)
-            | OutputItem::McpListTools(_)),
+            | OutputItem::McpListTools(_)
+            | OutputItem::Compaction(_)),
         ) = done_item
         {
             let OutputItem::WebSearchCall(call) = &mut output_item else {
@@ -631,6 +639,7 @@ fn in_flight_matches_call_type(item: &InFlight, item_type: SSEItemType) -> bool 
             | (InFlight::WebSearchCall { .. }, SSEItemType::WebSearchCall)
             | (InFlight::McpCall { .. }, SSEItemType::McpCall)
             | (InFlight::McpListTools { .. }, SSEItemType::McpListTools)
+            | (InFlight::Compaction { .. }, SSEItemType::Compaction)
     )
 }
 
@@ -891,6 +900,31 @@ mod tests {
         assert_eq!(item.tools.len(), 1);
         assert_eq!(item.tools[0].name, "increment");
         assert_eq!(item.tools[0].annotations, Some(serde_json::json!({"read_only": false})));
+    }
+
+    #[test]
+    fn compaction_added_and_done_accumulate_typed_output() {
+        let done = r#"data: {"type":"response.output_item.done","output_index":0,"item":{"type":"compaction","id":"cmp_1","encrypted_content":"durable summary"}}"#;
+        let lines = [
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"type":"compaction","id":"cmp_1","encrypted_content":"durable summary"}}"#.to_owned(),
+            done.to_owned(),
+            r#"data: {"type":"response.completed","response":{"id":"resp_1","status":"completed"}}"#.to_owned(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert_compaction_output(&acc.output);
+
+        let done_only = ResponseAccumulator::from_sse_lines([done.to_owned()], None);
+        assert_compaction_output(&done_only.output);
+    }
+
+    fn assert_compaction_output(output: &[OutputItem]) {
+        assert_eq!(output.len(), 1);
+        let OutputItem::Compaction(item) = &output[0] else {
+            panic!("expected compaction output");
+        };
+        assert_eq!(item.id.as_deref(), Some("cmp_1"));
+        assert_eq!(item.encrypted_content, "durable summary");
     }
 
     #[test]

@@ -208,6 +208,7 @@ impl RequestPayload {
                 | InputItem::CustomToolCallOutput(_)
                 | InputItem::Reasoning(_)
                 | InputItem::Compaction(_)
+                | InputItem::CompactionTrigger
                 | InputItem::Unknown => {}
             }
         }

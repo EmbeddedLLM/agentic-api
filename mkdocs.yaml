@@ -100,6 +100,7 @@ nav:
     - Container: deploying/container.md
     - GitHub authentication with Dex: deploying/github-oidc.md
     - Kubernetes: deploying/kubernetes.md
+    - Kubernetes with kind: deploying/README.md
   - Community: community/index.md
 
 extra:
