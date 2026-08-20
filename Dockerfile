@@ -59,7 +59,8 @@ WORKDIR /var/lib/agentic-api
 USER ${RUNTIME_UID}:${RUNTIME_GID}
 
 ENV GATEWAY_HOST=0.0.0.0 \
-    GATEWAY_PORT=9000
+    GATEWAY_PORT=9000 \
+    AGENTIC_API_HOME=/var/lib/agentic-api
 
 EXPOSE 9000
 ENTRYPOINT ["docker-entrypoint.sh"]

@@ -28,7 +28,8 @@ The image starts `agentic-server` in standalone mode. At minimum, set `LLM_API_B
 | `LLM_API_BASE` | none | Required upstream inference URL |
 | `GATEWAY_HOST` | `0.0.0.0` | Listen address |
 | `GATEWAY_PORT` | `9000` | Listen port |
-| `DATABASE_URL` | `sqlite://./agentic_api.db` | SQLite or PostgreSQL persistence URL |
+| `DATABASE_URL` | `$AGENTIC_API_HOME/agentic_api.db` | SQLite or PostgreSQL persistence URL |
+| `AGENTIC_API_HOME` | `/var/lib/agentic-api` | User configuration and default local-state directory |
 | `POSTGRES_MAX_CONNECTIONS` | `10` | Maximum PostgreSQL connections per gateway replica |
 | `POSTGRES_ACQUIRE_TIMEOUT_SECONDS` | `30` | Maximum wait for a PostgreSQL pool connection |
 | `POSTGRES_LOCK_TIMEOUT_SECONDS` | `5` | Maximum wait for a PostgreSQL row or table lock |

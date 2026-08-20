@@ -23,7 +23,7 @@ unset_dir=$test_root/unset
 mkdir "$unset_dir"
 (
     cd "$unset_dir"
-    env -u DATABASE_URL EXPECT_DATABASE_URL_UNSET=1 PATH="$test_path" "$entrypoint"
+    env -u DATABASE_URL AGENTIC_API_HOME="$unset_dir" EXPECT_DATABASE_URL_UNSET=1 PATH="$test_path" "$entrypoint"
 )
 test -f "$unset_dir/agentic_api.db"
 test "$(stat -c '%a' "$unset_dir/agentic_api.db" 2>/dev/null || stat -f '%Lp' "$unset_dir/agentic_api.db")" = "664"

@@ -33,6 +33,7 @@ fn bench_config(llm_url: &str) -> Config {
         db_url: None,
         postgres: agentic_core::config::PostgresConfig::default(),
         sqlite: agentic_core::config::SqliteConfig::default(),
+        tools: agentic_core::config::ToolRuntimeConfig::default(),
     }
 }
 

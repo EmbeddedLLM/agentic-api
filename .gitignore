@@ -28,3 +28,6 @@ target/
 *.db-journal
 *.db-shm
 *.db-wal
+
+# Local logs
+*.log

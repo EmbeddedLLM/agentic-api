@@ -49,6 +49,8 @@ Responses type:mcp declaration
 The OpenAI public contract uses:
 
 - `mcp_list_tools` for discovery output
+- `response.mcp_list_tools.in_progress`
+- `response.mcp_list_tools.completed` or `response.mcp_list_tools.failed`
 - `mcp_call` for a selected tool call
 - `response.mcp_call.in_progress`
 - `response.mcp_call_arguments.delta`
@@ -56,11 +58,10 @@ The OpenAI public contract uses:
 - `response.mcp_call.completed` or `response.mcp_call.failed`
 
 The internal function-tool representation is an implementation detail and must not leak as a public function call.
-The gateway exposes execution through the `mcp_call` lifecycle. Emitting the separate `mcp_list_tools` discovery
-lifecycle is an additional public representation of the same discovery step and does not change the tool execution
-design described here.
-
-Until that discovery lifecycle is implemented, gateway streams are a strict subset of OpenAI's MCP stream: they do not emit an `mcp_list_tools` output item before `mcp_call`.
+The gateway exposes discovery through the `mcp_list_tools` lifecycle before any selected tool is exposed through the
+`mcp_call` lifecycle. Blocking responses include the completed discovery item in `output`. Streaming responses emit
+the corresponding output-item and `response.mcp_list_tools.*` events. A discovery failure produces a failed
+`mcp_list_tools` item with its error and does not register tools from that server.
 
 ## Components
 
@@ -96,11 +97,16 @@ impl McpClient {
 ### `McpClientPool`
 
 `McpClientPool` owns clients keyed by `server_label`. Request-scoped HTTP clients are constructed from
-`McpToolParam`. Gateway configuration may also construct HTTP or stdio clients through `McpServerEntry`.
+`McpToolParam`. Gateway configuration can construct HTTP or stdio clients through an `McpServerEntry` under
+`~/.agentic-api/config.toml`; a request selects one by declaring the configured `server_label` without a `server_url`.
+Connection details from gateway configuration take precedence and cannot be overridden by a request. Configured
+`allowed_tools` form a policy ceiling that a request may narrow but cannot expand, and configured
+`require_approval = "never"` lets a request omit its approval setting.
 
 Request-provided URLs allow loopback hosts by default. Additional trusted hostnames may be configured through
-`AGENTIC_MCP_ALLOWED_HOSTS`. URL validation, pinned DNS addresses, disabled automatic proxy discovery, and disabled
-redirects prevent later routing changes from bypassing the configured trust boundary.
+`AGENTIC_MCP_ALLOWED_HOSTS` from the process environment or the `config.toml` `[mcp].allowed_hosts` array. URL
+validation, pinned DNS addresses, disabled automatic proxy discovery, and disabled redirects prevent later routing
+changes from bypassing the configured trust boundary.
 
 ### `GatewayExecutors`
 
@@ -146,7 +152,8 @@ happens before `RequestPayload::to_upstream_request()` normalizes the request:
 
 ```text
 ResponsesTool::Mcp
-  -> GatewayExecutors::mcp_handler()
+  -> GatewayExecutors::mcp_server_tools()
+  -> mcp_list_tools discovery output is retained
   -> declaration._agentic_discovered_tools is populated
   -> each discovered handler is inserted into ToolRegistry
   -> ResponsesTool::to_function_tools()
@@ -185,12 +192,3 @@ build request-scoped registry
 Tool execution failures become failed tool call output and are returned to the model for the next round; they do not
 automatically fail the whole Responses request.
 
-## Delivery
-
-This design is being shipped across three PRs:
-
-1. Revisit MCP support by removing gateway-owned MCP resource handling and fixing tool discovery, normalization, and
-   registry routing for native MCP tools. MCP resources remain the responsibility of clients such as Codex and Claude
-   Code.
-2. PR #139 completes the OpenAI-compatible public `mcp_call` output item and streaming event lifecycle.
-3. A follow-up PR will expose MCP discovery through the public `mcp_list_tools` output item and streaming events.

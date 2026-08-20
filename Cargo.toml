@@ -23,10 +23,12 @@ either = "1"
 bytes = "1"
 clap = { version = "4", features = ["derive", "env"] }
 criterion = { version = "0.5", features = ["async_tokio"] }
+dirs = "6"
 futures = "0.3"
 indexmap = "2"
 http = "1"
 jsonwebtoken = { version = "=10.3.0", default-features = false, features = ["rust_crypto"] }
+percent-encoding = "2"
 reqwest = { version = "0.12", default-features = false }
 rmcp-reqwest = { package = "reqwest", version = "0.13.2", default-features = false, features = ["json", "stream", "rustls"] }
 rmcp = { version = "1.8", default-features = false }
@@ -38,5 +40,6 @@ tokio-util = "0.7"
 tower-http = { version = "0.6", features = ["cors"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+toml = "0.8"
 tokio-tungstenite = "0.29"
 url = "2"

@@ -17,10 +17,12 @@ name = "agentic_core"
 [dependencies]
 async-stream.workspace = true
 bytes.workspace = true
+dirs.workspace = true
 either.workspace = true
 futures.workspace = true
 indexmap.workspace = true
 http.workspace = true
+percent-encoding.workspace = true
 reqwest = { workspace = true, features = ["default-tls", "stream"] }
 rmcp-reqwest.workspace = true
 rmcp = { workspace = true, features = [

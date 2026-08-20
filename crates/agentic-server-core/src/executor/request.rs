@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::config::Config;
+use crate::config::{Config, default_database_url};
 use crate::error::Error;
 use crate::executor::modes::{ConversationHandler, ResponseHandler};
 use crate::storage::backend::redact_database_urls;
@@ -137,7 +137,12 @@ impl ExecutionContext {
     /// Returns an error if the database pool cannot be opened or the schema
     /// migration fails.
     pub async fn from_config(cfg: &Config) -> Result<Self, Error> {
-        let db_url = cfg.db_url.as_deref().unwrap_or("sqlite://./agentic_api.db");
+        let default_db_url = cfg.db_url.is_none().then(default_database_url).transpose()?;
+        let db_url = cfg
+            .db_url
+            .as_deref()
+            .or(default_db_url.as_deref())
+            .ok_or_else(|| Error::Config("default database URL was not resolved".to_owned()))?;
         let database_backend = DatabaseBackend::from_url(db_url)
             .map_err(|error| Error::Config(format!("invalid DATABASE_URL: {error}")))?;
         let pool = create_pool_with_schema_and_configs(Some(db_url), cfg.sqlite, cfg.postgres)
@@ -150,14 +155,21 @@ impl ExecutionContext {
         let conv_handler = ConversationHandler::new(ConversationStore::new(pool.clone()));
         let resp_handler = ResponseHandler::new(ResponseStore::new(pool.clone()));
         let client = Arc::new(reqwest::Client::new());
-        let gateway_executors = GatewayExecutors::from_env(Arc::clone(&client));
+        let gateway_executors = GatewayExecutors::from_config(Arc::clone(&client), &cfg.tools)
+            .await
+            .map_err(|error| Error::Config(format!("failed to initialize configured MCP servers: {error}")))?;
 
         Ok(Self {
             conv_handler,
             resp_handler,
             client,
             gateway_executors,
-            messages_gateway_tools: messages_gateway_tools_from_env(),
+            messages_gateway_tools: std::env::var(GATEWAY_TOOL_ALIASES_ENV)
+                .ok()
+                .as_deref()
+                .or(cfg.tools.messages_gateway_tool_aliases.as_deref())
+                .map(GatewayToolMap::from_env_str)
+                .unwrap_or_default(),
             llm_base_url: cfg.llm_api_base.clone(),
             streaming_timeout: Duration::from_secs(30),
             storage_pool: Some(pool),

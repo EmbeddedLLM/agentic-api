@@ -89,6 +89,10 @@ YOU_API_KEY=<your-you.com-api-key> YOU_API_BASE_URL=<you.com-api-base-url> \
   cargo run -p agentic-server -- --llm-api-base http://0.0.0.0:5050
 ```
 
+The default database is `~/.agentic-api/agentic_api.db`, so running an installed binary does not create state in the
+current directory. Set `AGENTIC_API_HOME` to an absolute directory to move both the default database and user
+configuration, or set `DATABASE_URL`/`--db-url` to select a different database.
+
 **3. Make a stateful call:**
 
 ```bash
@@ -102,6 +106,61 @@ curl http://localhost:9000/v1/responses \
 ```
 
 Continue the conversation by passing the returned `id` as `previous_response_id`, and the server rehydrates everything for you.
+
+## ⚙️ Agentic API home and configuration
+
+On startup, Agentic API creates `~/.agentic-api` and loads `~/.agentic-api/config.toml` when that file exists. On the
+first invocation with a resolved LLM base URL, a missing config file is generated from the effective
+`--llm-api-base`/`LLM_API_BASE` and non-secret tool settings. It records the name of the web-search API-key environment
+variable, never its value. The generated file is group-readable but not group-writable on Unix (so a container restart
+under a different arbitrary UID sharing the same group can still read it) and is never overwritten on later
+runs. CLI arguments and process environment variables take precedence over file settings. A standalone server can
+therefore be started with just `agentic-server` after creating a config like this:
+
+```toml
+llm_api_base = "http://127.0.0.1:5050"
+# database_url = "postgresql://agentic-api@localhost/agentic_api"
+
+[web_search]
+base_url = "https://ydc-index.io"
+api_key_env = "YOU_API_KEY"
+
+[mcp]
+allowed_hosts = ["mcp.example.com"]
+
+[mcp_servers.counter]
+url = "https://mcp.example.com/mcp"
+allowed_tools = ["tool_1_name", "tool_2_name"]
+require_approval = "never"
+```
+
+`api_key_env` names the process environment variable containing the web-search credential; it does not contain the
+credential itself. `YOU_API_BASE_URL` and `AGENTIC_MCP_ALLOWED_HOSTS` can override their typed file settings. The MCP
+allowlist is used only for request-declared remote MCP URLs; configured `[mcp_servers]` entries are trusted operator
+configuration.
+
+With that file in place, inject only the secret when starting the server:
+
+```bash
+YOU_API_KEY="<your-you.com-api-key>" agentic-server
+```
+
+Restrict the file to the service account (for example, `chmod 600 ~/.agentic-api/config.toml`), especially if you add
+credentialed `database_url`, MCP headers, or stdio MCP environment values. Prefer `DATABASE_URL`, referenced API-key
+environment variables, and a deployment secret manager for secrets.
+
+To use an operator-configured MCP server, declare its label without sending its connection details or secrets:
+
+```json
+{
+  "type": "mcp",
+  "server_label": "server_label"
+}
+```
+
+Configured `allowed_tools` form the maximum tool set; request-provided `allowed_tools` may narrow it. A configured
+`require_approval = "never"` lets requests omit that field. If a label exists in `config.toml`, a request cannot
+override it with `server_url`; otherwise the existing request-declared HTTP MCP flow remains available.
 
 ## 🤖 Codex on your own GPUs
 

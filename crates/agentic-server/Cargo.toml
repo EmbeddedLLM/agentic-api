@@ -21,6 +21,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
+toml.workspace = true
 tower-http.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
@@ -36,6 +37,7 @@ rsa = "0.9"
 serde_json.workspace = true
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "any", "sqlite"] }
 serde_yml = "0.0.12"
+tempfile = "3"
 tokio = { workspace = true, features = ["test-util"] }
 tokio-tungstenite.workspace = true
 uuid = { version = "1", features = ["v7"] }

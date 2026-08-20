@@ -1,8 +1,10 @@
 use std::process::Command;
 
 #[test]
-fn missing_llm_api_base_error_mentions_environment_and_flag() {
+fn missing_llm_api_base_error_mentions_config_environment_and_flag() {
+    let home = tempfile::tempdir().expect("temporary Agentic API home");
     let output = Command::new(env!("CARGO_BIN_EXE_agentic-server"))
+        .env("AGENTIC_API_HOME", home.path())
         .env_remove("LLM_API_BASE")
         .env_remove("OIDC_ISSUER")
         .env_remove("OIDC_AUDIENCE")
@@ -12,7 +14,7 @@ fn missing_llm_api_base_error_mentions_environment_and_flag() {
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).expect("stderr must be UTF-8");
     assert!(
-        stderr.contains("LLM_API_BASE (or --llm-api-base)"),
+        stderr.contains("llm_api_base in config.toml, LLM_API_BASE, or --llm-api-base"),
         "unexpected error message: {stderr}"
     );
 }
