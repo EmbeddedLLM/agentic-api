@@ -32,16 +32,33 @@ pub fn prepare_codex_home(
             "display_name": model,
             "supported_in_api": true,
             "visibility": "list",
+            "priority": 0,
             "input_modalities": ["text"],
+            "default_reasoning_level": "medium",
             "supported_reasoning_levels": [
                 {"effort": "low", "description": "Fast responses"},
                 {"effort": "medium", "description": "Balanced responses"},
                 {"effort": "high", "description": "Deep reasoning"}
             ],
             "supports_reasoning_summaries": true,
-            "supports_parallel_tool_calls": true,
-            "apply_patch_tool_type": "freeform",
-            "web_search_tool_type": "text"
+            // The gateway accepts parallel_tool_calls=true but serializes tool calls
+            // upstream (#190, #197), so do not advertise parallel execution to Codex.
+            "supports_parallel_tool_calls": false,
+            // apply_patch_tool_type is intentionally omitted: Codex only supports
+            // "freeform", which the gateway cannot normalize while preserving
+            // constrained decoding. Codex falls back to editing via the shell tool.
+            "web_search_tool_type": "text",
+            "shell_type": "local",
+            "context_window": 32768,
+            "max_context_window": 262_144,
+            "base_instructions": "",
+            "support_verbosity": false,
+            "supports_image_detail_original": false,
+            "use_responses_lite": false,
+            "supports_search_tool": false,
+            "include_skills_usage_instructions": false,
+            "truncation_policy": {"limit": 32768, "mode": "tokens"},
+            "experimental_supported_tools": []
         }]
     });
     let catalog_bytes = serde_json::to_vec_pretty(&catalog).map_err(io::Error::other)?;
@@ -57,9 +74,9 @@ pub fn prepare_codex_home(
 
     let requires_auth = api_key.is_some();
     let config = format!(
-        "model = \"{}\"\\nmodel_provider = \"agentic-api\"\\nmodel_catalog_json = \"{}\"\\n\\n\
-[model_providers.agentic-api]\\nname = \"Agentic API\"\\nbase_url = \"{}\"\\n\
-wire_api = \"responses\"\\nrequires_openai_auth = {requires_auth}\\nsupports_websockets = true\\n",
+        "model = \"{}\"\nmodel_provider = \"agentic-api\"\nmodel_catalog_json = \"{}\"\n\n\
+[model_providers.agentic-api]\nname = \"Agentic API\"\nbase_url = \"{}\"\n\
+wire_api = \"responses\"\nrequires_openai_auth = {requires_auth}\nsupports_websockets = true\n",
         toml_escape(model),
         toml_escape(&catalog_path.display().to_string()),
         toml_escape(&gateway_url),

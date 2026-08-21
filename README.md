@@ -89,10 +89,12 @@ Launch Codex or Claude Code with an isolated Agentic API configuration:
 ./target/debug/agentic run claude --model Qwen/Qwen3-30B-A3B-FP8
 ```
 
-To use an existing upstream, provide its URL and the model name the harness should use:
+To use an existing upstream, provide its `http://` or `https://` base URL. The harness model defaults to the first
+model the upstream lists at `/v1/models`; pass `--model` to choose a different one:
 
 ```bash
-./target/debug/agentic run codex \
+./target/debug/agentic run codex --upstream http://127.0.0.1:5050
+./target/debug/agentic run claude \
   --upstream http://127.0.0.1:5050 \
   --model Qwen/Qwen3-30B-A3B-FP8
 ```
@@ -116,14 +118,15 @@ Run preflight checks without launching a harness:
 
 Use `AGENTIC_CODEX_BIN` or `AGENTIC_CLAUDE_BIN` to override harness binary discovery. Add `--no-color` for scripts or
 `--quiet` for minimal lifecycle output. Use `--yolo` only in an externally isolated environment; it skips Claude
-permission checks and disables Codex approvals and sandboxing. For Claude yolo sessions, Agentic API sets both
-`--effort medium` and `CLAUDE_CODE_EFFORT_LEVEL=medium`; the environment variable is intentional because Claude Code
-gives it precedence over the command-line effort flag.
+permission checks and disables Codex approvals and sandboxing.
 
-Qwen3.8-27B's vLLM chat template accepts `low`, `medium`, and `xhigh` reasoning effort values. It does not accept
-`high`, so use `--yolo` or set `AGENTIC_CLAUDE_EFFORT=medium` with the Spark launcher. See the [Claude Code effort
+For Claude sessions, Agentic API always sets both `--effort medium` and `CLAUDE_CODE_EFFORT_LEVEL=medium`; the
+environment variable is intentional because Claude Code gives it precedence over the command-line effort flag.
+Qwen3.8-27B's vLLM chat template accepts `low`, `medium`, and `xhigh` reasoning effort values but not Claude Code's
+default `high`. Override the pinned value with `AGENTIC_CLAUDE_EFFORT`. See the [Claude Code effort
 configuration](https://code.claude.com/docs/en/model-config) and [vLLM reasoning output
-documentation](https://docs.vllm.ai/en/latest/features/reasoning_outputs/) for the underlying behavior.
+documentation](https://docs.vllm.ai/en/latest/features/reasoning_outputs/) for the underlying behavior, and
+[Harness CLI Testing](docs/guides/harness-cli-testing.md) for an end-to-end verification checklist.
 
 **1. Serve a model with vLLM.** Any recipe from [recipes.vllm.ai](https://recipes.vllm.ai) works:
 

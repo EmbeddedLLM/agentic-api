@@ -90,11 +90,12 @@ pub struct ValidateOptions {
 
 #[derive(Args, Clone, Debug)]
 pub struct SourceOptions {
-    /// Connect to an already-running OpenAI-compatible upstream
-    #[arg(long, required_unless_present = "model")]
+    /// Connect to an already-running OpenAI-compatible upstream (`http://` or `https://` base URL)
+    #[arg(long, required_unless_present = "model", value_parser = parse_upstream_url)]
     pub upstream: Option<String>,
 
-    /// Start vLLM with this model before starting the gateway
+    /// Model to start with vLLM, or the model name to use with `--upstream`.
+    /// When omitted alongside `--upstream`, the first model served by the upstream is used.
     #[arg(long, required_unless_present = "upstream")]
     pub model: Option<String>,
 
@@ -145,6 +146,24 @@ pub struct CommonOptions {
     /// Disable ANSI color output
     #[arg(long)]
     pub no_color: bool,
+}
+
+fn parse_upstream_url(value: &str) -> Result<String, String> {
+    let parsed = url::Url::parse(value).map_err(|error| format!("invalid upstream URL `{value}`: {error}"))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(format!(
+            "invalid upstream URL `{value}`: expected an http:// or https:// base URL"
+        ));
+    }
+    if parsed.host_str().is_none_or(str::is_empty) {
+        return Err(format!("invalid upstream URL `{value}`: missing host"));
+    }
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err(format!(
+            "invalid upstream URL `{value}`: query strings and fragments are not supported; pass a base URL such as http://host:port"
+        ));
+    }
+    Ok(value.trim_end_matches('/').to_owned())
 }
 
 fn parse_timeout_seconds(value: &str) -> Result<f64, String> {
@@ -275,6 +294,36 @@ mod tests {
             panic!("expected run command");
         };
         assert_eq!(harness.options().source.model.as_deref(), Some("Qwen/test"));
+    }
+
+    #[test]
+    fn run_rejects_malformed_upstream_urls() {
+        for upstream in [
+            "http//127.0.0.1:8000",
+            "127.0.0.1:8000",
+            "ftp://127.0.0.1:8000",
+            "http://",
+        ] {
+            let error = Cli::try_parse_from(["agentic", "run", "claude", "--upstream", upstream])
+                .expect_err("malformed upstream URL should be rejected");
+            assert!(
+                error.to_string().contains("invalid upstream URL"),
+                "unexpected error for {upstream}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn run_normalizes_trailing_slash_on_upstream() {
+        let cli = Cli::try_parse_from(["agentic", "run", "claude", "--upstream", "http://127.0.0.1:8000/"])
+            .expect("valid CLI");
+        let Command::Run { harness } = cli.command else {
+            panic!("expected run command");
+        };
+        assert_eq!(
+            harness.options().source.upstream.as_deref(),
+            Some("http://127.0.0.1:8000")
+        );
     }
 
     #[test]

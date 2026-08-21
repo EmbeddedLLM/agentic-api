@@ -2,9 +2,18 @@ use std::{ffi::OsString, path::Path, time::Duration};
 
 use agentic_core::error::Error;
 use reqwest::Client;
+use serde::Deserialize;
 use tokio::time::{Instant, sleep};
 
 use crate::agentic_cli::{CommonOptions, SourceOptions};
+
+/// Reasoning effort passed to Claude Code unless `AGENTIC_CLAUDE_EFFORT` overrides it.
+///
+/// Qwen chat templates served by vLLM accept `low`, `medium`, and `xhigh`; Claude Code's
+/// default of `high` is rejected by the template, so the CLI always pins a compatible value.
+pub const DEFAULT_CLAUDE_EFFORT: &str = "medium";
+const CLAUDE_EFFORT_ENV: &str = "AGENTIC_CLAUDE_EFFORT";
+const PLACEHOLDER_MODEL: &str = "agentic-api";
 
 #[must_use]
 pub fn server_args(source: &SourceOptions, common: &CommonOptions) -> Vec<OsString> {
@@ -41,24 +50,93 @@ pub fn server_binary_path(current_exe: &Path) -> std::path::PathBuf {
     current_exe.with_file_name("agentic-server")
 }
 
-fn harness_launch_args(harness: crate::agentic_cli::Harness, yolo: bool, passthrough: &[String]) -> Vec<String> {
+#[must_use]
+pub fn claude_effort() -> String {
+    std::env::var(CLAUDE_EFFORT_ENV)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_CLAUDE_EFFORT.to_owned())
+}
+
+fn harness_launch_args(
+    harness: crate::agentic_cli::Harness,
+    yolo: bool,
+    claude_effort: &str,
+    passthrough: &[String],
+) -> Vec<String> {
     let mut args = Vec::with_capacity(passthrough.len() + 3);
-    if yolo {
-        match harness {
-            crate::agentic_cli::Harness::Codex => {
+    match harness {
+        crate::agentic_cli::Harness::Codex => {
+            if yolo {
                 args.push("--dangerously-bypass-approvals-and-sandbox".to_owned());
             }
-            crate::agentic_cli::Harness::Claude => {
-                args.extend([
-                    "--dangerously-skip-permissions".to_owned(),
-                    "--effort".to_owned(),
-                    "medium".to_owned(),
-                ]);
+        }
+        crate::agentic_cli::Harness::Claude => {
+            if yolo {
+                args.push("--dangerously-skip-permissions".to_owned());
             }
+            args.extend(["--effort".to_owned(), claude_effort.to_owned()]);
         }
     }
     args.extend_from_slice(passthrough);
     args
+}
+
+#[derive(Debug, Deserialize)]
+struct ModelList {
+    #[serde(default)]
+    data: Vec<ModelEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ModelEntry {
+    id: String,
+}
+
+/// Resolve the harness model: the explicit `--model`, or the first model the upstream serves.
+///
+/// # Errors
+///
+/// Returns a configuration error when no model is given and the upstream lists none.
+pub async fn resolve_model(client: &Client, source: &SourceOptions, api_key: Option<&str>) -> Result<String, Error> {
+    if let Some(model) = &source.model {
+        return Ok(model.clone());
+    }
+    let Some(upstream) = &source.upstream else {
+        return Ok(PLACEHOLDER_MODEL.to_owned());
+    };
+    let models_url = format!("{}/v1/models", agentic_core::config::normalize_base_url(upstream));
+    let mut request = client.get(&models_url);
+    if let Some(api_key) = api_key {
+        request = request.bearer_auth(api_key);
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|error| Error::Config(format!("failed to list upstream models at {models_url}: {error}")))?
+        .error_for_status()
+        .map_err(|error| Error::Config(format!("upstream model listing at {models_url} failed: {error}")))?;
+    let body = response
+        .text()
+        .await
+        .map_err(|error| Error::Config(format!("failed to read model listing from {models_url}: {error}")))?;
+    let list: ModelList = agentic_core::utils::common::deserialize_from_str(&body)
+        .map_err(|error| Error::Config(format!("invalid model listing from {models_url}: {error}")))?;
+    let mut ids = list.data.into_iter().map(|entry| entry.id);
+    let Some(model) = ids.next() else {
+        return Err(Error::Config(format!(
+            "upstream {upstream} serves no models; pass --model explicitly"
+        )));
+    };
+    let remaining = ids.count();
+    if remaining > 0 {
+        eprintln!(
+            "upstream serves {} models; using {model}. Pass --model to choose another.",
+            remaining + 1
+        );
+    }
+    Ok(model)
 }
 
 /// Wait until the gateway is live and, unless skipped, its upstream is ready.
@@ -144,13 +222,23 @@ pub async fn run_session(
         return Err(error);
     }
 
-    let harness_env = match harness_environment(harness, &gateway_url, &options, &session_root) {
+    let model = match resolve_model(&client, &options.source, options.common.api_key.as_deref()).await {
+        Ok(model) => model,
+        Err(error) => {
+            cleanup(&mut server, &session_root).await;
+            return Err(error);
+        }
+    };
+    let harness_env = match harness_environment(harness, &gateway_url, &model, &options, &session_root) {
         Ok(environment) => environment,
         Err(error) => {
             cleanup(&mut server, &session_root).await;
             return Err(error);
         }
     };
+    if !options.common.quiet {
+        println!("{}", harness_env.summary);
+    }
 
     let mut harness_child = match spawn_harness(harness, &options, &harness_env) {
         Ok(child) => child,
@@ -193,6 +281,7 @@ fn start_server(
 fn harness_environment(
     harness: crate::agentic_cli::Harness,
     gateway_url: &str,
+    model: &str,
     options: &crate::agentic_cli::HarnessOptions,
     session_root: &Path,
 ) -> Result<crate::agentic_harness::HarnessEnv, Error> {
@@ -200,20 +289,22 @@ fn harness_environment(
         crate::agentic_cli::Harness::Codex => crate::agentic_harness::prepare_codex_home(
             session_root,
             gateway_url,
-            options.source.model.as_deref().unwrap_or("agentic-api"),
+            model,
             options.common.api_key.as_deref(),
         )
         .map_err(Error::from),
         crate::agentic_cli::Harness::Claude => Ok(crate::agentic_harness::prepare_claude_env(
             gateway_url,
-            options.source.model.as_deref().unwrap_or("agentic-api"),
+            model,
             options.common.api_key.as_deref(),
         )),
     }?;
-    if options.common.yolo && matches!(harness, crate::agentic_cli::Harness::Claude) {
+    if matches!(harness, crate::agentic_cli::Harness::Claude) {
+        // Claude Code gives CLAUDE_CODE_EFFORT_LEVEL precedence over --effort, so set both
+        // to keep an inherited `high` from reaching the Qwen chat template.
         environment
             .environment
-            .insert("CLAUDE_CODE_EFFORT_LEVEL".to_owned(), "medium".to_owned());
+            .insert("CLAUDE_CODE_EFFORT_LEVEL".to_owned(), claude_effort());
     }
     Ok(environment)
 }
@@ -233,7 +324,12 @@ fn spawn_harness(
     };
     let binary = std::env::var_os(override_name).unwrap_or_else(|| binary_name.into());
     let mut harness_command = tokio::process::Command::new(binary);
-    harness_command.args(harness_launch_args(harness, options.common.yolo, &options.harness_args));
+    harness_command.args(harness_launch_args(
+        harness,
+        options.common.yolo,
+        &claude_effort(),
+        &options.harness_args,
+    ));
     harness_command.envs(&harness_env.environment);
     harness_command.stdin(std::process::Stdio::inherit());
     harness_command.stdout(std::process::Stdio::inherit());
@@ -253,7 +349,7 @@ async fn cleanup(server: &mut tokio::process::Child, session_root: &Path) {
 mod tests {
     use std::ffi::OsString;
 
-    use super::{harness_launch_args, server_args};
+    use super::{DEFAULT_CLAUDE_EFFORT, harness_launch_args, server_args};
     use crate::agentic_cli::{CommonOptions, Harness, SourceOptions};
 
     #[test]
@@ -311,7 +407,7 @@ mod tests {
     #[test]
     fn yolo_mode_uses_native_codex_bypass_flag() {
         assert_eq!(
-            harness_launch_args(Harness::Codex, true, &["exec".to_owned()]),
+            harness_launch_args(Harness::Codex, true, DEFAULT_CLAUDE_EFFORT, &["exec".to_owned()]),
             ["--dangerously-bypass-approvals-and-sandbox", "exec"]
         );
     }
@@ -319,8 +415,128 @@ mod tests {
     #[test]
     fn yolo_mode_uses_native_claude_bypass_and_compatible_effort() {
         assert_eq!(
-            harness_launch_args(Harness::Claude, true, &[]),
+            harness_launch_args(Harness::Claude, true, DEFAULT_CLAUDE_EFFORT, &[]),
             ["--dangerously-skip-permissions", "--effort", "medium"]
+        );
+    }
+
+    #[test]
+    fn claude_always_receives_a_compatible_effort() {
+        assert_eq!(
+            harness_launch_args(Harness::Claude, false, "low", &["-p".to_owned(), "hi".to_owned()]),
+            ["--effort", "low", "-p", "hi"]
+        );
+        assert_eq!(
+            harness_launch_args(Harness::Codex, false, DEFAULT_CLAUDE_EFFORT, &[]),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn claude_environment_pins_effort_without_yolo() {
+        let options = crate::agentic_cli::HarnessOptions {
+            source: SourceOptions {
+                upstream: Some("http://127.0.0.1:8000".to_owned()),
+                model: None,
+                llm_port: 8000,
+            },
+            common: CommonOptions::default(),
+            harness_args: Vec::new(),
+        };
+        let root = std::env::temp_dir().join(format!("agentic-api-effort-test-{}", std::process::id()));
+        let environment = super::harness_environment(
+            Harness::Claude,
+            "http://127.0.0.1:3000",
+            "Qwen/discovered",
+            &options,
+            &root,
+        )
+        .expect("Claude environment");
+
+        assert_eq!(
+            environment.environment.get("CLAUDE_CODE_EFFORT_LEVEL"),
+            Some(&DEFAULT_CLAUDE_EFFORT.to_owned())
+        );
+        assert_eq!(
+            environment.environment.get("ANTHROPIC_MODEL"),
+            Some(&"Qwen/discovered".to_owned())
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_model_does_not_double_the_v1_suffix() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buffer = [0_u8; 1024];
+            let read = socket.read(&mut buffer).await.unwrap();
+            let request_line = String::from_utf8_lossy(&buffer[..read])
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .to_owned();
+            let body = r#"{"data":[{"id":"Qwen/served"}]}"#;
+            let status = if request_line.starts_with("GET /v1/models ") {
+                "200 OK"
+            } else {
+                "404 Not Found"
+            };
+            let response = format!(
+                "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+        });
+        let client = reqwest::Client::new();
+        let source = SourceOptions {
+            upstream: Some(format!("http://{address}/v1")),
+            model: None,
+            llm_port: 8000,
+        };
+        assert_eq!(
+            super::resolve_model(&client, &source, None).await.unwrap(),
+            "Qwen/served"
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_model_prefers_explicit_model() {
+        let client = reqwest::Client::new();
+        let source = SourceOptions {
+            upstream: Some("http://127.0.0.1:9".to_owned()),
+            model: Some("Qwen/test".to_owned()),
+            llm_port: 8000,
+        };
+        assert_eq!(super::resolve_model(&client, &source, None).await.unwrap(), "Qwen/test");
+    }
+
+    #[tokio::test]
+    async fn resolve_model_discovers_first_upstream_model() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buffer = [0_u8; 1024];
+            let _ = socket.read(&mut buffer).await;
+            let body = r#"{"object":"list","data":[{"id":"Qwen/served"},{"id":"other"}]}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+        });
+        let client = reqwest::Client::new();
+        let source = SourceOptions {
+            upstream: Some(format!("http://{address}")),
+            model: None,
+            llm_port: 8000,
+        };
+        assert_eq!(
+            super::resolve_model(&client, &source, None).await.unwrap(),
+            "Qwen/served"
         );
     }
 
@@ -339,8 +555,9 @@ mod tests {
             harness_args: Vec::new(),
         };
         let root = std::env::temp_dir().join(format!("agentic-api-yolo-test-{}", std::process::id()));
-        let environment = super::harness_environment(Harness::Claude, "http://127.0.0.1:3000", &options, &root)
-            .expect("Claude environment");
+        let environment =
+            super::harness_environment(Harness::Claude, "http://127.0.0.1:3000", "Qwen/test", &options, &root)
+                .expect("Claude environment");
 
         assert_eq!(
             environment.environment.get("CLAUDE_CODE_EFFORT_LEVEL"),

@@ -9,7 +9,10 @@
 pub mod request;
 pub mod tool_seam;
 
-pub use request::{ContentBlock, MessageContent, MessageParam, MessagesRequest, SystemPrompt, ToolParam};
+pub use request::{
+    ContentBlock, MessageContent, MessageParam, MessagesRequest, OutputConfig, ReasoningEffort, ReasoningEffortLevel,
+    SystemPrompt, ToolParam,
+};
 pub use tool_seam::{
     GatewayToolMap, adapt_web_search_input, call_to_tool_use_block, has_gateway_tool, parse_tool_input, registry_tools,
     strip_gateway_tool_use, tool_result_block, tool_use_to_call,

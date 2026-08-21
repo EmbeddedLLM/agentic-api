@@ -107,12 +107,34 @@ async fn execute_messages(state: &AppState, headers: &HeaderMap, req: &MessagesR
     }
 }
 
+/// Qwen-family reasoning models only accept `xhigh|medium|low` in their chat
+/// template, but clients like Claude Code send the standard
+/// `output_config.effort = "high"` (their top tier). Map the standard top tiers
+/// (`high`, `max`) onto the model's top tier (`xhigh`) through the typed
+/// [`MessagesRequest`]; all other fields round-trip through `extra`. Returns
+/// rewritten bytes only when a change was made.
+///
+/// NOTE: this assumes a Qwen-style effort vocabulary (the model family this
+/// gateway targets). A backend that supports `high` but not `xhigh` would need
+/// this made model-aware.
+fn normalize_reasoning_effort(bytes: &Bytes) -> Option<Bytes> {
+    let body = std::str::from_utf8(bytes).ok()?;
+    let mut request: MessagesRequest = agentic_core::utils::common::deserialize_from_str(body).ok()?;
+    let config = request.output_config.as_mut()?;
+    let clamped = config.effort.as_ref()?.clamped_for_qwen()?;
+    config.effort = Some(clamped);
+    agentic_core::utils::common::serialize_to_string(&request)
+        .ok()
+        .map(Bytes::from)
+}
+
 pub async fn messages(State(state): State<AppState>, request: Request) -> Response {
     let (parts, body) = request.into_parts();
     let bytes: Bytes = match read_bytes_with_auth(body, ProxyAuth::Anthropic).await {
         Ok(bytes) => bytes,
         Err(response) => return response,
     };
+    let bytes = normalize_reasoning_effort(&bytes).unwrap_or(bytes);
 
     // Route to the loop only when a gateway-owned tool is declared; everything
     // else keeps the transparent proxy path.
