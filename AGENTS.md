@@ -81,20 +81,23 @@ uv run mkdocs serve
 - Clippy `all` lints are denied; `pedantic` lints are warnings.
 - Minimum supported Rust version (MSRV): 1.85.
 
-### `agentic-server-core` boundaries
+### The agentic-server and core design architecture
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full crate breakdown, request
+lifecycle, module-by-module walkthrough, and contribution guide.
 
 - `types/` owns wire/domain data; `events/` parses and normalizes upstream events; `tool/` owns tool discovery,
   routing, and execution; `executor/` orchestrates requests across inference, tools, and persistence; `storage/` owns
   database models and operations; `utils/` contains genuinely shared, domain-neutral helpers.
 - Respect this dependency direction: handlers call core APIs; executor coordinates `events`, `tool`, and `storage`;
   those modules share contracts through `types`. Do not introduce transport concerns into core types or business logic.
-- In `src/` code, reuse `utils::common` for JSON serialization/deserialization and fallback behavior. Do not call
-  `serde_json` directly when an existing strict, optional, or defaulting helper expresses the required policy; add a
-  focused helper there when the policy is reused. Direct `serde_json` use is fine in tests, fixtures, and cassette
-  tooling. Keep Serde wire-format attributes on the owning type.
 
 ## Rust Best Practices
 
+- Do not use loose/untyped JSON signatures (`serde_json::Value` and similar) at a public API boundary. Request,
+  response, and tool payloads must be modeled as proper types in `agentic-server-core/types` and serialized/
+  deserialized through them. Functions and APIs introduced in this repo must be typed Rust; untyped JSON is not a
+  substitute for a real type at a public boundary.
 - Prefer borrowing (`&T`, `&str`, `&[T]`) and avoid `.clone()` unless ownership or lifetime requirements make it
   necessary. Move values when ownership is transferred; use `Arc` only for genuinely shared thread-safe state, and
   keep required clones explicit and close to task spawn.
