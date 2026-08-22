@@ -110,3 +110,12 @@ spec:
             capabilities:
               drop:
                 - ALL
+          volumeMounts:
+            # Writable home for the generated config.toml and any local state; the
+            # root filesystem stays read-only.
+            - name: agentic-api-home
+              mountPath: /var/lib/agentic-api
+      volumes:
+        - name: agentic-api-home
+          emptyDir:
+            sizeLimit: 64Mi

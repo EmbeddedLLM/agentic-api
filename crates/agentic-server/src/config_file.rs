@@ -65,6 +65,13 @@ pub(crate) struct FileConfig {
     pub mcp_servers: HashMap<String, McpServerEntry>,
 }
 
+fn is_unwritable_home(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem
+    ) || error.raw_os_error() == Some(30) // EROFS on platforms without the stable ErrorKind mapping
+}
+
 impl FileConfig {
     pub(crate) fn load(home: &Path) -> Result<Option<Self>, Error> {
         let path = home.join(CONFIG_FILE_NAME);
@@ -98,10 +105,24 @@ impl FileConfig {
              # Secret values are read from referenced environment variables and are not written here.\n\n{body}"
         );
 
-        let mut file = tempfile::Builder::new()
-            .prefix(".agentic-config-")
-            .tempfile_in(home)
-            .map_err(|error| Error::Config(format!("failed to create temporary configuration file: {error}")))?;
+        let mut file = match tempfile::Builder::new().prefix(".agentic-config-").tempfile_in(home) {
+            Ok(file) => file,
+            Err(error) if is_unwritable_home(&error) => {
+                // A read-only root filesystem (the Kubernetes base) or an unwritable home must not
+                // prevent startup: the generated file is a convenience, not a requirement.
+                tracing::warn!(
+                    home = %home.display(),
+                    error = %error,
+                    "Agentic API home is not writable; continuing with the generated configuration in memory"
+                );
+                return Ok(self);
+            }
+            Err(error) => {
+                return Err(Error::Config(format!(
+                    "failed to create temporary configuration file: {error}"
+                )));
+            }
+        };
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -339,5 +360,30 @@ mod tests {
 
         assert_eq!(config.llm_api_base.as_deref(), Some("http://existing:8000"));
         assert!(!contents.contains("replacement"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_or_load_continues_when_home_is_not_writable() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let home = tempfile::tempdir().expect("tempdir");
+        fs::set_permissions(home.path(), fs::Permissions::from_mode(0o555)).expect("make home read-only");
+        if fs::File::create(home.path().join("probe")).is_ok() {
+            // Running as root: the permission bits are not enforced, so the scenario cannot be reproduced.
+            return;
+        }
+        let defaults = FileConfig {
+            llm_api_base: Some("http://127.0.0.1:5050".to_owned()),
+            ..FileConfig::default()
+        };
+
+        let config = defaults
+            .create_or_load(home.path())
+            .expect("an unwritable home must not fail startup");
+
+        assert_eq!(config.llm_api_base.as_deref(), Some("http://127.0.0.1:5050"));
+        assert!(!home.path().join("config.toml").exists());
+        fs::set_permissions(home.path(), fs::Permissions::from_mode(0o755)).expect("restore permissions");
     }
 }

@@ -1,0 +1,19 @@
+# kind overlay for native Linux Docker, where host.docker.internal does not
+# resolve inside the cluster. The IP is the gateway of the `kind` Docker network
+# (not the default bridge); confirm it with:
+#   docker network inspect kind --format '{{range .IPAM.Config}}{{.Gateway}} {{end}}'
+#
+#   kubectl apply -k deploy/overlays/kind-linux
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: agentic-api
+resources:
+  - ../kind
+patches:
+  - target: {kind: Deployment, name: agentic-api}
+    patch: |
+      - op: add
+        path: /spec/template/spec/hostAliases
+        value:
+          - ip: "172.18.0.1"
+            hostnames: [host.docker.internal]

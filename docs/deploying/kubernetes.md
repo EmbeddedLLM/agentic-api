@@ -10,14 +10,15 @@ or put an authenticated application boundary in front of it before allowing traf
 Build and publish the production image described in the [container guide](container.md). The base uses
 `agentic-api:dev` so it also works with images loaded directly into a local cluster. Before deploying to a shared
 cluster, replace that image with an immutable registry digest in an environment-specific Kustomize overlay such as
-`deploy/kubernetes/overlays/production/kustomization.yaml`:
+`deploy/overlays/production/kustomization.yaml`. Keep overlays outside `deploy/kubernetes`: Kustomize rejects a base
+that is an ancestor of the overlay directory with a "cycle detected" error.
 
 ```yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: agentic-api
 resources:
-  - ../..
+  - ../../kubernetes
 images:
   - name: agentic-api
     newName: registry.example.com/vllm/agentic-api
@@ -25,7 +26,10 @@ images:
 ```
 
 Change `LLM_API_BASE` and `CORS_ALLOWED_ORIGINS` in `deploy/kubernetes/configmap.yaml` or patch them in the same
-overlay. Keep `SKIP_LLM_READY_CHECK=false` when the inference service exposes `/health`. The recurring upstream check
+overlay. `deploy/overlays/kind` is a working example for the local kind cluster from the
+[kind guide](README.md): it points `LLM_API_BASE` at `host.docker.internal:5050` on the host. On native Linux
+Docker, apply `deploy/overlays/kind-linux` instead; it layers the `hostAliases` entry that `host.docker.internal`
+needs there on top of the same overlay. Keep `SKIP_LLM_READY_CHECK=false` when the inference service exposes `/health`. The recurring upstream check
 uses `OPENAI_API_KEY` as a bearer credential when configured. For a provider without `/health`, set
 `SKIP_LLM_READY_CHECK=true`; `/ready` will continue checking PostgreSQL but will omit the upstream check. Add a small
 Responses API request as an external monitor in that configuration.
@@ -91,7 +95,9 @@ The base defines:
 - a 30-second pod termination grace period for endpoint propagation and the gateway's bounded eight-second drain;
 - CPU and memory requests and limits that should be tuned from observed traffic;
 - a preferred hostname anti-affinity rule for the two gateway replicas;
-- a non-root, read-only runtime with no Linux capabilities or mounted service-account token;
+- a non-root, read-only root filesystem with no Linux capabilities or mounted service-account token, plus a small
+  `emptyDir` mounted at `/var/lib/agentic-api` for the generated `config.toml` (the gateway also starts without a
+  writable home and keeps that configuration in memory);
 - a default-deny ingress NetworkPolicy; and
 - a PodDisruptionBudget that retains one replica during voluntary disruption.
 
