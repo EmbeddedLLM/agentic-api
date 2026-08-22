@@ -83,6 +83,12 @@ jobs:
       - name: Run tests
         run: cargo test
 
+      - name: Test Codex and Claude launcher contracts
+        run: bash scripts/tests/agentic-launchers-test.sh
+
+      - name: Test agentic CLI end to end
+        run: python3 scripts/tests/agentic-cli-e2e-test.py
+
   postgres:
     runs-on: ubuntu-latest
     services:
@@ -122,7 +128,7 @@ jobs:
             cargo-${{ runner.os }}-
 
       - name: Verify PostgreSQL schema upgrades and validation
-        run: cargo test -p agentic-server-core --lib -- --ignored
+        run: cargo test -p agentic-server-core --lib -- --ignored --test-threads=1
 
       - name: Verify PostgreSQL migrations and restart persistence
-        run: cargo test -p agentic-server-core --test postgres_storage_integration -- --ignored
+        run: cargo test -p agentic-server-core --test postgres_storage_integration -- --ignored --test-threads=1

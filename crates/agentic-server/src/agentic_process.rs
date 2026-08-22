@@ -285,6 +285,9 @@ fn harness_environment(
     options: &crate::agentic_cli::HarnessOptions,
     session_root: &Path,
 ) -> Result<crate::agentic_harness::HarnessEnv, Error> {
+    if matches!(harness, crate::agentic_cli::Harness::Claude) {
+        crate::agentic_harness::validate_claude_model(model).map_err(Error::Config)?;
+    }
     let mut environment = match harness {
         crate::agentic_cli::Harness::Codex => crate::agentic_harness::prepare_codex_home(
             session_root,
@@ -447,7 +450,7 @@ mod tests {
         let environment = super::harness_environment(
             Harness::Claude,
             "http://127.0.0.1:3000",
-            "Qwen/discovered",
+            "served-discovered",
             &options,
             &root,
         )
@@ -459,7 +462,7 @@ mod tests {
         );
         assert_eq!(
             environment.environment.get("ANTHROPIC_MODEL"),
-            Some(&"Qwen/discovered".to_owned())
+            Some(&"served-discovered".to_owned())
         );
     }
 
@@ -545,7 +548,7 @@ mod tests {
         let options = crate::agentic_cli::HarnessOptions {
             source: SourceOptions {
                 upstream: Some("http://127.0.0.1:8000".to_owned()),
-                model: Some("Qwen/test".to_owned()),
+                model: Some("served-test".to_owned()),
                 llm_port: 8000,
             },
             common: CommonOptions {
@@ -556,7 +559,7 @@ mod tests {
         };
         let root = std::env::temp_dir().join(format!("agentic-api-yolo-test-{}", std::process::id()));
         let environment =
-            super::harness_environment(Harness::Claude, "http://127.0.0.1:3000", "Qwen/test", &options, &root)
+            super::harness_environment(Harness::Claude, "http://127.0.0.1:3000", "served-test", &options, &root)
                 .expect("Claude environment");
 
         assert_eq!(

@@ -103,6 +103,10 @@ wire_api = \"responses\"\nrequires_openai_auth = {requires_auth}\nsupports_webso
 
 #[must_use]
 pub fn prepare_claude_env(gateway_url: &str, model: &str, api_key: Option<&str>) -> HarnessEnv {
+    let auth_token = std::env::var("ANTHROPIC_AUTH_TOKEN")
+        .ok()
+        .or_else(|| api_key.map(str::to_owned))
+        .unwrap_or_else(|| "agentic-api-local".to_owned());
     let mut environment = BTreeMap::from([
         (
             "ANTHROPIC_BASE_URL".to_owned(),
@@ -110,10 +114,14 @@ pub fn prepare_claude_env(gateway_url: &str, model: &str, api_key: Option<&str>)
         ),
         ("ANTHROPIC_MODEL".to_owned(), model.to_owned()),
         ("ANTHROPIC_SMALL_FAST_MODEL".to_owned(), model.to_owned()),
+        ("ANTHROPIC_DEFAULT_OPUS_MODEL".to_owned(), model.to_owned()),
+        ("ANTHROPIC_DEFAULT_SONNET_MODEL".to_owned(), model.to_owned()),
+        ("ANTHROPIC_DEFAULT_HAIKU_MODEL".to_owned(), model.to_owned()),
         (
             "ANTHROPIC_API_KEY".to_owned(),
             api_key.unwrap_or("agentic-api-local").to_owned(),
         ),
+        ("ANTHROPIC_AUTH_TOKEN".to_owned(), auth_token),
     ]);
     if let Some(api_key) = api_key {
         environment.insert("OPENAI_API_KEY".to_owned(), api_key.to_owned());
@@ -126,6 +134,21 @@ pub fn prepare_claude_env(gateway_url: &str, model: &str, api_key: Option<&str>)
             gateway_url.trim_end_matches('/')
         ),
     }
+}
+
+/// Validates that a Claude Code model name is a slash-free served alias.
+///
+/// # Errors
+///
+/// Returns an error when the model name contains `/`, which Claude Code does not
+/// accept for custom model names.
+pub fn validate_claude_model(model: &str) -> Result<(), String> {
+    if model.contains('/') {
+        return Err(format!(
+            "Claude Code requires a slash-free served model alias; start vLLM with --served-model-name and set --model to that alias (received {model})"
+        ));
+    }
+    Ok(())
 }
 
 fn toml_escape(value: &str) -> String {
@@ -163,8 +186,30 @@ mod tests {
             Some(&"http://127.0.0.1:3000".to_owned())
         );
         assert_eq!(env.environment.get("ANTHROPIC_MODEL"), Some(&"Qwen/test".to_owned()));
+        assert_eq!(
+            env.environment.get("ANTHROPIC_DEFAULT_OPUS_MODEL"),
+            Some(&"Qwen/test".to_owned())
+        );
+        assert_eq!(
+            env.environment.get("ANTHROPIC_DEFAULT_SONNET_MODEL"),
+            Some(&"Qwen/test".to_owned())
+        );
+        assert_eq!(
+            env.environment.get("ANTHROPIC_DEFAULT_HAIKU_MODEL"),
+            Some(&"Qwen/test".to_owned())
+        );
         assert_eq!(env.environment.get("ANTHROPIC_API_KEY"), Some(&"secret-key".to_owned()));
+        assert_eq!(
+            env.environment.get("ANTHROPIC_AUTH_TOKEN"),
+            Some(&"secret-key".to_owned())
+        );
         assert!(!env.summary.contains("secret-key"));
+    }
+
+    #[test]
+    fn claude_model_requires_a_served_alias() {
+        assert!(super::validate_claude_model("Qwen/test").is_err());
+        assert!(super::validate_claude_model("Qwen-test").is_ok());
     }
 
     fn unique_temp_dir(name: &str) -> std::path::PathBuf {
