@@ -5,6 +5,9 @@ repo_url: https://github.com/vllm-project/agentic-api
 repo_name: vllm-project/agentic-api
 edit_uri: edit/main/docs/
 
+exclude_docs: |
+  superpowers/
+
 theme:
   name: material
   custom_dir: docs/mkdocs/overrides
@@ -97,6 +100,17 @@ nav:
     - Harness CLI Testing: guides/harness-cli-testing.md
   - Developing:
     - Getting Started: developing/getting-started.md
+  - Architecture:
+    - ADR-01: adr/ADR-01_core.md
+    - ADR-02: adr/ADR-02_response_store.md
+    - ADR-03: adr/ADR-03_gateway_integration.md
+    - Claude Code Integration: design/claude-code-integration.md
+    - Codex Integration: design/codex-integration.md
+    - Core Public API: design/core-public-api.md
+    - MCP Gateway Integration: design/mcp-gateway-integration.md
+    - Messages Gateway Tool Classification: design/messages-gateway-tool-classification.md
+    - OIDC Bearer Authentication: design/oidc-bearer-authentication.md
+    - Tool Framework: design/tool-framework.md
   - Deploying:
     - Container: deploying/container.md
     - GitHub authentication with Dex: deploying/github-oidc.md

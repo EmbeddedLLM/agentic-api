@@ -7,7 +7,16 @@ while verifying [issue #190](https://github.com/vllm-project/agentic-api/issues/
 
 ## Prerequisites
 
-- A running OpenAI-compatible upstream. The examples use vLLM serving Qwen on `http://127.0.0.1:8000`:
+- A running OpenAI-compatible upstream. The examples use vLLM serving Qwen on `http://127.0.0.1:8000`. For
+  Claude Code, vLLM must also serve the model under a slash-free alias (`--served-model-name` accepts several
+  names), because since 0.4.0 `agentic run claude` rejects model names containing `/`:
+
+  ```console
+  vllm serve Qwen/Qwen3.8-27B-FP8 \
+    --served-model-name Qwen/Qwen3.8-27B-FP8 qwen3-8-27b-fp8 ...
+  ```
+
+  Check what is served with:
 
   ```console
   curl -s http://127.0.0.1:8000/v1/models | python3 -c 'import sys,json; print([m["id"] for m in json.load(sys.stdin)["data"]])'
@@ -27,6 +36,7 @@ while verifying [issue #190](https://github.com/vllm-project/agentic-api/issues/
 |---|---|
 | `--upstream` must be a full URL | `http://` or `https://` with a host. A typo such as `http//127.0.0.1:8000` is rejected at parse time with `invalid upstream URL`. |
 | `--model` is optional with `--upstream` | When omitted, the CLI calls `GET {upstream}/v1/models` and uses the first model listed. Pass `--model` to pick another when the upstream serves several. |
+| Claude requires a slash-free model | `agentic run claude` fails with `Claude Code requires a slash-free served model alias` when the model name contains `/`. Serve an alias with `--served-model-name` and pass it via `--model` (Codex accepts either form). |
 | Claude effort is pinned to `medium` | Claude Code defaults to `high`, which Qwen's vLLM chat template rejects (`ValueError`). The CLI always passes `--effort medium` and sets `CLAUDE_CODE_EFFORT_LEVEL=medium` (the env var wins inside Claude Code). Override both with `AGENTIC_CLAUDE_EFFORT=low|medium|xhigh`. |
 | `--yolo` | Adds `--dangerously-skip-permissions` (Claude) or `--dangerously-bypass-approvals-and-sandbox` (Codex). Use only in an externally isolated environment. |
 | `--skip-llm-ready-check` | Skips the upstream `/health` probe. Avoid it while testing: the probe is what surfaces an unreachable upstream before the harness starts. |
@@ -46,7 +56,7 @@ the harness binary resolves, and the upstream URL is well formed.
 Claude Code:
 
 ```console
-./target/debug/agentic run claude --upstream http://127.0.0.1:8000 -- -p "Reply with exactly one word: pong"
+./target/debug/agentic run claude --upstream http://127.0.0.1:8000 --model qwen3-8-27b-fp8 -- -p "Reply with exactly one word: pong"
 ```
 
 Codex:
@@ -61,7 +71,7 @@ Expected lifecycle output, then the harness answer and a clean exit:
 Starting Claude via http://127.0.0.1:3000
 ... agentic_server::server: LLM ready: http://127.0.0.1:8000
 ... agentic_server::server: gateway listening on 127.0.0.1:3000
-Claude Code gateway: http://127.0.0.1:3000 (model: Qwen/Qwen3.8-27B-FP8)
+Claude Code gateway: http://127.0.0.1:3000 (model: qwen3-8-27b-fp8)
 pong
 ```
 
@@ -74,7 +84,7 @@ Tool calls are where the parallel-tool-call handling from #190 is exercised, so 
 session and approve the permission prompt when the harness asks to run the command:
 
 ```console
-./target/debug/agentic run claude --upstream http://127.0.0.1:8000
+./target/debug/agentic run claude --upstream http://127.0.0.1:8000 --model qwen3-8-27b-fp8
 > Run 'ls crates' with the Bash tool and list the directory names.
 ```
 
@@ -85,14 +95,14 @@ Permission prompts are the default. Only for an unattended run in an externally 
 throwaway container) add `--yolo`, which forwards the harness's native bypass flag:
 
 ```console
-./target/debug/agentic run claude --upstream http://127.0.0.1:8000 --yolo \
+./target/debug/agentic run claude --upstream http://127.0.0.1:8000 --model qwen3-8-27b-fp8 --yolo \
   -- -p "Run 'ls crates' with the Bash tool and list the directory names."
 ```
 
 ## 4. Interactive session
 
 ```console
-./target/debug/agentic run claude --upstream http://127.0.0.1:8000
+./target/debug/agentic run claude --upstream http://127.0.0.1:8000 --model qwen3-8-27b-fp8
 ```
 
 Inside the session, useful checks are a plain question (no tools), a file read, a multi-step edit, and `/model`
@@ -134,14 +144,17 @@ with the same environment the CLI would set. The kind-based development cluster 
 ```console
 docker build -t agentic-api:kind .
 kind load docker-image agentic-api:kind --name agentic-api
-kubectl rollout restart deploy/agentic-api
-kubectl rollout status deploy/agentic-api --timeout=180s
+kubectl --namespace agentic-api rollout restart deploy/agentic-api
+kubectl --namespace agentic-api rollout status deploy/agentic-api --timeout=180s
 ```
+
+The Kubernetes guide deploys into the `agentic-api` namespace, so every `kubectl` command below passes
+`--namespace agentic-api`; without it kubectl reports `deployments.apps "agentic-api" not found`.
 
 ### Port-forward and run the same checks
 
 ```console
-kubectl port-forward svc/agentic-api 9000:9000 &
+kubectl --namespace agentic-api port-forward svc/agentic-api 9000:9000 &
 
 # #190 repro (expect HTTP 200)
 curl -s -w '\nHTTP %{http_code}\n' -H 'content-type: application/json' http://127.0.0.1:9000/v1/responses -d '{
@@ -172,7 +185,7 @@ model_catalog_json = "$CODEX_HOME/model_catalog.json"
 
 [model_providers.agentic-api]
 name = "Agentic API"
-base_url = "http://127.0.0.1:9000/v1"
+base_url = "http://127.0.0.1:9000/v1"   # must match the port-forward above when reusing an older CODEX_HOME
 wire_api = "responses"
 requires_openai_auth = false
 supports_websockets = true
@@ -191,8 +204,13 @@ Replace `agentic-api-local` with a real key when the deployment enforces inbound
 confirming the gateway logged no errors during the run:
 
 ```console
-kubectl logs deploy/agentic-api --since=10m | grep -ci error   # expect 0
+kubectl --namespace agentic-api logs deploy/agentic-api --all-pods --since=10m | grep -c ' ERROR '   # expect 0
 ```
+
+Match the log level rather than the word `error`: Codex closes its WebSocket without a closing handshake when
+`exec` finishes, which the gateway logs as a `WARN ... WebSocket protocol error: Connection reset without closing
+handshake` line per run. That line and the startup `WARN ... parallel tool calls are not supported` notice are
+expected; anything at `ERROR` level is not.
 
 ## Troubleshooting
 
@@ -201,6 +219,7 @@ kubectl logs deploy/agentic-api --since=10m | grep -ci error   # expect 0
 | `invalid upstream URL` at startup | Malformed `--upstream` (missing `://`, no scheme, no host) | Pass a full `http://host:port` URL. |
 | `HTTP 502` on every request | Gateway cannot reach the upstream, typically a wrong URL combined with `--skip-llm-ready-check` | Drop `--skip-llm-ready-check` so the readiness probe fails fast, then fix the URL. |
 | `There's an issue with the selected model` | Model name does not match what the upstream serves | Omit `--model` to auto-discover, or copy the id from `/v1/models` exactly. |
+| `Claude Code requires a slash-free served model alias` | The discovered or passed model name contains `/`, which `agentic run claude` rejects (0.4.0+) | Add a slash-free alias to vLLM's `--served-model-name` list and pass it with `--model`. |
 | Template `ValueError` mentioning effort | Claude Code sent `high` | Do not override `AGENTIC_CLAUDE_EFFORT` with `high`; valid values for Qwen are `low`, `medium`, `xhigh`. |
 | `HTTP 503` from a cluster gateway | `/ready` failing because the gateway cannot reach its upstream or database | `kubectl logs deploy/agentic-api` and look for `gateway dependencies not ready`. |
 | `readiness.ready=false` warnings every minute or two while the upstream is healthy | Gateway build predates the readiness-client pooling fix ([#199](https://github.com/vllm-project/agentic-api/pull/199)): a pooled keep-alive connection that the upstream closed fails with `hyper::Error(IncompleteMessage)` | Rebuild from a tree that includes #199 and redeploy; add `agentic_server::handler::http::models=debug` to `RUST_LOG` to see the probe error. |

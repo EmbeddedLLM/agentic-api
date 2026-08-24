@@ -2,6 +2,20 @@
 
 The production image contains only the Rust gateway and its runtime libraries. It does not contain Python, vLLM, GPU libraries, model weights, Cargo, or the Rust toolchain. Run inference and PostgreSQL as external services.
 
+## Install from crates.io instead
+
+Since 0.4.0 the gateway is also published to crates.io, so a container is not required on a host with a Rust
+toolchain (MSRV 1.85):
+
+```console
+cargo install agentic-server --version 0.4.0 --locked
+```
+
+This installs two binaries: `agentic`, the harness CLI (`agentic serve` starts the gateway alone; `agentic run
+claude|codex` starts it and launches a harness), and `agentic-server`, the standalone server configured through the
+same environment variables as the container below. The container remains the recommended path for Kubernetes and
+for hosts without a toolchain.
+
 ## Build the image
 
 The multi-stage build pins its Rust and Debian bases by digest, uses BuildKit caches, and copies only `agentic-server` into the runtime stage. Dependabot proposes weekly digest updates so base-image changes remain explicit and reviewable.
@@ -14,6 +28,11 @@ DOCKER_BUILDKIT=1 docker build \
   --tag agentic-api:dev \
   .
 ```
+
+For a release build, pass the version being packaged instead of `dev` and tag the image to match, for example
+`OCI_VERSION="0.4.0"` with `--tag agentic-api:0.4.0`. That version tag (or, preferably, the digest recorded when
+the image is pushed) is what an environment overlay such as the one in the
+[Kubernetes guide](kubernetes.md) should pin.
 
 CI also records the workflow name and run URL in the vLLM-compatible image labels. Local builds use `local` as the pipeline label unless `OCI_BUILD_PIPELINE` is supplied as a build argument.
 
