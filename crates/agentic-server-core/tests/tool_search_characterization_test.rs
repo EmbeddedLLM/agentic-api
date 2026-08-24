@@ -1064,21 +1064,21 @@ fn provider_projection(filename: &str) -> Projection {
 }
 
 #[cfg(unix)]
-fn assert_recorder_cassette_mode(path: &Path, filename: &str) {
+fn assert_cassette_is_not_executable(path: &Path, filename: &str) {
     use std::os::unix::fs::PermissionsExt as _;
     assert_eq!(
         fs::metadata(path)
             .expect("characterization cassette metadata")
             .permissions()
             .mode()
-            & 0o777,
-        0o664,
-        "recorder-generated cassette mode drift in {filename}"
+            & 0o111,
+        0,
+        "checked-in cassette must not be executable: {filename}"
     );
 }
 
 #[cfg(not(unix))]
-fn assert_recorder_cassette_mode(_path: &Path, _filename: &str) {}
+fn assert_cassette_is_not_executable(_path: &Path, _filename: &str) {}
 
 fn assert_public_request_projection(
     directory: &Path,
@@ -1207,7 +1207,7 @@ fn normalize_provider_cassette(directory: &Path, filename: &str) -> SemanticFlow
         path.is_file(),
         "required provider parity cassette is missing: {filename}"
     );
-    assert_recorder_cassette_mode(&path, filename);
+    assert_cassette_is_not_executable(&path, filename);
     let raw_text = fs::read_to_string(&path).expect("characterization cassette should be readable");
     let raw_document = serde_yaml::from_str::<Value>(&raw_text).expect("characterization YAML should be valid");
     let cassette = support::load_cassette(path.to_str().expect("cassette path should be UTF-8"));

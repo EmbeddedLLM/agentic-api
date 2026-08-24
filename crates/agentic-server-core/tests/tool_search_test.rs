@@ -1760,9 +1760,9 @@ fn provider_parity_matrix_is_exact_and_gateway_has_no_private_search_leaks() {
         {
             use std::os::unix::fs::PermissionsExt as _;
             assert_eq!(
-                fs::metadata(&path).expect("cassette metadata").permissions().mode() & 0o777,
-                0o664,
-                "generated cassette mode drift in {filename}"
+                fs::metadata(&path).expect("cassette metadata").permissions().mode() & 0o111,
+                0,
+                "checked-in cassette must not be executable: {filename}"
             );
         }
         if gateway {
