@@ -27,10 +27,14 @@ WORKDIR /workspace
 COPY --from=planner /workspace/recipe.json recipe.json
 RUN cargo chef cook --locked --release --recipe-path recipe.json
 
+RUN rm -rf crates
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 
-RUN find crates -type f -name '*.rs' -exec touch {} + && \
+RUN cargo clean \
+      -p agentic-server-core \
+      -p agentic-server \
+      -p agentic-praxis && \
     cargo build --locked --release -p agentic-server && \
     install -Dm755 -s target/release/agentic-server /out/agentic-server
 
