@@ -2,22 +2,35 @@
 
 ARG RUST_VERSION=1.96.0
 ARG DEBIAN_VERSION=bookworm
-ARG RUST_IMAGE_DIGEST=sha256:5e2214abe154fe26e39f64488952e5c991eeed1d6d6da7cc8381ae83927f0cfc
+ARG CARGO_CHEF_VERSION=0.1.77
+ARG CARGO_CHEF_IMAGE_DIGEST=sha256:fa7281503a177bd5af6261f4041ca6b36d9f0de8d3090886c33cbd8e65b88ca9
 ARG DEBIAN_IMAGE_DIGEST=sha256:7b140f374b289a7c2befc338f42ebe6441b7ea838a042bbd5acbfca6ec875818
 
-FROM rust:${RUST_VERSION}-${DEBIAN_VERSION}@${RUST_IMAGE_DIGEST} AS rust-build
+FROM lukemathwalker/cargo-chef:${CARGO_CHEF_VERSION}-rust-${RUST_VERSION}-${DEBIAN_VERSION}@${CARGO_CHEF_IMAGE_DIGEST} AS chef
+
+WORKDIR /workspace
+
+FROM chef AS planner
+
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS rust-build
 
 ARG CARGO_BUILD_JOBS=4
 ENV CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}
 
 WORKDIR /workspace
+
+COPY --from=planner /workspace/recipe.json recipe.json
+RUN cargo chef cook --locked --release --recipe-path recipe.json
+
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 
-RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
-    --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
-    --mount=type=cache,target=/workspace/target,sharing=locked \
-    cargo build --locked --release -p agentic-server && \
+RUN cargo build --locked --release -p agentic-server && \
     install -Dm755 -s target/release/agentic-server /out/agentic-server
 
 FROM debian:${DEBIAN_VERSION}-slim@${DEBIAN_IMAGE_DIGEST} AS runtime

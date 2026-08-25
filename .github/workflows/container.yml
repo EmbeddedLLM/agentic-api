@@ -11,6 +11,7 @@ on:
       - "Dockerfile"
       - "docker-entrypoint.sh"
       - "crates/**"
+      - "!crates/**/tests/**"
       - "scripts/container-fixture-server.py"
       - "scripts/fixtures/vllm-response-single-nonstreaming.json"
       - "scripts/test-container-entrypoint.sh"
@@ -24,6 +25,7 @@ on:
       - "Dockerfile"
       - "docker-entrypoint.sh"
       - "crates/**"
+      - "!crates/**/tests/**"
       - "scripts/container-fixture-server.py"
       - "scripts/fixtures/vllm-response-single-nonstreaming.json"
       - "scripts/test-container-entrypoint.sh"
@@ -42,18 +44,27 @@ jobs:
       - name: Test container entrypoint
         run: scripts/test-container-entrypoint.sh
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Generate image metadata
+        id: image-metadata
+        run: echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
       - name: Build runtime image
-        env:
-          DOCKER_BUILDKIT: "1"
-        run: |
-          docker build \
-            --build-arg OCI_BUILD_PIPELINE="$GITHUB_WORKFLOW" \
-            --build-arg OCI_BUILD_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            --build-arg OCI_CREATED="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --build-arg OCI_REVISION="$GITHUB_SHA" \
-            --build-arg OCI_VERSION="${GITHUB_REF_NAME}" \
-            --tag agentic-api:test \
-            .
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          load: true
+          tags: agentic-api:test
+          build-args: |
+            OCI_BUILD_PIPELINE=${{ github.workflow }}
+            OCI_BUILD_URL=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            OCI_CREATED=${{ steps.image-metadata.outputs.created }}
+            OCI_REVISION=${{ github.sha }}
+            OCI_VERSION=${{ github.ref_name }}
+          cache-from: type=gha,scope=agentic-api-container
+          cache-to: type=gha,mode=max,scope=agentic-api-container,ignore-error=true
 
       - name: Verify runtime contents and identity
         run: |
