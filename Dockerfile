@@ -30,7 +30,8 @@ RUN cargo chef cook --locked --release --recipe-path recipe.json
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 
-RUN cargo build --locked --release -p agentic-server && \
+RUN find crates -type f -name '*.rs' -exec touch {} + && \
+    cargo build --locked --release -p agentic-server && \
     install -Dm755 -s target/release/agentic-server /out/agentic-server
 
 FROM debian:${DEBIAN_VERSION}-slim@${DEBIAN_IMAGE_DIGEST} AS runtime
