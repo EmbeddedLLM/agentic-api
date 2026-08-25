@@ -50,6 +50,7 @@ jobs:
 
   rust:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -57,7 +58,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
-          toolchain: stable
+          toolchain: 1.98.0
           components: clippy, rustfmt
 
       - name: Cache cargo registry and build
@@ -83,6 +84,12 @@ jobs:
       - name: Run tests
         run: cargo test
 
+      - name: Test Codex and Claude launcher contracts
+        run: bash scripts/tests/agentic-launchers-test.sh
+
+      - name: Test agentic CLI end to end
+        run: python3 scripts/tests/agentic-cli-e2e-test.py
+
   postgres:
     runs-on: ubuntu-latest
     services:
@@ -107,7 +114,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
-          toolchain: stable
+          toolchain: 1.98.0
 
       - name: Cache cargo registry and build
         uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v4
@@ -122,7 +129,7 @@ jobs:
             cargo-${{ runner.os }}-
 
       - name: Verify PostgreSQL schema upgrades and validation
-        run: cargo test -p agentic-server-core --lib -- --ignored
+        run: cargo test -p agentic-server-core --lib -- --ignored --test-threads=1
 
       - name: Verify PostgreSQL migrations and restart persistence
-        run: cargo test -p agentic-server-core --test postgres_storage_integration -- --ignored
+        run: cargo test -p agentic-server-core --test postgres_storage_integration -- --ignored --test-threads=1

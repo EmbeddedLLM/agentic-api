@@ -244,9 +244,9 @@ async fn handle_ws_text(
         return Ok(());
     };
     let Either::Right(stream) = result else {
-        return Err(WsError::Executor(ExecutorError::InvalidRequest(
+        return Err(WsError::Executor(Box::new(ExecutorError::InvalidRequest(
             "websocket response.create must produce a stream".to_owned(),
-        )));
+        ))));
     };
 
     stream_ws_response(sender, receiver, stream, shutdown_token, queue).await
@@ -428,7 +428,7 @@ async fn forward_ws_stream_chunk(sender: &mut WsSender, chunk: &str) -> Result<(
     for data in sse_json_data_lines(chunk) {
         let value = serde_json::from_str::<Value>(data)
             .map_err(ExecutorError::from)
-            .map_err(WsError::Executor)?;
+            .map_err(WsError::from)?;
         send_ws_json(sender, value).await?;
     }
     Ok(())

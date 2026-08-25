@@ -73,12 +73,17 @@ fronting the vLLM workers. For a direct vLLM smoke test, start vLLM on the host 
 
 ```console
 vllm serve Qwen/Qwen3-30B-A3B-FP8 \
+  --served-model-name Qwen/Qwen3-30B-A3B-FP8 qwen3-30b-a3b-fp8 \
   --tool-call-parser hermes \
   --enable-auto-tool-choice \
   --reasoning-parser qwen3 \
   --host 0.0.0.0 \
   --port 5050
 ```
+
+The second `--served-model-name` entry publishes a slash-free alias alongside the canonical name. Direct API calls
+work with either, but `agentic run claude` (0.4.0+) rejects model names containing `/`, so testing the deployment
+with the [harness CLI](../guides/harness-cli-testing.md) needs the alias.
 
 The `--host 0.0.0.0` setting matters because the vLLM process must accept traffic
 from the Docker network.

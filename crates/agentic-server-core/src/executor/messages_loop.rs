@@ -1,9 +1,8 @@
 //! Messages-native gateway tool loop.
 //!
 //! Runs the server-side gateway-tool loop for `/v1/messages` **natively**: the
-//! client's Anthropic request is forwarded to vLLM `/v1/messages` while
-//! preserving Anthropic fields except for native server-tool declarations that
-//! must be normalized to the function-tool shape vLLM accepts. The assistant turn is
+//! client's Anthropic request is forwarded to vLLM `/v1/messages` essentially
+//! untouched (preserving every Anthropic field), the assistant turn is
 //! inspected, any gateway-owned `tool_use` is executed server-side and hidden,
 //! the loop appends the `tool_result` and re-POSTs, until the model stops asking
 //! for a gateway tool. Only the final assistant message reaches the client.
@@ -19,7 +18,7 @@ use futures::future::join_all;
 use serde_json::{Value, json};
 
 use crate::executor::error::{ExecutorError, ExecutorResult};
-use crate::executor::inference::fetch_response_json;
+use crate::executor::inference::fetch_response_json_with_headers;
 use crate::executor::messages_request::{normalize_native_web_search, web_search_budget_exhausted_result};
 use crate::executor::request::ExecutionContext;
 use crate::tool::ToolRegistry;
@@ -36,6 +35,41 @@ pub(super) const MAX_GATEWAY_TOOL_ROUNDS: usize = 10;
 /// fed back to the model, never a whole-request failure (edge E5). Shared with
 /// the streaming loop; matches the Responses loop's `gateway::GATEWAY_TOOL_TIMEOUT`.
 pub(super) const GATEWAY_TOOL_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Per-request transport data reused for every upstream Messages round.
+#[derive(Clone, Debug)]
+pub struct MessagesUpstream {
+    url: String,
+    headers: reqwest::header::HeaderMap,
+}
+
+impl MessagesUpstream {
+    #[must_use]
+    pub fn new(base_url: &str, query: Option<&str>, headers: reqwest::header::HeaderMap) -> Self {
+        let mut url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
+        if let Some(query) = query.filter(|query| !query.is_empty()) {
+            url.push('?');
+            url.push_str(query);
+        }
+        Self { url, headers }
+    }
+
+    pub(super) fn url(&self) -> &str {
+        &self.url
+    }
+
+    pub(super) fn headers(&self) -> &reqwest::header::HeaderMap {
+        &self.headers
+    }
+}
+
+/// A Messages loop result paired with safe metadata from the relevant upstream response.
+pub struct MessagesResponse<T> {
+    /// The completed message or client-facing stream.
+    pub body: T,
+    /// Safe metadata retained from the terminal response, or the initial response for streaming.
+    pub headers: http::HeaderMap,
+}
 
 /// The `tool_result` block for one executed gateway call, fed back next round.
 /// (The model's own `tool_use` block is carried forward via the preserved
@@ -58,9 +92,8 @@ pub async fn run_messages_loop(
     mut request: Value,
     registry: &ToolRegistry,
     exec_ctx: &ExecutionContext,
-    auth: Option<&str>,
-) -> ExecutorResult<Value> {
-    let url = format!("{}/v1/messages", exec_ctx.llm_base_url);
+    upstream: &MessagesUpstream,
+) -> ExecutorResult<MessagesResponse<Value>> {
     let mut web_search_budget = normalize_native_web_search(&mut request)?;
     // The loop drives turns itself; force non-streaming upstream regardless of
     // what the client asked (the handler routes streaming elsewhere).
@@ -68,13 +101,17 @@ pub async fn run_messages_loop(
 
     for _round in 0..MAX_GATEWAY_TOOL_ROUNDS {
         let body = serialize_to_string(&request).map_err(ExecutorError::JsonError)?;
-        let resp_text = fetch_response_json(body, &url, &exec_ctx.client, auth).await?;
+        let (resp_text, response_headers) =
+            fetch_response_json_with_headers(body, &upstream.url, &exec_ctx.client, &upstream.headers).await?;
         let message: Value = deserialize_from_str(&resp_text).map_err(ExecutorError::JsonError)?;
 
         // Any error body from upstream is surfaced verbatim (handler maps it to
         // the Anthropic error envelope).
         if message.get("type").and_then(Value::as_str) == Some("error") {
-            return Ok(message);
+            return Ok(MessagesResponse {
+                body: message,
+                headers: response_headers,
+            });
         }
 
         let content = message.get("content").and_then(Value::as_array);
@@ -84,7 +121,10 @@ pub async fn run_messages_loop(
         // client should see. A client-owned tool_use means we cannot continue
         // the loop server-side — return the turn to the client (edge E7).
         let Some(content) = content else {
-            return Ok(message);
+            return Ok(MessagesResponse {
+                body: message,
+                headers: response_headers,
+            });
         };
         let gateway_map = &exec_ctx.messages_gateway_tools;
         let mut gateway_calls: Vec<Value> = Vec::new();
@@ -105,7 +145,10 @@ pub async fn run_messages_loop(
         // must run it) — but the gateway tool_use, if any, must still be hidden
         // (F5): strip gateway blocks from the client-facing content.
         if gateway_calls.is_empty() || stop_reason != Some("tool_use") {
-            return Ok(message);
+            return Ok(MessagesResponse {
+                body: message,
+                headers: response_headers,
+            });
         }
         if has_client_tool_use {
             // Strip the gateway tool_use from the client-facing content (compute
@@ -113,7 +156,10 @@ pub async fn run_messages_loop(
             let stripped = tool_seam::strip_gateway_tool_use(content, gateway_map);
             let mut message = message;
             message["content"] = Value::Array(stripped);
-            return Ok(message);
+            return Ok(MessagesResponse {
+                body: message,
+                headers: response_headers,
+            });
         }
 
         // Pure gateway-tool round: execute the calls, then feed the model's FULL
@@ -129,13 +175,16 @@ pub async fn run_messages_loop(
     // last message. (Open Q1: a dedicated pause_turn signal could go here.)
     // Reaching here means every round emitted a gateway tool_use; surface a
     // minimal terminal so the client isn't left hanging.
-    Ok(json!({
-        "type": "error",
-        "error": {
-            "type": "api_error",
-            "message": format!("gateway tool loop exceeded {MAX_GATEWAY_TOOL_ROUNDS} rounds")
-        }
-    }))
+    Ok(MessagesResponse {
+        body: json!({
+            "type": "error",
+            "error": {
+                "type": "api_error",
+                "message": format!("gateway tool loop exceeded {MAX_GATEWAY_TOOL_ROUNDS} rounds")
+            }
+        }),
+        headers: http::HeaderMap::new(),
+    })
 }
 
 /// Execute the gateway-owned `tool_use` blocks concurrently, each bounded by the

@@ -10,9 +10,9 @@ use std::task::{Context, Poll};
 
 use axum::Router;
 use axum::body::Bytes;
-use axum::http::header;
+use axum::http::{Uri, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
+use axum::routing::{get, post};
 use futures::{SinkExt, StreamExt};
 use http::StatusCode;
 use serde_json::{Value, json};
@@ -56,10 +56,10 @@ impl MockYouSearchServer {
 
         let app = Router::new().route(
             "/v1/search",
-            post(move |body: Bytes| {
+            get(move |uri: Uri| {
                 let requests = Arc::clone(&route_requests);
                 async move {
-                    let body = serde_json::from_slice::<Value>(&body).expect("You.com request body should be JSON");
+                    let body = query_params_as_json(&uri);
                     requests.lock().await.push(body);
                     axum::Json(json!({
                         "results": {
@@ -88,6 +88,14 @@ impl MockYouSearchServer {
     async fn request_bodies(&self) -> Vec<Value> {
         self.requests.lock().await.clone()
     }
+}
+
+fn query_params_as_json(uri: &Uri) -> Value {
+    let mut params = serde_json::Map::new();
+    for (key, value) in url::form_urlencoded::parse(uri.query().unwrap_or_default().as_bytes()) {
+        params.insert(key.into_owned(), Value::String(value.into_owned()));
+    }
+    Value::Object(params)
 }
 
 impl Drop for MockYouSearchServer {

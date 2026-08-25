@@ -10,6 +10,7 @@ use async_stream::stream;
 use futures::{Stream, StreamExt};
 
 use crate::executor::error::{ExecutorError, ExecutorResult};
+use crate::proxy::processed_response_headers;
 
 /// SSE stream of raw lines sent to the client (`data: …\n\n` per event).
 pub type BoxStream = std::pin::Pin<Box<dyn Stream<Item = String> + Send>>;
@@ -55,33 +56,40 @@ fn drain_complete_utf8_lines(buffer: &mut Vec<u8>) -> Vec<String> {
 ///
 /// Shared by both the blocking path (caller reads `.text()`) and the streaming
 /// path (caller reads `.bytes_stream()`). Maps connect/timeout failures and
-/// non-2xx status codes to [`ExecutorError::LLMRequest`].
+/// non-2xx status codes to [`ExecutorError::LLMRequest`] and connection
+/// failures to [`ExecutorError::LLMTransport`].
 pub(super) async fn send_request(
     client: &reqwest::Client,
     url: &str,
     body: String,
     auth: Option<&str>,
+    forwarded_headers: Option<&reqwest::header::HeaderMap>,
 ) -> ExecutorResult<reqwest::Response> {
-    let mut req = client.post(url).header("Content-Type", "application/json").body(body);
+    let mut headers = forwarded_headers.cloned().unwrap_or_default();
+    headers
+        .entry(reqwest::header::CONTENT_TYPE)
+        .or_insert(reqwest::header::HeaderValue::from_static("application/json"));
+    let mut req = client.post(url).headers(headers).body(body);
     if let Some(key) = auth {
         req = req.bearer_auth(key);
     }
 
-    let resp = req.send().await.map_err(|e| ExecutorError::LLMRequest {
+    let resp = req.send().await.map_err(|e| ExecutorError::LLMTransport {
         status: if e.is_timeout() {
             http::StatusCode::GATEWAY_TIMEOUT
         } else {
             http::StatusCode::BAD_GATEWAY
         },
-        body: if e.is_timeout() {
-            "upstream timeout".into()
+        message: if e.is_timeout() {
+            "LLM timeout"
         } else {
-            "upstream unavailable".into()
+            "LLM unavailable"
         },
     })?;
 
     if !resp.status().is_success() {
         let status = resp.status().as_u16();
+        let headers = processed_response_headers(resp.headers());
         // Log and discard any error reading the error body — the status code
         // is the primary signal; an empty body is acceptable here.
         let body = resp
@@ -92,6 +100,7 @@ pub(super) async fn send_request(
         return Err(ExecutorError::LLMRequest {
             status: http::StatusCode::from_u16(status).unwrap_or(http::StatusCode::INTERNAL_SERVER_ERROR),
             body,
+            headers,
         });
     }
 
@@ -107,9 +116,22 @@ pub(super) async fn fetch_response_json(
     client: &reqwest::Client,
     auth: Option<&str>,
 ) -> ExecutorResult<String> {
-    let resp = send_request(client, url, upstream_json, auth).await?;
+    let resp = send_request(client, url, upstream_json, auth, None).await?;
     // Preserve the reqwest::Error as the typed source (NetworkError).
     resp.text().await.map_err(ExecutorError::NetworkError)
+}
+
+/// Makes a non-streaming HTTP POST with caller-supplied upstream headers.
+pub(super) async fn fetch_response_json_with_headers(
+    upstream_json: String,
+    url: &str,
+    client: &reqwest::Client,
+    headers: &reqwest::header::HeaderMap,
+) -> ExecutorResult<(String, http::HeaderMap)> {
+    let resp = send_request(client, url, upstream_json, None, Some(headers)).await?;
+    let response_headers = processed_response_headers(resp.headers());
+    let body = resp.text().await.map_err(ExecutorError::NetworkError)?;
+    Ok((body, response_headers))
 }
 
 /// Step 2 — Call the LLM inference backend; yields raw SSE lines (`data: …`).
@@ -118,8 +140,8 @@ pub(super) async fn fetch_response_json(
 ///
 /// # Errors
 /// Each stream item is `Result<String, ExecutorError>`. The stream yields `Err` on:
-/// - [`ExecutorError::LLMRequest`] — connect timeout (504), connection failure (502),
-///   or non-2xx HTTP status from the backend
+/// - [`ExecutorError::LLMTransport`] — connect timeout (504) or connection failure (502)
+/// - [`ExecutorError::LLMRequest`] — non-2xx HTTP status from the backend
 /// - [`ExecutorError::NetworkError`] — network failure while reading the response body
 pub fn call_inference(
     upstream_json: String,
@@ -129,11 +151,24 @@ pub fn call_inference(
     chunk_timeout: Duration,
 ) -> impl Stream<Item = Result<String, ExecutorError>> + Send + 'static {
     stream! {
-        let resp = match send_request(&client, &url, upstream_json, auth.as_deref()).await {
+        let resp = match send_request(&client, &url, upstream_json, auth.as_deref(), None).await {
             Ok(r) => r,
             Err(e) => { yield Err(e); return; }
         };
 
+        let mut lines = Box::pin(response_lines(resp, chunk_timeout));
+        while let Some(line) = lines.next().await {
+            yield line;
+        }
+    }
+}
+
+/// Convert a successful upstream response body into normalized SSE data lines.
+pub(super) fn response_lines(
+    resp: reqwest::Response,
+    chunk_timeout: Duration,
+) -> impl Stream<Item = Result<String, ExecutorError>> + Send + 'static {
+    stream! {
         let mut bytes = resp.bytes_stream();
         let mut buf = Vec::with_capacity(8192);
 

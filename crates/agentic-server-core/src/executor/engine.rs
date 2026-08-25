@@ -5,6 +5,7 @@
 //! primary entry point; [`execute`] is a convenience shim for callers that don't
 //! need per-request configuration.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_stream::stream;
@@ -28,9 +29,10 @@ use crate::executor::persist::persist_if_needed;
 use crate::executor::rehydrate::rehydrate_for_execution;
 use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::executor::upstream::{emit_deferred_stream_events, fetch_blocking_payload, fetch_stream_payload};
-use crate::tool::{ToolRegistry, mcp};
+use crate::tool::{ToolRegistry, ToolSearchState, mcp};
 use crate::types::io::{InputItem, OutputItem, ResponseUsage, ResponsesInput, ToolChoice};
 use crate::types::request_response::{IncompleteDetails, RequestPayload, ResponsePayload};
+use crate::types::tools::ResponsesTool;
 use crate::utils::common::utcnow_str;
 
 pub use crate::executor::inference::BoxStream;
@@ -246,15 +248,30 @@ async fn build_request_tool_registry(
     ctx: &mut RequestContext,
     exec_ctx: &ExecutionContext,
 ) -> ExecutorResult<ToolRegistry> {
+    let loaded_mcp_server_labels = loaded_mcp_server_labels(ctx.tool_search_state.as_ref());
     let mut executors = exec_ctx.gateway_executors.request_scoped();
     let mut registry = match ctx.inference_request_mut().tools.as_mut() {
-        Some(tools) => ToolRegistry::build_with_handlers(tools, &mut executors).await?,
+        Some(tools) => {
+            ToolRegistry::build_with_handlers_for_tool_search(tools, &mut executors, &loaded_mcp_server_labels).await?
+        }
         None => ToolRegistry::default(),
     };
     if let Some(state) = &ctx.tool_search_state {
         registry.classify_tool_search(state)?;
     }
     Ok(registry)
+}
+
+fn loaded_mcp_server_labels(state: Option<&ToolSearchState>) -> HashSet<String> {
+    state
+        .filter(|state| state.is_active())
+        .into_iter()
+        .flat_map(ToolSearchState::loaded_public_tools)
+        .filter_map(|tool| match tool {
+            ResponsesTool::Mcp(mcp) => Some(mcp.server_label.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Codex CLI remote-compaction V2: the client appends a `compaction_trigger`
@@ -733,6 +750,72 @@ mod tests {
             format!("http://{address}"),
         );
         (exec_ctx, server)
+    }
+
+    #[tokio::test]
+    async fn restored_loaded_mcp_remains_recoverable_without_history_position() {
+        let request: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test-model",
+            "input": "continue after compaction",
+            "tools": [
+                {
+                    "type": "tool_search",
+                    "execution": "client",
+                    "description": "Find a tool",
+                    "parameters": {"type": "object"}
+                },
+                {
+                    "type": "mcp",
+                    "server_label": "private_weather",
+                    "server_url": "http://url-user:url-password@127.0.0.1:1/mcp?token=query-secret",
+                    "require_approval": "never",
+                    "defer_loading": true
+                }
+            ],
+            "parallel_tool_calls": false
+        }))
+        .expect("valid tool-search continuation");
+        let loaded_mcp = request
+            .tools
+            .as_deref()
+            .expect("tools")
+            .iter()
+            .find(|tool| matches!(tool, ResponsesTool::Mcp(_)))
+            .expect("MCP declaration")
+            .clone();
+
+        let state = ToolSearchState::build_with_loaded_tools(&request, &[loaded_mcp], false)
+            .expect("compaction metadata restores loaded MCP definition");
+
+        assert!(state.mcp_load_positions().is_empty());
+        let loaded_mcp_server_labels = loaded_mcp_server_labels(Some(&state));
+        assert_eq!(loaded_mcp_server_labels, HashSet::from(["private_weather".to_owned()]));
+
+        let mut private_tools = state
+            .private_inference_request(&request)
+            .expect("restored state materializes private request")
+            .tools
+            .expect("private tools");
+        let registry = ToolRegistry::build_with_handlers_for_tool_search(
+            &mut private_tools,
+            &mut crate::tool::GatewayExecutors::default(),
+            &loaded_mcp_server_labels,
+        )
+        .await
+        .expect("restored loaded MCP transport failure becomes public discovery failure");
+
+        let [list_tools] = registry.mcp_list_tools_items() else {
+            panic!("expected one restored MCP list-tools failure item");
+        };
+        assert_eq!(list_tools.server_label, "private_weather");
+        assert_eq!(
+            list_tools.error.as_deref(),
+            Some("MCP server 'private_weather' failed to connect or list tools")
+        );
+        let public_item = serde_json::to_string(list_tools).expect("public list-tools item serializes");
+        for secret in ["url-user", "url-password", "query-secret"] {
+            assert!(!public_item.contains(secret), "public list-tools item leaked {secret}");
+        }
     }
 
     #[tokio::test]

@@ -13,12 +13,15 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use agentic_core::executor::{ConversationHandler, ExecutionContext, ResponseHandler, run_messages_loop};
+use agentic_core::executor::{
+    ConversationHandler, ExecutionContext, ExecutorResult, MessagesUpstream, ResponseHandler, run_messages_loop,
+};
 use agentic_core::storage::{ConversationStore, ResponseStore};
 use agentic_core::tool::{ToolRegistry, WebSearchHandler};
 use agentic_core::types::messages::{GatewayToolMap, ToolParam, registry_tools};
 use axum::extract::State;
-use axum::routing::post;
+use axum::http::Uri;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::Value;
 use tokio::net::TcpListener;
@@ -48,6 +51,7 @@ fn cassette_bodies_at(path: &str) -> Vec<Value> {
 }
 
 const MULTIROUND_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/messages_multiround");
+const CLAUDE_CODE_CACHE_CONTROL_REQUEST: &str = include_str!("fixtures/claude-code-cache-control-request.json");
 
 /// Mock vLLM `/v1/messages` — serves the recorded response bodies in order and
 /// records each request body it received (to assert the loop fed the
@@ -90,6 +94,38 @@ struct CapturedSearch {
     body: Value,
 }
 
+async fn recv_search(captured: &mut mpsc::UnboundedReceiver<CapturedSearch>, expectation: &str) -> CapturedSearch {
+    tokio::time::timeout(std::time::Duration::from_secs(5), captured.recv())
+        .await
+        .unwrap_or_else(|_| panic!("{expectation}: timed out after 5 seconds"))
+        .unwrap_or_else(|| panic!("{expectation}: mock server stopped before receiving a request"))
+}
+
+fn query_params_as_json(uri: &Uri) -> Value {
+    let mut params = serde_json::Map::new();
+    for (key, value) in url::form_urlencoded::parse(uri.query().unwrap_or_default().as_bytes()) {
+        let value = if let Ok(number) = value.parse::<u64>() {
+            Value::from(number)
+        } else {
+            Value::String(value.into_owned())
+        };
+        let key = key.into_owned();
+        match params.remove(&key) {
+            None => {
+                params.insert(key, value);
+            }
+            Some(Value::Array(mut values)) => {
+                values.push(value);
+                params.insert(key, Value::Array(values));
+            }
+            Some(previous) => {
+                params.insert(key, Value::Array(vec![previous, value]));
+            }
+        }
+    }
+    Value::Object(params)
+}
+
 /// Mock You.com search backend the `web_search` executor calls. Uses an
 /// unbounded channel so a test that doesn't drain captures (e.g. the max-rounds
 /// cap, which fires ~10 searches) never blocks the handler.
@@ -102,14 +138,17 @@ async fn spawn_mock_search() -> (
     let app = Router::new()
         .route(
             "/v1/search",
-            post(|State(tx): State<mpsc::UnboundedSender<CapturedSearch>>, Json(body): Json<Value>| async move {
-                let _ = tx.send(CapturedSearch { body });
-                Json(serde_json::json!({
-                    "results": {"web": [{"url": "https://www.rust-lang.org/", "title": "Rust",
-                        "description": "d", "snippets": ["Rust 1.89.0 is the latest stable release."]}], "news": []},
-                    "metadata": {"query": "q", "search_uuid": "s1", "latency": 0.1}
-                }))
-            }),
+            get(
+                |State(tx): State<mpsc::UnboundedSender<CapturedSearch>>, uri: Uri| async move {
+                    let body = query_params_as_json(&uri);
+                    let _ = tx.send(CapturedSearch { body });
+                    Json(serde_json::json!({
+                        "results": {"web": [{"url": "https://www.rust-lang.org/", "title": "Rust",
+                            "description": "d", "snippets": ["Rust 1.89.0 is the latest stable release."]}], "news": []},
+                        "metadata": {"query": "q", "search_uuid": "s1", "latency": 0.1}
+                    }))
+                },
+            ),
         )
         .with_state(tx);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -126,12 +165,10 @@ async fn spawn_failing_search() -> (String, mpsc::Receiver<()>, tokio::task::Joi
     let app = Router::new()
         .route(
             "/v1/search",
-            post(
-                |State(tx): State<mpsc::Sender<()>>, _body: axum::body::Bytes| async move {
-                    let _ = tx.send(()).await;
-                    (http::StatusCode::INTERNAL_SERVER_ERROR, "search backend down")
-                },
-            ),
+            get(|State(tx): State<mpsc::Sender<()>>| async move {
+                let _ = tx.send(()).await;
+                (http::StatusCode::INTERNAL_SERVER_ERROR, "search backend down")
+            }),
         )
         .with_state(tx);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -142,6 +179,7 @@ async fn spawn_failing_search() -> (String, mpsc::Receiver<()>, tokio::task::Joi
     (format!("http://{addr}"), rx, handle)
 }
 
+#[allow(clippy::result_large_err)]
 async fn build_exec_ctx(vllm_url: &str, search_url: &str) -> ExecutionContext {
     let pool = support::setup_pool().await;
     let conv = ConversationHandler::new(ConversationStore::new(Arc::clone(&pool)));
@@ -153,11 +191,23 @@ async fn build_exec_ctx(vllm_url: &str, search_url: &str) -> ExecutionContext {
 }
 
 async fn build_tool_registry(tools: &Vec<ToolParam>, exec_ctx: &ExecutionContext) -> ToolRegistry {
-    let mut registry_tool_params = registry_tools(Some(tools), &GatewayToolMap::default());
+    let mut registry_tool_params = registry_tools(Some(tools), &exec_ctx.messages_gateway_tools);
     let mut gateway_executors = exec_ctx.gateway_executors.clone();
     ToolRegistry::build_with_handlers(&mut registry_tool_params, &mut gateway_executors)
         .await
         .unwrap()
+}
+
+#[allow(clippy::result_large_err)]
+async fn run_test_messages_loop(
+    request: Value,
+    registry: &ToolRegistry,
+    exec_ctx: &ExecutionContext,
+) -> ExecutorResult<Value> {
+    let upstream = MessagesUpstream::new(&exec_ctx.llm_base_url, None, reqwest::header::HeaderMap::new());
+    run_messages_loop(request, registry, exec_ctx, &upstream)
+        .await
+        .map(|response| response.body)
 }
 
 fn web_search_request() -> Value {
@@ -181,12 +231,12 @@ async fn messages_loop_hides_gateway_tool_and_surfaces_final_text() {
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
     let registry = build_tool_registry(&tools, &exec_ctx).await;
 
-    let result = run_messages_loop(request, &registry, &exec_ctx, None)
+    let result = run_test_messages_loop(request, &registry, &exec_ctx)
         .await
         .expect("loop runs");
 
     // The gateway executed the web_search server-side.
-    let search = captured.recv().await.expect("search backend hit");
+    let search = recv_search(&mut captured, "search backend hit").await;
     assert!(search.body.get("query").is_some(), "web_search dispatched with a query");
 
     // Two upstream rounds, and round 2 carried the fed-back tool_result.
@@ -238,12 +288,13 @@ async fn native_web_search_applies_domain_and_location_configuration() {
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
     let registry = build_tool_registry(&tools, &exec_ctx).await;
 
-    run_messages_loop(request, &registry, &exec_ctx, None)
+    let transport = MessagesUpstream::new(&exec_ctx.llm_base_url, None, reqwest::header::HeaderMap::new());
+    run_messages_loop(request, &registry, &exec_ctx, &transport)
         .await
         .expect("loop runs");
 
-    let search = captured.recv().await.expect("search backend hit");
-    assert_eq!(search.body["include_domains"], serde_json::json!(["rust-lang.org"]));
+    let search = recv_search(&mut captured, "search backend hit").await;
+    assert_eq!(search.body["include_domains"], "rust-lang.org");
     assert_eq!(search.body["country"], "CA");
 }
 
@@ -264,12 +315,13 @@ async fn native_web_search_applies_blocked_domains() {
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
     let registry = build_tool_registry(&tools, &exec_ctx).await;
 
-    run_messages_loop(request, &registry, &exec_ctx, None)
+    let transport = MessagesUpstream::new(&exec_ctx.llm_base_url, None, reqwest::header::HeaderMap::new());
+    run_messages_loop(request, &registry, &exec_ctx, &transport)
         .await
         .expect("loop runs");
 
-    let search = captured.recv().await.expect("search backend hit");
-    assert_eq!(search.body["exclude_domains"], serde_json::json!(["example.com"]));
+    let search = recv_search(&mut captured, "search backend hit").await;
+    assert_eq!(search.body["exclude_domains"], "example.com");
 }
 
 #[tokio::test]
@@ -298,11 +350,12 @@ async fn native_web_search_enforces_max_uses() {
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
     let registry = build_tool_registry(&tools, &exec_ctx).await;
 
-    run_messages_loop(request, &registry, &exec_ctx, None)
+    let transport = MessagesUpstream::new(&exec_ctx.llm_base_url, None, reqwest::header::HeaderMap::new());
+    run_messages_loop(request, &registry, &exec_ctx, &transport)
         .await
         .expect("loop runs");
 
-    captured.recv().await.expect("first search runs");
+    recv_search(&mut captured, "first search runs").await;
     assert!(captured.try_recv().is_err(), "second search must not run");
     let requests = upstream.requests.lock().await;
     let results = requests[1]["messages"]
@@ -344,7 +397,7 @@ async fn repro_f3_next_round_preserves_thinking_and_text_blocks() {
     let request = web_search_request();
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
     let registry = build_tool_registry(&tools, &exec_ctx).await;
-    run_messages_loop(request, &registry, &exec_ctx, None).await.unwrap();
+    run_test_messages_loop(request, &registry, &exec_ctx).await.unwrap();
 
     // Inspect the assistant turn the loop appended for round 2.
     let reqs = upstream.requests.lock().await;
@@ -413,7 +466,7 @@ async fn run_against(bodies: Vec<Value>, request: Value) -> (Value, usize) {
     let exec_ctx = build_exec_ctx(&vllm_url, &search_url).await;
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap_or_default();
     let registry = build_tool_registry(&tools, &exec_ctx).await;
-    let result = run_messages_loop(request, &registry, &exec_ctx, None).await.unwrap();
+    let result = run_test_messages_loop(request, &registry, &exec_ctx).await.unwrap();
     (result, upstream.calls.load(Ordering::SeqCst))
 }
 
@@ -472,12 +525,12 @@ async fn messages_loop_multi_round_sequential() {
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
     let registry = build_tool_registry(&tools, &exec_ctx).await;
 
-    let result = run_messages_loop(request, &registry, &exec_ctx, None).await.unwrap();
+    let result = run_test_messages_loop(request, &registry, &exec_ctx).await.unwrap();
 
     assert_eq!(upstream.calls.load(Ordering::SeqCst), 3, "three upstream rounds");
     // Two gateway searches executed (rounds 0 and 1).
-    captured.recv().await.expect("first search");
-    captured.recv().await.expect("second search");
+    recv_search(&mut captured, "first search").await;
+    recv_search(&mut captured, "second search").await;
     let content = result["content"].as_array().unwrap();
     assert!(!content.iter().any(|b| b["type"] == "tool_use"), "gateway tools hidden");
     assert_eq!(result["stop_reason"], "end_turn");
@@ -495,11 +548,11 @@ async fn messages_loop_parallel_tool_use() {
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
     let registry = build_tool_registry(&tools, &exec_ctx).await;
 
-    let result = run_messages_loop(request, &registry, &exec_ctx, None).await.unwrap();
+    let result = run_test_messages_loop(request, &registry, &exec_ctx).await.unwrap();
 
     // Two parallel gateway calls both executed against the backend.
-    captured.recv().await.expect("first parallel search");
-    captured.recv().await.expect("second parallel search");
+    recv_search(&mut captured, "first parallel search").await;
+    recv_search(&mut captured, "second parallel search").await;
     assert_eq!(upstream.calls.load(Ordering::SeqCst), 2, "tool round + final round");
     let content = result["content"].as_array().unwrap();
     assert!(!content.iter().any(|b| b["type"] == "tool_use"), "gateway tools hidden");
@@ -532,13 +585,18 @@ async fn messages_loop_tool_failure_becomes_error_tool_result() {
     });
     let (vllm_url, upstream, _v) = spawn_mock_vllm_messages(vec![round0, round1]).await;
     // Search backend that returns 500 → dispatch error.
-    let (search_url, _rx, _s) = spawn_failing_search().await;
+    let (search_url, mut captured, _s) = spawn_failing_search().await;
     let exec_ctx = build_exec_ctx(&vllm_url, &search_url).await;
     let request = web_search_request();
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
     let registry = build_tool_registry(&tools, &exec_ctx).await;
 
-    let result = run_messages_loop(request, &registry, &exec_ctx, None).await.unwrap();
+    let result = run_test_messages_loop(request, &registry, &exec_ctx).await.unwrap();
+
+    tokio::time::timeout(std::time::Duration::from_secs(5), captured.recv())
+        .await
+        .expect("failing search backend should be reached within 5 seconds")
+        .expect("failing search backend should receive a request");
 
     // The request did NOT fail — it looped to a final answer.
     assert_eq!(result["stop_reason"], "end_turn");
@@ -582,7 +640,7 @@ async fn messages_loop_caps_at_max_rounds() {
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
     let registry = build_tool_registry(&tools, &exec_ctx).await;
 
-    let result = run_messages_loop(request, &registry, &exec_ctx, None).await.unwrap();
+    let result = run_test_messages_loop(request, &registry, &exec_ctx).await.unwrap();
 
     let calls = upstream.calls.load(Ordering::SeqCst);
     assert!(calls <= 10, "loop must cap at MAX_GATEWAY_TOOL_ROUNDS (got {calls})");
@@ -643,7 +701,7 @@ async fn messages_loop_preserves_multi_block_system_across_rounds() {
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
     let registry = build_tool_registry(&tools, &exec_ctx).await;
 
-    let result = run_messages_loop(request, &registry, &exec_ctx, None).await.unwrap();
+    let result = run_test_messages_loop(request, &registry, &exec_ctx).await.unwrap();
     assert_eq!(result["stop_reason"], "end_turn");
     assert_eq!(upstream.calls.load(Ordering::SeqCst), 2, "tool round + final round");
 
@@ -654,4 +712,61 @@ async fn messages_loop_preserves_multi_block_system_across_rounds() {
         reqs[1]["system"], system,
         "round 2 (after append_round_to_history) still carries the system blocks unchanged"
     );
+}
+
+#[tokio::test]
+async fn messages_loop_preserves_claude_code_cache_control_across_rounds() {
+    let round0 = serde_json::json!({
+        "id": "m", "type": "message", "role": "assistant", "model": "qwen3",
+        "content": [{"type": "tool_use", "id": "t1", "name": "WebSearch", "input": {"query": "rust"}}],
+        "stop_reason": "tool_use", "usage": {"input_tokens": 5, "output_tokens": 3}
+    });
+    let round1 = serde_json::json!({
+        "id": "m2", "type": "message", "role": "assistant", "model": "qwen3",
+        "content": [{"type": "text", "text": "Rust is stable."}],
+        "stop_reason": "end_turn", "usage": {"input_tokens": 5, "output_tokens": 3}
+    });
+    let (vllm_url, upstream, _v) = spawn_mock_vllm_messages(vec![round0, round1]).await;
+    let (search_url, mut search_requests, _s) = spawn_mock_search().await;
+    let mut exec_ctx = build_exec_ctx(&vllm_url, &search_url).await;
+    exec_ctx.messages_gateway_tools = GatewayToolMap::from_pairs([("WebSearch", "web_search")]);
+
+    let request: Value = serde_json::from_str(CLAUDE_CODE_CACHE_CONTROL_REQUEST).unwrap();
+    let original_system = request["system"].clone();
+    let original_user_message = request["messages"][0].clone();
+    let original_tools = request["tools"].clone();
+    let tools: Vec<ToolParam> = serde_json::from_value(original_tools.clone()).unwrap();
+    let registry = build_tool_registry(&tools, &exec_ctx).await;
+
+    let result = run_test_messages_loop(request, &registry, &exec_ctx).await.unwrap();
+    assert_eq!(result["stop_reason"], "end_turn");
+    let search_request = search_requests
+        .try_recv()
+        .expect("WebSearch alias dispatches to the gateway search backend");
+    assert_eq!(search_request.body["query"], "rust");
+
+    let requests = upstream.requests.lock().await;
+    assert_eq!(requests.len(), 2, "tool round + final round");
+    for upstream_request in requests.iter() {
+        assert_eq!(upstream_request["system"], original_system);
+        assert_eq!(upstream_request["messages"][0], original_user_message);
+        assert_eq!(upstream_request["tools"], original_tools);
+    }
+    assert_eq!(
+        requests[1]["system"][0]["cache_control"],
+        serde_json::json!({"type": "ephemeral", "ttl": "1h"})
+    );
+    assert_eq!(
+        requests[1]["system"][1]["cache_control"],
+        serde_json::json!({"type": "ephemeral", "ttl": "5m"})
+    );
+    assert_eq!(
+        requests[1]["messages"][0]["content"][0]["cache_control"],
+        serde_json::json!({"type": "ephemeral", "ttl": "5m"})
+    );
+    assert_eq!(
+        requests[1]["tools"][1]["cache_control"],
+        serde_json::json!({"type": "ephemeral", "ttl": "1h"})
+    );
+    assert!(requests[1]["tools"][0].get("cache_control").is_none());
 }

@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use super::codex::insert_namespace_entries;
 use super::custom::{CustomHandler, CustomToolMap, insert_custom_entry};
-use super::executors::GatewayExecutors;
+use super::executors::{GatewayExecutors, McpServerToolsError};
 use super::function::insert_function_entry;
 use super::mcp::handler::{McpToolMap, McpToolRef};
 use super::mcp::registry::insert_discovered_mcp_entry;
@@ -199,8 +199,13 @@ impl ToolRegistry {
     /// # Errors
     ///
     /// Returns [`ToolError::Config`] when Codex namespace member flattening
-    /// would collide with another declared tool name, or when discovered MCP
-    /// tools derive the same internal model-visible name.
+    /// would collide with another declared tool name, when discovered MCP
+    /// tools derive the same internal model-visible name, or when an MCP
+    /// declaration is itself invalid (for example, a request tries to
+    /// override a gateway-configured server's connection). Transient MCP
+    /// discovery failures (the server could not be reached) are not
+    /// returned as errors; they are recorded as failed [`McpListTools`]
+    /// metadata so the rest of the request can proceed.
     ///
     /// # Panics
     ///
@@ -209,6 +214,29 @@ impl ToolRegistry {
     pub async fn build_with_handlers(
         tools: &mut [ResponsesTool],
         executors: &mut GatewayExecutors,
+    ) -> Result<Self, ToolError> {
+        Self::build_with_mcp_config_failure_labels(tools, executors, None).await
+    }
+
+    /// Build a request-scoped registry for active client tool search.
+    ///
+    /// Invalid MCP declarations remain request errors unless the search state
+    /// proves that the server definition was already loaded. A failure for a
+    /// loaded definition becomes the same sanitized `mcp_list_tools` failure
+    /// item used for connection and discovery errors, allowing inference to
+    /// continue without exposing private transport configuration.
+    pub(crate) async fn build_with_handlers_for_tool_search(
+        tools: &mut [ResponsesTool],
+        executors: &mut GatewayExecutors,
+        loaded_mcp_server_labels: &HashSet<String>,
+    ) -> Result<Self, ToolError> {
+        Self::build_with_mcp_config_failure_labels(tools, executors, Some(loaded_mcp_server_labels)).await
+    }
+
+    async fn build_with_mcp_config_failure_labels(
+        tools: &mut [ResponsesTool],
+        executors: &mut GatewayExecutors,
+        recoverable_mcp_config_failures: Option<&HashSet<String>>,
     ) -> Result<Self, ToolError> {
         let mut entries = HashMap::with_capacity(tools.len());
         let mut mcp_tool_map = McpToolMap::default();
@@ -231,9 +259,24 @@ impl ToolRegistry {
                 ResponsesTool::Mcp(p) => {
                     let tool_set = match executors.mcp_server_tools(p).await {
                         Ok(tool_set) => tool_set,
-                        Err(error) => {
+                        Err(McpServerToolsError::RequestServerUrl(error))
+                            if recoverable_mcp_config_failures
+                                .is_some_and(|labels| labels.contains(&p.server_label)) =>
+                        {
                             mcp_list_tools_items.push(McpHandler::failed_list_tools_item(&p.server_label, &error));
                             continue;
+                        }
+                        Err(error) => {
+                            let error = error.into_tool_error();
+                            match error {
+                                // Config errors mean the declaration is invalid; the client can fix it.
+                                error @ ToolError::Config(_) => return Err(error),
+                                error => {
+                                    mcp_list_tools_items
+                                        .push(McpHandler::failed_list_tools_item(&p.server_label, &error));
+                                    continue;
+                                }
+                            }
                         }
                     };
                     let handlers = tool_set.discovered_handlers;
@@ -555,6 +598,17 @@ mod tests {
             "server_label": server_label,
             "server_url": "http://127.0.0.1:8000/mcp",
             "require_approval": "never"
+        }))
+        .expect("MCP declaration")
+    }
+
+    /// A request-declared MCP tool for a server the gateway already has
+    /// configured. Configured servers reject a request-supplied `server_url`,
+    /// so declarations for them must omit it.
+    fn configured_declaration(server_label: &str) -> ResponsesTool {
+        serde_json::from_value(serde_json::json!({
+            "type": "mcp",
+            "server_label": server_label
         }))
         .expect("MCP declaration")
     }
@@ -936,9 +990,7 @@ mod tests {
             },
             {
                 "type": "mcp",
-                "server_label": "counter",
-                "server_url": "http://127.0.0.1:8000/mcp",
-                "require_approval": "never"
+                "server_label": "counter"
             },
             {"type": "web_search_preview", "search_context_size": "low"},
             {"type": "file_search", "vector_store_ids": ["vs_test"]},
@@ -1120,6 +1172,158 @@ mod tests {
         assert!(registry.is_empty());
     }
 
+    fn invalid_private_mcp_declaration(server_label: &str) -> ResponsesTool {
+        serde_json::from_value(serde_json::json!({
+            "type": "mcp",
+            "server_label": server_label,
+            "server_url": "http://url-user:url-password@127.0.0.1:1/mcp?token=query-secret",
+            "headers": {"X-Private-Token": "header-secret"},
+            "authorization": "authorization-secret",
+            "require_approval": "never"
+        }))
+        .expect("invalid private MCP declaration remains a typed declaration")
+    }
+
+    async fn assert_loaded_mcp_config_error(
+        tool: ResponsesTool,
+        mut executors: GatewayExecutors,
+        expected_message: &str,
+    ) {
+        let ResponsesTool::Mcp(param) = &tool else {
+            panic!("expected MCP declaration");
+        };
+        let loaded_mcp_server_labels = HashSet::from([param.server_label.clone()]);
+        let mut tools = vec![tool];
+
+        let error =
+            ToolRegistry::build_with_handlers_for_tool_search(&mut tools, &mut executors, &loaded_mcp_server_labels)
+                .await
+                .expect_err("loaded MCP policy error must remain a request error");
+
+        assert!(
+            matches!(error, ToolError::Config(ref message) if message.contains(expected_message)),
+            "unexpected loaded MCP configuration error: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn ordinary_invalid_mcp_configuration_remains_a_config_error() {
+        let mut tools = vec![invalid_private_mcp_declaration("private_weather")];
+        let mut executors = GatewayExecutors::default();
+
+        let error = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
+            .await
+            .expect_err("ordinary invalid MCP configuration must fail the request");
+
+        assert!(matches!(
+            error,
+            ToolError::Config(message)
+                if message == "MCP server 'private_weather' has no valid request-declared configuration"
+        ));
+    }
+
+    #[tokio::test]
+    async fn loaded_tool_search_mcp_config_failure_becomes_a_sanitized_list_tools_item() {
+        let mut tools = vec![invalid_private_mcp_declaration("private_weather")];
+        let mut executors = GatewayExecutors::default();
+        let loaded_mcp_server_labels = HashSet::from(["private_weather".to_owned()]);
+
+        let registry =
+            ToolRegistry::build_with_handlers_for_tool_search(&mut tools, &mut executors, &loaded_mcp_server_labels)
+                .await
+                .expect("loaded MCP failure must retain public list-tools semantics");
+
+        let [list_tools] = registry.mcp_list_tools_items() else {
+            panic!("expected one MCP list-tools failure item");
+        };
+        assert_eq!(list_tools.server_label, "private_weather");
+        assert!(list_tools.tools.is_empty());
+        assert_eq!(
+            list_tools.error.as_deref(),
+            Some("MCP server 'private_weather' failed to connect or list tools")
+        );
+        let public_item = serialize_to_value(list_tools)
+            .expect("public list-tools item serializes")
+            .to_string();
+        for secret in [
+            "url-user",
+            "url-password",
+            "query-secret",
+            "header-secret",
+            "authorization-secret",
+        ] {
+            assert!(!public_item.contains(secret), "public list-tools item leaked {secret}");
+        }
+        assert!(registry.is_empty());
+    }
+
+    #[tokio::test]
+    async fn loaded_tool_search_mcp_policy_and_identity_errors_remain_strict() {
+        let connector = serde_json::from_value(serde_json::json!({
+            "type": "mcp",
+            "server_label": "connector",
+            "connector_id": "connector_dropbox",
+            "require_approval": "never"
+        }))
+        .expect("connector declaration");
+        assert_loaded_mcp_config_error(connector, GatewayExecutors::default(), "connector_id is not supported").await;
+
+        let missing_approval = serde_json::from_value(serde_json::json!({
+            "type": "mcp",
+            "server_label": "missing_approval",
+            "server_url": "http://127.0.0.1:1/mcp"
+        }))
+        .expect("missing approval declaration");
+        assert_loaded_mcp_config_error(
+            missing_approval,
+            GatewayExecutors::default(),
+            "require_approval must be set to 'never'",
+        )
+        .await;
+
+        let unsupported_approval = serde_json::from_value(serde_json::json!({
+            "type": "mcp",
+            "server_label": "unsupported_approval",
+            "server_url": "http://127.0.0.1:1/mcp",
+            "require_approval": "always"
+        }))
+        .expect("unsupported approval declaration");
+        assert_loaded_mcp_config_error(
+            unsupported_approval,
+            GatewayExecutors::default(),
+            "approval gating is not yet supported",
+        )
+        .await;
+
+        let mut configured = GatewayExecutors::default();
+        configured.insert(GatewayExecutorRegistration::Mcp {
+            server_label: "configured".to_owned(),
+            handlers: vec![discovered_handler("configured", "read", "mcp__configured__read")],
+        });
+        let configured_override = serde_json::from_value(serde_json::json!({
+            "type": "mcp",
+            "server_label": "configured",
+            "server_url": "http://127.0.0.1:1/mcp",
+            "require_approval": "never"
+        }))
+        .expect("configured override declaration");
+        assert_loaded_mcp_config_error(configured_override, configured, "configured by the gateway").await;
+
+        let mut filtered = GatewayExecutors::default();
+        filtered.insert(GatewayExecutorRegistration::Mcp {
+            server_label: "filtered".to_owned(),
+            handlers: vec![discovered_handler("filtered", "delete", "mcp__filtered__delete")],
+        });
+        let empty_allowed_tools = serde_json::from_value(serde_json::json!({
+            "type": "mcp",
+            "server_label": "filtered",
+            "allowed_tools": ["read"],
+            "require_approval": "never"
+        }))
+        .expect("empty allowed tool declaration");
+        assert_loaded_mcp_config_error(empty_allowed_tools, filtered, "empty final allowed tool set").await;
+    }
+
     #[tokio::test]
     async fn duplicate_mcp_server_labels_are_rejected() {
         let mut tools = vec![declaration("counter"), declaration("counter")];
@@ -1146,7 +1350,7 @@ mod tests {
             server_label: "foo__bar".to_owned(),
             handlers: vec![discovered_handler("foo__bar", "baz", internal_name)],
         });
-        let mut tools = vec![declaration("foo"), declaration("foo__bar")];
+        let mut tools = vec![configured_declaration("foo"), configured_declaration("foo__bar")];
 
         let error = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
             .await
@@ -1169,7 +1373,7 @@ mod tests {
                 "name": internal_name
             }))
             .expect("function declaration");
-            let mcp = declaration("counter");
+            let mcp = configured_declaration("counter");
             let mut tools = if mcp_first {
                 vec![mcp, function]
             } else {

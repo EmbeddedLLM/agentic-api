@@ -7,7 +7,7 @@ use agentic_core::executor::ExecutorError;
 #[derive(Debug, Error)]
 pub(super) enum WsError {
     #[error(transparent)]
-    Executor(#[from] ExecutorError),
+    Executor(Box<ExecutorError>),
 
     #[error("invalid JSON: {0}")]
     InvalidJson(#[source] serde_json::Error),
@@ -29,6 +29,12 @@ pub(super) enum WsError {
 
     #[error("websocket receive failed: {0}")]
     Receive(String),
+}
+
+impl From<ExecutorError> for WsError {
+    fn from(error: ExecutorError) -> Self {
+        Self::Executor(Box::new(error))
+    }
 }
 
 impl WsError {
@@ -104,13 +110,13 @@ mod tests {
 
     #[test]
     fn executor_conflict_ws_frame_uses_client_conflict_contract() {
-        let error = WsError::Executor(ExecutorError::Persistence(Box::new(
+        let error = WsError::Executor(Box::new(ExecutorError::Persistence(Box::new(
             ExecutorError::ConversationLocked {
                 source: StorageError::ConversationConflict {
                     conversation_id: "conv_test".to_owned(),
                 },
             },
-        )));
+        ))));
 
         assert_eq!(
             error.to_ws_frame().expect("client-visible websocket error"),

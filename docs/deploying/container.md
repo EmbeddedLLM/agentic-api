@@ -2,6 +2,20 @@
 
 The production image contains only the Rust gateway and its runtime libraries. It does not contain Python, vLLM, GPU libraries, model weights, Cargo, or the Rust toolchain. Run inference and PostgreSQL as external services.
 
+## Install from crates.io instead
+
+Since 0.4.0 the gateway is also published to crates.io, so a container is not required on a host with a Rust
+toolchain (MSRV 1.85):
+
+```console
+cargo install agentic-server --version 0.4.0 --locked
+```
+
+This installs two binaries: `agentic`, the harness CLI (`agentic serve` starts the gateway alone; `agentic run
+claude|codex` starts it and launches a harness), and `agentic-server`, the standalone server configured through the
+same environment variables as the container below. The container remains the recommended path for Kubernetes and
+for hosts without a toolchain.
+
 ## Build the image
 
 The multi-stage build pins its Rust and Debian bases by digest, uses BuildKit caches, and copies only `agentic-server` into the runtime stage. Dependabot proposes weekly digest updates so base-image changes remain explicit and reviewable.
@@ -14,6 +28,11 @@ DOCKER_BUILDKIT=1 docker build \
   --tag agentic-api:dev \
   .
 ```
+
+For a release build, pass the version being packaged instead of `dev` and tag the image to match, for example
+`OCI_VERSION="0.4.0"` with `--tag agentic-api:0.4.0`. That version tag (or, preferably, the digest recorded when
+the image is pushed) is what an environment overlay such as the one in the
+[Kubernetes guide](kubernetes.md) should pin.
 
 CI also records the workflow name and run URL in the vLLM-compatible image labels. Local builds use `local` as the pipeline label unless `OCI_BUILD_PIPELINE` is supplied as a build argument.
 
@@ -28,7 +47,8 @@ The image starts `agentic-server` in standalone mode. At minimum, set `LLM_API_B
 | `LLM_API_BASE` | none | Required upstream inference URL |
 | `GATEWAY_HOST` | `0.0.0.0` | Listen address |
 | `GATEWAY_PORT` | `9000` | Listen port |
-| `DATABASE_URL` | `sqlite://./agentic_api.db` | SQLite or PostgreSQL persistence URL |
+| `DATABASE_URL` | `$AGENTIC_API_HOME/agentic_api.db` | SQLite or PostgreSQL persistence URL |
+| `AGENTIC_API_HOME` | `/var/lib/agentic-api` | User configuration and default local-state directory |
 | `POSTGRES_MAX_CONNECTIONS` | `10` | Maximum PostgreSQL connections per gateway replica |
 | `POSTGRES_ACQUIRE_TIMEOUT_SECONDS` | `30` | Maximum wait for a PostgreSQL pool connection |
 | `POSTGRES_LOCK_TIMEOUT_SECONDS` | `5` | Maximum wait for a PostgreSQL row or table lock |

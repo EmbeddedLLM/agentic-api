@@ -40,10 +40,12 @@ pub fn executor_error_response(err: ExecutorError) -> Response {
         .expect("valid error response")
 }
 
+#[allow(clippy::result_large_err)]
 pub(super) async fn read_bytes(body: Body) -> Result<Bytes, Response> {
     read_bytes_with_auth(body, ProxyAuth::OpenAiBearer).await
 }
 
+#[allow(clippy::result_large_err)]
 pub(super) async fn read_bytes_with_auth(body: Body, auth: ProxyAuth) -> Result<Bytes, Response> {
     axum::body::to_bytes(body, MAX_BODY_SIZE).await.map_err(|_| {
         convert_response(error_response_for_auth(
@@ -55,6 +57,7 @@ pub(super) async fn read_bytes_with_auth(body: Body, auth: ProxyAuth) -> Result<
     })
 }
 
+#[allow(clippy::result_large_err)]
 pub(super) async fn read_and_parse(body: Body) -> Result<(Bytes, RequestPayload), Response> {
     let bytes = read_bytes(body).await?;
     let payload = serde_json::from_slice::<RequestPayload>(&bytes)
@@ -62,6 +65,7 @@ pub(super) async fn read_and_parse(body: Body) -> Result<(Bytes, RequestPayload)
     Ok((bytes, payload))
 }
 
+#[allow(clippy::result_large_err)]
 pub(super) async fn read_json<T: DeserializeOwned>(body: Body) -> Result<T, Response> {
     let bytes = read_bytes(body).await?;
     serde_json::from_slice::<T>(&bytes).map_err(|error| executor_error_response(ExecutorError::from(error)))
@@ -85,12 +89,22 @@ pub(super) fn extract_bearer(headers: &HeaderMap, config_key: Option<&str>) -> O
 }
 
 pub(super) fn sse_response(stream: BoxStream) -> Response {
+    sse_response_with_headers(stream, HeaderMap::new())
+}
+
+pub(super) fn sse_response_with_headers(stream: BoxStream, mut headers: HeaderMap) -> Response {
     let byte_stream = stream.map(|line| Ok::<Bytes, std::convert::Infallible>(Bytes::from(line)));
-    Response::builder()
-        .status(StatusCode::OK)
-        .header("Content-Type", "text/event-stream; charset=utf-8")
-        .header("Cache-Control", "no-cache")
-        .header("X-Accel-Buffering", "no")
+    headers.insert(
+        http::header::CONTENT_TYPE,
+        http::HeaderValue::from_static("text/event-stream; charset=utf-8"),
+    );
+    headers.insert(http::header::CACHE_CONTROL, http::HeaderValue::from_static("no-cache"));
+    headers.insert("x-accel-buffering", http::HeaderValue::from_static("no"));
+    let mut builder = Response::builder().status(StatusCode::OK);
+    for (name, value) in &headers {
+        builder = builder.header(name, value);
+    }
+    builder
         .body(Body::from_stream(byte_stream))
         .expect("valid SSE response")
 }

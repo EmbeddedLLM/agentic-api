@@ -29,9 +29,58 @@ pub struct MessagesRequest {
     pub temperature: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub top_p: Option<f64>,
+    /// Anthropic `output_config` (reasoning effort and related settings).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_config: Option<OutputConfig>,
     /// Any other top-level field (e.g. `metadata`, `stop_sequences`) preserved verbatim.
     #[serde(flatten)]
     pub extra: HashMap<String, Value>,
+}
+
+/// Anthropic `output_config` object. Unmodeled keys are preserved via `extra`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct OutputConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<ReasoningEffort>,
+    #[serde(flatten)]
+    pub extra: HashMap<String, Value>,
+}
+
+/// Reasoning effort requested through `output_config.effort`.
+///
+/// Known tiers are modeled explicitly; any other string is preserved verbatim
+/// so the gateway never rejects or rewrites vocabulary it does not know.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ReasoningEffort {
+    Level(ReasoningEffortLevel),
+    Other(String),
+}
+
+/// Effort tiers understood by the gateway: the Anthropic/OpenAI standard
+/// `low`/`medium`/`high`/`max` plus the `xhigh` top tier used by Qwen chat templates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReasoningEffortLevel {
+    Low,
+    Medium,
+    High,
+    Xhigh,
+    Max,
+}
+
+impl ReasoningEffort {
+    /// Map the standard top tiers (`high`, `max`) onto `xhigh`, the top tier Qwen
+    /// chat templates accept. Returns `None` when no change is needed.
+    #[must_use]
+    pub fn clamped_for_qwen(&self) -> Option<Self> {
+        match self {
+            Self::Level(ReasoningEffortLevel::High | ReasoningEffortLevel::Max) => {
+                Some(Self::Level(ReasoningEffortLevel::Xhigh))
+            }
+            Self::Level(_) | Self::Other(_) => None,
+        }
+    }
 }
 
 /// Anthropic `system` accepts either a bare string or an array of text blocks.
@@ -154,4 +203,33 @@ pub struct ToolParam {
     pub type_: Option<String>,
     #[serde(flatten)]
     pub extra: HashMap<String, Value>,
+}
+
+#[cfg(test)]
+mod effort_tests {
+    use super::*;
+
+    #[test]
+    fn output_config_effort_clamps_top_tiers_and_preserves_extras() {
+        let request: MessagesRequest = serde_json::from_value(serde_json::json!({
+            "model": "m", "max_tokens": 1, "messages": [{"role": "user", "content": "hi"}],
+            "output_config": {"effort": "high", "format": {"type": "json"}},
+            "metadata": {"user_id": "u"}
+        }))
+        .unwrap();
+        let effort = request.output_config.as_ref().unwrap().effort.as_ref().unwrap();
+        assert_eq!(
+            effort.clamped_for_qwen(),
+            Some(ReasoningEffort::Level(ReasoningEffortLevel::Xhigh))
+        );
+        let json = serde_json::to_value(&request).unwrap();
+        assert_eq!(json["output_config"]["format"]["type"], "json");
+        assert_eq!(json["metadata"]["user_id"], "u");
+
+        for (input, expect_change) in [("max", true), ("medium", false), ("xhigh", false), ("minimal", false)] {
+            let effort: ReasoningEffort = serde_json::from_value(serde_json::json!(input)).unwrap();
+            assert_eq!(effort.clamped_for_qwen().is_some(), expect_change, "{input}");
+            assert_eq!(serde_json::to_value(&effort).unwrap(), input);
+        }
+    }
 }

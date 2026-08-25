@@ -9,7 +9,7 @@ use serde_json::Value;
 use crate::types::io::output::{FunctionToolCall, WebSearchCall, WebSearchCallStatus, WebSearchSource};
 use crate::types::io::{FunctionTool, OutputItem};
 use crate::types::tools::{WebSearchContextSize, WebSearchToolParam};
-use crate::utils::common::{serialize_to_string, serialize_to_value_or_custom_default};
+use crate::utils::common::serialize_to_value_or_custom_default;
 
 use super::handler::{GatewayExecutor, ToolError, ToolHandler, ToolOutput};
 use super::registry::{ToolEntry, ToolType};
@@ -118,8 +118,17 @@ pub struct WebSearchHandler {
 impl WebSearchHandler {
     #[must_use]
     pub fn from_env(client: Arc<reqwest::Client>) -> Self {
+        Self::from_values(
+            client,
+            std::env::var(YOU_API_KEY).ok(),
+            std::env::var(YOU_API_BASE_URL).ok(),
+        )
+    }
+
+    #[must_use]
+    pub fn from_values(client: Arc<reqwest::Client>, api_key: Option<String>, base_url: Option<String>) -> Self {
         Self {
-            provider: Arc::new(YouSearchProvider::from_env(client)),
+            provider: Arc::new(YouSearchProvider::from_values(client, api_key, base_url)),
         }
     }
 
@@ -176,14 +185,11 @@ struct YouSearchProvider {
 }
 
 impl YouSearchProvider {
-    fn from_env(client: Arc<reqwest::Client>) -> Self {
-        let api_key = std::env::var(YOU_API_KEY)
-            .ok()
+    fn from_values(client: Arc<reqwest::Client>, api_key: Option<String>, base_url: Option<String>) -> Self {
+        let api_key = api_key
             .map(|value| value.trim().to_owned())
             .filter(|value| !value.is_empty());
-        let base_url = std::env::var(YOU_API_BASE_URL)
-            .ok()
-            .and_then(|value| clean_base_url(&value));
+        let base_url = base_url.and_then(|value| clean_base_url(&value));
         Self {
             client,
             api_key,
@@ -215,16 +221,11 @@ impl WebSearchProvider for YouSearchProvider {
                 ToolError::Config(format!("{YOU_API_BASE_URL} must be set to use the web_search tool"))
             })?;
             let request = YouSearchRequest::from_args_and_config(args, config)?;
-            let url = format!("{base_url}/v1/search");
-            let body = serialize_to_string(&request)
-                .map_err(|e| ToolError::Execution(format!("failed to serialize web_search request: {e}")))?;
-
             let resp = self
                 .client
-                .post(url)
+                .get(format!("{base_url}/v1/search"))
+                .query(&request.query_params())
                 .header("X-API-Key", api_key)
-                .header("Content-Type", "application/json")
-                .body(body)
                 .send()
                 .await
                 .map_err(|e| ToolError::Execution(format!("You.com search request failed: {e}")))?;
@@ -349,6 +350,44 @@ struct YouSearchRequest {
 }
 
 impl YouSearchRequest {
+    fn query_params(&self) -> Vec<(String, String)> {
+        let mut params = vec![("query".to_owned(), self.query.clone())];
+        if let Some(count) = self.count {
+            params.push(("count".to_owned(), count.to_string()));
+        }
+        if let Some(freshness) = &self.freshness {
+            params.push(("freshness".to_owned(), freshness.clone()));
+        }
+        if let Some(country) = &self.country {
+            params.push(("country".to_owned(), country.clone()));
+        }
+        if let Some(language) = &self.language {
+            params.push(("language".to_owned(), language.clone()));
+        }
+        if let Some(safesearch) = &self.safesearch {
+            params.push(("safesearch".to_owned(), safesearch.clone()));
+        }
+        if let Some(livecrawl) = &self.livecrawl {
+            params.push(("livecrawl".to_owned(), livecrawl.clone()));
+        }
+        for format in self.livecrawl_formats.iter().flatten() {
+            params.push(("livecrawl_formats".to_owned(), format.clone()));
+        }
+        if let Some(crawl_timeout) = self.crawl_timeout {
+            params.push(("crawl_timeout".to_owned(), crawl_timeout.to_string()));
+        }
+        for domain in self.include_domains.iter().flatten() {
+            params.push(("include_domains".to_owned(), domain.clone()));
+        }
+        for domain in self.exclude_domains.iter().flatten() {
+            params.push(("exclude_domains".to_owned(), domain.clone()));
+        }
+        for domain in self.boost_domains.iter().flatten() {
+            params.push(("boost_domains".to_owned(), domain.clone()));
+        }
+        params
+    }
+
     fn from_args_and_config(args: &WebSearchArguments, config: &WebSearchToolParam) -> Result<Self, ToolError> {
         let count = args
             .count

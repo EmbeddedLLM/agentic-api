@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
@@ -12,14 +12,17 @@ use crate::types::tools::McpToolParam;
 // transport. Only add names whose DNS records are controlled by a trusted
 // administrator.
 const MCP_ALLOWED_HOSTS_ENV: &str = "AGENTIC_MCP_ALLOWED_HOSTS";
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(untagged)]
+#[serde(untagged, deny_unknown_fields)]
 pub enum McpServerEntry {
     Http {
         url: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(default, alias = "http_headers", skip_serializing_if = "Option::is_none")]
         headers: Option<HashMap<String, String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        allowed_tools: Option<Vec<String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        require_approval: Option<String>,
     },
     Stdio {
         command: String,
@@ -29,7 +32,27 @@ pub enum McpServerEntry {
         env: Option<HashMap<String, String>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cwd: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        allowed_tools: Option<Vec<String>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        require_approval: Option<String>,
     },
+}
+
+impl McpServerEntry {
+    #[must_use]
+    pub fn allowed_tools(&self) -> Option<&[String]> {
+        match self {
+            Self::Http { allowed_tools, .. } | Self::Stdio { allowed_tools, .. } => allowed_tools.as_deref(),
+        }
+    }
+
+    #[must_use]
+    pub fn require_approval(&self) -> Option<&str> {
+        match self {
+            Self::Http { require_approval, .. } | Self::Stdio { require_approval, .. } => require_approval.as_deref(),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -40,7 +63,14 @@ pub struct McpClientPool {
 
 impl McpClientPool {
     pub async fn from_params(params: &[McpToolParam]) -> Self {
-        let servers: HashMap<String, McpServerEntry> = params.iter().filter_map(server_entry_from_param).collect();
+        Self::from_params_with_allowed_hosts(params, &allowed_hosts_from_env()).await
+    }
+
+    pub async fn from_params_with_allowed_hosts(params: &[McpToolParam], allowed_hosts: &[String]) -> Self {
+        let servers: HashMap<String, McpServerEntry> = params
+            .iter()
+            .filter_map(|param| server_entry_from_param(param, allowed_hosts))
+            .collect();
         Self::from_config(servers).await
     }
 
@@ -50,12 +80,13 @@ impl McpClientPool {
 
         for (server_label, entry) in servers {
             let result = match entry {
-                McpServerEntry::Http { url, headers } => McpClient::connect(&url, headers).await,
+                McpServerEntry::Http { url, headers, .. } => McpClient::connect(&url, headers).await,
                 McpServerEntry::Stdio {
                     command,
                     args,
                     env,
                     cwd,
+                    ..
                 } => McpClient::connect_stdio(&command, &args, env.as_ref(), cwd.as_deref()).await,
             };
 
@@ -87,14 +118,14 @@ impl McpClientPool {
     }
 }
 
-fn server_entry_from_param(param: &McpToolParam) -> Option<(String, McpServerEntry)> {
+fn server_entry_from_param(param: &McpToolParam, allowed_hosts: &[String]) -> Option<(String, McpServerEntry)> {
     let Some(server_label) = clean_string(Some(&param.server_label)) else {
         tracing::debug!("MCP tool param has no server_label");
         return None;
     };
 
     if let Some(url) = clean_string(param.server_url.as_deref()) {
-        let Ok(url) = validate_request_server_url(&url) else {
+        let Ok(url) = validate_request_server_url_with_allowed_hosts(&url, allowed_hosts) else {
             tracing::warn!(server_label, "MCP tool param server_url rejected");
             return None;
         };
@@ -104,6 +135,8 @@ fn server_entry_from_param(param: &McpToolParam) -> Option<(String, McpServerEnt
             McpServerEntry::Http {
                 url,
                 headers: request_headers(param),
+                allowed_tools: None,
+                require_approval: None,
             },
         ));
     }
@@ -120,7 +153,10 @@ fn request_headers(param: &McpToolParam) -> Option<HashMap<String, String>> {
     (!headers.is_empty()).then_some(headers)
 }
 
-fn validate_request_server_url(value: &str) -> Result<String, String> {
+pub(crate) fn validate_request_server_url_with_allowed_hosts(
+    value: &str,
+    allowed_hosts: &[String],
+) -> Result<String, String> {
     let url = Url::parse(value).map_err(|error| format!("invalid URL: {error}"))?;
     match url.scheme() {
         "http" | "https" => {}
@@ -132,7 +168,7 @@ fn validate_request_server_url(value: &str) -> Result<String, String> {
     }
 
     let host = url.host().ok_or_else(|| "URL must include a host".to_owned())?;
-    if is_allowed_request_host(&host) {
+    if is_allowed_request_host(&host, allowed_hosts) {
         return Ok(value.to_owned());
     }
 
@@ -141,23 +177,22 @@ fn validate_request_server_url(value: &str) -> Result<String, String> {
     ))
 }
 
-fn is_allowed_request_host(host: &url::Host<&str>) -> bool {
+fn is_allowed_request_host(host: &url::Host<&str>, allowed_hosts: &[String]) -> bool {
     match host {
-        url::Host::Domain(host) => host.eq_ignore_ascii_case("localhost") || host_allowed_by_env(host),
-        url::Host::Ipv4(address) => address.is_loopback() || host_allowed_by_env(&address.to_string()),
-        url::Host::Ipv6(address) => address.is_loopback() || host_allowed_by_env(&address.to_string()),
+        url::Host::Domain(host) => host.eq_ignore_ascii_case("localhost") || host_allowed(host, allowed_hosts),
+        url::Host::Ipv4(address) => address.is_loopback() || host_allowed(&address.to_string(), allowed_hosts),
+        url::Host::Ipv6(address) => address.is_loopback() || host_allowed(&address.to_string(), allowed_hosts),
     }
 }
 
-fn host_allowed_by_env(host: &str) -> bool {
-    allowed_hosts()
+fn host_allowed(host: &str, allowed_hosts: &[String]) -> bool {
+    allowed_hosts
         .iter()
         .any(|allowed_host| allowed_host.eq_ignore_ascii_case(host))
 }
 
-fn allowed_hosts() -> &'static [String] {
-    static ALLOWED_HOSTS: OnceLock<Vec<String>> = OnceLock::new();
-    ALLOWED_HOSTS.get_or_init(|| parse_allowed_hosts(&std::env::var(MCP_ALLOWED_HOSTS_ENV).unwrap_or_default()))
+pub(crate) fn allowed_hosts_from_env() -> Vec<String> {
+    parse_allowed_hosts(&std::env::var(MCP_ALLOWED_HOSTS_ENV).unwrap_or_default())
 }
 
 fn parse_allowed_hosts(value: &str) -> Vec<String> {
@@ -178,21 +213,32 @@ fn clean_string(value: Option<&str>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{McpServerEntry, parse_allowed_hosts, server_entry_from_param, validate_request_server_url};
+    use super::{
+        McpServerEntry, parse_allowed_hosts, server_entry_from_param, validate_request_server_url_with_allowed_hosts,
+    };
     use crate::types::tools::McpToolParam;
 
     #[test]
     fn mcp_server_entry_deserializes_http_config() {
         let entry = serde_json::from_value::<McpServerEntry>(serde_json::json!({
             "url": "http://localhost:9000",
-            "headers": {"Authorization": "Bearer token"}
+            "headers": {"Authorization": "Bearer token"},
+            "allowed_tools": ["say_hello", "sum"],
+            "require_approval": "never"
         }))
         .unwrap();
 
         match entry {
-            McpServerEntry::Http { url, headers } => {
+            McpServerEntry::Http {
+                url,
+                headers,
+                allowed_tools,
+                require_approval,
+            } => {
                 assert_eq!(url, "http://localhost:9000");
                 assert_eq!(headers.unwrap()["Authorization"], "Bearer token");
+                assert_eq!(allowed_tools.unwrap(), ["say_hello", "sum"]);
+                assert_eq!(require_approval.as_deref(), Some("never"));
             }
             McpServerEntry::Stdio { .. } => panic!("expected HTTP MCP config"),
         }
@@ -214,11 +260,15 @@ mod tests {
                 args,
                 env,
                 cwd,
+                allowed_tools,
+                require_approval,
             } => {
                 assert_eq!(command, "python3");
                 assert_eq!(args, vec!["/tmp/server.py".to_owned()]);
                 assert_eq!(env.unwrap()["TOKEN"], "secret");
                 assert_eq!(cwd.as_deref(), Some("/tmp"));
+                assert!(allowed_tools.is_none());
+                assert!(require_approval.is_none());
             }
             McpServerEntry::Http { .. } => panic!("expected stdio MCP config"),
         }
@@ -226,20 +276,32 @@ mod tests {
 
     #[test]
     fn request_server_url_allows_loopback_http() {
-        let url = validate_request_server_url("http://127.0.0.1:8000/mcp").unwrap();
+        let url = validate_request_server_url_with_allowed_hosts("http://127.0.0.1:8000/mcp", &[]).unwrap();
         assert_eq!(url, "http://127.0.0.1:8000/mcp");
     }
 
     #[test]
     fn request_server_url_allows_ipv6_loopback_http() {
-        let url = validate_request_server_url("http://[::1]:8000/mcp").unwrap();
+        let url = validate_request_server_url_with_allowed_hosts("http://[::1]:8000/mcp", &[]).unwrap();
         assert_eq!(url, "http://[::1]:8000/mcp");
     }
 
     #[test]
     fn request_server_url_rejects_unallowlisted_host() {
-        let error = validate_request_server_url("http://169.254.169.254/mcp").unwrap_err();
+        let error = validate_request_server_url_with_allowed_hosts("http://169.254.169.254/mcp", &[]).unwrap_err();
         assert!(error.contains("not allowed"));
+    }
+
+    #[test]
+    fn request_server_url_uses_supplied_allowlist() {
+        assert!(
+            validate_request_server_url_with_allowed_hosts(
+                "https://mcp.example.com/mcp",
+                &["mcp.example.com".to_owned()]
+            )
+            .is_ok()
+        );
+        assert!(validate_request_server_url_with_allowed_hosts("https://mcp.example.com/mcp", &[]).is_err());
     }
 
     #[test]
@@ -251,7 +313,7 @@ mod tests {
         }))
         .unwrap();
 
-        assert!(server_entry_from_param(&param).is_none());
+        assert!(server_entry_from_param(&param, &[]).is_none());
     }
 
     #[test]

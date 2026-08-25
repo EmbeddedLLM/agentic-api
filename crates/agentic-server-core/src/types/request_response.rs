@@ -241,17 +241,10 @@ impl RequestPayload {
     /// decoding cannot be preserved upstream.
     pub fn to_upstream_request(&self, stream: bool) -> Result<UpstreamRequest<'_>, ToolError> {
         self.ensure_tool_search_ready()?;
-        let has_built_in_tool = self.declares_built_in_tool();
-        if has_built_in_tool && self.parallel_tool_calls == Some(true) {
-            return Err(ToolError::Config(
-                "parallel_tool_calls must be false when using built-in tools".into(),
-            ));
-        }
-        let parallel_tool_calls = if has_built_in_tool {
-            Some(false)
-        } else {
-            self.parallel_tool_calls
-        };
+        // The gateway currently executes tool calls serially. Accept the client's
+        // preference for compatibility, but do not advertise parallel execution
+        // to the upstream model.
+        let parallel_tool_calls = Some(false);
 
         let renamed_tools = self
             .tools
@@ -291,12 +284,6 @@ impl RequestPayload {
             parallel_tool_calls,
             cache_salt: self.cache_salt.as_deref(),
         })
-    }
-
-    fn declares_built_in_tool(&self) -> bool {
-        self.tools
-            .as_deref()
-            .is_some_and(|tools| tools.iter().any(ResponsesTool::is_gateway_owned))
     }
 }
 
@@ -790,7 +777,7 @@ mod tests {
         )
         .expect("upstream request serializes");
         assert_eq!(upstream["tools"][0]["name"], "tool_search");
-        assert_eq!(upstream["parallel_tool_calls"], true);
+        assert_eq!(upstream["parallel_tool_calls"], false);
     }
 
     #[test]
@@ -876,7 +863,7 @@ mod tests {
     }
 
     #[test]
-    fn to_upstream_request_allows_parallel_tool_calls_for_client_function_tools() {
+    fn to_upstream_request_serializes_parallel_tool_calls_for_client_function_tools() {
         let payload: RequestPayload = serde_json::from_value(serde_json::json!({
             "model": "test",
             "input": "hi",
@@ -887,15 +874,15 @@ mod tests {
 
         let upstream = payload
             .to_upstream_request(false)
-            .expect("function tools allow parallel calls");
+            .expect("function tools are serialized by the gateway");
         let value = serde_json::to_value(upstream).unwrap();
-        assert_eq!(value["parallel_tool_calls"], true);
+        assert_eq!(value["parallel_tool_calls"], false);
     }
 
     #[test]
-    fn to_upstream_request_validates_parallel_tool_calls_for_mixed_tools() {
+    fn to_upstream_request_serializes_parallel_tool_calls_for_mixed_tools() {
         for built_in_tool in builtin_tool_declarations() {
-            for (parallel_tool_calls, should_reject) in [(false, false), (true, true)] {
+            for parallel_tool_calls in [false, true] {
                 let payload: RequestPayload = serde_json::from_value(serde_json::json!({
                     "model": "test",
                     "input": "hi",
@@ -907,16 +894,13 @@ mod tests {
                 }))
                 .unwrap();
 
-                let result = payload.to_upstream_request(false);
-                if should_reject {
-                    let err = result.expect_err("built-in tools should reject parallel tool calls");
-                    assert!(err.to_string().contains("parallel_tool_calls must be false"));
-                } else {
-                    let value =
-                        serde_json::to_value(result.expect("mixed built-in and function tools allow serial calls"))
-                            .unwrap();
-                    assert_eq!(value["parallel_tool_calls"], false);
-                }
+                let value = serde_json::to_value(
+                    payload
+                        .to_upstream_request(false)
+                        .expect("mixed tools are serialized by the gateway"),
+                )
+                .unwrap();
+                assert_eq!(value["parallel_tool_calls"], false);
             }
         }
     }
@@ -940,7 +924,7 @@ mod tests {
     }
 
     #[test]
-    fn to_upstream_request_rejects_parallel_tool_calls_for_builtin_tools() {
+    fn to_upstream_request_serializes_parallel_tool_calls_for_builtin_tools() {
         for tool in builtin_tool_declarations() {
             let payload: RequestPayload = serde_json::from_value(serde_json::json!({
                 "model": "test",
@@ -950,11 +934,11 @@ mod tests {
             }))
             .unwrap();
 
-            let Err(err) = payload.to_upstream_request(false) else {
-                panic!("built-in tools should reject parallel_tool_calls=true");
-            };
-
-            assert!(err.to_string().contains("parallel_tool_calls must be false"));
+            let upstream = payload
+                .to_upstream_request(false)
+                .expect("parallel tool calls are ignored by the gateway");
+            let value = serde_json::to_value(upstream).unwrap();
+            assert_eq!(value["parallel_tool_calls"], false);
         }
     }
 
