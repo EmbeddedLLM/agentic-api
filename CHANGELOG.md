@@ -2,6 +2,18 @@
 
 All notable changes to Agentic API are documented here.
 
+## [0.5.0] - 2026-08-25
+
+### Changed
+
+- Preserved Claude Code Messages transport fidelity across the gateway.
+- Updated You.com web search integration to use GET query parameters.
+- Aligned deployment and harness documentation with the 0.4.0 release.
+
+### Testing
+
+- Fixed web search test hangs in CI.
+
 ## [0.4.0] - 2026-08-23
 
 ### Added
