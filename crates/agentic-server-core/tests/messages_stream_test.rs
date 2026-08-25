@@ -16,8 +16,9 @@ use agentic_core::storage::{ConversationStore, ResponseStore};
 use agentic_core::tool::{ToolRegistry, WebSearchHandler};
 use agentic_core::types::messages::{GatewayToolMap, ToolParam, registry_tools};
 use axum::extract::State;
+use axum::http::Uri;
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::StreamExt;
 use http::StatusCode;
@@ -102,15 +103,53 @@ async fn spawn_mock_vllm_stream(streams: Vec<String>) -> (String, UpstreamState,
     (format!("http://{addr}"), state, handle)
 }
 
-async fn spawn_mock_search() -> (String, tokio::task::JoinHandle<()>) {
+async fn recv_search(captured: &mut tokio::sync::mpsc::UnboundedReceiver<Value>) -> Value {
+    tokio::time::timeout(std::time::Duration::from_secs(5), captured.recv())
+        .await
+        .expect("search backend should be reached within 5 seconds")
+        .expect("search backend should receive a request")
+}
+
+fn query_params_as_json(uri: &Uri) -> Value {
+    let mut params = serde_json::Map::new();
+    for (key, value) in url::form_urlencoded::parse(uri.query().unwrap_or_default().as_bytes()) {
+        let key = key.into_owned();
+        let value = Value::String(value.into_owned());
+        match params.remove(&key) {
+            None => {
+                params.insert(key, value);
+            }
+            Some(Value::Array(mut values)) => {
+                values.push(value);
+                params.insert(key, Value::Array(values));
+            }
+            Some(previous) => {
+                params.insert(key, Value::Array(vec![previous, value]));
+            }
+        }
+    }
+    Value::Object(params)
+}
+
+async fn spawn_mock_search() -> (
+    String,
+    tokio::sync::mpsc::UnboundedReceiver<Value>,
+    tokio::task::JoinHandle<()>,
+) {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let app = Router::new().route(
         "/v1/search",
-        post(|Json(_body): Json<Value>| async move {
-            Json(serde_json::json!({
-                "results": {"web": [{"url": "https://www.rust-lang.org/", "title": "Rust",
-                    "description": "d", "snippets": ["Rust 1.89.0 is the latest stable release."]}], "news": []},
-                "metadata": {"query": "q", "search_uuid": "s1", "latency": 0.1}
-            }))
+        get(move |uri: Uri| {
+            let tx = tx.clone();
+            async move {
+                let body = query_params_as_json(&uri);
+                let _ = tx.send(body);
+                Json(serde_json::json!({
+                    "results": {"web": [{"url": "https://www.rust-lang.org/", "title": "Rust",
+                        "description": "d", "snippets": ["Rust 1.89.0 is the latest stable release."]}], "news": []},
+                    "metadata": {"query": "q", "search_uuid": "s1", "latency": 0.1}
+                }))
+            }
         }),
     );
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -118,7 +157,7 @@ async fn spawn_mock_search() -> (String, tokio::task::JoinHandle<()>) {
     let handle = tokio::spawn(async move {
         axum::serve(listener, app).await.ok();
     });
-    (format!("http://{addr}"), handle)
+    (format!("http://{addr}"), rx, handle)
 }
 
 async fn build_exec_ctx(vllm_url: &str, search_url: &str) -> Arc<ExecutionContext> {
@@ -136,7 +175,7 @@ async fn build_exec_ctx(vllm_url: &str, search_url: &str) -> Arc<ExecutionContex
 #[tokio::test]
 async fn messages_stream_presents_one_message_and_hides_gateway_tool() {
     let (vllm_url, upstream, _v) = spawn_mock_vllm_stream(cassette_turn_streams()).await;
-    let (search_url, _s) = spawn_mock_search().await;
+    let (search_url, mut captured, _s) = spawn_mock_search().await;
     let exec_ctx = build_exec_ctx(&vllm_url, &search_url).await;
 
     let request = serde_json::json!({
@@ -157,6 +196,8 @@ async fn messages_stream_presents_one_message_and_hides_gateway_tool() {
     let stream = run_messages_stream(request, registry, Arc::clone(&exec_ctx), None);
     let chunks: Vec<String> = stream.collect().await;
     let sse = chunks.join("");
+    let search = recv_search(&mut captured).await;
+    assert!(search.get("query").is_some(), "web_search dispatched with a query");
 
     // Two upstream rounds ran (tool round + final).
     assert_eq!(
@@ -211,7 +252,7 @@ async fn messages_stream_presents_one_message_and_hides_gateway_tool() {
 async fn messages_stream_normalizes_claude_native_web_search_for_vllm() {
     let final_stream = cassette_turn_streams().into_iter().nth(1).expect("final cassette turn");
     let (vllm_url, upstream, _v) = spawn_mock_vllm_stream(vec![final_stream]).await;
-    let (search_url, _s) = spawn_mock_search().await;
+    let (search_url, _captured, _s) = spawn_mock_search().await;
     let exec_ctx = build_exec_ctx(&vllm_url, &search_url).await;
 
     let request = serde_json::json!({
@@ -246,7 +287,7 @@ async fn messages_stream_normalizes_claude_native_web_search_for_vllm() {
 async fn messages_stream_enforces_native_web_search_max_uses() {
     let streams = streams_at(MULTIROUND);
     let (vllm_url, upstream, _v) = spawn_mock_vllm_stream(streams).await;
-    let (search_url, _s) = spawn_mock_search().await;
+    let (search_url, _captured, _s) = spawn_mock_search().await;
     let exec_ctx = build_exec_ctx(&vllm_url, &search_url).await;
 
     let request = serde_json::json!({
@@ -288,7 +329,7 @@ async fn messages_stream_enforces_native_web_search_max_uses() {
 #[tokio::test]
 async fn messages_stream_multiround_single_lifecycle() {
     let (vllm_url, upstream, _v) = spawn_mock_vllm_stream(streams_at(MULTIROUND)).await;
-    let (search_url, _s) = spawn_mock_search().await;
+    let (search_url, _captured, _s) = spawn_mock_search().await;
     let exec_ctx = build_exec_ctx(&vllm_url, &search_url).await;
 
     let request = serde_json::json!({
@@ -352,7 +393,7 @@ async fn messages_stream_multiround_single_lifecycle() {
 #[tokio::test]
 async fn messages_stream_preserves_multi_block_system_across_rounds() {
     let (vllm_url, upstream, _v) = spawn_mock_vllm_stream(cassette_turn_streams()).await;
-    let (search_url, _s) = spawn_mock_search().await;
+    let (search_url, _captured, _s) = spawn_mock_search().await;
     let exec_ctx = build_exec_ctx(&vllm_url, &search_url).await;
 
     let system = serde_json::json!([

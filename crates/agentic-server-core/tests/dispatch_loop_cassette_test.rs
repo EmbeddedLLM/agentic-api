@@ -224,7 +224,7 @@ async fn openai_mixed_gateway_and_client_owned_hands_back_after_gateway_exec() {
     };
 
     // web_search is gateway-owned → executed against You.com mock.
-    let search = captured_you.recv().await.expect("web_search should hit You.com");
+    let search = recv_search(&mut captured_you, "web_search should hit You.com").await;
     assert!(search.body.get("query").is_some(), "web_search executed with a query");
 
     // get_job_status is still client-owned → RequiresClientAction, one model call.
@@ -275,7 +275,7 @@ async fn assert_web_search_then_namespace(cassette_rel_path: &str) {
 
     // Round 0 executed the gateway web_search against the You.com mock, then
     // round 1 emitted the namespace call — two model calls in one conversation.
-    let search = captured_you.recv().await.expect("web_search should hit You.com");
+    let search = recv_search(&mut captured_you, "web_search should hit You.com").await;
     assert!(search.body.get("query").is_some(), "web_search executed with a query");
     assert_eq!(
         llm.request_bodies().await.len(),
@@ -366,9 +366,9 @@ async fn assert_multi_round_web_search(cassette_rel_path: &str) {
 
     // Two gateway web_search executions (rounds 0 and 1), three model calls total
     // (the loop continued twice, then the model answered).
-    let first = captured_you.recv().await.expect("first web_search should hit You.com");
+    let first = recv_search(&mut captured_you, "first web_search should hit You.com").await;
     assert!(first.body.get("query").is_some(), "round-0 web_search executed");
-    let second = captured_you.recv().await.expect("second web_search should hit You.com");
+    let second = recv_search(&mut captured_you, "second web_search should hit You.com").await;
     assert!(second.body.get("query").is_some(), "round-1 web_search executed");
     assert_eq!(
         llm.request_bodies().await.len(),
@@ -448,7 +448,7 @@ async fn openai_web_search_and_namespace_same_turn_hands_back_in_one_round() {
 
     // The gateway web_search executed this turn, and the turn ended in ONE model
     // call (no loop-back) because a client-owned namespace call was also present.
-    let search = captured_you.recv().await.expect("web_search should hit You.com");
+    let search = recv_search(&mut captured_you, "web_search should hit You.com").await;
     assert!(search.body.get("query").is_some(), "web_search executed with a query");
     assert_eq!(
         llm.request_bodies().await.len(),
@@ -486,13 +486,28 @@ struct CapturedSearch {
     body: serde_json::Value,
 }
 
+async fn recv_search(captured: &mut tokio::sync::mpsc::Receiver<CapturedSearch>, expectation: &str) -> CapturedSearch {
+    tokio::time::timeout(std::time::Duration::from_secs(5), captured.recv())
+        .await
+        .unwrap_or_else(|_| panic!("{expectation}: timed out after 5 seconds"))
+        .unwrap_or_else(|| panic!("{expectation}: mock server stopped before receiving a request"))
+}
+
+fn query_params_as_json(uri: &axum::http::Uri) -> serde_json::Value {
+    let params = url::form_urlencoded::parse(uri.query().unwrap_or_default().as_bytes())
+        .map(|(key, value)| (key.into_owned(), serde_json::Value::String(value.into_owned())))
+        .collect();
+    serde_json::Value::Object(params)
+}
+
 async fn spawn_mock_you() -> (
     String,
     tokio::sync::mpsc::Receiver<CapturedSearch>,
     tokio::task::JoinHandle<()>,
 ) {
     use axum::extract::State;
-    use axum::routing::post;
+    use axum::http::Uri;
+    use axum::routing::get;
     use axum::{Json, Router};
     use tokio::net::TcpListener;
     use tokio::sync::mpsc;
@@ -501,8 +516,9 @@ async fn spawn_mock_you() -> (
     let app = Router::new()
         .route(
             "/v1/search",
-            post(
-                move |State(tx): State<mpsc::Sender<CapturedSearch>>, Json(body): Json<serde_json::Value>| async move {
+            get(
+                move |State(tx): State<mpsc::Sender<CapturedSearch>>, uri: Uri| async move {
+                    let body = query_params_as_json(&uri);
                     tx.send(CapturedSearch { body }).await.unwrap();
                     (
                         axum::http::StatusCode::OK,
