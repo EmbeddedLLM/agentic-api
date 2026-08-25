@@ -283,7 +283,7 @@ to the Deployment’s container environment:
                   name: agentic-api-secrets
                   key: you-api-key
             - name: YOU_API_BASE_URL
-              value: https://api.you.com
+              value: https://api.ydc-index.io
 ```
 
 Create the secret before applying the Deployment:
