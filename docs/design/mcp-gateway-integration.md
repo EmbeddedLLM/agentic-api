@@ -191,4 +191,3 @@ build request-scoped registry
 
 Tool execution failures become failed tool call output and are returned to the model for the next round; they do not
 automatically fail the whole Responses request.
-

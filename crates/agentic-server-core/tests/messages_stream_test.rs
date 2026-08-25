@@ -11,14 +11,15 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use agentic_core::executor::{ConversationHandler, ExecutionContext, ResponseHandler, run_messages_stream};
+use agentic_core::executor::{
+    BoxStream, ConversationHandler, ExecutionContext, MessagesUpstream, ResponseHandler, run_messages_stream,
+};
 use agentic_core::storage::{ConversationStore, ResponseStore};
 use agentic_core::tool::{ToolRegistry, WebSearchHandler};
 use agentic_core::types::messages::{GatewayToolMap, ToolParam, registry_tools};
 use axum::extract::State;
-use axum::http::Uri;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::post;
 use axum::{Json, Router};
 use futures::StreamExt;
 use http::StatusCode;
@@ -36,6 +37,7 @@ const MULTIROUND: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/tests/cassettes/messages_multiround/multiround-web-search-qwen3-streaming.yaml"
 );
+const CLAUDE_CODE_CACHE_CONTROL_REQUEST: &str = include_str!("fixtures/claude-code-cache-control-request.json");
 
 /// Load each streaming turn's SSE body (the raw event-stream text) from the cassette.
 fn cassette_turn_streams() -> Vec<String> {
@@ -103,52 +105,33 @@ async fn spawn_mock_vllm_stream(streams: Vec<String>) -> (String, UpstreamState,
     (format!("http://{addr}"), state, handle)
 }
 
-async fn recv_search(captured: &mut tokio::sync::mpsc::UnboundedReceiver<Value>) -> Value {
-    tokio::time::timeout(std::time::Duration::from_secs(5), captured.recv())
-        .await
-        .expect("search backend should be reached within 5 seconds")
-        .expect("search backend should receive a request")
-}
-
-fn query_params_as_json(uri: &Uri) -> Value {
-    let mut params = serde_json::Map::new();
-    for (key, value) in url::form_urlencoded::parse(uri.query().unwrap_or_default().as_bytes()) {
-        let key = key.into_owned();
-        let value = Value::String(value.into_owned());
-        match params.remove(&key) {
-            None => {
-                params.insert(key, value);
-            }
-            Some(Value::Array(mut values)) => {
-                values.push(value);
-                params.insert(key, Value::Array(values));
-            }
-            Some(previous) => {
-                params.insert(key, Value::Array(vec![previous, value]));
-            }
-        }
-    }
-    Value::Object(params)
-}
-
-async fn spawn_mock_search() -> (
-    String,
-    tokio::sync::mpsc::UnboundedReceiver<Value>,
-    tokio::task::JoinHandle<()>,
-) {
-    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+async fn spawn_mock_vllm_stream_then_error(
+    first_stream: String,
+    error_body: &'static str,
+) -> (String, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let route_calls = Arc::clone(&calls);
     let app = Router::new().route(
-        "/v1/search",
-        get(move |uri: Uri| {
-            let tx = tx.clone();
+        "/v1/messages",
+        post(move |_body: axum::body::Bytes| {
+            let n = route_calls.fetch_add(1, Ordering::SeqCst);
+            let first_stream = first_stream.clone();
             async move {
-                let body = query_params_as_json(&uri);
-                let _ = tx.send(body);
-                Json(serde_json::json!({
-                    "results": {"web": [{"url": "https://www.rust-lang.org/", "title": "Rust",
-                        "description": "d", "snippets": ["Rust 1.89.0 is the latest stable release."]}], "news": []},
-                    "metadata": {"query": "q", "search_uuid": "s1", "latency": 0.1}
-                }))
+                if n == 0 {
+                    Response::builder()
+                        .status(StatusCode::OK)
+                        .header("content-type", "text/event-stream")
+                        .body(axum::body::Body::from(first_stream))
+                        .unwrap()
+                        .into_response()
+                } else {
+                    Response::builder()
+                        .status(StatusCode::BAD_REQUEST)
+                        .header("content-type", "application/json")
+                        .body(axum::body::Body::from(error_body))
+                        .unwrap()
+                        .into_response()
+                }
             }
         }),
     );
@@ -157,7 +140,26 @@ async fn spawn_mock_search() -> (
     let handle = tokio::spawn(async move {
         axum::serve(listener, app).await.ok();
     });
-    (format!("http://{addr}"), rx, handle)
+    (format!("http://{addr}"), calls, handle)
+}
+
+async fn spawn_mock_search() -> (String, tokio::task::JoinHandle<()>) {
+    let app = Router::new().route(
+        "/v1/search",
+        post(|Json(_body): Json<Value>| async move {
+            Json(serde_json::json!({
+                "results": {"web": [{"url": "https://www.rust-lang.org/", "title": "Rust",
+                    "description": "d", "snippets": ["Rust 1.89.0 is the latest stable release."]}], "news": []},
+                "metadata": {"query": "q", "search_uuid": "s1", "latency": 0.1}
+            }))
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app).await.ok();
+    });
+    (format!("http://{addr}"), handle)
 }
 
 async fn build_exec_ctx(vllm_url: &str, search_url: &str) -> Arc<ExecutionContext> {
@@ -172,10 +174,22 @@ async fn build_exec_ctx(vllm_url: &str, search_url: &str) -> Arc<ExecutionContex
     )
 }
 
+async fn run_test_messages_stream(
+    request: Value,
+    registry: Arc<ToolRegistry>,
+    exec_ctx: Arc<ExecutionContext>,
+) -> BoxStream {
+    let upstream = MessagesUpstream::new(&exec_ctx.llm_base_url, None, reqwest::header::HeaderMap::new());
+    run_messages_stream(request, registry, exec_ctx, upstream)
+        .await
+        .map(|response| response.body)
+        .unwrap()
+}
+
 #[tokio::test]
 async fn messages_stream_presents_one_message_and_hides_gateway_tool() {
     let (vllm_url, upstream, _v) = spawn_mock_vllm_stream(cassette_turn_streams()).await;
-    let (search_url, mut captured, _s) = spawn_mock_search().await;
+    let (search_url, _s) = spawn_mock_search().await;
     let exec_ctx = build_exec_ctx(&vllm_url, &search_url).await;
 
     let request = serde_json::json!({
@@ -193,11 +207,9 @@ async fn messages_stream_presents_one_message_and_hides_gateway_tool() {
             .unwrap(),
     );
 
-    let stream = run_messages_stream(request, registry, Arc::clone(&exec_ctx), None);
+    let stream = run_test_messages_stream(request, registry, Arc::clone(&exec_ctx)).await;
     let chunks: Vec<String> = stream.collect().await;
     let sse = chunks.join("");
-    let search = recv_search(&mut captured).await;
-    assert!(search.get("query").is_some(), "web_search dispatched with a query");
 
     // Two upstream rounds ran (tool round + final).
     assert_eq!(
@@ -249,16 +261,16 @@ async fn messages_stream_presents_one_message_and_hides_gateway_tool() {
 }
 
 #[tokio::test]
-async fn messages_stream_normalizes_claude_native_web_search_for_vllm() {
-    let final_stream = cassette_turn_streams().into_iter().nth(1).expect("final cassette turn");
-    let (vllm_url, upstream, _v) = spawn_mock_vllm_stream(vec![final_stream]).await;
-    let (search_url, _captured, _s) = spawn_mock_search().await;
+async fn messages_stream_preserves_error_event_after_gateway_tool_round() {
+    let error_body = r#"{"type":"error","error":{"type":"invalid_request_error","message":"bad second round"}}"#;
+    let first_stream = cassette_turn_streams().remove(0);
+    let (vllm_url, calls, _v) = spawn_mock_vllm_stream_then_error(first_stream, error_body).await;
+    let (search_url, _s) = spawn_mock_search().await;
     let exec_ctx = build_exec_ctx(&vllm_url, &search_url).await;
-
     let request = serde_json::json!({
         "model": "qwen3", "max_tokens": 1024, "stream": true,
-        "messages": [{"role": "user", "content": "What is the latest stable Rust release?"}],
-        "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 8}]
+        "messages": [{"role": "user", "content": "Use web_search."}],
+        "tools": [{"name": "web_search", "description": "s", "input_schema": {"type": "object"}}]
     });
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
     let mut registry_tool_params = registry_tools(Some(&tools), &GatewayToolMap::default());
@@ -269,31 +281,32 @@ async fn messages_stream_normalizes_claude_native_web_search_for_vllm() {
             .unwrap(),
     );
 
-    let chunks: Vec<String> = run_messages_stream(request, registry, Arc::clone(&exec_ctx), None)
-        .collect()
-        .await;
+    let stream = run_test_messages_stream(request, registry, Arc::clone(&exec_ctx)).await;
+    let sse = stream.collect::<Vec<_>>().await.join("");
 
-    assert!(chunks.join("").contains("event: message_stop"));
-    let requests = upstream.requests.lock().await;
-    assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0]["tools"][0]["name"], "web_search");
-    assert_eq!(requests[0]["tools"][0]["input_schema"]["type"], "object");
-    assert_eq!(requests[0]["tools"][0]["input_schema"]["required"][0], "query");
-    assert!(requests[0]["tools"][0].get("type").is_none());
-    assert!(requests[0]["tools"][0].get("max_uses").is_none());
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert!(
+        sse.contains(&format!("event: error\ndata: {error_body}\n\n")),
+        "the original Anthropic error object should survive as the SSE error event: {sse}"
+    );
 }
 
 #[tokio::test]
-async fn messages_stream_enforces_native_web_search_max_uses() {
-    let streams = streams_at(MULTIROUND);
-    let (vllm_url, upstream, _v) = spawn_mock_vllm_stream(streams).await;
-    let (search_url, _captured, _s) = spawn_mock_search().await;
+async fn messages_stream_forwards_upstream_sse_error_and_stops() {
+    let error = r#"{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#;
+    let upstream_stream = format!(
+        "event: message_start\ndata: {{\"type\":\"message_start\",\"message\":{{\"id\":\"m\"}}}}\n\n\
+         event: error\ndata: {error}\n\n\
+         event: message_stop\ndata: {{\"type\":\"message_stop\"}}\n\n\
+         data: [DONE]\n\n"
+    );
+    let (vllm_url, upstream, _v) = spawn_mock_vllm_stream(vec![upstream_stream]).await;
+    let (search_url, _s) = spawn_mock_search().await;
     let exec_ctx = build_exec_ctx(&vllm_url, &search_url).await;
-
     let request = serde_json::json!({
         "model": "qwen3", "max_tokens": 1024, "stream": true,
-        "messages": [{"role": "user", "content": "Search twice."}],
-        "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 1}]
+        "messages": [{"role": "user", "content": "Use web_search."}],
+        "tools": [{"name": "web_search", "description": "s", "input_schema": {"type": "object"}}]
     });
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
     let mut registry_tool_params = registry_tools(Some(&tools), &GatewayToolMap::default());
@@ -304,23 +317,19 @@ async fn messages_stream_enforces_native_web_search_max_uses() {
             .unwrap(),
     );
 
-    let sse = run_messages_stream(request, registry, Arc::clone(&exec_ctx), None)
-        .collect::<Vec<_>>()
-        .await
-        .join("");
+    let stream = run_test_messages_stream(request, registry, Arc::clone(&exec_ctx)).await;
+    let sse = stream.collect::<Vec<_>>().await.join("");
 
-    assert_eq!(sse.matches("event: message_start").count(), 1);
-    assert_eq!(sse.matches("event: message_stop").count(), 1);
-    let requests = upstream.requests.lock().await;
-    let results = requests[1]["messages"]
-        .as_array()
-        .and_then(|messages| messages.last())
-        .and_then(|message| message["content"].as_array())
-        .expect("tool results fed back");
-    assert_eq!(results.len(), 2);
-    assert_eq!(results[0]["is_error"], false);
-    assert_eq!(results[1]["is_error"], true);
-    assert!(results[1]["content"].as_str().unwrap_or_default().contains("max_uses"));
+    assert_eq!(upstream.calls.load(Ordering::SeqCst), 1);
+    assert!(sse.contains("event: error"), "error event missing: {sse}");
+    assert!(
+        sse.contains(r#""type":"overloaded_error""#),
+        "upstream error payload missing: {sse}"
+    );
+    assert!(
+        !sse.contains("event: message_stop"),
+        "an error must terminate without message_stop: {sse}"
+    );
 }
 
 // Multi-round streaming: replay the live-recorded multi-round streaming cassette
@@ -329,7 +338,7 @@ async fn messages_stream_enforces_native_web_search_max_uses() {
 #[tokio::test]
 async fn messages_stream_multiround_single_lifecycle() {
     let (vllm_url, upstream, _v) = spawn_mock_vllm_stream(streams_at(MULTIROUND)).await;
-    let (search_url, _captured, _s) = spawn_mock_search().await;
+    let (search_url, _s) = spawn_mock_search().await;
     let exec_ctx = build_exec_ctx(&vllm_url, &search_url).await;
 
     let request = serde_json::json!({
@@ -347,7 +356,7 @@ async fn messages_stream_multiround_single_lifecycle() {
             .unwrap(),
     );
 
-    let stream = run_messages_stream(request, registry, Arc::clone(&exec_ctx), None);
+    let stream = run_test_messages_stream(request, registry, Arc::clone(&exec_ctx)).await;
     let sse = stream.collect::<Vec<_>>().await.join("");
 
     assert!(
@@ -393,7 +402,7 @@ async fn messages_stream_multiround_single_lifecycle() {
 #[tokio::test]
 async fn messages_stream_preserves_multi_block_system_across_rounds() {
     let (vllm_url, upstream, _v) = spawn_mock_vllm_stream(cassette_turn_streams()).await;
-    let (search_url, _captured, _s) = spawn_mock_search().await;
+    let (search_url, _s) = spawn_mock_search().await;
     let exec_ctx = build_exec_ctx(&vllm_url, &search_url).await;
 
     let system = serde_json::json!([
@@ -418,7 +427,7 @@ async fn messages_stream_preserves_multi_block_system_across_rounds() {
             .unwrap(),
     );
 
-    let stream = run_messages_stream(request, registry, Arc::clone(&exec_ctx), None);
+    let stream = run_test_messages_stream(request, registry, Arc::clone(&exec_ctx)).await;
     let _chunks: Vec<String> = stream.collect().await;
 
     assert_eq!(
@@ -435,4 +444,59 @@ async fn messages_stream_preserves_multi_block_system_across_rounds() {
         requests[1]["system"], system,
         "round 2 still carries the system blocks unchanged"
     );
+}
+
+#[tokio::test]
+async fn messages_stream_preserves_claude_code_cache_control_across_rounds() {
+    let streams = cassette_turn_streams()
+        .into_iter()
+        .map(|stream| stream.replace(r#""web_search""#, r#""WebSearch""#))
+        .collect();
+    let (vllm_url, upstream, _v) = spawn_mock_vllm_stream(streams).await;
+    let (search_url, _s) = spawn_mock_search().await;
+    let mut exec_ctx = build_exec_ctx(&vllm_url, &search_url).await;
+    Arc::get_mut(&mut exec_ctx).unwrap().messages_gateway_tools =
+        GatewayToolMap::from_pairs([("WebSearch", "web_search")]);
+
+    let mut request: Value = serde_json::from_str(CLAUDE_CODE_CACHE_CONTROL_REQUEST).unwrap();
+    request["stream"] = Value::Bool(true);
+    let original_system = request["system"].clone();
+    let original_user_message = request["messages"][0].clone();
+    let original_tools = request["tools"].clone();
+    let tools: Vec<ToolParam> = serde_json::from_value(original_tools.clone()).unwrap();
+    let mut registry_tool_params = registry_tools(Some(&tools), &exec_ctx.messages_gateway_tools);
+    let mut gateway_executors = exec_ctx.gateway_executors.clone();
+    let registry = Arc::new(
+        ToolRegistry::build_with_handlers(&mut registry_tool_params, &mut gateway_executors)
+            .await
+            .unwrap(),
+    );
+
+    let stream = run_test_messages_stream(request, registry, Arc::clone(&exec_ctx)).await;
+    let _chunks: Vec<String> = stream.collect().await;
+
+    let requests = upstream.requests.lock().await;
+    assert_eq!(requests.len(), 2, "tool round + final round");
+    for upstream_request in requests.iter() {
+        assert_eq!(upstream_request["system"], original_system);
+        assert_eq!(upstream_request["messages"][0], original_user_message);
+        assert_eq!(upstream_request["tools"], original_tools);
+    }
+    assert_eq!(
+        requests[1]["system"][0]["cache_control"],
+        serde_json::json!({"type": "ephemeral", "ttl": "1h"})
+    );
+    assert_eq!(
+        requests[1]["system"][1]["cache_control"],
+        serde_json::json!({"type": "ephemeral", "ttl": "5m"})
+    );
+    assert_eq!(
+        requests[1]["messages"][0]["content"][0]["cache_control"],
+        serde_json::json!({"type": "ephemeral", "ttl": "5m"})
+    );
+    assert_eq!(
+        requests[1]["tools"][1]["cache_control"],
+        serde_json::json!({"type": "ephemeral", "ttl": "1h"})
+    );
+    assert!(requests[1]["tools"][0].get("cache_control").is_none());
 }

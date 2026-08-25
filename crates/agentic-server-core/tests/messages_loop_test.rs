@@ -13,7 +13,9 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use agentic_core::executor::{ConversationHandler, ExecutionContext, ResponseHandler, run_messages_loop};
+use agentic_core::executor::{
+    ConversationHandler, ExecutionContext, ExecutorResult, MessagesUpstream, ResponseHandler, run_messages_loop,
+};
 use agentic_core::storage::{ConversationStore, ResponseStore};
 use agentic_core::tool::{ToolRegistry, WebSearchHandler};
 use agentic_core::types::messages::{GatewayToolMap, ToolParam, registry_tools};
@@ -49,6 +51,7 @@ fn cassette_bodies_at(path: &str) -> Vec<Value> {
 }
 
 const MULTIROUND_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/cassettes/messages_multiround");
+const CLAUDE_CODE_CACHE_CONTROL_REQUEST: &str = include_str!("fixtures/claude-code-cache-control-request.json");
 
 /// Mock vLLM `/v1/messages` — serves the recorded response bodies in order and
 /// records each request body it received (to assert the loop fed the
@@ -176,6 +179,7 @@ async fn spawn_failing_search() -> (String, mpsc::Receiver<()>, tokio::task::Joi
     (format!("http://{addr}"), rx, handle)
 }
 
+#[allow(clippy::result_large_err)]
 async fn build_exec_ctx(vllm_url: &str, search_url: &str) -> ExecutionContext {
     let pool = support::setup_pool().await;
     let conv = ConversationHandler::new(ConversationStore::new(Arc::clone(&pool)));
@@ -187,11 +191,23 @@ async fn build_exec_ctx(vllm_url: &str, search_url: &str) -> ExecutionContext {
 }
 
 async fn build_tool_registry(tools: &Vec<ToolParam>, exec_ctx: &ExecutionContext) -> ToolRegistry {
-    let mut registry_tool_params = registry_tools(Some(tools), &GatewayToolMap::default());
+    let mut registry_tool_params = registry_tools(Some(tools), &exec_ctx.messages_gateway_tools);
     let mut gateway_executors = exec_ctx.gateway_executors.clone();
     ToolRegistry::build_with_handlers(&mut registry_tool_params, &mut gateway_executors)
         .await
         .unwrap()
+}
+
+#[allow(clippy::result_large_err)]
+async fn run_test_messages_loop(
+    request: Value,
+    registry: &ToolRegistry,
+    exec_ctx: &ExecutionContext,
+) -> ExecutorResult<Value> {
+    let upstream = MessagesUpstream::new(&exec_ctx.llm_base_url, None, reqwest::header::HeaderMap::new());
+    run_messages_loop(request, registry, exec_ctx, &upstream)
+        .await
+        .map(|response| response.body)
 }
 
 fn web_search_request() -> Value {
@@ -215,7 +231,7 @@ async fn messages_loop_hides_gateway_tool_and_surfaces_final_text() {
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
     let registry = build_tool_registry(&tools, &exec_ctx).await;
 
-    let result = run_messages_loop(request, &registry, &exec_ctx, None)
+    let result = run_test_messages_loop(request, &registry, &exec_ctx)
         .await
         .expect("loop runs");
 
@@ -272,7 +288,8 @@ async fn native_web_search_applies_domain_and_location_configuration() {
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
     let registry = build_tool_registry(&tools, &exec_ctx).await;
 
-    run_messages_loop(request, &registry, &exec_ctx, None)
+    let transport = MessagesUpstream::new(&exec_ctx.llm_base_url, None, reqwest::header::HeaderMap::new());
+    run_messages_loop(request, &registry, &exec_ctx, &transport)
         .await
         .expect("loop runs");
 
@@ -298,7 +315,8 @@ async fn native_web_search_applies_blocked_domains() {
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
     let registry = build_tool_registry(&tools, &exec_ctx).await;
 
-    run_messages_loop(request, &registry, &exec_ctx, None)
+    let transport = MessagesUpstream::new(&exec_ctx.llm_base_url, None, reqwest::header::HeaderMap::new());
+    run_messages_loop(request, &registry, &exec_ctx, &transport)
         .await
         .expect("loop runs");
 
@@ -332,7 +350,8 @@ async fn native_web_search_enforces_max_uses() {
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
     let registry = build_tool_registry(&tools, &exec_ctx).await;
 
-    run_messages_loop(request, &registry, &exec_ctx, None)
+    let transport = MessagesUpstream::new(&exec_ctx.llm_base_url, None, reqwest::header::HeaderMap::new());
+    run_messages_loop(request, &registry, &exec_ctx, &transport)
         .await
         .expect("loop runs");
 
@@ -378,7 +397,7 @@ async fn repro_f3_next_round_preserves_thinking_and_text_blocks() {
     let request = web_search_request();
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
     let registry = build_tool_registry(&tools, &exec_ctx).await;
-    run_messages_loop(request, &registry, &exec_ctx, None).await.unwrap();
+    run_test_messages_loop(request, &registry, &exec_ctx).await.unwrap();
 
     // Inspect the assistant turn the loop appended for round 2.
     let reqs = upstream.requests.lock().await;
@@ -447,7 +466,7 @@ async fn run_against(bodies: Vec<Value>, request: Value) -> (Value, usize) {
     let exec_ctx = build_exec_ctx(&vllm_url, &search_url).await;
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap_or_default();
     let registry = build_tool_registry(&tools, &exec_ctx).await;
-    let result = run_messages_loop(request, &registry, &exec_ctx, None).await.unwrap();
+    let result = run_test_messages_loop(request, &registry, &exec_ctx).await.unwrap();
     (result, upstream.calls.load(Ordering::SeqCst))
 }
 
@@ -506,7 +525,7 @@ async fn messages_loop_multi_round_sequential() {
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
     let registry = build_tool_registry(&tools, &exec_ctx).await;
 
-    let result = run_messages_loop(request, &registry, &exec_ctx, None).await.unwrap();
+    let result = run_test_messages_loop(request, &registry, &exec_ctx).await.unwrap();
 
     assert_eq!(upstream.calls.load(Ordering::SeqCst), 3, "three upstream rounds");
     // Two gateway searches executed (rounds 0 and 1).
@@ -529,7 +548,7 @@ async fn messages_loop_parallel_tool_use() {
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
     let registry = build_tool_registry(&tools, &exec_ctx).await;
 
-    let result = run_messages_loop(request, &registry, &exec_ctx, None).await.unwrap();
+    let result = run_test_messages_loop(request, &registry, &exec_ctx).await.unwrap();
 
     // Two parallel gateway calls both executed against the backend.
     recv_search(&mut captured, "first parallel search").await;
@@ -572,7 +591,7 @@ async fn messages_loop_tool_failure_becomes_error_tool_result() {
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
     let registry = build_tool_registry(&tools, &exec_ctx).await;
 
-    let result = run_messages_loop(request, &registry, &exec_ctx, None).await.unwrap();
+    let result = run_test_messages_loop(request, &registry, &exec_ctx).await.unwrap();
 
     tokio::time::timeout(std::time::Duration::from_secs(5), captured.recv())
         .await
@@ -621,7 +640,7 @@ async fn messages_loop_caps_at_max_rounds() {
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
     let registry = build_tool_registry(&tools, &exec_ctx).await;
 
-    let result = run_messages_loop(request, &registry, &exec_ctx, None).await.unwrap();
+    let result = run_test_messages_loop(request, &registry, &exec_ctx).await.unwrap();
 
     let calls = upstream.calls.load(Ordering::SeqCst);
     assert!(calls <= 10, "loop must cap at MAX_GATEWAY_TOOL_ROUNDS (got {calls})");
@@ -682,7 +701,7 @@ async fn messages_loop_preserves_multi_block_system_across_rounds() {
     let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
     let registry = build_tool_registry(&tools, &exec_ctx).await;
 
-    let result = run_messages_loop(request, &registry, &exec_ctx, None).await.unwrap();
+    let result = run_test_messages_loop(request, &registry, &exec_ctx).await.unwrap();
     assert_eq!(result["stop_reason"], "end_turn");
     assert_eq!(upstream.calls.load(Ordering::SeqCst), 2, "tool round + final round");
 
@@ -693,4 +712,61 @@ async fn messages_loop_preserves_multi_block_system_across_rounds() {
         reqs[1]["system"], system,
         "round 2 (after append_round_to_history) still carries the system blocks unchanged"
     );
+}
+
+#[tokio::test]
+async fn messages_loop_preserves_claude_code_cache_control_across_rounds() {
+    let round0 = serde_json::json!({
+        "id": "m", "type": "message", "role": "assistant", "model": "qwen3",
+        "content": [{"type": "tool_use", "id": "t1", "name": "WebSearch", "input": {"query": "rust"}}],
+        "stop_reason": "tool_use", "usage": {"input_tokens": 5, "output_tokens": 3}
+    });
+    let round1 = serde_json::json!({
+        "id": "m2", "type": "message", "role": "assistant", "model": "qwen3",
+        "content": [{"type": "text", "text": "Rust is stable."}],
+        "stop_reason": "end_turn", "usage": {"input_tokens": 5, "output_tokens": 3}
+    });
+    let (vllm_url, upstream, _v) = spawn_mock_vllm_messages(vec![round0, round1]).await;
+    let (search_url, mut search_requests, _s) = spawn_mock_search().await;
+    let mut exec_ctx = build_exec_ctx(&vllm_url, &search_url).await;
+    exec_ctx.messages_gateway_tools = GatewayToolMap::from_pairs([("WebSearch", "web_search")]);
+
+    let request: Value = serde_json::from_str(CLAUDE_CODE_CACHE_CONTROL_REQUEST).unwrap();
+    let original_system = request["system"].clone();
+    let original_user_message = request["messages"][0].clone();
+    let original_tools = request["tools"].clone();
+    let tools: Vec<ToolParam> = serde_json::from_value(original_tools.clone()).unwrap();
+    let registry = build_tool_registry(&tools, &exec_ctx).await;
+
+    let result = run_test_messages_loop(request, &registry, &exec_ctx).await.unwrap();
+    assert_eq!(result["stop_reason"], "end_turn");
+    let search_request = search_requests
+        .try_recv()
+        .expect("WebSearch alias dispatches to the gateway search backend");
+    assert_eq!(search_request.body["query"], "rust");
+
+    let requests = upstream.requests.lock().await;
+    assert_eq!(requests.len(), 2, "tool round + final round");
+    for upstream_request in requests.iter() {
+        assert_eq!(upstream_request["system"], original_system);
+        assert_eq!(upstream_request["messages"][0], original_user_message);
+        assert_eq!(upstream_request["tools"], original_tools);
+    }
+    assert_eq!(
+        requests[1]["system"][0]["cache_control"],
+        serde_json::json!({"type": "ephemeral", "ttl": "1h"})
+    );
+    assert_eq!(
+        requests[1]["system"][1]["cache_control"],
+        serde_json::json!({"type": "ephemeral", "ttl": "5m"})
+    );
+    assert_eq!(
+        requests[1]["messages"][0]["content"][0]["cache_control"],
+        serde_json::json!({"type": "ephemeral", "ttl": "5m"})
+    );
+    assert_eq!(
+        requests[1]["tools"][1]["cache_control"],
+        serde_json::json!({"type": "ephemeral", "ttl": "1h"})
+    );
+    assert!(requests[1]["tools"][0].get("cache_control").is_none());
 }

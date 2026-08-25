@@ -89,12 +89,22 @@ pub(super) fn extract_bearer(headers: &HeaderMap, config_key: Option<&str>) -> O
 }
 
 pub(super) fn sse_response(stream: BoxStream) -> Response {
+    sse_response_with_headers(stream, HeaderMap::new())
+}
+
+pub(super) fn sse_response_with_headers(stream: BoxStream, mut headers: HeaderMap) -> Response {
     let byte_stream = stream.map(|line| Ok::<Bytes, std::convert::Infallible>(Bytes::from(line)));
-    Response::builder()
-        .status(StatusCode::OK)
-        .header("Content-Type", "text/event-stream; charset=utf-8")
-        .header("Cache-Control", "no-cache")
-        .header("X-Accel-Buffering", "no")
+    headers.insert(
+        http::header::CONTENT_TYPE,
+        http::HeaderValue::from_static("text/event-stream; charset=utf-8"),
+    );
+    headers.insert(http::header::CACHE_CONTROL, http::HeaderValue::from_static("no-cache"));
+    headers.insert("x-accel-buffering", http::HeaderValue::from_static("no"));
+    let mut builder = Response::builder().status(StatusCode::OK);
+    for (name, value) in &headers {
+        builder = builder.header(name, value);
+    }
+    builder
         .body(Body::from_stream(byte_stream))
         .expect("valid SSE response")
 }

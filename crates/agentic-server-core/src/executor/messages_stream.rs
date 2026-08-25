@@ -22,56 +22,90 @@ use async_stream::stream;
 use futures::StreamExt;
 use serde_json::{Value, json};
 
-use crate::executor::inference::{BoxStream, call_inference};
+use crate::executor::error::{ExecutorError, ExecutorResult};
+use crate::executor::inference::{BoxStream, response_lines, send_request};
 use crate::executor::messages_request::{normalize_native_web_search, web_search_budget_exhausted_result};
 use crate::executor::request::ExecutionContext;
+use crate::proxy::processed_response_headers;
 use crate::tool::ToolRegistry;
 use crate::types::messages::tool_seam;
-use crate::utils::common::serialize_to_string;
+use crate::utils::common::{deserialize_from_str, serialize_to_string};
 
 // Shared with the non-streaming loop so the two Messages loops can't drift.
-use crate::executor::messages_loop::{GATEWAY_TOOL_TIMEOUT, MAX_GATEWAY_TOOL_ROUNDS};
+use crate::executor::messages_loop::{
+    GATEWAY_TOOL_TIMEOUT, MAX_GATEWAY_TOOL_ROUNDS, MessagesResponse, MessagesUpstream,
+};
 /// vLLM streaming chunk timeout (per line). Generous — the loop's own budget is
 /// the round cap, not this.
 const CHUNK_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Drive the streaming Messages-native loop, yielding Anthropic SSE lines for
 /// the client. Owns the multi-round → single-message accumulation.
-#[must_use]
-pub fn run_messages_stream(
+///
+/// # Errors
+///
+/// Returns an executor error when the initial request cannot be serialized or
+/// when the upstream rejects it before streaming begins.
+pub async fn run_messages_stream(
     mut request: Value,
     registry: Arc<ToolRegistry>,
     exec_ctx: Arc<ExecutionContext>,
-    auth: Option<String>,
-) -> BoxStream {
-    let url = format!("{}/v1/messages", exec_ctx.llm_base_url);
-    let preparation = normalize_native_web_search(&mut request);
+    upstream: MessagesUpstream,
+) -> ExecutorResult<MessagesResponse<BoxStream>> {
+    let mut web_search_budget = normalize_native_web_search(&mut request)?;
     request["stream"] = Value::Bool(true);
 
-    Box::pin(stream! {
-        let mut web_search_budget = match preparation {
-            Ok(budget) => budget,
-            Err(error) => { yield error_sse(&error.to_string()); return; }
-        };
+    // Prime the first upstream request before the handler commits an HTTP 200.
+    // This lets initial vLLM errors retain their original status and body.
+    let first_body = serialize_to_string(&request)?;
+    let first_response = send_request(
+        &exec_ctx.client,
+        upstream.url(),
+        first_body,
+        None,
+        Some(upstream.headers()),
+    )
+    .await?;
+    let response_headers = processed_response_headers(first_response.headers());
+
+    let body: BoxStream = Box::pin(stream! {
         let mut acc = MessagesStreamAccumulator::new(exec_ctx.messages_gateway_tools.clone());
+        let mut prepared_response = Some(first_response);
 
         for _round in 0..MAX_GATEWAY_TOOL_ROUNDS {
-            let body = match serialize_to_string(&request) {
-                Ok(b) => b,
-                Err(e) => { yield error_sse(&e.to_string()); return; }
+            let response = if let Some(response) = prepared_response.take() {
+                response
+            } else {
+                let body = match serialize_to_string(&request) {
+                    Ok(b) => b,
+                    Err(e) => { yield error_sse(&e.to_string()); return; }
+                };
+                match send_request(
+                    &exec_ctx.client,
+                    upstream.url(),
+                    body,
+                    None,
+                    Some(upstream.headers()),
+                )
+                .await
+                {
+                    Ok(response) => response,
+                    Err(e) => { yield executor_error_sse(&e); return; }
+                }
             };
-            let mut upstream = Box::pin(call_inference(
-                body, url.clone(), Arc::clone(&exec_ctx.client), auth.clone(), CHUNK_TIMEOUT,
-            ));
+            let mut response_stream = Box::pin(response_lines(response, CHUNK_TIMEOUT));
 
             acc.begin_round();
-            while let Some(line) = upstream.next().await {
+            while let Some(line) = response_stream.next().await {
                 let line = match line {
                     Ok(l) => l,
                     Err(e) => { yield error_sse(&e.to_string()); return; }
                 };
                 for out in acc.push(&line) {
                     yield out;
+                }
+                if acc.has_upstream_error() {
+                    return;
                 }
             }
 
@@ -100,6 +134,10 @@ pub fn run_messages_stream(
 
         // Round budget exhausted.
         yield error_sse(&format!("gateway tool loop exceeded {MAX_GATEWAY_TOOL_ROUNDS} rounds"));
+    });
+    Ok(MessagesResponse {
+        body,
+        headers: response_headers,
     })
 }
 
@@ -121,6 +159,12 @@ struct BufferedBlock {
     input_json: String,
     /// Gateway-owned `tool_use` (drives the loop; suppressed from the client).
     is_gateway_tool: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RoundState {
+    Active,
+    UpstreamError,
 }
 
 impl BufferedBlock {
@@ -186,6 +230,8 @@ struct MessagesStreamAccumulator {
     has_client_tool_use: bool,
     /// Buffered terminal `message_delta` from the final round (emitted by `finish`).
     final_message_delta: Option<Value>,
+    /// Whether this round is still active or terminated with an upstream error.
+    round_state: RoundState,
     /// Operator-configured client-tool → gateway-executor aliases, so a client
     /// tool like Claude Code's `WebSearch` is classified gateway-owned (and
     /// suppressed) the same way the built-in `web_search` is.
@@ -203,6 +249,7 @@ impl MessagesStreamAccumulator {
             ended_on_tool_use: false,
             has_client_tool_use: false,
             final_message_delta: None,
+            round_state: RoundState::Active,
             gateway_map,
         }
     }
@@ -213,6 +260,7 @@ impl MessagesStreamAccumulator {
         self.blocks.clear();
         self.ended_on_tool_use = false;
         self.has_client_tool_use = false;
+        self.round_state = RoundState::Active;
         // F6: clear the previous round's terminal so a clean-EOF round can't
         // re-emit a stale stop_reason.
         self.final_message_delta = None;
@@ -251,6 +299,10 @@ impl MessagesStreamAccumulator {
         self.ended_on_tool_use && self.gateway_call_count() > 0 && !self.has_client_tool_use
     }
 
+    fn has_upstream_error(&self) -> bool {
+        self.round_state == RoundState::UpstreamError
+    }
+
     /// Translate one upstream SSE line into zero or more client SSE lines.
     fn push(&mut self, line: &str) -> Vec<String> {
         let Some(data) = line.strip_prefix("data: ") else {
@@ -273,6 +325,10 @@ impl MessagesStreamAccumulator {
                 self.ended_on_tool_use = event["delta"]["stop_reason"].as_str() == Some("tool_use");
                 self.final_message_delta = Some(event);
                 Vec::new()
+            }
+            Some("error") => {
+                self.round_state = RoundState::UpstreamError;
+                vec![sse("error", &event)]
             }
             // `message_stop` (per-round terminal) is suppressed; `finish` emits
             // the single client-visible terminal. Everything else is dropped.
@@ -375,6 +431,21 @@ fn error_sse(message: &str) -> String {
     let event = json!({"type": "error", "error": {"type": "api_error", "message": message}});
     let json = serialize_to_string(&event).unwrap_or_default();
     format!("event: error\ndata: {json}\n\n")
+}
+
+fn executor_error_sse(error: &ExecutorError) -> String {
+    if let ExecutorError::LLMRequest { body, .. } = error
+        && let Ok(value) = deserialize_from_str::<Value>(body)
+        && value.get("type").and_then(Value::as_str) == Some("error")
+    {
+        let data = if body.contains(['\r', '\n']) {
+            serialize_to_string(&value).unwrap_or_else(|_| body.clone())
+        } else {
+            body.clone()
+        };
+        return format!("event: error\ndata: {data}\n\n");
+    }
+    error_sse(&error.to_string())
 }
 
 /// Execute reconstructed gateway calls (concurrent, per-call timeout). Errors
@@ -674,7 +745,7 @@ mod tests {
             &calls,
             &no_op_registry().await,
             &tool_seam::GatewayToolMap::default(),
-            usize::MAX,
+            calls.len(),
         )
         .await;
         let content = resolved[0].tool_result_block["content"].as_str().unwrap_or_default();

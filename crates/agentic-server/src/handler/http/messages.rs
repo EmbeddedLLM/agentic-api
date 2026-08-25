@@ -7,14 +7,17 @@ use http::HeaderMap;
 use tracing::debug;
 
 use agentic_core::executor::{
-    ExecutorError, normalize_native_web_search_for_upstream, run_messages_loop, run_messages_stream,
+    ExecutorError, MessagesUpstream, normalize_native_web_search_for_upstream, run_messages_loop, run_messages_stream,
     validate_native_web_search_request,
 };
-use agentic_core::proxy::{ProxyAuth, ProxyRequest, error_response_for_auth, proxy_request_with_path};
+use agentic_core::proxy::{
+    ProxyAuth, ProxyBody, ProxyRequest, ProxyResponse, error_response_for_auth, proxy_request_with_path,
+    upstream_request_headers,
+};
 use agentic_core::tool::ToolRegistry;
 use agentic_core::types::messages::{MessagesRequest, has_gateway_tool, registry_tools};
 
-use super::super::common::{convert_response, read_bytes_with_auth, sse_response};
+use super::super::common::{convert_response, read_bytes_with_auth, sse_response_with_headers};
 use crate::app::AppState;
 
 async fn proxy_messages(
@@ -38,30 +41,24 @@ async fn proxy_messages(
     )
 }
 
-/// Extract the client's Anthropic credential — `x-api-key` (Anthropic-native) or
-/// an `Authorization: Bearer` — falling back to the server's configured key.
-/// Consistent with the proxy path forwarding the client's `x-api-key` (E15).
-fn extract_client_key(headers: &HeaderMap, config_key: Option<&str>) -> Option<String> {
-    headers
-        .get("x-api-key")
-        .and_then(|v| v.to_str().ok())
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned)
-        .or_else(|| {
-            headers
-                .get("authorization")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.strip_prefix("Bearer "))
-                .filter(|s| !s.is_empty())
-                .map(str::to_owned)
-        })
-        .or_else(|| config_key.filter(|s| !s.is_empty()).map(str::to_owned))
-}
-
-/// Render an executor error as the Anthropic error envelope
-/// (`{"type":"error","error":{"type","message"}}`), consistent with the proxy
-/// path (E14).
-fn messages_error_response(err: &ExecutorError) -> Response {
+/// Preserve upstream Messages errors verbatim; render local executor failures
+/// as an Anthropic error envelope, consistent with the proxy path (E14).
+fn messages_error_response(err: ExecutorError) -> Response {
+    if let ExecutorError::LLMRequest {
+        status,
+        body,
+        mut headers,
+    } = err
+    {
+        headers
+            .entry(http::header::CONTENT_TYPE)
+            .or_insert(http::HeaderValue::from_static("application/json"));
+        return convert_response(ProxyResponse {
+            status,
+            headers,
+            body: ProxyBody::Full(Bytes::from(body)),
+        });
+    }
     convert_response(error_response_for_auth(
         err.http_status(),
         err.error_code(),
@@ -72,9 +69,13 @@ fn messages_error_response(err: &ExecutorError) -> Response {
 
 /// Drive the Messages-native gateway tool loop (non-streaming or streaming) for
 /// a request that declares a gateway-owned tool.
-async fn execute_messages(state: &AppState, headers: &HeaderMap, req: &MessagesRequest, body: &Bytes) -> Response {
-    let auth = extract_client_key(headers, state.openai_api_key.as_deref());
-
+async fn execute_messages(
+    state: &AppState,
+    headers: &HeaderMap,
+    query: Option<&str>,
+    req: &MessagesRequest,
+    body: &Bytes,
+) -> Response {
     // Build the request-scoped registry from the declared tools (M6). Gateway
     // ownership (incl. configured aliases like Claude Code's `WebSearch`) is
     // resolved against the operator-configured map.
@@ -83,49 +84,43 @@ async fn execute_messages(state: &AppState, headers: &HeaderMap, req: &MessagesR
     let mut executors = state.exec_ctx.gateway_executors.clone();
     let registry = match ToolRegistry::build_with_handlers(&mut tools, &mut executors).await {
         Ok(r) => r,
-        Err(e) => return messages_error_response(&ExecutorError::from(e)),
+        Err(e) => return messages_error_response(ExecutorError::from(e)),
     };
 
-    // Parse the raw body to a JSON Value so unmodeled Anthropic fields remain
-    // intact. Native web-search declarations are normalized before upstream use.
+    // Parse the raw body to a JSON Value the loop forwards upstream untouched —
+    // preserving every Anthropic field (tool_choice, stop_sequences, …).
     let request_json: serde_json::Value = match serde_json::from_slice(body) {
         Ok(v) => v,
-        Err(e) => return messages_error_response(&ExecutorError::from(e)),
+        Err(e) => return messages_error_response(ExecutorError::from(e)),
     };
     if let Err(error) = validate_native_web_search_request(&request_json) {
-        return messages_error_response(&error);
+        return messages_error_response(error);
     }
 
+    let upstream = MessagesUpstream::new(
+        &state.exec_ctx.llm_base_url,
+        query,
+        upstream_request_headers(headers, &state.proxy_state.config, ProxyAuth::Anthropic),
+    );
     if req.stream {
-        let stream = run_messages_stream(request_json, Arc::new(registry), Arc::clone(&state.exec_ctx), auth);
-        sse_response(stream)
+        match run_messages_stream(request_json, Arc::new(registry), Arc::clone(&state.exec_ctx), upstream).await {
+            Ok(response) => sse_response_with_headers(response.body, response.headers),
+            Err(e) => messages_error_response(e),
+        }
     } else {
-        match run_messages_loop(request_json, &registry, &state.exec_ctx, auth.as_deref()).await {
-            Ok(message) => axum::Json(message).into_response(),
-            Err(e) => messages_error_response(&e),
+        match run_messages_loop(request_json, &registry, &state.exec_ctx, &upstream).await {
+            Ok(message) => {
+                let mut response = axum::Json(message.body).into_response();
+                response.headers_mut().extend(message.headers);
+                response.headers_mut().insert(
+                    http::header::CONTENT_TYPE,
+                    http::HeaderValue::from_static("application/json"),
+                );
+                response
+            }
+            Err(e) => messages_error_response(e),
         }
     }
-}
-
-/// Qwen-family reasoning models only accept `xhigh|medium|low` in their chat
-/// template, but clients like Claude Code send the standard
-/// `output_config.effort = "high"` (their top tier). Map the standard top tiers
-/// (`high`, `max`) onto the model's top tier (`xhigh`) through the typed
-/// [`MessagesRequest`]; all other fields round-trip through `extra`. Returns
-/// rewritten bytes only when a change was made.
-///
-/// NOTE: this assumes a Qwen-style effort vocabulary (the model family this
-/// gateway targets). A backend that supports `high` but not `xhigh` would need
-/// this made model-aware.
-fn normalize_reasoning_effort(bytes: &Bytes) -> Option<Bytes> {
-    let body = std::str::from_utf8(bytes).ok()?;
-    let mut request: MessagesRequest = agentic_core::utils::common::deserialize_from_str(body).ok()?;
-    let config = request.output_config.as_mut()?;
-    let clamped = config.effort.as_ref()?.clamped_for_qwen()?;
-    config.effort = Some(clamped);
-    agentic_core::utils::common::serialize_to_string(&request)
-        .ok()
-        .map(Bytes::from)
 }
 
 pub async fn messages(State(state): State<AppState>, request: Request) -> Response {
@@ -134,7 +129,6 @@ pub async fn messages(State(state): State<AppState>, request: Request) -> Respon
         Ok(bytes) => bytes,
         Err(response) => return response,
     };
-    let bytes = normalize_reasoning_effort(&bytes).unwrap_or(bytes);
 
     // Route to the loop only when a gateway-owned tool is declared; everything
     // else keeps the transparent proxy path.
@@ -147,7 +141,7 @@ pub async fn messages(State(state): State<AppState>, request: Request) -> Respon
             "routing HTTP messages request"
         );
         if route_to_loop {
-            return execute_messages(&state, &parts.headers, &req, &bytes).await;
+            return execute_messages(&state, &parts.headers, parts.uri.query(), &req, &bytes).await;
         }
     }
 
@@ -164,10 +158,10 @@ pub async fn count_tokens(State(state): State<AppState>, request: Request) -> Re
         match normalize_native_web_search_for_upstream(&mut request_json) {
             Ok(true) => match serde_json::to_vec(&request_json) {
                 Ok(body) => bytes = Bytes::from(body),
-                Err(error) => return messages_error_response(&ExecutorError::from(error)),
+                Err(error) => return messages_error_response(ExecutorError::from(error)),
             },
             Ok(false) => {}
-            Err(error) => return messages_error_response(&error),
+            Err(error) => return messages_error_response(error),
         }
     }
     proxy_messages(&state, parts, bytes, "/v1/messages/count_tokens").await

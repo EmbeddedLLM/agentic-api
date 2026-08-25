@@ -22,7 +22,8 @@ const HOP_BY_HOP: &[&str] = &[
     "upgrade",
 ];
 
-const REQUEST_DROP_EXTRA: &[&str] = &["host", "content-length"];
+const REQUEST_DROP_EXTRA: &[&str] = &["host", "content-length", "accept-encoding"];
+const PROCESSED_RESPONSE_DROP_EXTRA: &[&str] = &["content-length", "content-encoding"];
 
 fn is_hop_by_hop(name: &str) -> bool {
     HOP_BY_HOP.iter().any(|h| h.eq_ignore_ascii_case(name))
@@ -92,7 +93,13 @@ impl ProxyState {
     }
 }
 
-fn filter_request_headers(headers: &HeaderMap, config: &Config, auth: ProxyAuth) -> reqwest::header::HeaderMap {
+/// Build the request headers forwarded to an upstream API.
+///
+/// Hop-by-hop and origin-specific headers are removed, all other headers stay
+/// open-ended, and the configured credential is injected only when the client
+/// did not supply one.
+#[must_use]
+pub fn upstream_request_headers(headers: &HeaderMap, config: &Config, auth: ProxyAuth) -> reqwest::header::HeaderMap {
     let mut out = reqwest::header::HeaderMap::new();
     for (name, value) in headers {
         if is_request_drop(name.as_str()) {
@@ -143,6 +150,20 @@ fn filter_response_headers(headers: &reqwest::header::HeaderMap) -> HeaderMap {
     out
 }
 
+/// Build response headers for an upstream body consumed or transformed in-process.
+///
+/// Hop-by-hop headers are removed along with representation metadata that may no
+/// longer describe the emitted body. Request IDs, retry guidance, and rate-limit
+/// metadata remain open-ended.
+#[must_use]
+pub fn processed_response_headers(headers: &reqwest::header::HeaderMap) -> HeaderMap {
+    let mut out = filter_response_headers(headers);
+    for name in PROCESSED_RESPONSE_DROP_EXTRA {
+        out.remove(*name);
+    }
+    out
+}
+
 fn is_sse_content_type(headers: &reqwest::header::HeaderMap) -> bool {
     headers
         .get(reqwest::header::CONTENT_TYPE)
@@ -189,7 +210,7 @@ pub fn error_response_for_auth(status: StatusCode, code: &str, message: &str, au
 /// Uses the non-streaming client; the response body is returned as a full
 /// [`ProxyBody::Full`] payload.
 pub async fn proxy_get(path: &str, request_headers: &HeaderMap, state: &ProxyState) -> ProxyResponse {
-    let llm_headers = filter_request_headers(request_headers, &state.config, ProxyAuth::OpenAiBearer);
+    let llm_headers = upstream_request_headers(request_headers, &state.config, ProxyAuth::OpenAiBearer);
     let base = state.config.llm_api_base.trim_end_matches('/');
     let url = format!("{base}/{}", path.trim_start_matches('/'));
 
@@ -242,7 +263,7 @@ pub async fn proxy_request_with_path(
         .and_then(|v| v.get("stream")?.as_bool())
         .unwrap_or(false);
 
-    let llm_headers = filter_request_headers(&request.headers, &state.config, auth);
+    let llm_headers = upstream_request_headers(&request.headers, &state.config, auth);
 
     let base = state.config.llm_api_base.trim_end_matches('/');
     let mut url = format!("{base}/{}", path.trim_start_matches('/'));
@@ -350,6 +371,7 @@ mod tests {
     fn request_drop_includes_host_and_content_length() {
         assert!(is_request_drop("host"));
         assert!(is_request_drop("content-length"));
+        assert!(is_request_drop("accept-encoding"));
         assert!(is_request_drop("connection"));
         assert!(!is_request_drop("content-type"));
     }
@@ -372,7 +394,7 @@ mod tests {
         headers.insert("x-custom", "value".parse().unwrap());
 
         let config = test_config_no_key();
-        let filtered = filter_request_headers(&headers, &config, ProxyAuth::OpenAiBearer);
+        let filtered = upstream_request_headers(&headers, &config, ProxyAuth::OpenAiBearer);
 
         assert!(filtered.contains_key("content-type"));
         assert!(filtered.contains_key("x-custom"));
@@ -388,7 +410,7 @@ mod tests {
         headers.insert("accept", "*/*".parse().unwrap());
 
         let config = test_config_no_key();
-        let filtered = filter_request_headers(&headers, &config, ProxyAuth::OpenAiBearer);
+        let filtered = upstream_request_headers(&headers, &config, ProxyAuth::OpenAiBearer);
 
         assert!(!filtered.contains_key("host"));
         assert!(!filtered.contains_key("content-length"));
@@ -399,7 +421,7 @@ mod tests {
     fn auth_injected_when_no_client_auth() {
         let headers = HeaderMap::new();
         let config = test_config();
-        let filtered = filter_request_headers(&headers, &config, ProxyAuth::OpenAiBearer);
+        let filtered = upstream_request_headers(&headers, &config, ProxyAuth::OpenAiBearer);
 
         assert_eq!(
             filtered.get("authorization").unwrap().to_str().unwrap(),
@@ -413,7 +435,7 @@ mod tests {
         headers.insert("authorization", "Bearer client-token".parse().unwrap());
 
         let config = test_config();
-        let filtered = filter_request_headers(&headers, &config, ProxyAuth::OpenAiBearer);
+        let filtered = upstream_request_headers(&headers, &config, ProxyAuth::OpenAiBearer);
 
         assert_eq!(
             filtered.get("authorization").unwrap().to_str().unwrap(),
@@ -426,7 +448,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("x-api-key", "client-anthropic-key".parse().unwrap());
 
-        let filtered = filter_request_headers(&headers, &test_config(), ProxyAuth::Anthropic);
+        let filtered = upstream_request_headers(&headers, &test_config(), ProxyAuth::Anthropic);
 
         assert_eq!(filtered.get("x-api-key").unwrap(), "client-anthropic-key");
         assert!(!filtered.contains_key("authorization"));
@@ -434,7 +456,7 @@ mod tests {
 
     #[test]
     fn anthropic_auth_uses_configured_key_as_api_key_fallback() {
-        let filtered = filter_request_headers(&HeaderMap::new(), &test_config(), ProxyAuth::Anthropic);
+        let filtered = upstream_request_headers(&HeaderMap::new(), &test_config(), ProxyAuth::Anthropic);
 
         assert_eq!(filtered.get("x-api-key").unwrap(), "test-key");
         assert!(!filtered.contains_key("authorization"));
@@ -447,7 +469,7 @@ mod tests {
             openai_api_key: Some("  ".to_owned()),
             ..test_config()
         };
-        let filtered = filter_request_headers(&headers, &config, ProxyAuth::OpenAiBearer);
+        let filtered = upstream_request_headers(&headers, &config, ProxyAuth::OpenAiBearer);
 
         assert!(!filtered.contains_key("authorization"));
     }
@@ -456,7 +478,7 @@ mod tests {
     fn no_auth_injected_when_key_none() {
         let headers = HeaderMap::new();
         let config = test_config_no_key();
-        let filtered = filter_request_headers(&headers, &config, ProxyAuth::OpenAiBearer);
+        let filtered = upstream_request_headers(&headers, &config, ProxyAuth::OpenAiBearer);
 
         assert!(!filtered.contains_key("authorization"));
     }
@@ -473,6 +495,24 @@ mod tests {
         assert!(filtered.contains_key("content-type"));
         assert!(filtered.contains_key("x-request-id"));
         assert!(!filtered.contains_key("connection"));
+    }
+
+    #[test]
+    fn processed_response_headers_preserve_metadata_and_strip_representation_headers() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("request-id", "req_123".parse().unwrap());
+        headers.insert("retry-after", "3".parse().unwrap());
+        headers.insert("anthropic-ratelimit-requests-remaining", "7".parse().unwrap());
+        headers.insert("content-length", "99".parse().unwrap());
+        headers.insert("content-encoding", "gzip".parse().unwrap());
+
+        let filtered = processed_response_headers(&headers);
+
+        assert_eq!(filtered["request-id"], "req_123");
+        assert_eq!(filtered["retry-after"], "3");
+        assert_eq!(filtered["anthropic-ratelimit-requests-remaining"], "7");
+        assert!(!filtered.contains_key("content-length"));
+        assert!(!filtered.contains_key("content-encoding"));
     }
 
     #[test]

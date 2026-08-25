@@ -29,9 +29,17 @@ pub enum ExecutorError {
         source: StorageError,
     },
 
-    /// The LLM backend returned a non-2xx status or was unreachable.
+    /// The LLM backend returned a non-2xx HTTP response.
     #[error("LLM request failed ({status}): {body}")]
-    LLMRequest { status: StatusCode, body: String },
+    LLMRequest {
+        status: StatusCode,
+        body: String,
+        headers: http::HeaderMap,
+    },
+
+    /// The LLM backend could not be reached or timed out before responding.
+    #[error("{message}")]
+    LLMTransport { status: StatusCode, message: &'static str },
 
     /// A network error occurred reading from the LLM response stream.
     ///
@@ -101,7 +109,7 @@ impl ExecutorError {
     pub fn http_status(&self) -> StatusCode {
         match self.client_visible_error() {
             Self::Storage(e) if e.is_not_found() => StatusCode::NOT_FOUND,
-            Self::LLMRequest { status, .. } => *status,
+            Self::LLMRequest { status, .. } | Self::LLMTransport { status, .. } => *status,
             Self::ConversationLocked { .. }
             | Self::Tool(ToolError::Config(_))
             | Self::InvalidRequest(_)
@@ -122,7 +130,7 @@ impl ExecutorError {
             | Self::ParseError(_)
             | Self::JsonError(_) => "invalid_request_error",
             Self::Storage(e) if e.is_not_found() => "not_found",
-            Self::LLMRequest { .. } | Self::CompactionFailed { .. } => "upstream_error",
+            Self::LLMRequest { .. } | Self::LLMTransport { .. } | Self::CompactionFailed { .. } => "upstream_error",
             Self::Tool(ToolError::Execution(_)) => "tool_error",
             _ => "server_error",
         }
