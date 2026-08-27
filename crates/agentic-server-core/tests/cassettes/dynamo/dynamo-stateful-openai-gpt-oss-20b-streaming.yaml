@@ -1,0 +1,228 @@
+turns:
+- filename: t1
+  request:
+    body:
+      input: 'Remember the word APPLE. Just say: OK'
+      max_output_tokens: 2048
+      model: openai/gpt-oss-20b
+      store: true
+      stream: true
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    headers:
+      content-type: text/event-stream
+    sse:
+    - 'event: response.created
+
+      '
+    - 'data: {"type":"response.created","sequence_number":0,"response":{"background":false,"billing":null,"conversation":null,"created_at":1787829079,"completed_at":null,"error":null,"id":"resp_96ef0035cc8b4fa7b99ceccc8199b2cd","incomplete_details":null,"instructions":null,"max_output_tokens":2048,"max_tool_calls":null,"metadata":{},"model":"openai/gpt-oss-20b","object":"response","output":[],"parallel_tool_calls":true,"previous_response_id":null,"prompt":null,"prompt_cache_key":null,"prompt_cache_retention":null,"reasoning":null,"safety_identifier":null,"service_tier":"auto","status":"in_progress","temperature":1.0,"text":{"format":{"type":"text"}},"tool_choice":"auto","tools":[],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":null,"presence_penalty":0.0,"frequency_penalty":0.0,"store":true}}
+
+      '
+    - '
+
+      '
+    - 'event: response.in_progress
+
+      '
+    - 'data: {"type":"response.in_progress","sequence_number":1,"response":{"background":false,"billing":null,"conversation":null,"created_at":1787829079,"completed_at":null,"error":null,"id":"resp_96ef0035cc8b4fa7b99ceccc8199b2cd","incomplete_details":null,"instructions":null,"max_output_tokens":2048,"max_tool_calls":null,"metadata":{},"model":"openai/gpt-oss-20b","object":"response","output":[],"parallel_tool_calls":true,"previous_response_id":null,"prompt":null,"prompt_cache_key":null,"prompt_cache_retention":null,"reasoning":null,"safety_identifier":null,"service_tier":"auto","status":"in_progress","temperature":1.0,"text":{"format":{"type":"text"}},"tool_choice":"auto","tools":[],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":null,"presence_penalty":0.0,"frequency_penalty":0.0,"store":true}}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.added
+
+      '
+    - 'data: {"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"type":"message","content":[],"id":"msg_6ff56ed5582c493ba4b6bd8d57b514cb","role":"assistant","status":"in_progress"}}
+
+      '
+    - '
+
+      '
+    - 'event: response.content_part.added
+
+      '
+    - 'data: {"type":"response.content_part.added","sequence_number":3,"item_id":"msg_6ff56ed5582c493ba4b6bd8d57b514cb","output_index":0,"content_index":0,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":""}}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":4,"item_id":"msg_6ff56ed5582c493ba4b6bd8d57b514cb","output_index":0,"content_index":0,"delta":"OK","logprobs":[]}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.done
+
+      '
+    - 'data: {"type":"response.output_text.done","sequence_number":5,"item_id":"msg_6ff56ed5582c493ba4b6bd8d57b514cb","output_index":0,"content_index":0,"text":"OK","logprobs":[]}
+
+      '
+    - '
+
+      '
+    - 'event: response.content_part.done
+
+      '
+    - 'data: {"type":"response.content_part.done","sequence_number":6,"item_id":"msg_6ff56ed5582c493ba4b6bd8d57b514cb","output_index":0,"content_index":0,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":"OK"}}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.done
+
+      '
+    - 'data: {"type":"response.output_item.done","sequence_number":7,"output_index":0,"item":{"type":"message","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"OK"}],"id":"msg_6ff56ed5582c493ba4b6bd8d57b514cb","role":"assistant","status":"completed"}}
+
+      '
+    - '
+
+      '
+    - 'event: response.completed
+
+      '
+    - 'data: {"type":"response.completed","sequence_number":8,"response":{"background":false,"billing":null,"conversation":null,"created_at":1787829079,"completed_at":1787829080,"error":null,"id":"resp_96ef0035cc8b4fa7b99ceccc8199b2cd","incomplete_details":null,"instructions":null,"max_output_tokens":2048,"max_tool_calls":null,"metadata":{},"model":"openai/gpt-oss-20b","object":"response","output":[{"type":"message","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"OK"}],"id":"msg_6ff56ed5582c493ba4b6bd8d57b514cb","role":"assistant","status":"completed"}],"parallel_tool_calls":true,"previous_response_id":null,"prompt":null,"prompt_cache_key":null,"prompt_cache_retention":null,"reasoning":null,"safety_identifier":null,"service_tier":"auto","status":"completed","temperature":1.0,"text":{"format":{"type":"text"}},"tool_choice":"auto","tools":[],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":{"input_tokens":77,"input_tokens_details":{"cached_tokens":64},"output_tokens":38,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":115},"presence_penalty":0.0,"frequency_penalty":0.0,"store":true}}
+
+      '
+    - '
+
+      '
+    - 'data: [DONE]
+
+      '
+    - '
+
+      '
+    status_code: 200
+- filename: t2
+  request:
+    body:
+      input:
+      - content: 'Remember the word APPLE. Just say: OK'
+        role: user
+        type: message
+      - content:
+        - text: OK
+          type: output_text
+        id: msg_6ff56ed5582c493ba4b6bd8d57b514cb
+        role: assistant
+        status: completed
+        type: message
+      - content: What word did I ask you to remember? Reply with just the word.
+        role: user
+        type: message
+      max_output_tokens: 2048
+      model: openai/gpt-oss-20b
+      store: true
+      stream: true
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    headers:
+      content-type: text/event-stream
+    sse:
+    - 'event: response.created
+
+      '
+    - 'data: {"type":"response.created","sequence_number":0,"response":{"background":false,"billing":null,"conversation":null,"created_at":1787829081,"completed_at":null,"error":null,"id":"resp_fe040e9a687c47fb9a3bd0284a866422","incomplete_details":null,"instructions":null,"max_output_tokens":2048,"max_tool_calls":null,"metadata":{},"model":"openai/gpt-oss-20b","object":"response","output":[],"parallel_tool_calls":true,"previous_response_id":null,"prompt":null,"prompt_cache_key":null,"prompt_cache_retention":null,"reasoning":null,"safety_identifier":null,"service_tier":"auto","status":"in_progress","temperature":1.0,"text":{"format":{"type":"text"}},"tool_choice":"auto","tools":[],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":null,"presence_penalty":0.0,"frequency_penalty":0.0,"store":true}}
+
+      '
+    - '
+
+      '
+    - 'event: response.in_progress
+
+      '
+    - 'data: {"type":"response.in_progress","sequence_number":1,"response":{"background":false,"billing":null,"conversation":null,"created_at":1787829081,"completed_at":null,"error":null,"id":"resp_fe040e9a687c47fb9a3bd0284a866422","incomplete_details":null,"instructions":null,"max_output_tokens":2048,"max_tool_calls":null,"metadata":{},"model":"openai/gpt-oss-20b","object":"response","output":[],"parallel_tool_calls":true,"previous_response_id":null,"prompt":null,"prompt_cache_key":null,"prompt_cache_retention":null,"reasoning":null,"safety_identifier":null,"service_tier":"auto","status":"in_progress","temperature":1.0,"text":{"format":{"type":"text"}},"tool_choice":"auto","tools":[],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":null,"presence_penalty":0.0,"frequency_penalty":0.0,"store":true}}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.added
+
+      '
+    - 'data: {"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"type":"message","content":[],"id":"msg_c8ca06b8cb7541c2baad58c63ff81ac1","role":"assistant","status":"in_progress"}}
+
+      '
+    - '
+
+      '
+    - 'event: response.content_part.added
+
+      '
+    - 'data: {"type":"response.content_part.added","sequence_number":3,"item_id":"msg_c8ca06b8cb7541c2baad58c63ff81ac1","output_index":0,"content_index":0,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":""}}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.delta
+
+      '
+    - 'data: {"type":"response.output_text.delta","sequence_number":4,"item_id":"msg_c8ca06b8cb7541c2baad58c63ff81ac1","output_index":0,"content_index":0,"delta":"APPLE","logprobs":[]}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_text.done
+
+      '
+    - 'data: {"type":"response.output_text.done","sequence_number":5,"item_id":"msg_c8ca06b8cb7541c2baad58c63ff81ac1","output_index":0,"content_index":0,"text":"APPLE","logprobs":[]}
+
+      '
+    - '
+
+      '
+    - 'event: response.content_part.done
+
+      '
+    - 'data: {"type":"response.content_part.done","sequence_number":6,"item_id":"msg_c8ca06b8cb7541c2baad58c63ff81ac1","output_index":0,"content_index":0,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":"APPLE"}}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.done
+
+      '
+    - 'data: {"type":"response.output_item.done","sequence_number":7,"output_index":0,"item":{"type":"message","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"APPLE"}],"id":"msg_c8ca06b8cb7541c2baad58c63ff81ac1","role":"assistant","status":"completed"}}
+
+      '
+    - '
+
+      '
+    - 'event: response.completed
+
+      '
+    - 'data: {"type":"response.completed","sequence_number":8,"response":{"background":false,"billing":null,"conversation":null,"created_at":1787829081,"completed_at":1787829084,"error":null,"id":"resp_fe040e9a687c47fb9a3bd0284a866422","incomplete_details":null,"instructions":null,"max_output_tokens":2048,"max_tool_calls":null,"metadata":{},"model":"openai/gpt-oss-20b","object":"response","output":[{"type":"message","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"APPLE"}],"id":"msg_c8ca06b8cb7541c2baad58c63ff81ac1","role":"assistant","status":"completed"}],"parallel_tool_calls":true,"previous_response_id":null,"prompt":null,"prompt_cache_key":null,"prompt_cache_retention":null,"reasoning":null,"safety_identifier":null,"service_tier":"auto","status":"completed","temperature":1.0,"text":{"format":{"type":"text"}},"tool_choice":"auto","tools":[],"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":{"input_tokens":103,"input_tokens_details":{"cached_tokens":96},"output_tokens":96,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":199},"presence_penalty":0.0,"frequency_penalty":0.0,"store":true}}
+
+      '
+    - '
+
+      '
+    - 'data: [DONE]
+
+      '
+    - '
+
+      '
+    status_code: 200

@@ -198,6 +198,7 @@ turns:
 | `record_custom_tool_cassettes.sh` | Matching two-turn custom-tool flows (streaming + non-streaming) | gateway and OpenAI reference |
 | `record_mcp_cassettes.sh` | Native MCP counter tool discovery and calls (streaming + non-streaming) | gateway and OpenAI reference |
 | `record_web_search_cassettes.sh` | Matching web-search calls (streaming + non-streaming) | gateway and OpenAI reference |
+| `record_dynamo_cassettes.sh` | Stateful two-turn and client-executed function tool call cassettes (streaming + non-streaming) | NVIDIA Dynamo frontend |
 
 ### Text-only (OpenAI)
 
@@ -220,6 +221,17 @@ VLLM_URL=http://0.0.0.0:5050 MODEL=Qwen/Qwen3-30B-A3B-FP8 bash tests/cassettes/r
 vllm serve Qwen/Qwen3-30B-A3B-FP8 --tool-call-parser hermes --enable-auto-tool-choice --port 5050 > server.log 2>&1
 
 VLLM_URL=http://0.0.0.0:5050 MODEL=Qwen/Qwen3-30B-A3B-FP8 bash tests/cassettes/record_tool_call_cassettes.sh
+```
+
+### NVIDIA Dynamo (vLLM worker behind the Dynamo frontend)
+
+Dynamo's `/v1/responses` rejects `previous_response_id` with `501`, so the recorder's own turn chaining cannot be
+used. The script records turn 1 from a prompt, builds turn 2's input from turn 1's recorded assistant message (the
+hydrated item history the gateway sends upstream), records it, and merges both into one cassette. See
+[docs/guides/dynamo-upstream.md](../../../../docs/guides/dynamo-upstream.md) for the Dynamo launch commands.
+
+```bash
+DYNAMO_URL=http://127.0.0.1:8000 MODEL=openai/gpt-oss-20b bash tests/cassettes/record_dynamo_cassettes.sh
 ```
 
 ### Web search (gateway and OpenAI)
