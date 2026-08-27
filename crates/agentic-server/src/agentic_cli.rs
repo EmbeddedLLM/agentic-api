@@ -3,6 +3,8 @@ use clap::{
     builder::{Styles, styling::AnsiColor},
 };
 
+use crate::agentic_output::redact_url;
+
 const fn brand_styles() -> Styles {
     Styles::styled()
         .header(AnsiColor::BrightCyan.on_default().bold())
@@ -39,10 +41,54 @@ pub enum Command {
         #[command(subcommand)]
         harness: HarnessCommand,
     },
+    /// Launch a coding harness against an already-running Agentic API gateway
+    Harness {
+        #[command(subcommand)]
+        harness: AttachedHarnessCommand,
+    },
     /// Start Agentic API without launching a harness
     Serve(ServeOptions),
     /// Validate the local Agentic API session prerequisites
     Validate(ValidateOptions),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum AttachedHarnessCommand {
+    /// Launch Codex with an isolated provider configuration
+    Codex(AttachedHarnessOptions),
+    /// Launch Claude Code with isolated provider and model configuration
+    Claude(AttachedHarnessOptions),
+}
+
+#[derive(Args, Clone, Debug)]
+pub struct AttachedHarnessOptions {
+    /// URL of an already-running Agentic API gateway
+    #[arg(long, value_parser = parse_upstream_url)]
+    pub gateway_url: String,
+
+    /// Model ID served by the gateway
+    #[arg(long)]
+    pub model: String,
+
+    /// API key forwarded to the gateway and harness when configured
+    #[arg(long, env = "AGENTIC_GATEWAY_API_KEY", hide_env_values = true)]
+    pub api_key: Option<String>,
+
+    /// Suppress lifecycle output
+    #[arg(long)]
+    pub quiet: bool,
+
+    /// Skip harness permission prompts and sandbox restrictions
+    #[arg(long)]
+    pub yolo: bool,
+
+    /// Disable ANSI color output
+    #[arg(long)]
+    pub no_color: bool,
+
+    /// Arguments forwarded to the selected harness after `--`
+    #[arg(last = true, allow_hyphen_values = true)]
+    pub harness_args: Vec<String>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -149,18 +195,19 @@ pub struct CommonOptions {
 }
 
 fn parse_upstream_url(value: &str) -> Result<String, String> {
-    let parsed = url::Url::parse(value).map_err(|error| format!("invalid upstream URL `{value}`: {error}"))?;
+    let display_value = redact_url(value);
+    let parsed = url::Url::parse(value).map_err(|error| format!("invalid upstream URL `{display_value}`: {error}"))?;
     if !matches!(parsed.scheme(), "http" | "https") {
         return Err(format!(
-            "invalid upstream URL `{value}`: expected an http:// or https:// base URL"
+            "invalid upstream URL `{display_value}`: expected an http:// or https:// base URL"
         ));
     }
     if parsed.host_str().is_none_or(str::is_empty) {
-        return Err(format!("invalid upstream URL `{value}`: missing host"));
+        return Err(format!("invalid upstream URL `{display_value}`: missing host"));
     }
     if parsed.query().is_some() || parsed.fragment().is_some() {
         return Err(format!(
-            "invalid upstream URL `{value}`: query strings and fragments are not supported; pass a base URL such as http://host:port"
+            "invalid upstream URL `{display_value}`: query strings and fragments are not supported; pass a base URL such as http://host:port"
         ));
     }
     Ok(value.trim_end_matches('/').to_owned())
@@ -224,9 +271,11 @@ impl HarnessCommand {
 
 #[cfg(test)]
 mod tests {
-    use clap::Parser;
+    use std::ffi::OsStr;
 
-    use super::{Cli, Command, DEFAULT_DATABASE_URL, HarnessCommand};
+    use clap::{CommandFactory, Parser};
+
+    use super::{AttachedHarnessCommand, Cli, Command, DEFAULT_DATABASE_URL, HarnessCommand};
 
     #[test]
     fn run_codex_uses_sqlite_by_default_and_preserves_arguments() {
@@ -335,5 +384,93 @@ mod tests {
             panic!("expected run command");
         };
         assert!(harness.options().common.yolo);
+    }
+
+    #[test]
+    fn harness_claude_accepts_gateway_and_namespaced_model() {
+        let cli = Cli::try_parse_from([
+            "agentic",
+            "harness",
+            "claude",
+            "--gateway-url",
+            "http://127.0.0.1:9000/",
+            "--model",
+            "Qwen/Qwen3-8B",
+            "--",
+            "--resume",
+        ])
+        .expect("valid attached Claude CLI");
+
+        let Command::Harness { harness } = cli.command else {
+            panic!("expected harness command");
+        };
+        let AttachedHarnessCommand::Claude(options) = harness else {
+            panic!("expected Claude harness");
+        };
+        assert_eq!(options.gateway_url, "http://127.0.0.1:9000");
+        assert_eq!(options.model, "Qwen/Qwen3-8B");
+        assert_eq!(options.harness_args, ["--resume"]);
+    }
+
+    #[test]
+    fn harness_claude_rejects_malformed_gateway_urls() {
+        let error = Cli::try_parse_from([
+            "agentic",
+            "harness",
+            "claude",
+            "--gateway-url",
+            "127.0.0.1:9000",
+            "--model",
+            "Qwen/Qwen3-8B",
+        ])
+        .expect_err("malformed gateway URL should be rejected");
+
+        assert!(error.to_string().contains("invalid upstream URL"));
+    }
+
+    #[test]
+    fn harness_codex_accepts_gateway_model_and_passthrough() {
+        let cli = Cli::try_parse_from([
+            "agentic",
+            "harness",
+            "codex",
+            "--gateway-url",
+            "http://127.0.0.1:9000/",
+            "--model",
+            "Qwen/Qwen3-8B",
+            "--",
+            "exec",
+            "say hello",
+        ])
+        .expect("valid attached Codex CLI");
+
+        let Command::Harness { harness } = cli.command else {
+            panic!("expected harness command");
+        };
+        let AttachedHarnessCommand::Codex(options) = harness else {
+            panic!("expected Codex harness");
+        };
+        assert_eq!(options.gateway_url, "http://127.0.0.1:9000");
+        assert_eq!(options.model, "Qwen/Qwen3-8B");
+        assert_eq!(options.harness_args, ["exec", "say hello"]);
+    }
+
+    #[test]
+    fn attached_api_key_uses_gateway_specific_environment_variable() {
+        let command = Cli::command();
+        let harness = command
+            .get_subcommands()
+            .find(|command| command.get_name() == "harness")
+            .expect("harness subcommand");
+        let claude = harness
+            .get_subcommands()
+            .find(|command| command.get_name() == "claude")
+            .expect("Claude subcommand");
+        let api_key = claude
+            .get_arguments()
+            .find(|argument| argument.get_id() == "api_key")
+            .expect("attached API key argument");
+
+        assert_eq!(api_key.get_env(), Some(OsStr::new("AGENTIC_GATEWAY_API_KEY")));
     }
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Replay recorded vLLM Messages turns for the Claude Code CI acceptance test."""
+"""Replay recorded vLLM turns for coding-harness CI acceptance tests."""
 
 from __future__ import annotations
 
@@ -72,13 +72,18 @@ def _cache_breakpoint_ttls(request: dict[str, Any]) -> list[str]:
     return ttls
 
 
-def validate_capture(records: list[dict[str, Any]]) -> None:
+def validate_capture(records: list[dict[str, Any]], expected_model: str | None = None) -> None:
     messages = [record["body"] for record in records if record["kind"] == "messages"]
     transports = [record["body"] for record in records if record["kind"] == "messages_transport"]
     searches = [record["body"] for record in records if record["kind"] == "search"]
     assert len(messages) == 2, f"expected two Messages rounds, got {len(messages)}"
     assert len(transports) == 2, f"expected transport capture for both Messages rounds, got {len(transports)}"
     assert len(searches) == 1, f"expected one search request, got {len(searches)}"
+
+    if expected_model is not None:
+        assert all(message.get("model") == expected_model for message in messages), (
+            f"expected Claude Code to request model {expected_model!r}"
+        )
 
     session_ids = set()
     for transport in transports:
@@ -120,6 +125,19 @@ def validate_capture(records: list[dict[str, Any]]) -> None:
         block.get("type") == "tool_result" for block in _content_blocks(messages[1])
     ), "expected a tool_result in the second Messages round"
     assert searches[0].get("query"), "expected a non-empty search query"
+
+
+def validate_responses_capture(records: list[dict[str, Any]], expected_model: str) -> None:
+    responses = [record["body"] for record in records if record["kind"] == "responses"]
+    transports = [record["body"] for record in records if record["kind"] == "responses_transport"]
+    assert len(responses) == 1, f"expected one Responses request, got {len(responses)}"
+    assert len(transports) == 1, f"expected one Responses transport capture, got {len(transports)}"
+    assert transports[0]["path"] == "/v1/responses", transports[0]
+
+    request = responses[0]
+    assert request.get("model") == expected_model, f"expected requested model {expected_model!r}, got {request.get('model')!r}"
+    assert request.get("stream") is True, "expected Codex to request a streaming response"
+    assert request.get("input"), "expected a non-empty Responses input"
 
 
 @dataclass
@@ -192,6 +210,19 @@ def make_handler(state: ReplayState) -> type[BaseHTTPRequestHandler]:
             if path == "/v1/search":
                 self._send_search_response(request)
                 return
+            if path == "/v1/responses":
+                append_capture(
+                    state.capture_path,
+                    "responses_transport",
+                    {"path": self.path},
+                )
+                append_capture(state.capture_path, "responses", request)
+                turn = state.take_turn()
+                if turn is None:
+                    self._send_json(409, {"error": {"type": "api_error", "message": "cassette exhausted"}})
+                    return
+                self._send_bytes(turn.status_code, turn.content_type, turn.body)
+                return
             if path != "/v1/messages":
                 self.send_error(404)
                 return
@@ -251,6 +282,8 @@ def parse_args() -> argparse.Namespace:
 
     assert_capture = subparsers.add_parser("assert-capture")
     assert_capture.add_argument("--capture", required=True, type=Path)
+    assert_capture.add_argument("--api", choices=("messages", "responses"), default="messages")
+    assert_capture.add_argument("--model", required=True)
     return parser.parse_args()
 
 
@@ -258,11 +291,17 @@ def main() -> None:
     args = parse_args()
     if args.command == "assert-capture":
         records = load_capture(args.capture)
-        validate_capture(records)
-        messages = sum(record["kind"] == "messages" for record in records)
-        transports = sum(record["kind"] == "messages_transport" for record in records)
-        searches = sum(record["kind"] == "search" for record in records)
-        print(f"capture valid: messages={messages} transports={transports} searches={searches}")
+        if args.api == "responses":
+            validate_responses_capture(records, args.model)
+            responses = sum(record["kind"] == "responses" for record in records)
+            transports = sum(record["kind"] == "responses_transport" for record in records)
+            print(f"capture valid: responses={responses} transports={transports}")
+        else:
+            validate_capture(records, args.model)
+            messages = sum(record["kind"] == "messages" for record in records)
+            transports = sum(record["kind"] == "messages_transport" for record in records)
+            searches = sum(record["kind"] == "search" for record in records)
+            print(f"capture valid: messages={messages} transports={transports} searches={searches}")
         return
 
     args.capture.parent.mkdir(parents=True, exist_ok=True)

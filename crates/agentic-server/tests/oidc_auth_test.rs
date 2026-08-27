@@ -15,6 +15,7 @@ use rsa::RsaPrivateKey;
 use rsa::pkcs1::EncodeRsaPrivateKey;
 use serde::Serialize;
 use serde_json::{Value, json};
+use std::sync::LazyLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
@@ -25,6 +26,35 @@ use agentic_server::app::{ServerConfig, build_router_with_auth};
 use agentic_server::auth::{AuthenticatedPrincipal, OidcAuthError, OidcAuthenticator, OidcConfig, require_oidc};
 
 const TEST_AUDIENCE: &str = "agentic-api";
+
+struct TestKey {
+    private_key_der: Vec<u8>,
+    jwk: Jwk,
+}
+
+impl TestKey {
+    fn generate() -> Self {
+        let private_key = RsaPrivateKey::new(&mut OsRng, 2048).expect("generate test RSA key");
+        let private_key_der = private_key.to_pkcs1_der().expect("encode test RSA key");
+        let private_key_der = private_key_der.as_bytes().to_vec();
+        let encoding_key = EncodingKey::from_rsa_der(&private_key_der);
+        let mut jwk = Jwk::from_encoding_key(&encoding_key, Algorithm::RS256).expect("test JWK");
+        jwk.common.key_algorithm = Some(KeyAlgorithm::RS256);
+        jwk.common.public_key_use = Some(PublicKeyUse::Signature);
+        Self { private_key_der, jwk }
+    }
+
+    fn with_id(&self, kid: &str) -> (Vec<u8>, Value) {
+        let mut jwk = self.jwk.clone();
+        jwk.common.key_id = Some(kid.to_owned());
+        (
+            self.private_key_der.clone(),
+            serde_json::to_value(jwk).expect("serialize test JWK"),
+        )
+    }
+}
+
+static TEST_KEYS: LazyLock<[TestKey; 2]> = LazyLock::new(|| [TestKey::generate(), TestKey::generate()]);
 
 struct TestGateway {
     address: std::net::SocketAddr,
@@ -69,15 +99,11 @@ fn test_key() -> (Vec<u8>, Value) {
 }
 
 fn test_key_with_id(kid: &str) -> (Vec<u8>, Value) {
-    let private_key = RsaPrivateKey::new(&mut OsRng, 2048).expect("generate test RSA key");
-    let private_key_der = private_key.to_pkcs1_der().expect("encode test RSA key");
-    let private_key_der = private_key_der.as_bytes().to_vec();
-    let encoding_key = EncodingKey::from_rsa_der(&private_key_der);
-    let mut jwk = Jwk::from_encoding_key(&encoding_key, Algorithm::RS256).expect("test JWK");
-    jwk.common.key_id = Some(kid.to_owned());
-    jwk.common.key_algorithm = Some(KeyAlgorithm::RS256);
-    jwk.common.public_key_use = Some(PublicKeyUse::Signature);
-    (private_key_der, serde_json::to_value(jwk).expect("serialize test JWK"))
+    TEST_KEYS[0].with_id(kid)
+}
+
+fn alternate_test_key_with_id(kid: &str) -> (Vec<u8>, Value) {
+    TEST_KEYS[1].with_id(kid)
 }
 
 async fn spawn_rotating_oidc_provider() -> (String, Vec<u8>, Vec<u8>, std::sync::Arc<AtomicUsize>, JoinHandle<()>) {
@@ -88,7 +114,7 @@ async fn spawn_rotating_oidc_provider() -> (String, Vec<u8>, Vec<u8>, std::sync:
     let discovery_issuer = issuer.clone();
     let discovery_jwks_uri = format!("{issuer}/jwks");
     let (old_private_key, old_jwk) = test_key_with_id("old-key");
-    let (new_private_key, new_jwk) = test_key_with_id("new-key");
+    let (new_private_key, new_jwk) = alternate_test_key_with_id("new-key");
     let jwks_requests = std::sync::Arc::new(AtomicUsize::new(0));
     let observed_jwks_requests = std::sync::Arc::clone(&jwks_requests);
 
@@ -646,7 +672,7 @@ async fn configured_oidc_rejects_wrong_issuer_audience_and_expired_tokens() {
 #[tokio::test]
 async fn configured_oidc_rejects_missing_claims_empty_subject_future_nbf_and_bad_signature() {
     let (issuer, private_key, _public_jwk, _jwks_requests, _provider) = spawn_oidc_provider().await;
-    let (other_private_key, _) = test_key_with_id("test-key");
+    let (other_private_key, _) = alternate_test_key_with_id("test-key");
     let authenticator = discover_test_authenticator(&issuer).await;
     let gateway = spawn_gateway(authenticator, "http://127.0.0.1:9").await;
     let now = jsonwebtoken::get_current_timestamp();

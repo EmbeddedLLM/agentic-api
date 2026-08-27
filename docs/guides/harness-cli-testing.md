@@ -7,13 +7,11 @@ while verifying [issue #190](https://github.com/vllm-project/agentic-api/issues/
 
 ## Prerequisites
 
-- A running OpenAI-compatible upstream. The examples use vLLM serving Qwen on `http://127.0.0.1:8000`. For
-  Claude Code, vLLM must also serve the model under a slash-free alias (`--served-model-name` accepts several
-  names), because since 0.4.0 `agentic run claude` rejects model names containing `/`:
+- A running OpenAI-compatible upstream. The examples use vLLM serving Qwen on `http://127.0.0.1:8000`:
 
   ```console
   vllm serve Qwen/Qwen3.8-27B-FP8 \
-    --served-model-name Qwen/Qwen3.8-27B-FP8 qwen3-8-27b-fp8 ...
+    --served-model-name Qwen/Qwen3.8-27B-FP8 ...
   ```
 
   Check what is served with:
@@ -24,11 +22,17 @@ while verifying [issue #190](https://github.com/vllm-project/agentic-api/issues/
 
 - The harness binary on `PATH`: `claude --version` or `codex --version`. Override discovery with `AGENTIC_CLAUDE_BIN`
   or `AGENTIC_CODEX_BIN`.
+
 - Both Agentic API binaries built from this repository:
 
   ```console
   cargo build -p agentic-server --bins
   ```
+
+CI pins Claude Code 2.1.245 and Codex 0.149.1 and runs both real CLIs through the attach commands against recorded
+Qwen/vLLM streams. The Claude job verifies a gateway-owned web-search round trip; the Codex job verifies a completed
+Responses answer. Run the same checks locally with `bash scripts/claude-code-smoke.sh` and
+`bash scripts/codex-smoke.sh` after building both binaries with `cargo build -p agentic-server --bins`.
 
 ## CLI behavior worth knowing
 
@@ -36,11 +40,12 @@ while verifying [issue #190](https://github.com/vllm-project/agentic-api/issues/
 |---|---|
 | `--upstream` must be a full URL | `http://` or `https://` with a host. A typo such as `http//127.0.0.1:8000` is rejected at parse time with `invalid upstream URL`. |
 | `--model` is optional with `--upstream` | When omitted, the CLI calls `GET {upstream}/v1/models` and uses the first model listed. Pass `--model` to pick another when the upstream serves several. |
-| Claude requires a slash-free model | `agentic run claude` fails with `Claude Code requires a slash-free served model alias` when the model name contains `/`. Serve an alias with `--served-model-name` and pass it via `--model` (Codex accepts either form). |
+| Claude uses isolated settings and state | Per-run settings map Claude Code's canonical `claude-sonnet-4-5-20250929` identifier to the exact served model ID, while every default and small/fast model tier is pinned to that served model. Session history is isolated from the user's normal Claude home under `$AGENTIC_API_HOME/harnesses/claude` (default `~/.agentic-api/harnesses/claude`) so `--resume` and `--continue` work across invocations. Inherited Vertex, Bedrock, and Foundry routing switches are removed. |
 | Claude effort is pinned to `medium` | Claude Code defaults to `high`, which Qwen's vLLM chat template rejects (`ValueError`). The CLI always passes `--effort medium` and sets `CLAUDE_CODE_EFFORT_LEVEL=medium` (the env var wins inside Claude Code). Override both with `AGENTIC_CLAUDE_EFFORT=low|medium|xhigh`. |
+| Claude resource limits are pinned | The generated environment sets a 32,768-token context, 2,048 output tokens, and disables extended thinking. These conservative defaults fit the tested Qwen deployment. |
 | `--yolo` | Adds `--dangerously-skip-permissions` (Claude) or `--dangerously-bypass-approvals-and-sandbox` (Codex). Use only in an externally isolated environment. |
 | `--skip-llm-ready-check` | Skips the upstream `/health` probe. Avoid it while testing: the probe is what surfaces an unreachable upstream before the harness starts. |
-| Arguments after `--` | Forwarded verbatim to the harness (`-p`, `--resume`, `exec`, ...). |
+| Arguments after `--` | Forwarded to the harness (`-p`, `--resume`, `exec`, ...). Claude's `--model`, `--settings`, `--setting-sources`, and `--bare` are rejected because they would bypass the generated model and provider isolation. Generated settings are temporary, but Claude session history persists in the isolated Agentic API home. |
 
 ## 1. Validate the configuration
 
@@ -56,7 +61,7 @@ the harness binary resolves, and the upstream URL is well formed.
 Claude Code:
 
 ```console
-./target/debug/agentic run claude --upstream http://127.0.0.1:8000 --model qwen3-8-27b-fp8 -- -p "Reply with exactly one word: pong"
+./target/debug/agentic run claude --upstream http://127.0.0.1:8000 --model Qwen/Qwen3.8-27B-FP8 -- -p "Reply with exactly one word: pong"
 ```
 
 Codex:
@@ -71,12 +76,13 @@ Expected lifecycle output, then the harness answer and a clean exit:
 Starting Claude via http://127.0.0.1:3000
 ... agentic_server::server: LLM ready: http://127.0.0.1:8000
 ... agentic_server::server: gateway listening on 127.0.0.1:3000
-Claude Code gateway: http://127.0.0.1:3000 (model: qwen3-8-27b-fp8)
+Claude Code config: /tmp/agentic-api-session-... (gateway: http://127.0.0.1:3000, model: Qwen/Qwen3.8-27B-FP8)
 pong
 ```
 
-Claude Code prints a warning that the model name is not one it recognizes and assumes a 200k context window. That
-is expected for any non-Anthropic model name and does not affect the request.
+Claude Code's header may still display the canonical Sonnet label. Requests are routed to the Qwen model by the
+generated `modelOverrides` entry; the display label is not evidence that Anthropic billing or an enterprise provider
+is in use.
 
 ## 3. Tool-call round trip
 
@@ -84,7 +90,7 @@ Tool calls are where the parallel-tool-call handling from #190 is exercised, so 
 session and approve the permission prompt when the harness asks to run the command:
 
 ```console
-./target/debug/agentic run claude --upstream http://127.0.0.1:8000 --model qwen3-8-27b-fp8
+./target/debug/agentic run claude --upstream http://127.0.0.1:8000 --model Qwen/Qwen3.8-27B-FP8
 > Run 'ls crates' with the Bash tool and list the directory names.
 ```
 
@@ -95,14 +101,14 @@ Permission prompts are the default. Only for an unattended run in an externally 
 throwaway container) add `--yolo`, which forwards the harness's native bypass flag:
 
 ```console
-./target/debug/agentic run claude --upstream http://127.0.0.1:8000 --model qwen3-8-27b-fp8 --yolo \
+./target/debug/agentic run claude --upstream http://127.0.0.1:8000 --model Qwen/Qwen3.8-27B-FP8 --yolo \
   -- -p "Run 'ls crates' with the Bash tool and list the directory names."
 ```
 
 ## 4. Interactive session
 
 ```console
-./target/debug/agentic run claude --upstream http://127.0.0.1:8000 --model qwen3-8-27b-fp8
+./target/debug/agentic run claude --upstream http://127.0.0.1:8000 --model Qwen/Qwen3.8-27B-FP8
 ```
 
 Inside the session, useful checks are a plain question (no tools), a file read, a multi-step edit, and `/model`
@@ -135,8 +141,8 @@ true`; it must return `HTTP 200` as well. Unit coverage lives in
 
 ## 6. Against a Kubernetes deployment
 
-The CLI always starts its own local gateway, so to test a cluster-hosted gateway point the harness at it directly
-with the same environment the CLI would set. The kind-based development cluster below is the one from
+Use the attach-only `agentic harness` command to test a cluster-hosted gateway without starting another local
+gateway. The kind-based development cluster below is the one from
 [Deploy agentic-api on Kubernetes](../deploying/kubernetes.md).
 
 ### Roll out a new image
@@ -162,45 +168,90 @@ curl -s -w '\nHTTP %{http_code}\n' -H 'content-type: application/json' http://12
   "parallel_tool_calls": true, "tools": [{"type": "web_search_preview"}]
 }'
 
-# Claude Code through the cluster gateway
-ANTHROPIC_BASE_URL=http://127.0.0.1:9000 \
-ANTHROPIC_API_KEY=agentic-api-local \
-ANTHROPIC_MODEL=Qwen/Qwen3.8-27B-FP8 \
-ANTHROPIC_SMALL_FAST_MODEL=Qwen/Qwen3.8-27B-FP8 \
-CLAUDE_CODE_EFFORT_LEVEL=medium \
-claude --effort medium -p "Reply with exactly one word: pong"
+# Claude Code through the cluster gateway (interactive)
+agentic harness claude \
+  --gateway-url http://127.0.0.1:9000 \
+  --model Qwen/Qwen3.8-27B-FP8
+
+# The same path as a one-shot smoke test
+agentic harness claude \
+  --gateway-url http://127.0.0.1:9000 \
+  --model Qwen/Qwen3.8-27B-FP8 \
+  -- -p "Reply with exactly one word: pong"
 ```
 
-Codex needs a `CODEX_HOME` with the same provider configuration the CLI generates. Keep it outside `/tmp` (Codex
-refuses to create its helper binaries there) and close stdin for `exec`, otherwise Codex waits for additional prompt
-input when it is not attached to a terminal:
+The Claude command waits for `/health` and `/ready` without following redirects, creates owner-only temporary settings,
+removes inherited cloud-provider routing variables, and deletes the temporary settings when Claude exits. Claude's session
+history persists under `$AGENTIC_API_HOME/harnesses/claude`, separate from the user's normal Claude Code configuration.
+It advertises the compact `Bash,Edit,Read,WebSearch` tool set. There is intentionally no `--web-search` switch:
+whether Claude Code's `WebSearch` function is gateway-owned is a deployment policy controlled by
+`MESSAGES_GATEWAY_TOOL_ALIASES=WebSearch=web_search`.
+
+For a raw-command diagnosis, the critical pieces are a persistent isolated `CLAUDE_CONFIG_DIR`, a temporary `settings.json` whose
+`modelOverrides` maps the full canonical ID `claude-sonnet-4-5-20250929` to the served model, removal of inherited
+`CLAUDE_CODE_USE_VERTEX`/`CLAUDE_CODE_USE_BEDROCK`/`CLAUDE_CODE_USE_FOUNDRY`, and passing the canonical ID to
+`claude --model`. Short aliases such as `claude-sonnet-4-5` are not sufficient for this override.
 
 ```console
-export CODEX_HOME=$HOME/.cache/agentic-codex-k8s
-mkdir -p "$CODEX_HOME"
-cat > "$CODEX_HOME/config.toml" <<EOF
-model = "Qwen/Qwen3.8-27B-FP8"
-model_provider = "agentic-api"
-model_catalog_json = "$CODEX_HOME/model_catalog.json"
+CLAUDE_SETTINGS_HOME=$(mktemp -d)
+CLAUDE_STATE_HOME="${AGENTIC_API_HOME:-$HOME/.agentic-api}/harnesses/claude"
+mkdir -p -m 700 "$CLAUDE_STATE_HOME"
+trap 'rm -rf -- "$CLAUDE_SETTINGS_HOME"' EXIT
+jq --null-input --arg model 'Qwen/Qwen3.8-27B-FP8' \
+  '{modelOverrides: {"claude-sonnet-4-5-20250929": $model}}' \
+  >"$CLAUDE_SETTINGS_HOME/settings.json"
 
-[model_providers.agentic-api]
-name = "Agentic API"
-base_url = "http://127.0.0.1:9000/v1"   # must match the port-forward above when reusing an older CODEX_HOME
-wire_api = "responses"
-requires_openai_auth = false
-supports_websockets = true
-EOF
-# Copy model_catalog.json from a CLI session (printed path) or from prepare_codex_home in
-# crates/agentic-server/src/agentic_harness.rs, replacing the slug with your model id.
-codex exec --skip-git-repo-check "Reply with exactly one word: pong" </dev/null
+env -u CLAUDE_CODE_USE_VERTEX \
+  -u CLAUDE_CODE_USE_BEDROCK \
+  -u CLAUDE_CODE_USE_FOUNDRY \
+  -u CLAUDE_CODE_USE_ANTHROPIC_AWS \
+  -u CLAUDE_CODE_USE_MANTLE \
+  -u CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST \
+  -u ANTHROPIC_VERTEX_PROJECT_ID \
+  -u CLOUD_ML_REGION \
+  CLAUDE_CONFIG_DIR="$CLAUDE_STATE_HOME" \
+  ANTHROPIC_BASE_URL=http://127.0.0.1:9000 \
+  ANTHROPIC_MODEL=Qwen/Qwen3.8-27B-FP8 \
+  ANTHROPIC_SMALL_FAST_MODEL=Qwen/Qwen3.8-27B-FP8 \
+  ANTHROPIC_DEFAULT_OPUS_MODEL=Qwen/Qwen3.8-27B-FP8 \
+  ANTHROPIC_DEFAULT_SONNET_MODEL=Qwen/Qwen3.8-27B-FP8 \
+  ANTHROPIC_DEFAULT_HAIKU_MODEL=Qwen/Qwen3.8-27B-FP8 \
+  ANTHROPIC_API_KEY=agentic-api-local \
+  ANTHROPIC_AUTH_TOKEN=agentic-api-local \
+  CLAUDE_CODE_MAX_CONTEXT_TOKENS=32768 \
+  CLAUDE_CODE_MAX_OUTPUT_TOKENS=2048 \
+  MAX_THINKING_TOKENS=0 \
+  CLAUDE_CODE_EFFORT_LEVEL=medium \
+  claude --model claude-sonnet-4-5-20250929 \
+    --tools Bash,Edit,Read,WebSearch --setting-sources user --effort medium \
+    --settings "$CLAUDE_SETTINGS_HOME/settings.json"
+```
+
+Codex uses the same attach-only workflow. The CLI generates an isolated `CODEX_HOME`, Responses provider
+configuration, and model catalog, then removes them when Codex exits:
+
+```console
+# Interactive Codex session through the cluster gateway
+agentic harness codex \
+  --gateway-url http://127.0.0.1:9000 \
+  --model Qwen/Qwen3.8-27B-FP8
+
+# One-shot smoke test
+agentic harness codex \
+  --gateway-url http://127.0.0.1:9000 \
+  --model Qwen/Qwen3.8-27B-FP8 \
+  -- exec --skip-git-repo-check "Reply with exactly one word: pong"
 ```
 
 Codex uses the gateway's WebSocket transport (`supports_websockets = true`), so this also verifies `/v1/responses`
 over WebSocket through the port-forward. On Linux hosts where Codex's sandbox (`codex-linux-sandbox`/bwrap) cannot
 start, shell tool calls fail inside Codex itself; that is unrelated to the gateway and `--dangerously-bypass-approvals-and-sandbox`
-(or the CLI's `--yolo`) confirms the gateway side.
+(or the CLI's `--yolo`) confirms the gateway side. Codex declares web search structurally through the Responses API,
+so it does not require `MESSAGES_GATEWAY_TOOL_ALIASES`.
 
-Replace `agentic-api-local` with a real key when the deployment enforces inbound authentication. Finish by
+Replace `agentic-api-local` with a real key when the deployment enforces inbound authentication. For `agentic harness`,
+pass it explicitly with `--api-key` or set `AGENTIC_GATEWAY_API_KEY`; ambient `OPENAI_API_KEY` and
+`ANTHROPIC_CUSTOM_HEADERS` are deliberately ignored because they commonly carry unrelated provider credentials. Finish by
 confirming the gateway logged no errors during the run:
 
 ```console
@@ -219,13 +270,15 @@ expected; anything at `ERROR` level is not.
 | `invalid upstream URL` at startup | Malformed `--upstream` (missing `://`, no scheme, no host) | Pass a full `http://host:port` URL. |
 | `HTTP 502` on every request | Gateway cannot reach the upstream, typically a wrong URL combined with `--skip-llm-ready-check` | Drop `--skip-llm-ready-check` so the readiness probe fails fast, then fix the URL. |
 | `There's an issue with the selected model` | Model name does not match what the upstream serves | Omit `--model` to auto-discover, or copy the id from `/v1/models` exactly. |
-| `Claude Code requires a slash-free served model alias` | The discovered or passed model name contains `/`, which `agentic run claude` rejects (0.4.0+) | Add a slash-free alias to vLLM's `--served-model-name` list and pass it with `--model`. |
+| Claude opens with `Google Vertex AI`, Bedrock, or Foundry | Provider-selection variables leaked in from the user's normal Claude configuration | Use `agentic harness claude`; it creates an isolated config and removes the provider switches from the child environment. |
+| Claude reports `There's an issue with the selected model (claude-sonnet-4-5)` | A short alias was overridden, but Claude Code requested the full canonical model ID | Map `claude-sonnet-4-5-20250929` to the served model; the CLI does this automatically. |
+| Claude answers that it cannot browse even though `WebSearch` is listed | The deployment did not opt the PascalCase client function into gateway execution, or the model did not emit a tool call | Set `MESSAGES_GATEWAY_TOOL_ALIASES=WebSearch=web_search`, restart the Deployment, and verify the gateway logs contain an actual tool call. A model's prose claim is not a tool-call verification. |
 | Template `ValueError` mentioning effort | Claude Code sent `high` | Do not override `AGENTIC_CLAUDE_EFFORT` with `high`; valid values for Qwen are `low`, `medium`, `xhigh`. |
 | `HTTP 503` from a cluster gateway | `/ready` failing because the gateway cannot reach its upstream or database | `kubectl logs deploy/agentic-api` and look for `gateway dependencies not ready`. |
 | `readiness.ready=false` warnings every minute or two while the upstream is healthy | Gateway build predates the readiness-client pooling fix ([#199](https://github.com/vllm-project/agentic-api/pull/199)): a pooled keep-alive connection that the upstream closed fails with `hyper::Error(IncompleteMessage)` | Rebuild from a tree that includes #199 and redeploy; add `agentic_server::handler::http::models=debug` to `RUST_LOG` to see the probe error. |
 | Pods in `CrashLoopBackOff` with `failed to create temporary configuration file: Read-only file system` | Gateway build predates the read-only-home fix ([#199](https://github.com/vllm-project/agentic-api/pull/199)), and the base mounts a read-only root filesystem | Rebuild from a tree that includes #199 and redeploy; that base also mounts an `emptyDir` at `/var/lib/agentic-api`. Until then, mount a writable volume at `/var/lib/agentic-api` in your overlay. |
 | `kubectl apply -k` fails with `cycle detected` | Overlay directory placed inside `deploy/kubernetes` | Move the overlay to a sibling directory such as `deploy/overlays/<env>` and reference `../../kubernetes` (a working kind example ships with #199). |
 | Codex `exec` prints `Reading additional input from stdin...` and hangs | stdin is not a terminal | Append `</dev/null`. |
-| Codex warns it could not create PATH aliases | `CODEX_HOME` under `/tmp` | Use a home under `$HOME`. |
+| Codex warns it could not create PATH aliases | Attach mode uses a temporary `CODEX_HOME` | The warning is non-fatal for an attach session. Codex still loads the generated provider and model catalog; use a persistent home under `$HOME` only for a manual configuration. |
 | A long stream stops without a terminal event during a rollout | Bounded drain: 5 s `preStop` plus up to 8 s of in-flight draining, then the pod exits | Expected for responses longer than the drain window; clients should reconnect and continue with `previous_response_id`. |
 | `parallel_tool_calls must be false when using built-in tools` | Gateway predates PR #197 | Rebuild and redeploy the image. |

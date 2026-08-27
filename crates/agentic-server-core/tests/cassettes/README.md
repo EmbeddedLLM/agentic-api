@@ -29,31 +29,34 @@ python tests/cassettes/record_cassette.py --mode responses --turns 1 --no-stream
 
 The recorder scripts (`record_reasoning_cassettes.sh`, `record_tool_call_cassettes.sh`, etc.) use `printf` to feed fixed prompts per test so no manual input is needed.
 
-## Claude Code cache-control parity
+## Coding-harness CLI acceptance tests
 
 The literal fixture at `../fixtures/claude-code-cache-control-request.json` mirrors the cache-bearing parts of a
 Claude Code Messages request: multi-block `system`, a structured user message, and both `WebSearch` and client-owned
 tool declarations. It includes explicit `5m` and `1h` TTLs. The Messages HTTP and loop integration tests assert that
 the fixture remains unchanged through transparent proxying and every streaming and non-streaming gateway-tool round.
 
-The fixture is hand-checked test data, not a captured cassette. A dedicated GitHub Actions job also runs the real,
-pinned Claude Code CLI through `agentic-server` against the recorded streaming vLLM Messages cassette and a
-deterministic local search backend. It uses a placeholder API key and makes no request to Anthropic or a live model.
+The fixture is hand-checked test data, not a captured cassette. A dedicated GitHub Actions matrix runs the real,
+pinned Claude Code and Codex CLIs through the `agentic harness` attach commands. Claude Code replays the streaming
+vLLM Messages web-search cassette through a deterministic local search backend. Codex replays the streaming vLLM
+Responses reasoning cassette. Neither job contacts Anthropic, OpenAI, or a live model.
 
 To run the same end-to-end check locally, install the pinned dependencies, build the server, and run the harness:
 
 ```bash
-npm install --global '@anthropic-ai/claude-code@2.1.218'
+npm install --global '@anthropic-ai/claude-code@2.1.245' '@openai/codex@0.149.1'
 python -m pip install 'PyYAML==6.0.3'
-cargo build -p agentic-server
+cargo build -p agentic-server --bins
 bash scripts/claude-code-smoke.sh
+bash scripts/codex-smoke.sh
 ```
 
-The harness starts both local services, opts `WebSearch` into gateway execution with
-`MESSAGES_GATEWAY_TOOL_ALIASES=WebSearch=web_search`, and invokes Claude Code's non-interactive interface in safe
-mode. It disables nonessential traffic and session persistence, maps every Claude model tier to the replayed `qwen3`
-model, then asserts two Messages rounds, one search request, a hidden `tool_result`, and the cache-bearing system and
-user blocks emitted by Claude Code 2.1.218.
+Each smoke script starts a replay server and Agentic API, then invokes the installed CLI through the corresponding
+`agentic harness` command. The Claude job opts `WebSearch` into gateway execution with
+`MESSAGES_GATEWAY_TOOL_ALIASES=WebSearch=web_search`; it asserts the recorded answer, two Messages rounds, one search
+request, a hidden `tool_result`, cache-bearing system and user blocks, and the exact Qwen model requested by Claude
+Code 2.1.245. The Codex job asserts the recorded `HELLO` answer, one streaming Responses request, and the exact Qwen
+model requested by Codex 0.149.1.
 
 ## Modes
 

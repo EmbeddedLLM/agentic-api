@@ -820,33 +820,48 @@ mod tests {
     use rsa::RsaPrivateKey;
     use rsa::pkcs1::EncodeRsaPrivateKey;
     use serde_json::json;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, LazyLock};
     use std::time::{Duration, Instant};
     use tokio::net::TcpListener;
     use tokio::sync::Semaphore;
 
+    struct TestKey {
+        private_key_der: Vec<u8>,
+        jwk: Jwk,
+    }
+
+    impl TestKey {
+        fn generate() -> Self {
+            let private_key = RsaPrivateKey::new(&mut OsRng, 2048).expect("generate test RSA key");
+            let private_key = private_key.to_pkcs1_der().expect("encode test RSA key");
+            let private_key_der = private_key.as_bytes().to_vec();
+            let mut jwk = Jwk::from_encoding_key(&EncodingKey::from_rsa_der(&private_key_der), Algorithm::RS256)
+                .expect("test JWK");
+            jwk.common.key_algorithm = Some(KeyAlgorithm::RS256);
+            jwk.common.public_key_use = Some(PublicKeyUse::Signature);
+            Self { private_key_der, jwk }
+        }
+
+        fn with_id(&self, kid: &str) -> (Vec<u8>, Jwk) {
+            let mut jwk = self.jwk.clone();
+            jwk.common.key_id = Some(kid.to_owned());
+            (self.private_key_der.clone(), jwk)
+        }
+    }
+
+    static TEST_KEYS: LazyLock<[TestKey; 2]> = LazyLock::new(|| [TestKey::generate(), TestKey::generate()]);
+
     fn test_jwk() -> Jwk {
-        let private_key = RsaPrivateKey::new(&mut OsRng, 2048).expect("generate test RSA key");
-        let private_key = private_key.to_pkcs1_der().expect("encode test RSA key");
-        let mut jwk = Jwk::from_encoding_key(&EncodingKey::from_rsa_der(private_key.as_bytes()), Algorithm::RS256)
-            .expect("test JWK");
-        jwk.common.key_id = Some("test-key".to_owned());
-        jwk.common.key_algorithm = Some(KeyAlgorithm::RS256);
-        jwk.common.public_key_use = Some(PublicKeyUse::Signature);
-        jwk
+        TEST_KEYS[0].with_id("test-key").1
     }
 
     fn test_key_with_id(kid: &str) -> (Vec<u8>, Jwk) {
-        let private_key = RsaPrivateKey::new(&mut OsRng, 2048).expect("generate test RSA key");
-        let private_key = private_key.to_pkcs1_der().expect("encode test RSA key");
-        let private_key = private_key.as_bytes().to_vec();
-        let mut jwk =
-            Jwk::from_encoding_key(&EncodingKey::from_rsa_der(&private_key), Algorithm::RS256).expect("test JWK");
-        jwk.common.key_id = Some(kid.to_owned());
-        jwk.common.key_algorithm = Some(KeyAlgorithm::RS256);
-        jwk.common.public_key_use = Some(PublicKeyUse::Signature);
-        (private_key, jwk)
+        TEST_KEYS[0].with_id(kid)
+    }
+
+    fn alternate_test_key_with_id(kid: &str) -> (Vec<u8>, Jwk) {
+        TEST_KEYS[1].with_id(kid)
     }
 
     async fn cancellation_test_authenticator() -> (
@@ -864,7 +879,7 @@ mod tests {
         let discovery_issuer = issuer.clone();
         let discovery_jwks_uri = format!("{issuer}/jwks");
         let (_old_private_key, old_jwk) = test_key_with_id("old-key");
-        let (new_private_key, new_jwk) = test_key_with_id("new-key");
+        let (new_private_key, new_jwk) = alternate_test_key_with_id("new-key");
         let requests = Arc::new(AtomicUsize::new(0));
         let observed_requests = Arc::clone(&requests);
         let refresh_started = Arc::new(Semaphore::new(0));

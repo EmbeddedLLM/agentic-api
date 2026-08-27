@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CLAUDE_BIN="${CLAUDE_BIN:-claude}"
+CODEX_BIN="${CODEX_BIN:-codex}"
 AGENTIC_BIN="${AGENTIC_BIN:-target/debug/agentic}"
 AGENTIC_SERVER_BIN="${AGENTIC_SERVER_BIN:-target/debug/agentic-server}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-CASSETTE="${CASSETTE:-crates/agentic-server-core/tests/cassettes/messages/messages-web-search-Qwen-Qwen3-30B-A3B-FP8-streaming.yaml}"
+CASSETTE="${CASSETTE:-crates/agentic-server-core/tests/cassettes/reasoning/responses/reasoning-single-Qwen-Qwen3-30B-A3B-FP8-streaming.yaml}"
 MODEL="${MODEL:-Qwen/Qwen3-30B-A3B-FP8}"
 
 choose_port() {
@@ -15,8 +15,8 @@ choose_port() {
 REPLAY_PORT="${REPLAY_PORT:-$(choose_port)}"
 GATEWAY_PORT="${GATEWAY_PORT:-$(choose_port)}"
 
-if ! command -v "$CLAUDE_BIN" >/dev/null 2>&1; then
-  echo "error: Claude Code is not installed: ${CLAUDE_BIN}" >&2
+if ! command -v "$CODEX_BIN" >/dev/null 2>&1; then
+  echo "error: Codex is not installed: ${CODEX_BIN}" >&2
   exit 2
 fi
 if [[ ! -x "$AGENTIC_SERVER_BIN" ]]; then
@@ -28,7 +28,7 @@ if [[ ! -x "$AGENTIC_BIN" ]]; then
   exit 2
 fi
 if [[ ! -f "$CASSETTE" ]]; then
-  echo "error: Messages cassette not found: ${CASSETTE}" >&2
+  echo "error: Responses cassette not found: ${CASSETTE}" >&2
   exit 2
 fi
 
@@ -36,8 +36,8 @@ temp_dir="$(mktemp -d)"
 capture_path="${temp_dir}/capture.jsonl"
 replay_log="${temp_dir}/replay.log"
 gateway_log="${temp_dir}/gateway.log"
-claude_output="${temp_dir}/claude.json"
-claude_debug="${temp_dir}/claude-debug.log"
+codex_output="${temp_dir}/codex.out"
+codex_debug="${temp_dir}/codex-debug.log"
 replay_pid=""
 gateway_pid=""
 
@@ -57,10 +57,10 @@ cleanup() {
     sed -n '1,240p' "$replay_log" >&2 || true
     echo "--- agentic-server log ---" >&2
     sed -n '1,240p' "$gateway_log" >&2 || true
-    echo "--- Claude Code output ---" >&2
-    sed -n '1,240p' "$claude_output" >&2 || true
-    echo "--- Claude Code debug log ---" >&2
-    sed -n '1,240p' "$claude_debug" >&2 || true
+    echo "--- Codex output ---" >&2
+    sed -n '1,240p' "$codex_output" >&2 || true
+    echo "--- Codex debug log ---" >&2
+    sed -n '1,240p' "$codex_debug" >&2 || true
     echo "--- replay capture ---" >&2
     sed -n '1,240p' "$capture_path" >&2 || true
   fi
@@ -97,46 +97,34 @@ env \
   GATEWAY_PORT="$GATEWAY_PORT" \
   SKIP_LLM_READY_CHECK=true \
   DATABASE_URL="sqlite://${temp_dir}/agentic.db" \
-  MESSAGES_GATEWAY_TOOL_ALIASES=WebSearch=web_search \
-  YOU_API_KEY=ci-placeholder \
-  YOU_API_BASE_URL="http://127.0.0.1:${REPLAY_PORT}" \
   "$AGENTIC_SERVER_BIN" \
   >"$gateway_log" 2>&1 &
 gateway_pid=$!
 wait_until_ready "agentic-server" "http://127.0.0.1:${GATEWAY_PORT}/ready"
 
 env \
-  AGENTIC_CLAUDE_BIN="$CLAUDE_BIN" \
-  ANTHROPIC_CUSTOM_HEADERS='Authorization: Bearer must-not-be-forwarded' \
-  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
-  DISABLE_AUTOUPDATER=1 \
-  "$AGENTIC_BIN" harness claude \
+  OPENAI_API_KEY=must-not-be-forwarded \
+  AGENTIC_CODEX_BIN="$CODEX_BIN" \
+  RUST_LOG=warn \
+  "$AGENTIC_BIN" harness codex \
   --gateway-url "http://127.0.0.1:${GATEWAY_PORT}" \
   --model "$MODEL" \
-  --api-key ci-placeholder \
   --quiet \
   -- \
-  --safe-mode \
-  --print \
-  "Use WebSearch to find the latest stable Rust release, then answer with its version only." \
-  --output-format json \
-  --debug-file "$claude_debug" \
-  --no-session-persistence \
-  --permission-mode dontAsk \
-  --allowedTools WebSearch \
-  >"$claude_output"
+  exec \
+  --skip-git-repo-check \
+  "Reply with exactly one word: HELLO" \
+  >"$codex_output" 2>"$codex_debug" </dev/null
 
-"$PYTHON_BIN" - "$claude_output" <<'PY'
-import json
+"$PYTHON_BIN" - "$codex_output" <<'PY'
 import sys
 
-result = json.load(open(sys.argv[1]))
-assert result.get("is_error") is False, result
-assert "1.89.0" in result.get("result", ""), result
-print(f"Claude Code result: {result['result']}")
+result = open(sys.argv[1]).read().strip()
+assert result == "HELLO", f"expected Codex to print exactly HELLO, got {result!r}"
+print(result)
 PY
 
 "$PYTHON_BIN" scripts/claude_code_replay_server.py assert-capture \
-  --api messages \
+  --api responses \
   --model "$MODEL" \
   --capture "$capture_path"

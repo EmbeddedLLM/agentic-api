@@ -80,6 +80,135 @@ The PostgreSQL example requires TLS certificate and hostname verification. When 
 `&sslrootcert=/path/to/postgres-ca.pem` to the example `DATABASE_URL` and mount that read-only CA file through a
 production overlay.
 
+## Use llm-d as the inference backend
+
+[llm-d](https://llm-d.ai/) can sit between Agentic API and an in-cluster model-serving pool. Agentic API continues to
+own Responses API state, tool orchestration, and the tool loop. The llm-d Router owns model-server selection and can
+place requests by load and estimated prefix-cache reuse.
+
+```mermaid
+flowchart LR
+    C["Responses API client"]
+    A["Agentic API"]
+    R["llm-d Router\nEPP and proxy"]
+    V["vLLM model-server pool"]
+    P["PostgreSQL"]
+    T["Built-in and function tools"]
+
+    C --> A
+    A --> R
+    R --> V
+    A --> P
+    A --> T
+    T --> A
+```
+
+This section assumes that the llm-d Router and model servers are already installed. Follow the upstream
+[llm-d quickstart](https://github.com/llm-d/llm-d/blob/main/docs/getting-started/quickstart.md) for a small standalone
+deployment or the
+[optimized baseline](https://github.com/llm-d/llm-d/tree/main/guides/optimized-baseline) for prefix-cache-aware and
+load-aware routing. Keep the llm-d installation in its own namespace so its model-server resources and lifecycle are
+independent from the Agentic API gateway.
+
+### Verify llm-d before connecting Agentic API
+
+Resolve the Router Service created by the llm-d installation. The upstream quickstart names the standalone Service
+`<release>-epp`; use the actual Service name and port from your release:
+
+```console
+kubectl --namespace llm-d-optimized-baseline get services
+kubectl --namespace llm-d-optimized-baseline get pods
+```
+
+Run the check from inside the cluster. This catches Service DNS, NetworkPolicy, proxy, EPP, and model-server failures
+before Agentic API is involved:
+
+```console
+kubectl --namespace llm-d-optimized-baseline run llm-d-check \
+  --rm --stdin --restart=Never \
+  --image=curlimages/curl:8.10.1 \
+  --command -- \
+  curl --fail --show-error \
+  http://optimized-baseline-epp.llm-d-optimized-baseline.svc.cluster.local/v1/models
+```
+
+Replace `optimized-baseline-epp` when the Helm release uses another name. Use a digest-pinned diagnostic image when
+cluster policy requires immutable images.
+
+Agentic API also probes `<LLM_API_BASE>/health` during startup and readiness. Verify that path through the Router:
+
+```console
+kubectl --namespace llm-d-optimized-baseline run llm-d-health-check \
+  --rm --stdin --restart=Never \
+  --image=curlimages/curl:8.10.1 \
+  --command -- \
+  curl --fail --show-error \
+  http://optimized-baseline-epp.llm-d-optimized-baseline.svc.cluster.local/health
+```
+
+If the selected llm-d proxy does not expose `/health`, set `SKIP_LLM_READY_CHECK=true` in the Agentic API overlay and
+monitor a small inference request externally. Do not disable the check merely to hide an unreachable or unhealthy
+Router.
+
+### Point Agentic API at llm-d
+
+Patch the production overlay so `LLM_API_BASE` uses the Router's cluster-local Service DNS name. For the upstream
+optimized-baseline naming convention:
+
+```yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: agentic-api
+resources:
+  - ../../kubernetes
+patches:
+  - target:
+      kind: ConfigMap
+      name: agentic-api
+    patch: |-
+      - op: replace
+        path: /data/LLM_API_BASE
+        value: http://optimized-baseline-epp.llm-d-optimized-baseline.svc.cluster.local
+```
+
+The request's `model` must match a name advertised by the llm-d model-server pool. Agentic API passes that model name
+through to the OpenAI-compatible inference endpoint. When the Router serves several models, verify each name through
+`/v1/models` before exposing it to clients.
+
+Render the overlay and confirm that it contains the expected URL only once:
+
+```console
+kubectl kustomize deploy/overlays/production |
+  grep -n -A1 'LLM_API_BASE'
+```
+
+Apply the overlay and wait for the gateway. ConfigMap data is injected into the process environment, so an existing
+pod must be replaced before it can use a new Router URL:
+
+```console
+kubectl apply -k deploy/overlays/production
+kubectl --namespace agentic-api rollout restart deployment/agentic-api
+kubectl --namespace agentic-api rollout status deployment/agentic-api
+kubectl --namespace agentic-api logs deployment/agentic-api --tail=20
+```
+
+Confirm that the logs contain `gateway listening on 0.0.0.0:9000` and `gateway dependencies ready`. If the Deployment
+declares the same variable under both `env` and `envFrom`, the explicit `env` entry wins. Keep `LLM_API_BASE`,
+`RUST_LOG`, and similar non-secret settings in one source so an old pod-template override cannot silently supersede
+the ConfigMap.
+
+### Size the model servers separately
+
+Agentic API CPU and memory settings do not size the llm-d model servers. Choose vLLM resources from the model,
+precision, context length, concurrency target, and accelerator, then calibrate llm-d's saturation-aware routing for
+that model and hardware combination as described by the upstream optimized-baseline guide.
+
+For one concrete sizing data point, a direct-vLLM deployment validated on CoreWeave served `Qwen/Qwen3-8B` with vLLM
+v0.26.0 and a 32,768-token context window on one H100 80 GB. The vLLM pod requested 4 CPU, 24 GiB of memory, and one
+GPU, with limits of 8 CPU and 48 GiB. Treat this as a smoke-test profile, not an llm-d performance recommendation:
+prefix-cache-aware routing only provides value when a pool has multiple model-server replicas, and a different model
+or workload needs new measurements.
+
 ## Deploy and inspect the gateway
 
 Render and schema-check the base before applying it. CI runs the same validation with pinned kubectl and kubeconform
@@ -105,6 +234,11 @@ kubectl --namespace agentic-api get pods,service,networkpolicy,poddisruptionbudg
 ConfigMap and Secret values are injected as environment variables and do not update inside existing pods. After
 changing either object without otherwise changing the pod template, run
 `kubectl --namespace agentic-api rollout restart deployment/agentic-api` and wait for the rollout to finish.
+
+Use immutable image digests in shared clusters. A rollout restart changes the pod template, but
+`imagePullPolicy: IfNotPresent` with a reused mutable tag can still start a cached image on the selected node. If a
+development workflow must reuse a tag, set `imagePullPolicy: Always` in that environment's overlay and verify the
+running pod's `imageID`; production overlays should continue using a digest.
 
 The base defines:
 
@@ -279,3 +413,78 @@ curl --fail --silent --show-error http://127.0.0.1:9000/v1/responses \
 Repeat the check through the authenticated ingress for HTTP streaming and WebSockets before a production release.
 Size PostgreSQL pools, gateway replicas, and inference capacity together; adding gateway replicas cannot compensate
 for a saturated database or inference service.
+
+## Enable and verify web search
+
+The `web_search_preview` built-in tool is executed by Agentic API when `YOU_API_KEY` and `YOU_API_BASE_URL` are
+configured. Keep the key in a Secret and use the current You.com Search API base URL, `https://ydc-index.io`.
+
+Create the Secret from a protected environment file so the key does not enter shell history or process arguments:
+
+```console
+install -m 600 /dev/null /tmp/agentic-api-web-search.env
+$EDITOR /tmp/agentic-api-web-search.env
+kubectl --namespace agentic-api create secret generic agentic-api-web-search \
+  --from-env-file=/tmp/agentic-api-web-search.env \
+  --dry-run=client --output=yaml |
+  kubectl apply --server-side --field-manager=agentic-api-operator --filename=-
+```
+
+The file contains one line, `YOU_API_KEY=...`. Remove it securely after creating the Secret. Patch the environment in
+the production overlay:
+
+```yaml
+patches:
+  - target:
+      kind: ConfigMap
+      name: agentic-api
+    patch: |-
+      - op: add
+        path: /data/YOU_API_BASE_URL
+        value: https://ydc-index.io
+      - op: add
+        path: /data/MESSAGES_GATEWAY_TOOL_ALIASES
+        value: WebSearch=web_search
+  - target:
+      kind: Deployment
+      name: agentic-api
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/envFrom/-
+        value:
+          secretRef:
+            name: agentic-api-web-search
+```
+
+`MESSAGES_GATEWAY_TOOL_ALIASES` is required only when Claude Code's client-owned `WebSearch` function should be
+executed by the gateway. Responses API clients declare web search structurally and do not need this alias. Leaving
+the setting empty preserves the default client-owned behavior.
+
+Apply the overlay, restart the Deployment after every Secret update, and wait for readiness:
+
+```console
+kubectl apply -k deploy/overlays/production
+kubectl --namespace agentic-api rollout restart deployment/agentic-api
+kubectl --namespace agentic-api rollout status deployment/agentic-api
+```
+
+With the Service port-forward running, submit a web-search request and require at least one completed
+`web_search_call` output item:
+
+```console
+curl --fail --silent --show-error http://127.0.0.1:9000/v1/responses \
+  --header "Authorization: Bearer $OIDC_TOKEN" \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "model": "Qwen/Qwen3-8B",
+    "stream": false,
+    "tools": [{"type": "web_search_preview"}],
+    "input": "Search the web for the latest vLLM release."
+  }' |
+  jq --exit-status 'any(.output[]?; .type == "web_search_call" and .status == "completed")'
+```
+
+Remove the `Authorization` header when inbound OIDC validation is disabled. A top-level response can have
+`status: "completed"` even when an individual `web_search_call` failed, so inspect the output item status rather than
+only the response status. A `403 Forbidden` from You.com means the external search request was rejected; confirm the
+documented base URL and refresh the Secret, restart the Deployment, and test again without printing the key.
