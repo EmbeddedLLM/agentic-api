@@ -546,7 +546,7 @@ pub(super) fn append_input_item(input: &mut ResponsesInput, item: InputItem) {
 }
 
 pub(super) fn append_output_items_to_input(input: &mut ResponsesInput, output_items: &[OutputItem]) {
-    for input_item in output_items.iter().flat_map(OutputItem::to_input_item) {
+    for input_item in output_items.iter().filter_map(OutputItem::to_input_item) {
         append_input_item(input, input_item);
     }
 }

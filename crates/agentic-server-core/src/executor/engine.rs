@@ -159,6 +159,16 @@ async fn run_until_gateway_tools_complete(
     run_gateway_tool_loop(ctx, exec_ctx, auth, stream_upstream, stream).await
 }
 
+async fn build_tool_registry(ctx: &mut RequestContext, exec_ctx: &ExecutionContext) -> ExecutorResult<ToolRegistry> {
+    let mut executors = exec_ctx.gateway_executors.request_scoped();
+    let mut registry: ToolRegistry = match ctx.enriched_request.tools.as_mut() {
+        Some(tools) => ToolRegistry::build_with_handlers(tools, &mut executors).await?,
+        None => ToolRegistry::default(),
+    };
+    registry.cache_listed_mcp_tools(&ctx.enriched_request.input);
+    Ok(registry)
+}
+
 async fn run_gateway_tool_loop(
     mut ctx: RequestContext,
     exec_ctx: &ExecutionContext,
@@ -166,12 +176,7 @@ async fn run_gateway_tool_loop(
     stream_upstream: bool,
     mut stream: Option<(&mut GatewayStreamAccumulator, &mpsc::UnboundedSender<StreamEvent>)>,
 ) -> ExecutorResult<(ResponsePayload, RequestContext)> {
-    let mut executors = exec_ctx.gateway_executors.request_scoped();
-    let mut registry: ToolRegistry = match ctx.enriched_request.tools.as_mut() {
-        Some(tools) => ToolRegistry::build_with_handlers(tools, &mut executors).await?,
-        None => ToolRegistry::default(),
-    };
-    registry.cache_listed_mcp_tools(&ctx.enriched_request.input);
+    let mut registry = build_tool_registry(&mut ctx, exec_ctx).await?;
     let mut combined_output: Vec<OutputItem> = registry
         .mcp_list_tool_items()
         .map(mcp::handler::list_tools_output_item)
