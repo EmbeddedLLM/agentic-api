@@ -19,6 +19,7 @@ pub const DEFAULT_POSTGRES_STATEMENT_TIMEOUT_SECONDS: u64 = 30;
 pub const DEFAULT_SQLITE_MAX_CONNECTIONS: u32 = 4;
 pub const DEFAULT_SQLITE_JOURNAL_SIZE_LIMIT_BYTES: u64 = 6_144_000;
 pub const DEFAULT_SQLITE_MMAP_SIZE_BYTES: u64 = 268_435_456;
+pub const DEFAULT_MAX_CONCURRENT_GATEWAY_CALLS: usize = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PostgresConfig {
@@ -89,12 +90,28 @@ pub struct WebSearchProviderConfig {
     pub base_url: Option<String>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ToolRuntimeConfig {
     pub web_search: WebSearchProviderConfig,
     pub mcp_servers: HashMap<String, McpServerEntry>,
     pub mcp_allowed_hosts: Vec<String>,
     pub messages_gateway_tool_aliases: Option<String>,
+    /// Upper bound on gateway-owned tool calls executing concurrently within one
+    /// round. A sliding window admits another call as one finishes. Individual
+    /// handlers may further serialize calls to the same tool name.
+    pub max_concurrent_gateway_calls: usize,
+}
+
+impl Default for ToolRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            web_search: WebSearchProviderConfig::default(),
+            mcp_servers: HashMap::default(),
+            mcp_allowed_hosts: Vec::default(),
+            messages_gateway_tool_aliases: None,
+            max_concurrent_gateway_calls: DEFAULT_MAX_CONCURRENT_GATEWAY_CALLS,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

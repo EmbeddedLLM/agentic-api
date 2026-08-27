@@ -58,6 +58,10 @@ pub struct TurnBody {
     pub tool_choice: Option<Value>,
     #[serde(default)]
     pub max_output_tokens: Option<u64>,
+    #[serde(default)]
+    pub parallel_tool_calls: Option<bool>,
+    #[serde(default)]
+    pub previous_response_id: Option<String>,
 }
 
 fn default_true() -> bool {

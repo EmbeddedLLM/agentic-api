@@ -111,7 +111,7 @@ impl ExecutorError {
             Self::Storage(e) if e.is_not_found() => StatusCode::NOT_FOUND,
             Self::LLMRequest { status, .. } | Self::LLMTransport { status, .. } => *status,
             Self::ConversationLocked { .. }
-            | Self::Tool(ToolError::Config(_))
+            | Self::Tool(ToolError::Config(_) | ToolError::MissingOutput { .. })
             | Self::InvalidRequest(_)
             | Self::JsonError(_) => StatusCode::BAD_REQUEST,
             Self::Tool(ToolError::Execution(_)) | Self::CompactionFailed { .. } => StatusCode::BAD_GATEWAY,
@@ -125,7 +125,7 @@ impl ExecutorError {
     pub fn error_type(&self) -> &'static str {
         match self.client_visible_error() {
             Self::ConversationLocked { .. }
-            | Self::Tool(ToolError::Config(_))
+            | Self::Tool(ToolError::Config(_) | ToolError::MissingOutput { .. })
             | Self::InvalidRequest(_)
             | Self::ParseError(_)
             | Self::JsonError(_) => "invalid_request_error",

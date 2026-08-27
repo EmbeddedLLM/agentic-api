@@ -261,8 +261,7 @@ fn emit_mcp_discovery_lifecycle(
     stream_sender: &tokio::sync::mpsc::UnboundedSender<StreamEvent>,
 ) -> ExecutorResult<()> {
     let discovered_output = registry
-        .mcp_list_tools_items()
-        .iter()
+        .mcp_list_tool_items()
         .map(crate::tool::mcp::handler::list_tools_output_item)
         .collect::<Vec<_>>();
     let public_output = public_output_items(&discovered_output, registry, &[]);

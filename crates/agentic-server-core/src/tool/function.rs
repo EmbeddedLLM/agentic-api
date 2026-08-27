@@ -66,12 +66,7 @@ pub(crate) fn insert_function_entry(entries: &mut HashMap<String, ToolEntry>, p:
             if entries
                 .insert(
                     p.name.as_str().to_owned(),
-                    ToolEntry {
-                        tool_type: ToolType::Function,
-                        config,
-                        server_label: None,
-                        handler: None,
-                    },
+                    ToolEntry::client(ToolType::Function, config, None),
                 )
                 .is_some()
             {

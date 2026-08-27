@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use crate::config::{Config, default_database_url};
 use crate::error::Error;
+use crate::executor::gateway::set_max_concurrent_gateway_calls;
 use crate::executor::modes::{ConversationHandler, ResponseHandler};
 use crate::storage::backend::redact_database_urls;
 use crate::storage::{
@@ -157,6 +158,7 @@ impl ExecutionContext {
         let client = Arc::new(reqwest::Client::new());
         let gateway_executors = GatewayExecutors::from_config(Arc::clone(&client), &cfg.tools)
             .map_err(|error| Error::Config(format!("failed to validate configured MCP server policies: {error}")))?;
+        set_max_concurrent_gateway_calls(cfg.tools.max_concurrent_gateway_calls);
 
         Ok(Self {
             conv_handler,

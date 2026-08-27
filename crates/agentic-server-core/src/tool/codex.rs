@@ -58,12 +58,7 @@ pub(crate) fn insert_namespace_entries(entries: &mut HashMap<String, ToolEntry>,
                 if entries
                     .insert(
                         name.clone(),
-                        ToolEntry {
-                            tool_type: ToolType::CodexNamespace,
-                            config: config.clone(),
-                            server_label: Some(p.name.clone()),
-                            handler: None,
-                        },
+                        ToolEntry::client(ToolType::CodexNamespace, config.clone(), Some(p.name.clone())),
                     )
                     .is_some()
                 {

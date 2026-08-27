@@ -260,12 +260,7 @@ pub(crate) fn insert_custom_entry(entries: &mut HashMap<String, ToolEntry>, para
         |config| {
             entries.insert(
                 param.name.as_str().to_owned(),
-                ToolEntry {
-                    tool_type: ToolType::Custom,
-                    config,
-                    server_label: None,
-                    handler: None,
-                },
+                ToolEntry::client(ToolType::Custom, config, None),
             );
         },
         (),

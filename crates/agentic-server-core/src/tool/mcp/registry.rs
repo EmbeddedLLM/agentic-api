@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::tool::{ToolEntry, ToolType};
+use crate::tool::{GatewayBinding, ToolEntry, ToolType};
 use crate::types::tools::McpDiscoveredToolParam;
 use crate::utils::common::serialize_to_value_or_custom_default;
 
@@ -25,11 +25,11 @@ pub(crate) fn insert_discovered_mcp_entry(entries: &mut HashMap<String, ToolEntr
     } = param;
     entries.insert(
         internal_name,
-        ToolEntry {
-            tool_type: ToolType::Mcp,
+        ToolEntry::gateway(
+            ToolType::Mcp,
             config,
-            server_label: Some(server_label),
-            handler: Some(handler),
-        },
+            Some(server_label),
+            Some(GatewayBinding::new(handler)),
+        ),
     );
 }

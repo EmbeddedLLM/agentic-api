@@ -124,9 +124,14 @@ impl GatewayExecutors {
         }
     }
 
+    /// Always returns a real handler — falls back to [`WebSearchHandler::spec_only`]
+    /// when no provider was configured, so callers never need to handle a
+    /// missing gateway-owned `web_search` handler themselves.
     #[must_use]
-    pub fn web_search_handler(&self) -> Option<Arc<dyn GatewayExecutor>> {
-        self.web_search.clone()
+    pub fn web_search_handler(&self) -> Arc<dyn GatewayExecutor> {
+        self.web_search
+            .clone()
+            .unwrap_or_else(|| Arc::new(WebSearchHandler::spec_only()))
     }
 
     #[must_use]

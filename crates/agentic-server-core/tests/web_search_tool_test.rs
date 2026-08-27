@@ -7,7 +7,9 @@ use std::time::Duration;
 use agentic_core::executor::{ConversationHandler, ExecuteRequest, ExecutionContext, ResponseHandler};
 use agentic_core::storage::{ConversationStore, ResponseStore};
 use agentic_core::tool::{GatewayExecutor, WebSearchHandler};
-use agentic_core::types::io::{OutputItem, ResponsesInput, ToolChoice};
+use agentic_core::types::io::{
+    FunctionToolResultMessage, InputItem, OutputItem, ResponsesInput, ToolCallOutput, ToolChoice,
+};
 use agentic_core::types::request_response::RequestPayload;
 use agentic_core::types::tools::ResponsesTool;
 use axum::extract::State;
@@ -437,7 +439,7 @@ async fn web_search_handler_gets_query_params_from_you_and_formats_results() {
     let output_json: serde_json::Value = serde_json::from_str(&output.output).unwrap();
     assert_eq!(output_json["query"], "rust async");
     assert_eq!(output_json["results"]["web"][0]["url"], "https://example.com/rust");
-    assert_eq!(output_json["metadata"]["search_uuid"], "search_123");
+    assert_eq!(output_json["metadata"][0]["search_uuid"], "search_123");
 }
 
 #[tokio::test]
@@ -1083,6 +1085,22 @@ async fn execute_runs_web_search_and_sends_tool_output_back_to_model() {
     let second_input = request_bodies[1]["input"]
         .as_array()
         .expect("second request input array");
+    assert_eq!(
+        second_input
+            .iter()
+            .filter(|item| item["type"] == "function_call" && item["call_id"] == "call_search")
+            .count(),
+        1,
+        "persisted web_search function call must not be duplicated by its public output item"
+    );
+    assert_eq!(
+        second_input
+            .iter()
+            .filter(|item| item["type"] == "function_call_output" && item["call_id"] == "call_search")
+            .count(),
+        1,
+        "persisted web_search result must not be duplicated by its public output item"
+    );
     let tool_output = second_input
         .iter()
         .find(|item| item["type"] == "function_call_output")
@@ -1164,6 +1182,29 @@ async fn execute_relaxes_forced_tool_choice_after_web_search_result() {
     assert!(request_bodies[1].get("tool_choice").is_none());
 }
 
+fn base_payload(input: ResponsesInput) -> RequestPayload {
+    RequestPayload {
+        model: "test-model".to_owned(),
+        input,
+        instructions: None,
+        previous_response_id: None,
+        conversation_id: None,
+        tools: None,
+        tool_choice: None,
+        stream: false,
+        store: true,
+        include: None,
+        temperature: None,
+        top_p: None,
+        max_output_tokens: Some(1024),
+        truncation: None,
+        metadata: None,
+        parallel_tool_calls: None,
+        cache_salt: None,
+        context_management: None,
+    }
+}
+
 #[tokio::test]
 async fn execute_returns_mixed_client_tool_calls_without_followup_model_request() {
     let (you_url, mut captured_you, _you_handle) = spawn_mock_you().await;
@@ -1184,24 +1225,8 @@ async fn execute_returns_mixed_client_tool_calls_without_followup_model_request(
     }))
     .unwrap();
     let payload = RequestPayload {
-        model: "test-model".to_owned(),
-        input: ResponsesInput::Text("look up rust async and weather".to_owned()),
-        instructions: None,
-        previous_response_id: None,
-        conversation_id: None,
         tools: Some(vec![web_search, client_function]),
-        tool_choice: None,
-        stream: false,
-        store: true,
-        include: None,
-        temperature: None,
-        top_p: None,
-        max_output_tokens: Some(1024),
-        truncation: None,
-        metadata: None,
-        parallel_tool_calls: None,
-        cache_salt: None,
-        context_management: None,
+        ..base_payload(ResponsesInput::Text("look up rust async and weather".to_owned()))
     };
 
     let result = ExecuteRequest::new(payload, Arc::clone(&exec_ctx)).run().await.unwrap();
@@ -1233,24 +1258,13 @@ async fn execute_returns_mixed_client_tool_calls_without_followup_model_request(
     assert_eq!(function_names, ["get_weather"]);
 
     let continuation_payload = RequestPayload {
-        model: "test-model".to_owned(),
-        input: ResponsesInput::Text("continue".to_owned()),
-        instructions: None,
         previous_response_id: Some(response.id),
-        conversation_id: None,
-        tools: None,
-        tool_choice: None,
-        stream: false,
-        store: true,
-        include: None,
-        temperature: None,
-        top_p: None,
-        max_output_tokens: Some(1024),
-        truncation: None,
-        metadata: None,
-        parallel_tool_calls: None,
-        cache_salt: None,
-        context_management: None,
+        ..base_payload(ResponsesInput::Items(vec![InputItem::FunctionCallOutput(
+            FunctionToolResultMessage {
+                call_id: "call_weather".to_owned(),
+                output: ToolCallOutput::Text("{\"city\":\"San Francisco\",\"temperature_c\":18}".to_owned()),
+            },
+        )]))
     };
     let continuation = ExecuteRequest::new(continuation_payload, exec_ctx).run().await.unwrap();
     assert!(matches!(continuation, Either::Left(_)));

@@ -4,8 +4,10 @@
 //! injecting them into the enriched request before it is forwarded to the LLM.
 
 use crate::executor::error::{ExecutorError, ExecutorResult};
+use crate::executor::pending_calls::pending_calls;
 use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::storage::InOutItem;
+use crate::tool::ToolError;
 use crate::types::io::{InputItem, ResponsesInput, resolve_tool_choice, resolve_tools};
 use crate::types::request_response::RequestPayload;
 use crate::utils::uuid7_str;
@@ -49,15 +51,12 @@ pub async fn rehydrate_conversation(
 
     if ctx.original_request.conversation_id.is_some() {
         from_conversation(&mut ctx, exec_ctx).await?;
-        return Ok(ctx);
-    }
-
-    if ctx.original_request.previous_response_id.is_some() {
+    } else if ctx.original_request.previous_response_id.is_some() {
         from_response(&mut ctx, exec_ctx).await?;
-        return Ok(ctx);
+    } else {
+        ctx.enriched_request.input = ResponsesInput::Items(ctx.new_input_items.clone());
     }
 
-    ctx.enriched_request.input = ResponsesInput::Items(ctx.new_input_items.clone());
     Ok(ctx)
 }
 
@@ -73,6 +72,11 @@ async fn from_response(ctx: &mut RequestContext, exec_ctx: &ExecutionContext) ->
     let mut items = InOutItem::into_input_items(history);
     items.reserve(ctx.new_input_items.len());
     items.extend(ctx.new_input_items.iter().cloned());
+    if let Some(pending) = pending_calls(&items).into_iter().next() {
+        return Err(ExecutorError::Tool(ToolError::MissingOutput {
+            call_id: pending.call_id,
+        }));
+    }
 
     ctx.enriched_request.previous_response_id = None;
     ctx.enriched_request.input = ResponsesInput::Items(items);
@@ -109,6 +113,11 @@ async fn from_conversation(ctx: &mut RequestContext, exec_ctx: &ExecutionContext
     let mut items = InOutItem::into_input_items(snapshot.items);
     items.reserve(ctx.new_input_items.len());
     items.extend(ctx.new_input_items.iter().cloned());
+    if let Some(pending) = pending_calls(&items).into_iter().next() {
+        return Err(ExecutorError::Tool(ToolError::MissingOutput {
+            call_id: pending.call_id,
+        }));
+    }
 
     ctx.enriched_request.input = ResponsesInput::Items(items);
     ctx.conversation_id = Some(conv_data.conversation_id);
@@ -125,6 +134,7 @@ mod tests {
     use crate::storage::{
         ConversationStore, ConversationVersion, InOutItem, ResponseMetadata, ResponseStore, create_pool_with_schema,
     };
+    use crate::types::io::output::{McpListTools, OutputItem};
     use crate::types::request_response::RequestPayload;
 
     fn request(conversation_id: Option<&str>, previous_response_id: Option<&str>) -> RequestPayload {
@@ -199,6 +209,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn conversation_rehydration_remembers_listed_mcp_servers() -> Result<(), Box<dyn std::error::Error>> {
+        let pool = create_pool_with_schema(Some("sqlite://?mode=memory")).await?;
+        let conversation_store = ConversationStore::new(pool);
+        let conversation = conversation_store.create().await?;
+        conversation_store
+            .persist(
+                &conversation.conversation_id,
+                "resp_prior",
+                None,
+                vec![InOutItem::Output(OutputItem::McpListTools(McpListTools::new(
+                    "mcpl_prior",
+                    "counter",
+                    Vec::new(),
+                )))],
+                &ResponseMetadata::default(),
+            )
+            .await?;
+        let exec_ctx = execution_context(conversation_store, ResponseStore::disabled());
+
+        let ctx = rehydrate_conversation(request(Some(&conversation.conversation_id), None), &exec_ctx).await?;
+
+        let ResponsesInput::Items(items) = &ctx.enriched_request.input else {
+            panic!("rehydrated input should contain items");
+        };
+        assert!(
+            matches!(items.first(), Some(InputItem::McpListTools(list_tools)) if list_tools.server_label == "counter")
+        );
+        let ResponsesInput::Items(model_items) = ctx.enriched_request.input.model_input().into_owned() else {
+            panic!("model input should contain items");
+        };
+        assert!(
+            model_items
+                .iter()
+                .all(|item| !matches!(item, InputItem::McpListTools(_)))
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn request_without_continuation_has_no_conversation_version() -> Result<(), Box<dyn std::error::Error>> {
         let exec_ctx = execution_context(ConversationStore::disabled(), ResponseStore::disabled());
 
@@ -220,6 +269,43 @@ mod tests {
         let ctx = rehydrate_conversation(request(None, Some("resp_prior")), &exec_ctx).await?;
 
         assert_eq!(ctx.conversation_version, None);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn previous_response_rehydration_remembers_listed_mcp_servers() -> Result<(), Box<dyn std::error::Error>> {
+        let pool = create_pool_with_schema(Some("sqlite://?mode=memory")).await?;
+        let response_store = ResponseStore::new(pool);
+        response_store
+            .persist(
+                "resp_prior",
+                None,
+                vec![InOutItem::Output(OutputItem::McpListTools(McpListTools::new(
+                    "mcpl_prior",
+                    "counter",
+                    Vec::new(),
+                )))],
+                &ResponseMetadata::default(),
+            )
+            .await?;
+        let exec_ctx = execution_context(ConversationStore::disabled(), response_store);
+
+        let ctx = rehydrate_conversation(request(None, Some("resp_prior")), &exec_ctx).await?;
+
+        let ResponsesInput::Items(items) = &ctx.enriched_request.input else {
+            panic!("rehydrated input should contain items");
+        };
+        assert!(
+            matches!(items.first(), Some(InputItem::McpListTools(list_tools)) if list_tools.server_label == "counter")
+        );
+        let ResponsesInput::Items(model_items) = ctx.enriched_request.input.model_input().into_owned() else {
+            panic!("model input should contain items");
+        };
+        assert!(
+            model_items
+                .iter()
+                .all(|item| !matches!(item, InputItem::McpListTools(_)))
+        );
         Ok(())
     }
 }

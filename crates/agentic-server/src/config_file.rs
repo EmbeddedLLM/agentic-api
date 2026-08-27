@@ -37,6 +37,19 @@ impl McpFileConfig {
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
+pub(crate) struct ToolsFileConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_concurrent_gateway_calls: Option<u32>,
+}
+
+impl ToolsFileConfig {
+    fn is_empty(&self) -> bool {
+        self.max_concurrent_gateway_calls.is_none()
+    }
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
 pub(crate) struct MessagesGatewayFileConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_aliases: Option<String>,
@@ -59,6 +72,8 @@ pub(crate) struct FileConfig {
     pub web_search: WebSearchFileConfig,
     #[serde(skip_serializing_if = "McpFileConfig::is_empty")]
     pub mcp: McpFileConfig,
+    #[serde(skip_serializing_if = "ToolsFileConfig::is_empty")]
+    pub tools: ToolsFileConfig,
     #[serde(skip_serializing_if = "MessagesGatewayFileConfig::is_empty")]
     pub messages_gateway: MessagesGatewayFileConfig,
     #[serde(skip_serializing_if = "HashMap::is_empty")]

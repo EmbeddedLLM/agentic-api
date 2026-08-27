@@ -223,7 +223,9 @@ user-visible unit of interaction.
 ### tool registry
 
 The project-specific request-scoped mapping from model-visible tool names to their original type, configuration, and
-available executor. It routes calls after inference; it is not part of the Responses wire format.
+explicit ownership. Gateway-owned entries may contain a `GatewayBinding` with an executor and same-tool concurrency
+policy. The registry routes calls after inference and also retains MCP discovery-history metadata; it is not part of
+the Responses wire format.
 
 ### tool normalization
 

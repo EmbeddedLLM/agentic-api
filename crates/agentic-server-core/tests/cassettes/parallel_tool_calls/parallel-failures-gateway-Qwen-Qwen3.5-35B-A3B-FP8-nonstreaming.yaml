@@ -1,0 +1,544 @@
+turns:
+- filename: t1
+  request:
+    body:
+      input: 'Do both of these right now, in parallel, in this single turn -- do not
+        wait for one before starting another: (1) call get_weather for "London", and
+        (2) call get_weather for "Tokyo".'
+      max_output_tokens: 2048
+      model: Qwen/Qwen3.5-35B-A3B-FP8
+      parallel_tool_calls: true
+      store: true
+      stream: false
+      tool_choice: auto
+      tools:
+      - type: web_search_preview
+      - description: Get the current weather for a given city.
+        name: get_weather
+        parameters:
+          additionalProperties: false
+          properties:
+            city:
+              description: City name, e.g. Tokyo
+              type: string
+          required:
+          - city
+          type: object
+        strict: true
+        type: function
+      - description: Set the user's preferred temperature unit. This changes how temperatures
+          should be reported for the rest of this conversation. Call with the raw
+          unit as plain text input, e.g. fahrenheit -- not JSON.
+        name: set_temperature_unit
+        type: custom
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      conversation_id: null
+      created_at: 1787817601
+      error: null
+      id: resp_01a0423b-a0a8-7f72-86a6-8f483c9f2844
+      incomplete_details: null
+      instructions: null
+      model: Qwen/Qwen3.5-35B-A3B-FP8
+      object: response
+      output:
+      - content:
+        - text: 'The user is asking me to call get_weather for both "London" and "Tokyo"
+            in parallel, in the same turn. However, looking at the available tools,
+            I only have one get_weather function that takes a single city parameter.
+            I cannot call it twice simultaneously with different parameters.
+
+
+            I need to clarify this limitation to the user - I can only make one tool
+            call at a time, and the get_weather function only accepts one city at
+            a time. I''ll need to make two separate calls, but they will be sequential,
+            not parallel.
+
+
+            Let me explain this to the user and then proceed with making the calls
+            one after another.
+
+            '
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_ae982bd56c2adc06
+        status: null
+        summary: []
+        type: reasoning
+      - content:
+        - annotations: []
+          text: "I appreciate you asking me to run these in parallel, but I need to\
+            \ clarify something: the `get_weather` tool only accepts one city at a\
+            \ time (it has a single `city` parameter), and I can only make one tool\
+            \ call at a time. \n\nI'll need to make two separate calls - one for London\
+            \ and one for Tokyo. They won't be truly parallel, but I'll get both weather\
+            \ reports for you. Let me do that now:"
+          type: output_text
+        id: msg_bad63866747fc5bd
+        role: assistant
+        status: completed
+        type: message
+      - arguments: '{"city": "London"}'
+        call_id: chatcmpl-tool-8dcd079421b19883
+        id: fc_ae02e958313cbde0
+        name: get_weather
+        status: completed
+        type: function_call
+      - arguments: '{"city": "Tokyo"}'
+        call_id: chatcmpl-tool-a4757b20b1ff296e
+        id: fc_bcecda16270a877e
+        name: get_weather
+        status: completed
+        type: function_call
+      previous_response_id: null
+      status: completed
+      usage:
+        input_tokens: 848
+        input_tokens_details:
+          cached_tokens: 0
+        output_tokens: 282
+        output_tokens_details:
+          reasoning_tokens: 0
+        total_tokens: 1130
+    headers:
+      content-type: application/json
+    status_code: 200
+- filename: t2
+  request:
+    body:
+      input:
+      - call_id: chatcmpl-tool-8dcd079421b19883
+        output: '{"error": "weather service unavailable: upstream timeout"}'
+        type: function_call_output
+      - call_id: chatcmpl-tool-a4757b20b1ff296e
+        output: '{"city": "Tokyo", "temperature_c": 22, "condition": "Clear"}'
+        type: function_call_output
+      - content: What did you find for each of those two cities?
+        role: user
+        type: message
+      max_output_tokens: 2048
+      model: Qwen/Qwen3.5-35B-A3B-FP8
+      parallel_tool_calls: true
+      previous_response_id: resp_01a0423b-a0a8-7f72-86a6-8f483c9f2844
+      store: true
+      stream: false
+      tool_choice: auto
+      tools:
+      - type: web_search_preview
+      - description: Get the current weather for a given city.
+        name: get_weather
+        parameters:
+          additionalProperties: false
+          properties:
+            city:
+              description: City name, e.g. Tokyo
+              type: string
+          required:
+          - city
+          type: object
+        strict: true
+        type: function
+      - description: Set the user's preferred temperature unit. This changes how temperatures
+          should be reported for the rest of this conversation. Call with the raw
+          unit as plain text input, e.g. fahrenheit -- not JSON.
+        name: set_temperature_unit
+        type: custom
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      conversation_id: null
+      created_at: 1787817602
+      error: null
+      id: resp_01a0423b-a82b-7892-8834-3e87e709d5ff
+      incomplete_details: null
+      instructions: null
+      model: Qwen/Qwen3.5-35B-A3B-FP8
+      object: response
+      output:
+      - content:
+        - text: 'The user is asking about the weather results for both cities. I got
+            two tool results - one for London which had an error, and one for Tokyo
+            which was successful. Let me summarize what I found for each city.
+
+            '
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_882e2d6733093d98
+        status: null
+        summary: []
+        type: reasoning
+      - content:
+        - annotations: []
+          text: '
+
+
+            Based on the weather service results:
+
+
+            **London**: Unfortunately, the weather service was unavailable when I
+            tried to get London''s weather. The request timed out and returned an
+            error.
+
+
+            **Tokyo**: I was able to get Tokyo''s weather information:
+
+            - Temperature: 22°C
+
+            - Condition: Clear skies
+
+
+            Would you like me to try getting London''s weather again later, or is
+            there anything else I can help you with?'
+          type: output_text
+        id: msg_abac153aa36ee4e9
+        role: assistant
+        status: completed
+        type: message
+      previous_response_id: resp_01a0423b-a0a8-7f72-86a6-8f483c9f2844
+      status: completed
+      usage:
+        input_tokens: 1062
+        input_tokens_details:
+          cached_tokens: 0
+        output_tokens: 138
+        output_tokens_details:
+          reasoning_tokens: 0
+        total_tokens: 1200
+    headers:
+      content-type: application/json
+    status_code: 200
+- filename: t3
+  request:
+    body:
+      input: 'Do both of these right now, in parallel, in this single turn -- do not
+        wait for one before starting another: (1) call get_weather for "Tokyo", and
+        (2) call get_weather for "Atlantis".'
+      max_output_tokens: 2048
+      model: Qwen/Qwen3.5-35B-A3B-FP8
+      parallel_tool_calls: true
+      store: true
+      stream: false
+      tool_choice: auto
+      tools:
+      - type: web_search_preview
+      - description: Get the current weather for a given city.
+        name: get_weather
+        parameters:
+          additionalProperties: false
+          properties:
+            city:
+              description: City name, e.g. Tokyo
+              type: string
+          required:
+          - city
+          type: object
+        strict: true
+        type: function
+      - description: Set the user's preferred temperature unit. This changes how temperatures
+          should be reported for the rest of this conversation. Call with the raw
+          unit as plain text input, e.g. fahrenheit -- not JSON.
+        name: set_temperature_unit
+        type: custom
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      conversation_id: null
+      created_at: 1787817604
+      error: null
+      id: resp_01a0423b-b197-70a0-9686-59c12c564a36
+      incomplete_details: null
+      instructions: null
+      model: Qwen/Qwen3.5-35B-A3B-FP8
+      object: response
+      output:
+      - content:
+        - text: "The user wants me to call get_weather for two cities in parallel:\
+            \ Tokyo and Atlantis. I can see that I have the get_weather function available,\
+            \ but I notice there's only one parameter \"city\" and it's a single string,\
+            \ not an array. \n\nLooking at the function schema more carefully, get_weather\
+            \ only accepts a single city parameter, not multiple. However, the user\
+            \ is asking me to make two separate calls in parallel.\n\nI should make\
+            \ two separate function calls - one for Tokyo and one for Atlantis. Let\
+            \ me do this in parallel as requested.\n"
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_a633bae04cfa2322
+        status: null
+        summary: []
+        type: reasoning
+      - arguments: '{"city": "Tokyo"}'
+        call_id: chatcmpl-tool-8ff6e5abd1214c5e
+        id: fc_9257b93379b088b0
+        name: get_weather
+        status: completed
+        type: function_call
+      - arguments: '{"city": "Atlantis"}'
+        call_id: chatcmpl-tool-ae496d66897a40a5
+        id: fc_90e0e56d9233788c
+        name: get_weather
+        status: completed
+        type: function_call
+      previous_response_id: null
+      status: completed
+      usage:
+        input_tokens: 849
+        input_tokens_details:
+          cached_tokens: 0
+        output_tokens: 171
+        output_tokens_details:
+          reasoning_tokens: 0
+        total_tokens: 1020
+    headers:
+      content-type: application/json
+    status_code: 200
+- filename: t4
+  request:
+    body:
+      input:
+      - call_id: chatcmpl-tool-8ff6e5abd1214c5e
+        output: '{"city": "Tokyo", "temperature_c": 22, "condition": "Clear"}'
+        type: function_call_output
+      - content: What's the weather in Tokyo?
+        role: user
+        type: message
+      max_output_tokens: 2048
+      model: Qwen/Qwen3.5-35B-A3B-FP8
+      parallel_tool_calls: true
+      previous_response_id: resp_01a0423b-b197-70a0-9686-59c12c564a36
+      store: true
+      stream: false
+      tool_choice: auto
+      tools:
+      - type: web_search_preview
+      - description: Get the current weather for a given city.
+        name: get_weather
+        parameters:
+          additionalProperties: false
+          properties:
+            city:
+              description: City name, e.g. Tokyo
+              type: string
+          required:
+          - city
+          type: object
+        strict: true
+        type: function
+      - description: Set the user's preferred temperature unit. This changes how temperatures
+          should be reported for the rest of this conversation. Call with the raw
+          unit as plain text input, e.g. fahrenheit -- not JSON.
+        name: set_temperature_unit
+        type: custom
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      error:
+        code: invalid_request_error
+        message: 'tool error: No tool output found for function call chatcmpl-tool-ae496d66897a40a5.'
+        type: invalid_request_error
+    headers:
+      content-type: application/json
+    status_code: 400
+- filename: t5
+  request:
+    body:
+      input: 'Do both of these right now, in parallel, in this single turn -- do not
+        wait for one before starting another: (1) search the web for the exact query
+        "Atlantis weather today", and (2) call get_weather for "Atlantis".'
+      max_output_tokens: 2048
+      model: Qwen/Qwen3.5-35B-A3B-FP8
+      parallel_tool_calls: true
+      store: true
+      stream: false
+      tool_choice: auto
+      tools:
+      - type: web_search_preview
+      - description: Get the current weather for a given city.
+        name: get_weather
+        parameters:
+          additionalProperties: false
+          properties:
+            city:
+              description: City name, e.g. Tokyo
+              type: string
+          required:
+          - city
+          type: object
+        strict: true
+        type: function
+      - description: Set the user's preferred temperature unit. This changes how temperatures
+          should be reported for the rest of this conversation. Call with the raw
+          unit as plain text input, e.g. fahrenheit -- not JSON.
+        name: set_temperature_unit
+        type: custom
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      conversation_id: null
+      created_at: 1787817607
+      error: null
+      id: resp_01a0423b-bc31-7a70-ba75-69eee52a8f9e
+      incomplete_details: null
+      instructions: null
+      model: Qwen/Qwen3.5-35B-A3B-FP8
+      object: response
+      output:
+      - content:
+        - text: 'The user wants me to do two things in parallel:
+
+            1. Search the web for "Atlantis weather today"
+
+            2. Call get_weather for "Atlantis"
+
+
+            I need to use both tools in the same turn. The web_search function can
+            take a query parameter, and get_weather needs a city parameter. I''ll
+            call both at the same time.
+
+
+            Let me set up the function calls:
+
+            1. web_search with query "Atlantis weather today"
+
+            2. get_weather with city "Atlantis"
+
+            '
+          type: reasoning_text
+        encrypted_content: null
+        id: rs_bf2ba3e3015bc708
+        status: null
+        summary: []
+        type: reasoning
+      - action:
+          queries:
+          - Atlantis weather today
+          query: Atlantis weather today
+          sources:
+          - title: Atlantis, FL Weather Forecast | AccuWeather
+            url: https://www.accuweather.com/en/us/atlantis/33462/weather-forecast/328118
+          - title: Weather for Atlantis Island, New York, USA
+            url: https://www.timeanddate.com/weather/@5107485
+          - title: 10-Day Weather Forecast for Atlantis, Florida - The Weather Channel
+              ...
+            url: https://weather.com/us/florida/city/atlantis/tenday
+          - title: Atlantis, MD Weather Forecast | AccuWeather
+            url: https://www.accuweather.com/en/us/atlantis/21409/weather-forecast/2169413
+          - title: Atlantis, Florida | Current Weather Forecasts, Live Radar Maps
+              ...
+            url: https://www.weatherbug.com/weather-forecast/now/atlantis-fl-33462
+          - title: Hourly Weather Forecast for Atlantis, Florida 33462 - The Weather
+              ...
+            url: https://weather.com/weather/hourbyhour/l/Atlantis+FL+USFL0626:1:US
+          - title: 'Atlantis Weather Forecast: Hourly & 7-Day Outlook for Florida
+              • ...'
+            url: https://www.predictwind.com/weather/united-states/florida/atlantis
+          - title: National Weather Service
+            url: https://forecast.weather.gov/MapClick.php?site=mfl&map.x=264&map.y=64
+          - title: Atlantis, FL Hourly Weather | AccuWeather
+            url: https://www.accuweather.com/en/us/atlantis/33462/hourly-weather-forecast/328118
+          - title: Atlantis, Florida, USA 14 day weather forecast
+            url: https://www.timeanddate.com/weather/@4146372/ext
+          type: search
+        id: ws_b33de0417f427767
+        status: completed
+        type: web_search_call
+      - arguments: '{"city": "Atlantis"}'
+        call_id: chatcmpl-tool-bb1e56cee803040c
+        id: fc_a489aee71faee3e7
+        name: get_weather
+        status: completed
+        type: function_call
+      previous_response_id: null
+      status: completed
+      usage:
+        input_tokens: 854
+        input_tokens_details:
+          cached_tokens: 0
+        output_tokens: 166
+        output_tokens_details:
+          reasoning_tokens: 0
+        total_tokens: 1020
+    headers:
+      content-type: application/json
+    status_code: 200
+- filename: t6
+  request:
+    body:
+      input:
+      - content: Never mind the weather lookup -- just tell me one fun fact about
+          Atlantis instead.
+        role: user
+        type: message
+      max_output_tokens: 2048
+      model: Qwen/Qwen3.5-35B-A3B-FP8
+      parallel_tool_calls: true
+      previous_response_id: resp_01a0423b-bc31-7a70-ba75-69eee52a8f9e
+      store: true
+      stream: false
+      tool_choice: auto
+      tools:
+      - type: web_search_preview
+      - description: Get the current weather for a given city.
+        name: get_weather
+        parameters:
+          additionalProperties: false
+          properties:
+            city:
+              description: City name, e.g. Tokyo
+              type: string
+          required:
+          - city
+          type: object
+        strict: true
+        type: function
+      - description: Set the user's preferred temperature unit. This changes how temperatures
+          should be reported for the rest of this conversation. Call with the raw
+          unit as plain text input, e.g. fahrenheit -- not JSON.
+        name: set_temperature_unit
+        type: custom
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      error:
+        code: invalid_request_error
+        message: 'tool error: No tool output found for function call chatcmpl-tool-bb1e56cee803040c.'
+        type: invalid_request_error
+    headers:
+      content-type: application/json
+    status_code: 400
