@@ -6,7 +6,7 @@ use crate::executor::error::ExecutorError;
 use crate::tool::{ToolError, ToolRegistry, tool_search};
 use crate::types::event::MessageStatus;
 use crate::types::tools::{ToolSearchExecution, ToolSearchStatus};
-use crate::utils::common::deserialize_from_value_opt;
+use crate::utils::common::{deserialize_from_str, deserialize_from_value, deserialize_from_value_opt};
 use crate::utils::uuid7_str;
 
 use super::input::{
@@ -104,6 +104,30 @@ pub struct FunctionToolCall {
     pub status: MessageStatus,
 }
 
+/// Strict non-streaming wire shape used before tool classification.
+///
+/// [`FunctionToolCall`] intentionally supplies compatibility defaults for
+/// ordinary functions. This private shape lets the executor remember whether
+/// a call would be valid if its name is later classified as tool search.
+#[derive(Debug, Deserialize)]
+pub(crate) struct BlockingFunctionToolCall {
+    id: String,
+    call_id: String,
+    name: String,
+    #[serde(default)]
+    namespace: Option<Value>,
+    arguments: String,
+    status: MessageStatus,
+}
+
+impl TryFrom<&Value> for BlockingFunctionToolCall {
+    type Error = ToolError;
+
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        deserialize_from_value(value.clone()).map_err(|_| tool_search::invalid_upstream_search_call())
+    }
+}
+
 /// A newly emitted public client tool-search call.
 ///
 /// Unlike replay input, execution and status have no serde defaults: response
@@ -137,6 +161,13 @@ impl TryFrom<&FunctionToolCall> for ToolSearchCall {
 }
 
 impl ToolSearchCall {
+    pub(crate) fn from_blocking_output(value: Value) -> Result<Self, ToolError> {
+        if value.get("namespace").is_some_and(|namespace| !namespace.is_null()) {
+            return Err(tool_search::invalid_upstream_search_call());
+        }
+        deserialize_from_value(value).map_err(|_| tool_search::invalid_upstream_search_call())
+    }
+
     pub(crate) fn started_from_function(call: &FunctionToolCall) -> Result<Self, ToolError> {
         if call.id.trim().is_empty()
             || call.call_id.trim().is_empty()
@@ -152,6 +183,30 @@ impl ToolSearchCall {
             arguments: serde_json::Map::new(),
             status: ToolSearchStatus::InProgress,
         })
+    }
+}
+
+impl TryFrom<BlockingFunctionToolCall> for FunctionToolCall {
+    type Error = ToolError;
+
+    fn try_from(call: BlockingFunctionToolCall) -> Result<Self, Self::Error> {
+        if call.namespace.is_some() {
+            return Err(tool_search::invalid_upstream_search_call());
+        }
+        let call = Self {
+            id: call.id,
+            call_id: call.call_id,
+            name: call.name,
+            namespace: None,
+            arguments: call.arguments,
+            status: call.status,
+        };
+        ToolSearchCall::started_from_function(&call)?;
+        if call.status == MessageStatus::Completed {
+            deserialize_from_str::<serde_json::Map<String, Value>>(&call.arguments)
+                .map_err(|_| tool_search::invalid_upstream_search_call())?;
+        }
+        Ok(call)
     }
 }
 
