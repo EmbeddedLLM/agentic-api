@@ -92,12 +92,7 @@ impl ExecutorError {
     pub(crate) fn is_invalid_upstream_tool_search(&self) -> bool {
         matches!(
             self,
-            Self::Tool(ToolError::Execution(message))
-                if matches!(
-                    message.as_str(),
-                    "upstream returned an invalid tool-search call"
-                        | "upstream returned a call for a function that has not been loaded"
-                )
+            Self::Tool(ToolError::InvalidUpstreamToolSearch | ToolError::UpstreamWithheldFunctionCall)
         )
     }
 
@@ -126,7 +121,12 @@ impl ExecutorError {
             | Self::Tool(ToolError::Config(_))
             | Self::InvalidRequest(_)
             | Self::JsonError(_) => StatusCode::BAD_REQUEST,
-            Self::Tool(ToolError::Execution(_)) | Self::CompactionFailed { .. } => StatusCode::BAD_GATEWAY,
+            Self::Tool(
+                ToolError::Execution(_)
+                | ToolError::InvalidUpstreamToolSearch
+                | ToolError::UpstreamWithheldFunctionCall,
+            )
+            | Self::CompactionFailed { .. } => StatusCode::BAD_GATEWAY,
             Self::ParseError(_) => StatusCode::UNPROCESSABLE_ENTITY,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         }
@@ -143,7 +143,11 @@ impl ExecutorError {
             | Self::JsonError(_) => "invalid_request_error",
             Self::Storage(e) if e.is_not_found() => "not_found",
             Self::LLMRequest { .. } | Self::LLMTransport { .. } | Self::CompactionFailed { .. } => "upstream_error",
-            Self::Tool(ToolError::Execution(_)) => "tool_error",
+            Self::Tool(
+                ToolError::Execution(_)
+                | ToolError::InvalidUpstreamToolSearch
+                | ToolError::UpstreamWithheldFunctionCall,
+            ) => "tool_error",
             _ => "server_error",
         }
     }

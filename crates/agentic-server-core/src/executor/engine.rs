@@ -5,7 +5,6 @@
 //! primary entry point; [`execute`] is a convenience shim for callers that don't
 //! need per-request configuration.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_stream::stream;
@@ -23,16 +22,16 @@ use super::gateway::{
 };
 use super::gateway_accumulator::{GatewayStreamAccumulator, StreamEvent, error_sse_chunk};
 use crate::events::EventFrame;
-use crate::executor::error::ExecutorResult;
+use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::executor::inference::DONE_MARKER;
 use crate::executor::persist::persist_if_needed;
-use crate::executor::rehydrate::rehydrate_for_execution;
-use crate::executor::request::{ExecutionContext, RequestContext};
+use crate::executor::prepare::prepare_tool_search;
+use crate::executor::rehydrate::rehydrate_conversation;
+use crate::executor::request::{ExecutionContext, PreparedTurn, RequestContext};
 use crate::executor::upstream::{emit_deferred_stream_events, fetch_blocking_payload, fetch_stream_payload};
-use crate::tool::{ToolRegistry, ToolSearchState, mcp};
+use crate::tool::{ToolRegistry, mcp};
 use crate::types::io::{InputItem, OutputItem, ResponseUsage, ResponsesInput, ToolChoice};
 use crate::types::request_response::{IncompleteDetails, RequestPayload, ResponsePayload};
-use crate::types::tools::ResponsesTool;
 use crate::utils::common::utcnow_str;
 
 pub use crate::executor::inference::BoxStream;
@@ -98,13 +97,13 @@ impl<T> Drop for AbortOnDrop<T> {
 }
 
 async fn run_until_gateway_tools_complete(
-    ctx: RequestContext,
+    ctx: PreparedTurn,
     exec_ctx: &ExecutionContext,
     auth: Option<&str>,
     stream_upstream: bool,
     mut stream: Option<(&mut GatewayStreamAccumulator, &mpsc::UnboundedSender<StreamEvent>)>,
-) -> ExecutorResult<(ResponsePayload, RequestContext)> {
-    if ctx.enriched_request.input.has_compaction_trigger() {
+) -> ExecutorResult<(ResponsePayload, PreparedTurn)> {
+    if ctx.request().enriched_request.input.has_compaction_trigger() {
         let (payload, ctx) = run_compaction_trigger(ctx, exec_ctx, auth).await?;
         if let Some((stream_accumulator, stream_sender)) = stream.as_mut() {
             emit_response_start_events(&payload, stream_accumulator, stream_sender)?;
@@ -119,12 +118,12 @@ async fn run_until_gateway_tools_complete(
 }
 
 async fn run_gateway_tool_loop(
-    mut ctx: RequestContext,
+    mut ctx: PreparedTurn,
     exec_ctx: &ExecutionContext,
     auth: Option<&str>,
     stream_upstream: bool,
     mut stream: Option<(&mut GatewayStreamAccumulator, &mpsc::UnboundedSender<StreamEvent>)>,
-) -> ExecutorResult<(ResponsePayload, RequestContext)> {
+) -> ExecutorResult<(ResponsePayload, PreparedTurn)> {
     let registry = build_request_tool_registry(&mut ctx, exec_ctx).await?;
     let mut combined_output: Vec<OutputItem> = registry
         .mcp_list_tools_items()
@@ -134,7 +133,7 @@ async fn run_gateway_tool_loop(
     let mut combined_usage = None;
 
     for round in 0..MAX_GATEWAY_TOOL_ROUNDS {
-        let compaction_usage = maybe_compact_context(&mut ctx, exec_ctx, auth).await?;
+        let compaction_usage = maybe_compact_context(ctx.request_mut(), exec_ctx, auth).await?;
         accumulate_usage(&mut combined_usage, compaction_usage);
         let output_offset = combined_output.len();
         let (mut payload, deferred_stream_events): (ResponsePayload, Vec<_>) = if stream_upstream {
@@ -151,20 +150,19 @@ async fn run_gateway_tool_loop(
             .await?;
             (stream_payload.payload, stream_payload.deferred_events)
         } else {
-            (
-                fetch_blocking_payload(&ctx, exec_ctx, auth, &registry).await?,
-                Vec::new(),
-            )
+            let payload = fetch_blocking_payload(ctx.request(), exec_ctx, auth, &registry).await?;
+            (payload, Vec::new())
         };
-        registry.restore_final_payload_output(&mut payload.output)?;
+        registry.restore_final_payload_output(&mut payload.output);
         accumulate_usage(&mut combined_usage, payload.usage.take());
         let current_output = std::mem::take(&mut payload.output);
-        if matches!(payload.status.as_str(), "error" | "failed" | "incomplete") {
+        if matches!(payload.status.as_str(), "error" | "failed") {
             combined_output.extend(current_output);
             finalize_loop(&mut payload, combined_output, combined_usage, &ctx);
             return Ok((payload, ctx));
         }
-        log_custom_tool_calls(&current_output, &ctx.response_id);
+        let upstream_incomplete = payload.status == "incomplete";
+        log_custom_tool_calls(&current_output, &ctx.request().response_id);
         let has_client_owned = has_client_owned_calls(&current_output, &registry);
         let gateway_results = execute_and_emit_round_output_calls(
             &current_output,
@@ -180,14 +178,24 @@ async fn run_gateway_tool_loop(
         let public_output = public_output_items(&current_output, &registry, &gateway_results);
         combined_output.extend(public_output);
 
+        if upstream_incomplete {
+            append_gateway_calls_to_new_input(ctx.request_mut(), &current_output, &registry);
+            append_tool_outputs(
+                ctx.request_mut(),
+                gateway_results.into_iter().map(|result| result.input_item).collect(),
+            );
+            finalize_loop(&mut payload, combined_output, combined_usage, &ctx);
+            return Ok((payload, ctx));
+        }
+
         match classify_round(has_client_owned, &gateway_results, round, MAX_GATEWAY_TOOL_ROUNDS) {
             // Client-owned calls (plain function or Codex namespace tools) are
             // handed back to the caller. Gateway calls in the same turn are
             // still recorded so the returned conversation is complete.
             LoopDecision::RequiresClientAction => {
-                append_gateway_calls_to_new_input(&mut ctx, &current_output, &registry);
+                append_gateway_calls_to_new_input(ctx.request_mut(), &current_output, &registry);
                 append_tool_outputs(
-                    &mut ctx,
+                    ctx.request_mut(),
                     gateway_results.into_iter().map(|result| result.input_item).collect(),
                 );
                 finalize_loop(&mut payload, combined_output, combined_usage, &ctx);
@@ -204,9 +212,9 @@ async fn run_gateway_tool_loop(
             // The final round's gateway calls and outputs are recorded so a
             // continuation is not fed a dangling tool call.
             LoopDecision::Incomplete(reason) => {
-                append_gateway_calls_to_new_input(&mut ctx, &current_output, &registry);
+                append_gateway_calls_to_new_input(ctx.request_mut(), &current_output, &registry);
                 append_tool_outputs(
-                    &mut ctx,
+                    ctx.request_mut(),
                     gateway_results.into_iter().map(|result| result.input_item).collect(),
                 );
                 finalize_loop(&mut payload, combined_output, combined_usage, &ctx);
@@ -216,11 +224,11 @@ async fn run_gateway_tool_loop(
             }
             // Gateway tools ran and rounds remain; feed outputs back and loop.
             LoopDecision::Continue => {
-                ctx.inference_request_mut().tool_choice = Some(ToolChoice::Auto);
-                append_output_items_to_input(&mut ctx.inference_request_mut().input, &current_output);
-                append_gateway_calls_to_new_input(&mut ctx, &current_output, &registry);
+                ctx.request_mut().enriched_request.tool_choice = Some(ToolChoice::Auto);
+                append_output_items_to_input(&mut ctx.request_mut().enriched_request.input, &current_output);
+                append_gateway_calls_to_new_input(ctx.request_mut(), &current_output, &registry);
                 append_tool_outputs(
-                    &mut ctx,
+                    ctx.request_mut(),
                     gateway_results.into_iter().map(|result| result.input_item).collect(),
                 );
             }
@@ -245,33 +253,16 @@ fn log_custom_tool_calls(output: &[OutputItem], response_id: &str) {
 }
 
 async fn build_request_tool_registry(
-    ctx: &mut RequestContext,
+    ctx: &mut PreparedTurn,
     exec_ctx: &ExecutionContext,
 ) -> ExecutorResult<ToolRegistry> {
-    let loaded_mcp_server_labels = loaded_mcp_server_labels(ctx.tool_search_state.as_ref());
     let mut executors = exec_ctx.gateway_executors.request_scoped();
-    let mut registry = match ctx.inference_request_mut().tools.as_mut() {
-        Some(tools) => {
-            ToolRegistry::build_with_handlers_for_tool_search(tools, &mut executors, &loaded_mcp_server_labels).await?
-        }
+    let mut registry = match ctx.request_mut().enriched_request.tools.as_mut() {
+        Some(tools) => ToolRegistry::build_with_handlers(tools, &mut executors).await?,
         None => ToolRegistry::default(),
     };
-    if let Some(state) = &ctx.tool_search_state {
-        registry.classify_tool_search(state)?;
-    }
+    ctx.apply_tool_search_to_registry(&mut registry)?;
     Ok(registry)
-}
-
-fn loaded_mcp_server_labels(state: Option<&ToolSearchState>) -> HashSet<String> {
-    state
-        .filter(|state| state.is_active())
-        .into_iter()
-        .flat_map(ToolSearchState::loaded_public_tools)
-        .filter_map(|tool| match tool {
-            ResponsesTool::Mcp(mcp) => Some(mcp.server_label.clone()),
-            _ => None,
-        })
-        .collect()
 }
 
 /// Codex CLI remote-compaction V2: the client appends a `compaction_trigger`
@@ -280,25 +271,23 @@ fn loaded_mcp_server_labels(state: Option<&ToolSearchState>) -> HashSet<String> 
 /// The trigger never reaches the upstream model; the summary inference is a
 /// normal blocking call against the same backend as standalone compaction.
 async fn run_compaction_trigger(
-    mut ctx: RequestContext,
+    mut ctx: PreparedTurn,
     exec_ctx: &ExecutionContext,
     auth: Option<&str>,
-) -> ExecutorResult<(ResponsePayload, RequestContext)> {
-    let (model, instructions, input) = {
-        let inference_request = ctx.inference_request_mut();
-        (
-            inference_request.model.clone(),
-            inference_request.instructions.clone(),
-            std::mem::replace(&mut inference_request.input, ResponsesInput::Items(Vec::new())),
-        )
-    };
+) -> ExecutorResult<(ResponsePayload, PreparedTurn)> {
+    let model = ctx.request().enriched_request.model.clone();
+    let instructions = ctx.request().enriched_request.instructions.clone();
+    let input = std::mem::replace(
+        &mut ctx.request_mut().enriched_request.input,
+        ResponsesInput::Items(Vec::new()),
+    );
     let (mut compacted, usage) = compact_items(&model, input, instructions.as_deref(), exec_ctx, auth).await?;
     let Some(InputItem::Compaction(compaction)) = compacted.pop() else {
         unreachable!("compact_items always appends a compaction item");
     };
-    ctx.new_input_items = compacted;
+    ctx.request_mut().new_input_items = compacted;
     let mut payload = ResponsePayload {
-        id: ctx.response_id.clone(),
+        id: ctx.request().response_id.clone(),
         object: "response".to_owned(),
         created_at: utcnow_str(),
         model,
@@ -307,11 +296,13 @@ async fn run_compaction_trigger(
         usage: Some(usage),
         incomplete_details: None,
         error: None,
-        previous_response_id: ctx.original_request.previous_response_id.clone(),
-        conversation_id: ctx.conversation_id.clone(),
+        previous_response_id: ctx.request().original_request.previous_response_id.clone(),
+        conversation_id: ctx.request().conversation_id.clone(),
         instructions,
+        tools: None,
+        tool_choice: None,
     };
-    ctx.inject_ids(&mut payload);
+    ctx.request().inject_ids(&mut payload);
     Ok((payload, ctx))
 }
 
@@ -320,7 +311,7 @@ async fn execute_and_emit_round_output_calls(
     registry: &ToolRegistry,
     output_offset: usize,
     deferred_events: Vec<EventFrame>,
-    ctx: &RequestContext,
+    ctx: &PreparedTurn,
     stream: Option<(&mut GatewayStreamAccumulator, &mpsc::UnboundedSender<StreamEvent>)>,
 ) -> ExecutorResult<Vec<GatewayCallResult>> {
     match (deferred_events.is_empty(), stream) {
@@ -346,7 +337,7 @@ async fn execute_and_emit_ordered_output_calls(
     registry: &ToolRegistry,
     output_offset: usize,
     deferred_events: Vec<EventFrame>,
-    ctx: &RequestContext,
+    ctx: &PreparedTurn,
     stream_accumulator: &mut GatewayStreamAccumulator,
     stream_sender: &mpsc::UnboundedSender<StreamEvent>,
 ) -> ExecutorResult<Vec<GatewayCallResult>> {
@@ -437,15 +428,19 @@ fn finalize_loop(
     payload: &mut ResponsePayload,
     combined_output: Vec<crate::types::io::OutputItem>,
     combined_usage: Option<ResponseUsage>,
-    ctx: &RequestContext,
+    ctx: &PreparedTurn,
 ) {
     payload.output = combined_output;
     payload.usage = combined_usage;
-    ctx.inject_ids(payload);
+    ctx.request().inject_ids(payload);
+    if let Some(tools) = ctx.tool_search_response_tools() {
+        payload.tools = Some(tools);
+        payload.tool_choice = Some(ctx.request().enriched_request.tool_choice.clone().unwrap_or_default());
+    }
 }
 
 async fn run_blocking(
-    ctx: RequestContext,
+    ctx: PreparedTurn,
     exec_ctx: &ExecutionContext,
     auth: Option<&str>,
 ) -> ExecutorResult<ResponsePayload> {
@@ -458,9 +453,9 @@ async fn run_blocking(
     Ok(payload)
 }
 
-fn run_stream(ctx: RequestContext, exec_ctx: Arc<ExecutionContext>, auth: Option<String>) -> BoxStream {
+fn run_stream(ctx: PreparedTurn, exec_ctx: Arc<ExecutionContext>, auth: Option<String>) -> BoxStream {
     Box::pin(stream! {
-        let failure_context = StreamFailureContext::from(&ctx);
+        let failure_context = StreamFailureContext::from(ctx.request());
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
         let exec_ctx_for_run = Arc::clone(&exec_ctx);
         let event_tx_for_run = event_tx.clone();
@@ -556,7 +551,7 @@ impl From<&RequestContext> for StreamFailureContext {
 }
 
 impl StreamFailureContext {
-    fn failed_payload(&self, error: &crate::executor::error::ExecutorError) -> ResponsePayload {
+    fn failed_payload(&self, error: &ExecutorError) -> ResponsePayload {
         ResponsePayload {
             id: self.response_id.clone(),
             object: "response".to_owned(),
@@ -574,6 +569,8 @@ impl StreamFailureContext {
             previous_response_id: self.previous_response_id.clone(),
             conversation_id: self.conversation_id.clone(),
             instructions: self.instructions.clone(),
+            tools: None,
+            tool_choice: None,
         }
     }
 }
@@ -659,8 +656,9 @@ impl ExecuteRequest {
             tools = self.payload.tools.as_ref().map_or(0, Vec::len),
             "executor received responses request"
         );
-        let ctx = rehydrate_for_execution(self.payload, &self.exec_ctx).await?;
-        if ctx.original_request.stream {
+        let ctx = rehydrate_conversation(self.payload, &self.exec_ctx).await?;
+        let ctx = prepare_tool_search(ctx, &self.exec_ctx.conv_handler, &self.exec_ctx.resp_handler).await?;
+        if ctx.request().original_request.stream {
             Ok(Either::Right(run_stream(ctx, self.exec_ctx, self.client_auth)))
         } else {
             Ok(Either::Left(
@@ -750,72 +748,6 @@ mod tests {
             format!("http://{address}"),
         );
         (exec_ctx, server)
-    }
-
-    #[tokio::test]
-    async fn restored_loaded_mcp_remains_recoverable_without_history_position() {
-        let request: RequestPayload = serde_json::from_value(serde_json::json!({
-            "model": "test-model",
-            "input": "continue after compaction",
-            "tools": [
-                {
-                    "type": "tool_search",
-                    "execution": "client",
-                    "description": "Find a tool",
-                    "parameters": {"type": "object"}
-                },
-                {
-                    "type": "mcp",
-                    "server_label": "private_weather",
-                    "server_url": "http://url-user:url-password@127.0.0.1:1/mcp?token=query-secret",
-                    "require_approval": "never",
-                    "defer_loading": true
-                }
-            ],
-            "parallel_tool_calls": false
-        }))
-        .expect("valid tool-search continuation");
-        let loaded_mcp = request
-            .tools
-            .as_deref()
-            .expect("tools")
-            .iter()
-            .find(|tool| matches!(tool, ResponsesTool::Mcp(_)))
-            .expect("MCP declaration")
-            .clone();
-
-        let state = ToolSearchState::build_with_loaded_tools(&request, &[loaded_mcp], false)
-            .expect("compaction metadata restores loaded MCP definition");
-
-        assert!(state.mcp_load_positions().is_empty());
-        let loaded_mcp_server_labels = loaded_mcp_server_labels(Some(&state));
-        assert_eq!(loaded_mcp_server_labels, HashSet::from(["private_weather".to_owned()]));
-
-        let mut private_tools = state
-            .private_inference_request(&request)
-            .expect("restored state materializes private request")
-            .tools
-            .expect("private tools");
-        let registry = ToolRegistry::build_with_handlers_for_tool_search(
-            &mut private_tools,
-            &mut crate::tool::GatewayExecutors::default(),
-            &loaded_mcp_server_labels,
-        )
-        .await
-        .expect("restored loaded MCP transport failure becomes public discovery failure");
-
-        let [list_tools] = registry.mcp_list_tools_items() else {
-            panic!("expected one restored MCP list-tools failure item");
-        };
-        assert_eq!(list_tools.server_label, "private_weather");
-        assert_eq!(
-            list_tools.error.as_deref(),
-            Some("MCP server 'private_weather' failed to connect or list tools")
-        );
-        let public_item = serde_json::to_string(list_tools).expect("public list-tools item serializes");
-        for secret in ["url-user", "url-password", "query-secret"] {
-            assert!(!public_item.contains(secret), "public list-tools item leaked {secret}");
-        }
     }
 
     #[tokio::test]

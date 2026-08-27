@@ -59,7 +59,7 @@ async fn test_two_turn_nonstreaming_conversation() {
 }
 
 #[tokio::test]
-async fn tool_search_conversation_continuation_recovers_effective_tools_from_latest_metadata() {
+async fn tool_search_conversation_continuation_rebuilds_loaded_tools_from_history() {
     let fixture = TestFixture::new_with_responses(vec![
         function_call_response("fc_search", "call_search", "tool_search", r#"{"query":"weather"}"#),
         function_call_response("fc_weather", "call_weather", "get_weather", r#"{"city":"Paris"}"#),
@@ -142,7 +142,7 @@ async fn tool_search_conversation_continuation_recovers_effective_tools_from_lat
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|tool| tool["name"] == "tool_search")
+                .all(|tool| tool["name"] != "tool_search")
         );
         assert!(!request.to_string().contains("tool_search_call"));
         assert!(!request.to_string().contains("tool_search_output"));
@@ -150,7 +150,7 @@ async fn tool_search_conversation_continuation_recovers_effective_tools_from_lat
 }
 
 #[tokio::test]
-async fn tool_search_previous_response_branch_cannot_replace_conversation_metadata() {
+async fn tool_search_previous_response_branch_cannot_replace_conversation_history() {
     let fixture = TestFixture::new_with_responses(vec![
         function_call_response("fc_winner", "call_winner", "tool_search", r#"{"query":"winner"}"#),
         text_response("winner loaded"),

@@ -8,7 +8,7 @@ use super::super::models::Response as StorageDbResponse;
 use super::errors::StorageError;
 use crate::types::io::ToolChoice;
 use crate::types::tools::ResponsesTool;
-use crate::utils::common::{serialize_to_string, serialize_to_value};
+use crate::utils::common::serialize_to_string;
 
 /// Response metadata with effective configuration.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -23,15 +23,6 @@ pub struct ResponseMetadata {
     pub tool_search_loaded_tools: Option<Vec<ResponsesTool>>,
     pub effective_tool_choice: ToolChoice,
     pub effective_instructions: Option<String>,
-}
-
-impl PartialEq for ResponseMetadata {
-    fn eq(&self, other: &Self) -> bool {
-        // Tool wire models intentionally do not expose a broad `PartialEq`
-        // contract. Metadata equality follows their complete serialized public
-        // representation so `ConversationSnapshot` retains its existing API.
-        serialize_to_value(self).ok() == serialize_to_value(other).ok()
-    }
 }
 
 /// Domain entity for a stored LLM response.
@@ -152,9 +143,7 @@ mod tests {
         let mut tool = serde_json::from_value(serde_json::json!({
             "type": "mcp",
             "server_label": "counter",
-            "server_description": "Counter tools",
             "server_url": "https://mcp.example.com/mcp",
-            "defer_loading": true,
             "headers": {"X-API-Key": "secret"},
             "authorization": "bearer-secret",
             "require_approval": "never"
@@ -176,8 +165,8 @@ mod tests {
                 .expect("discovered MCP tool"),
             });
         let metadata = ResponseMetadata {
-            effective_tools: Some(vec![tool.clone()]),
-            tool_search_loaded_tools: Some(vec![tool]),
+            effective_tools: Some(vec![tool]),
+            tool_search_loaded_tools: None,
             ..ResponseMetadata::default()
         };
 
@@ -198,16 +187,6 @@ mod tests {
 
         assert!(tool.headers.is_none());
         assert!(tool.authorization.is_none());
-        assert_eq!(tool.server_description.as_deref(), Some("Counter tools"));
-        assert_eq!(tool.defer_loading, Some(true));
-
-        let loaded = persisted.tool_search_loaded_tools.expect("persisted loaded tools");
-        let ResponsesTool::Mcp(loaded) = &loaded[0] else {
-            panic!("expected loaded MCP tool");
-        };
-        assert!(loaded.headers.is_none());
-        assert!(loaded.authorization.is_none());
-        assert!(loaded.discovered_tools.is_empty());
     }
 
     #[test]

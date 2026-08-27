@@ -1,4 +1,5 @@
-use agentic_core::events::{EventPayload, SSEEventType, normalize_sse_line};
+use agentic_core::events::{EventPayload, SSEEventType, SSEItemType, normalize_sse_line};
+use agentic_core::types::tools::ToolSearchExecution;
 use serde::Deserialize;
 
 // --- Unit tests (per-event-type parsing) ---
@@ -208,6 +209,8 @@ fn test_output_item_added_function_call() {
         name,
         namespace,
         call_id,
+        execution,
+        ..
     } = &frame.payload
     {
         assert_eq!(item_id, "fc_1");
@@ -216,6 +219,7 @@ fn test_output_item_added_function_call() {
         assert_eq!(name.as_deref(), Some("get_weather"));
         assert_eq!(namespace.as_deref(), Some("mcp__weather"));
         assert_eq!(call_id.as_deref(), Some("call_1"));
+        assert_eq!(*execution, None);
     } else {
         panic!("expected OutputItemAdded payload");
     }
@@ -702,6 +706,26 @@ fn test_call_id_from_output_item_added() {
     } else {
         panic!("expected OutputItemAdded");
     }
+}
+
+#[test]
+fn test_native_tool_search_call_added_is_typed() {
+    let line = r#"data: {"type":"response.output_item.added","item":{"id":"tsc_native","type":"tool_search_call","status":"in_progress","call_id":"call_search","execution":"client","arguments":{}},"output_index":2,"sequence_number":4}"#;
+    let frame = normalize_sse_line(line).unwrap();
+
+    assert!(matches!(
+        frame.payload,
+        EventPayload::OutputItemAdded {
+            ref item_id,
+            item_type: SSEItemType::ToolSearchCall,
+            output_index: 2,
+            call_id: Some(ref call_id),
+            execution: Some(ToolSearchExecution::Client),
+            status: Some(ref status),
+            arguments: Some(ref arguments),
+            ..
+        } if item_id == "tsc_native" && call_id == "call_search" && status == "in_progress" && arguments.is_empty()
+    ));
 }
 
 #[test]

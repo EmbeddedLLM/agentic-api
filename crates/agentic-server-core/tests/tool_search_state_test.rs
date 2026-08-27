@@ -65,24 +65,26 @@ fn tool_values(tools: Option<&[agentic_core::ResponsesTool]>) -> Value {
     serde_json::to_value(tools).expect("prepared tools serialize")
 }
 
-fn private_request(state: &ToolSearchState, public: &RequestPayload) -> RequestPayload {
+fn private_request(state: &mut ToolSearchState, public: &RequestPayload) -> RequestPayload {
+    let mut private = public.clone();
     state
-        .private_inference_request(public)
-        .expect("prepared state materializes a private inference request")
+        .prepare_inference_request(&mut private)
+        .expect("prepared state materializes a private inference request");
+    private
 }
 
-fn private_tool_values(state: &ToolSearchState, public: &RequestPayload) -> Value {
+fn private_tool_values(state: &mut ToolSearchState, public: &RequestPayload) -> Value {
     let private = private_request(state, public);
     tool_values(private.tools.as_deref())
 }
 
-fn private_input_value(state: &ToolSearchState, public: &RequestPayload) -> Value {
+fn private_input_value(state: &mut ToolSearchState, public: &RequestPayload) -> Value {
     serde_json::to_value(private_request(state, public).input).expect("private input serializes")
 }
 
 fn synthetic_description(state: &ToolSearchState) -> &str {
     state
-        .synthetic_function()
+        .synthetic_tool_search()
         .and_then(|function| function.description.as_deref())
         .expect("active tool search has a synthetic description")
 }
@@ -109,23 +111,25 @@ fn fresh_and_sequential_state_has_distinct_deterministic_views() {
     ]);
     let request = request(tools, input);
 
-    let state = ToolSearchState::build(&request).expect("valid ordered history");
-    let rebuilt = ToolSearchState::build(&request).expect("same request builds again");
+    let mut state = ToolSearchState::build(&request).expect("valid ordered history");
+    let mut rebuilt = ToolSearchState::build(&request).expect("same request builds again");
+    let private = private_tool_values(&mut state, &request);
+    let rebuilt_private = private_tool_values(&mut rebuilt, &request);
 
     assert!(state.is_active());
     assert_eq!(
         serde_json::to_string(&(
             tool_values(state.public_effective_tools()),
-            private_tool_values(&state, &request),
+            &private,
             tool_values(Some(state.loaded_public_tools())),
-            serde_json::to_value(state.synthetic_function()).expect("synthetic declaration serializes")
+            serde_json::to_value(state.synthetic_tool_search()).expect("synthetic declaration serializes")
         ))
         .expect("state snapshot serializes"),
         serde_json::to_string(&(
             tool_values(rebuilt.public_effective_tools()),
-            private_tool_values(&rebuilt, &request),
+            &rebuilt_private,
             tool_values(Some(rebuilt.loaded_public_tools())),
-            serde_json::to_value(rebuilt.synthetic_function()).expect("synthetic declaration serializes")
+            serde_json::to_value(rebuilt.synthetic_tool_search()).expect("synthetic declaration serializes")
         ))
         .expect("rebuilt snapshot serializes")
     );
@@ -141,10 +145,9 @@ fn fresh_and_sequential_state_has_distinct_deterministic_views() {
     let loaded = tool_values(Some(state.loaded_public_tools()));
     assert_eq!(loaded, json!([dynamic]), "an exact repeated definition is idempotent");
 
-    let private = private_tool_values(&state, &request);
     assert_eq!(private.as_array().map(Vec::len), Some(3));
-    assert_eq!(private[0]["type"], "function");
-    assert_eq!(private[0]["name"], "tool_search");
+    assert_eq!(private[0]["type"], "tool_search");
+    assert_eq!(private[0]["execution"], "client");
     assert_eq!(private[1]["name"], "current_time");
     assert_eq!(private[2]["name"], "get_uv");
     assert!(private[2].get("defer_loading").is_none());
@@ -158,20 +161,126 @@ fn fresh_and_sequential_state_has_distinct_deterministic_views() {
     );
 
     assert_eq!(
-        serde_json::to_value(state.synthetic_function()).expect("synthetic declaration serializes"),
+        serde_json::to_value(state.synthetic_tool_search()).expect("synthetic declaration serializes"),
         json!({
-            "type": "function",
-            "name": "tool_search",
+            "execution": "client",
             "description": "Search the client tool catalog. Available catalog entry: get_weather — Get weather.",
             "parameters": {
                 "type": "object",
                 "properties": {"query": {"type": "string"}},
                 "required": ["query"],
                 "additionalProperties": false
-            },
-            "strict": true
+            }
         })
     );
+}
+
+#[test]
+fn optional_declaration_fields_get_private_defaults_and_supplied_values_are_preserved() {
+    let default_parameters = json!({
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "A concise description of the needed capabilities."
+            }
+        },
+        "required": ["query"],
+        "additionalProperties": false
+    });
+    let minimal = request(
+        json!([{"type": "tool_search", "execution": "client"}]),
+        json!("find a weather tool"),
+    );
+    let minimal_state = ToolSearchState::build(&minimal).expect("minimal declaration reaches state preparation");
+    let minimal_synthetic = serde_json::to_value(minimal_state.synthetic_tool_search()).expect("synthetic serializes");
+    assert_eq!(minimal_synthetic["description"], "Search the client tool catalog");
+    assert_eq!(minimal_synthetic["parameters"], default_parameters);
+
+    let supplied_declaration = search_declaration();
+    let supplied = request(json!([supplied_declaration.clone()]), json!("find a weather tool"));
+    let supplied_state = ToolSearchState::build(&supplied).expect("supplied declaration reaches state preparation");
+    let supplied_synthetic =
+        serde_json::to_value(supplied_state.synthetic_tool_search()).expect("synthetic serializes");
+    assert_eq!(supplied_synthetic["description"], supplied_declaration["description"]);
+    assert_eq!(supplied_synthetic["parameters"], supplied_declaration["parameters"]);
+
+    let supplied_parameters = json!({"type": "object", "properties": {"term": {"type": "string"}}});
+    let blank_description = request(
+        json!([{
+            "type": "tool_search",
+            "execution": "client",
+            "description": "   ",
+            "parameters": supplied_parameters.clone()
+        }]),
+        json!("find a weather tool"),
+    );
+    let state = ToolSearchState::build(&blank_description).expect("blank description is normalized privately");
+    let synthetic = serde_json::to_value(state.synthetic_tool_search()).expect("synthetic serializes");
+    assert_eq!(synthetic["description"], "Search the client tool catalog");
+    assert_eq!(synthetic["parameters"], supplied_parameters);
+
+    for invalid_parameters in [json!({}), json!({"type": "array"})] {
+        let invalid_schema = request(
+            json!([{
+                "type": "tool_search",
+                "execution": "client",
+                "description": "Find exactly the needed tool",
+                "parameters": invalid_parameters
+            }]),
+            json!("find a weather tool"),
+        );
+        let state = ToolSearchState::build(&invalid_schema).expect("invalid schema is normalized privately");
+        let synthetic = serde_json::to_value(state.synthetic_tool_search()).expect("synthetic serializes");
+        assert_eq!(synthetic["description"], "Find exactly the needed tool");
+        assert_eq!(synthetic["parameters"], default_parameters);
+    }
+}
+
+#[test]
+fn only_completed_search_outputs_load_definitions() {
+    let deferred = function("get_weather", "Get weather", "string", true);
+
+    for status in ["in_progress", "incomplete"] {
+        let mut output = search_output("call_search_1", vec![deferred.clone()]);
+        output["status"] = Value::String(status.to_owned());
+        let public = request(
+            json!([search_declaration(), deferred.clone()]),
+            json!([search_call("call_search_1"), output]),
+        );
+        let error = ToolSearchState::build(&public).expect_err("a non-completed output must not load definitions");
+        assert!(
+            error
+                .to_string()
+                .contains("must be completed before it may load tool definitions")
+        );
+    }
+
+    let mut output = search_output("call_search_1", vec![deferred.clone()]);
+    output["status"] = json!("completed");
+    let completed = request(
+        json!([search_declaration(), deferred.clone()]),
+        json!([search_call("call_search_1"), output]),
+    );
+    let state = ToolSearchState::build(&completed).expect("a completed output loads definitions");
+    assert_eq!(tool_values(Some(state.loaded_public_tools())), json!([deferred]));
+}
+
+#[test]
+fn replayed_search_calls_accept_documented_statuses() {
+    let deferred = function("get_weather", "Get weather", "string", true);
+
+    for status in ["in_progress", "completed", "incomplete"] {
+        let mut call = search_call("call_search_1");
+        call["status"] = Value::String(status.to_owned());
+        let public = request(
+            json!([search_declaration(), deferred.clone()]),
+            json!([call, search_output("call_search_1", vec![deferred.clone()])]),
+        );
+
+        let state = ToolSearchState::build(&public).expect("documented replayed call status is accepted");
+        assert_eq!(tool_values(Some(state.loaded_public_tools())), json!([deferred]));
+    }
 }
 
 #[test]
@@ -192,7 +301,7 @@ fn one_history_pass_prepares_canonical_private_input_without_mutating_public_inp
     );
     let public_before = serde_json::to_value(&request.input).expect("public input serializes");
 
-    let state = ToolSearchState::build(&request).expect("matching history prepares once");
+    let mut state = ToolSearchState::build(&request).expect("matching history prepares once");
 
     assert_eq!(
         serde_json::to_value(&request.input).expect("public input remains serializable"),
@@ -200,7 +309,7 @@ fn one_history_pass_prepares_canonical_private_input_without_mutating_public_inp
         "the public request must not be rewritten"
     );
     assert_eq!(
-        private_input_value(&state, &request),
+        private_input_value(&mut state, &request),
         json!([
             {"type": "message", "role": "user", "content": "find weather"},
             {
@@ -218,24 +327,6 @@ fn one_history_pass_prepares_canonical_private_input_without_mutating_public_inp
             }
         ])
     );
-}
-
-#[test]
-fn ordinary_request_builds_inactive_state_without_loaded_tools() {
-    let request = request(
-        json!([{
-            "type": "function",
-            "name": "ordinary",
-            "parameters": {"type": "object", "properties": {"secret_schema": {"type": "string"}}}
-        }]),
-        json!("hello"),
-    );
-
-    let state = ToolSearchState::build(&request).expect("ordinary request prepares inactive state");
-
-    assert!(!state.is_active());
-    assert!(state.public_effective_tools().is_none());
-    assert!(state.loaded_public_tools().is_empty());
 }
 
 #[test]
@@ -339,7 +430,6 @@ fn invalid_loaded_definitions_and_normalized_collisions_are_rejected() {
                         vec![json!({
                             "type": "mcp",
                             "server_label": "get_weather",
-                            "server_description": "A different kind",
                             "server_url": "https://mcp.example.test/mcp",
                             "defer_loading": true
                         })]
@@ -402,204 +492,37 @@ fn invalid_loaded_definitions_and_normalized_collisions_are_rejected() {
 }
 
 #[test]
-fn initial_and_dynamic_model_visible_declared_name_collisions_are_rejected() {
-    let initial_cases = [
-        json!([
-            search_declaration(),
-            {"type": "function", "name": "shared"},
-            {"type": "custom", "name": "shared"}
-        ]),
-        json!([
-            search_declaration(),
-            {"type": "function", "name": "web_search"},
-            {"type": "web_search_preview"}
-        ]),
-        json!([
-            search_declaration(),
-            {"type": "function", "name": "file_search"},
-            {"type": "file_search", "vector_store_ids": []}
-        ]),
-        json!([
-            search_declaration(),
-            {"type": "function", "name": "code_interpreter"},
-            {"type": "code_interpreter"}
-        ]),
-        json!([
-            search_declaration(),
-            {"type": "custom", "name": "agentic_ns__weather__forecast"},
-            {
-                "type": "namespace",
-                "name": "weather",
-                "tools": [{"type": "function", "name": "forecast"}]
-            }
-        ]),
-        json!([
-            search_declaration(),
-            {"type": "namespace", "name": "a__b", "tools": [{"type": "function", "name": "c"}]},
-            {"type": "namespace", "name": "a", "tools": [{"type": "function", "name": "b__c"}]}
-        ]),
-    ];
-    for tools in initial_cases {
-        assert!(
-            ToolSearchState::build(&request(tools, json!("find a tool"))).is_err(),
-            "initial normalized collisions must fail"
-        );
-    }
-
-    let dynamic_cases = [
-        (
-            json!([search_declaration(), {"type": "custom", "name": "shared"}]),
-            function("shared", "Dynamic function", "string", true),
-        ),
-        (
-            json!([search_declaration(), {"type": "web_search_preview"}]),
-            function("web_search", "Dynamic function", "string", true),
-        ),
-        (
-            json!([search_declaration(), {"type": "file_search", "vector_store_ids": []}]),
-            function("file_search", "Dynamic function", "string", true),
-        ),
-        (
-            json!([search_declaration(), {"type": "code_interpreter"}]),
-            function("code_interpreter", "Dynamic function", "string", true),
-        ),
-        (
-            json!([{
-                "type": "namespace",
-                "name": "weather",
-                "tools": [{"type": "function", "name": "forecast"}]
-            }, search_declaration()]),
-            function("agentic_ns__weather__forecast", "Dynamic function", "string", true),
-        ),
-    ];
-    for (tools, loaded) in dynamic_cases {
-        let input = json!([
-            search_call("call_search_1"),
-            search_output("call_search_1", vec![loaded])
-        ]);
-        assert!(
-            ToolSearchState::build(&request(tools, input)).is_err(),
-            "dynamic normalized collisions must fail"
-        );
-    }
-}
-
-#[test]
-fn canonical_mcp_equality_is_private_and_secret_sensitive() {
-    let mcp = json!({
-        "type": "mcp",
-        "server_label": "weather_mcp",
-        "server_description": "Weather tools",
-        "server_url": "https://mcp.example.test/private-path",
-        "headers": {"X-Private-Token": "header-secret-a"},
-        "authorization": "authorization-secret-a",
-        "defer_loading": true
-    });
-    let matching = request(
-        json!([search_declaration(), mcp.clone()]),
-        json!([
-            search_call("call_search_1"),
-            search_output("call_search_1", vec![mcp.clone()])
-        ]),
+fn initial_and_dynamic_namespace_collisions_are_rejected() {
+    let initial = json!([
+        search_declaration(),
+        {"type": "namespace", "name": "a__b", "tools": [{"type": "function", "name": "c"}]},
+        {"type": "namespace", "name": "a", "tools": [{"type": "function", "name": "b__c"}]}
+    ]);
+    assert!(
+        ToolSearchState::build(&request(initial, json!("find a tool"))).is_err(),
+        "initial namespace collisions must fail"
     );
-    let state = ToolSearchState::build(&matching).expect("an exact secret-bearing definition is idempotent");
-    let debug = format!("{state:?}");
-    for secret in ["private-path", "header-secret-a", "authorization-secret-a"] {
-        assert!(!debug.contains(secret), "state Debug leaked {secret}");
-    }
 
-    let mut conflicting = mcp;
-    conflicting["authorization"] = json!("authorization-secret-b");
-    let conflict = request(
-        matching.tools.map_or_else(
-            || json!([]),
-            |tools| serde_json::to_value(tools).expect("tools serialize"),
-        ),
-        json!([
-            search_call("call_search_2"),
-            search_output("call_search_2", vec![conflicting])
-        ]),
-    );
-    let error = ToolSearchState::build(&conflict).expect_err("credential changes are configuration conflicts");
-    let message = error.to_string();
-    for secret in [
-        "private-path",
-        "header-secret-a",
-        "authorization-secret-a",
-        "authorization-secret-b",
-    ] {
-        assert!(!message.contains(secret), "conflict error leaked {secret}");
-    }
-}
-
-#[test]
-fn loaded_mcp_model_output_projection_excludes_all_execution_configuration() {
-    let url_mcp = json!({
-        "type": "mcp",
-        "server_label": "weather_url",
-        "server_description": "Weather URL tools",
-        "server_url": "https://url-user:url-password@mcp.example.test/private-path?X-Amz-Credential=query-credential&sig=query-signature",
-        "headers": {
-            "Authorization": "Bearer header-authorization",
-            "X-Private-Token": "header-private-token"
-        },
-        "authorization": "top-level-authorization",
-        "allowed_tools": ["allowed-tool-sentinel"],
-        "require_approval": "approval-sentinel",
-        "defer_loading": true
-    });
-    let connector_mcp = json!({
-        "type": "mcp",
-        "server_label": "weather_connector",
-        "server_description": "Weather connector tools",
-        "connector_id": "connector-id-sentinel",
-        "defer_loading": true
-    });
-    let public = request(
-        json!([search_declaration()]),
-        json!([
-            search_call("call_search_url"),
-            search_output("call_search_url", vec![url_mcp]),
-            search_call("call_search_connector"),
-            search_output("call_search_connector", vec![connector_mcp])
-        ]),
-    );
-    let state = ToolSearchState::build(&public)
-        .expect("sensitive execution configuration remains valid private equality state");
-
-    let private_value = private_input_value(&state, &public);
-    let private_input = private_value.to_string();
-    for forbidden in [
-        "server_url",
-        "url-user",
-        "url-password",
-        "private-path",
-        "X-Amz-Credential",
-        "query-credential",
-        "query-signature",
-        "headers",
-        "header-authorization",
-        "header-private-token",
-        "authorization",
-        "top-level-authorization",
-        "connector_id",
-        "connector-id-sentinel",
-        "allowed_tools",
-        "allowed-tool-sentinel",
-        "require_approval",
-        "approval-sentinel",
-        "defer_loading",
-    ] {
-        assert!(!private_input.contains(forbidden), "private input leaked {forbidden}");
-    }
-    assert_eq!(
-        [private_value[1]["output"].as_str(), private_value[3]["output"].as_str()],
-        [
-            Some(r#"{"tools":[{"server_description":"Weather URL tools","server_label":"weather_url","type":"mcp"}]}"#),
-            Some(
-                r#"{"tools":[{"server_description":"Weather connector tools","server_label":"weather_connector","type":"mcp"}]}"#
-            ),
-        ]
+    let tools = json!([{
+        "type": "namespace",
+        "name": "weather",
+        "tools": [{"type": "function", "name": "forecast"}]
+    }, search_declaration()]);
+    let input = json!([
+        search_call("call_search_1"),
+        search_output(
+            "call_search_1",
+            vec![function(
+                "agentic_ns__weather__forecast",
+                "Dynamic function",
+                "string",
+                true
+            )]
+        )
+    ]);
+    assert!(
+        ToolSearchState::build(&request(tools, input)).is_err(),
+        "dynamic namespace collisions must fail"
     );
 }
 
@@ -628,15 +551,15 @@ fn loaded_namespace_model_output_is_identity_only_while_private_tools_retain_mem
             search_output("call_search_namespace", vec![namespace])
         ]),
     );
-    let state = ToolSearchState::build(&public).expect("loaded namespace prepares without transport behavior");
+    let mut state = ToolSearchState::build(&public).expect("loaded namespace prepares without transport behavior");
 
-    let private_input = private_input_value(&state, &public);
+    let private = private_request(&mut state, &public);
+    let private_input = serde_json::to_value(&private.input).expect("private input serializes");
     assert_eq!(
         private_input[1]["output"],
         r#"{"tools":[{"description":"Weather tools","name":"weather","type":"namespace"}]}"#
     );
-    let private_tools =
-        serde_json::to_string(&private_request(&state, &public).tools).expect("private tools serialize");
+    let private_tools = serde_json::to_string(&private.tools).expect("private tools serialize");
     assert!(
         private_tools.contains("forecast"),
         "loaded member must remain available to request lowering"
@@ -695,7 +618,7 @@ fn namespace_partial_load_merges_members_and_is_idempotent() {
             search_output("call_namespace_2", vec![loaded_subset.clone()])
         ]),
     );
-    let state =
+    let mut state =
         ToolSearchState::build(&public_request).expect("same-name partial namespace output merges exact members");
 
     let public = tool_values(state.public_effective_tools());
@@ -705,7 +628,7 @@ fn namespace_partial_load_merges_members_and_is_idempotent() {
     );
     let loaded = tool_values(Some(state.loaded_public_tools()));
     assert_eq!(loaded, json!([loaded_subset]), "exact member reload is idempotent");
-    let private = private_tool_values(&state, &public_request);
+    let private = private_tool_values(&mut state, &public_request);
     assert_eq!(private[1]["tools"].as_array().map(Vec::len), Some(2));
     assert!(private[1]["tools"][0].get("defer_loading").is_none());
     assert!(private[1]["tools"][1].get("defer_loading").is_none());
@@ -834,9 +757,10 @@ fn namespace_tool_choice_rejects_withheld_member_and_accepts_loaded_member() {
         serde_json::from_value(json!({"type": "function", "namespace": "weather", "name": "forecast"}))
             .expect("namespaced choice"),
     );
-    let state = ToolSearchState::build(&withheld).expect("state preparation succeeds before readiness check");
+    let mut state = ToolSearchState::build(&withheld).expect("state preparation succeeds before readiness check");
+    let mut private = withheld.clone();
     let error = state
-        .private_inference_request(&withheld)
+        .prepare_inference_request(&mut private)
         .expect_err("withheld namespace member cannot be forced");
     assert!(error.to_string().contains("before its definition is loaded"));
 
@@ -848,10 +772,8 @@ fn namespace_tool_choice_rejects_withheld_member_and_accepts_loaded_member() {
         ]),
     );
     loaded.tool_choice.clone_from(&withheld.tool_choice);
-    let state = ToolSearchState::build(&loaded).expect("exact namespace member loads");
-    let private = state
-        .private_inference_request(&loaded)
-        .expect("loaded member may be selected");
+    let mut state = ToolSearchState::build(&loaded).expect("exact namespace member loads");
+    let private = private_request(&mut state, &loaded);
     let upstream = serde_json::to_value(private.to_upstream_request(false).expect("private request lowers"))
         .expect("upstream request serializes");
     assert_eq!(
@@ -906,10 +828,8 @@ fn namespace_history_rejects_exact_withheld_calls_and_lowers_loaded_calls() {
             loaded_call
         ]),
     );
-    let state = ToolSearchState::build(&loaded_request).expect("loaded known history call remains valid");
-    let private = state
-        .private_inference_request(&loaded_request)
-        .expect("loaded namespace request prepares");
+    let mut state = ToolSearchState::build(&loaded_request).expect("loaded known history call remains valid");
+    let private = private_request(&mut state, &loaded_request);
     let upstream = serde_json::to_value(private.to_upstream_request(false).expect("loaded history lowers"))
         .expect("upstream request serializes");
     assert_eq!(upstream["input"][2]["name"], flat_name);
@@ -1002,9 +922,10 @@ fn top_level_function_tool_choices_require_the_definition_to_be_loaded() {
     ] {
         let mut withheld = request(json!([search_declaration(), deferred.clone()]), json!("find weather"));
         withheld.tool_choice = Some(serde_json::from_value(choice).expect("function tool choice"));
-        let state = ToolSearchState::build(&withheld).expect("state preparation succeeds before choice validation");
+        let mut state = ToolSearchState::build(&withheld).expect("state preparation succeeds before choice validation");
+        let mut private = withheld.clone();
         state
-            .private_inference_request(&withheld)
+            .prepare_inference_request(&mut private)
             .expect_err("a withheld function cannot be selected");
     }
 
@@ -1017,10 +938,8 @@ fn top_level_function_tool_choices_require_the_definition_to_be_loaded() {
     );
     loaded.tool_choice =
         Some(serde_json::from_value(json!({"type": "function", "name": "get_weather"})).expect("function tool choice"));
-    let state = ToolSearchState::build(&loaded).expect("loaded state");
-    state
-        .private_inference_request(&loaded)
-        .expect("a loaded function may be selected");
+    let mut state = ToolSearchState::build(&loaded).expect("loaded state");
+    private_request(&mut state, &loaded);
 }
 
 #[test]
@@ -1043,10 +962,10 @@ fn dynamically_returned_namespace_members_start_loaded_without_catalog_debt() {
             search_output("call_dynamic_namespace", vec![dynamic_namespace])
         ]),
     );
-    let state = ToolSearchState::build(&public).expect("dynamically returned namespace members are already loaded");
+    let mut state = ToolSearchState::build(&public).expect("dynamically returned namespace members are already loaded");
 
     assert_eq!(synthetic_description(&state), "Search the client tool catalog");
-    let private = private_tool_values(&state, &public);
+    let private = private_tool_values(&mut state, &public);
     assert_eq!(private[1]["tools"].as_array().map(Vec::len), Some(1));
     assert!(private[1]["tools"][0].get("defer_loading").is_none());
 }
@@ -1094,10 +1013,8 @@ fn dynamic_namespace_history_rejects_forward_references_but_accepts_valid_order_
                 call
             ]),
         );
-        let state = ToolSearchState::build(&valid).expect("output-before-call order is valid");
-        let private = state
-            .private_inference_request(&valid)
-            .expect("valid ordered request prepares");
+        let mut state = ToolSearchState::build(&valid).expect("output-before-call order is valid");
+        let private = private_request(&mut state, &valid);
         let upstream = serde_json::to_value(private.to_upstream_request(false).expect("valid history lowers"))
             .expect("upstream request serializes");
         assert_eq!(upstream["input"][2]["name"], flat_name);
@@ -1142,20 +1059,20 @@ fn declaration_free_manual_replay_builds_loaded_views_without_a_synthetic_declar
             search_output("call_search_1", vec![dynamic.clone()])
         ]),
     );
-    let state =
+    let mut state =
         ToolSearchState::build(&public_request).expect("manual public replay is valid without redeclaring tool_search");
 
     assert!(state.is_active());
-    assert!(state.synthetic_function().is_none());
+    assert!(state.synthetic_tool_search().is_none());
     assert_eq!(tool_values(Some(state.loaded_public_tools())), json!([dynamic]));
     let public = tool_values(state.public_effective_tools());
-    let private = private_tool_values(&state, &public_request);
+    let private = private_tool_values(&mut state, &public_request);
     assert_eq!(public[0]["defer_loading"], true);
     assert!(private[0].get("defer_loading").is_none());
 }
 
 #[test]
-fn private_inference_request_consumes_prepared_views_without_mutating_public_state() {
+fn prepare_inference_request_consumes_prepared_views_without_mutating_public_source() {
     let deferred = function("get_weather", "Get weather", "string", true);
     let public = request(
         json!([search_declaration(), deferred.clone()]),
@@ -1166,29 +1083,33 @@ fn private_inference_request_consumes_prepared_views_without_mutating_public_sta
         ]),
     );
     let public_before = serde_json::to_value(&public).expect("public request serializes");
-    let state = ToolSearchState::build(&public).expect("valid function-only state");
+    let mut state = ToolSearchState::build(&public).expect("valid function-only state");
     assert_eq!(tool_values(Some(state.loaded_public_tools())), json!([deferred]));
     assert_eq!(synthetic_description(&state), "Search the client tool catalog");
 
-    let private = state
-        .private_inference_request(&public)
-        .expect("private inference request consumes the prepared private view");
+    let private = private_request(&mut state, &public);
 
     assert_eq!(
         serde_json::to_value(&public).expect("public request still serializes"),
         public_before,
         "private lowering must not mutate the public request"
     );
-    let private_value = serde_json::to_value(private).expect("private request serializes");
+    let private_value = serde_json::to_value(&private).expect("private request serializes");
     assert_eq!(private_value["input"][1]["type"], "function_call");
     assert_eq!(private_value["input"][1]["name"], "tool_search");
     assert_eq!(private_value["input"][1]["call_id"], "call_search_1");
     assert_eq!(private_value["input"][2]["type"], "function_call_output");
     assert_eq!(private_value["input"][2]["call_id"], "call_search_1");
     assert_eq!(private_value["tools"].as_array().map(Vec::len), Some(2));
-    assert_eq!(private_value["tools"][0]["name"], "tool_search");
+    assert_eq!(private_value["tools"][0]["type"], "tool_search");
+    assert_eq!(private_value["tools"][0]["execution"], "client");
     assert_eq!(private_value["tools"][1]["name"], "get_weather");
     assert!(private_value["tools"][1].get("defer_loading").is_none());
+
+    let upstream = serde_json::to_value(private.to_upstream_request(false).expect("prepared request lowers"))
+        .expect("upstream request serializes");
+    assert_eq!(upstream["tools"][0]["type"], "function");
+    assert_eq!(upstream["tools"][0]["name"], "tool_search");
 }
 
 #[test]
@@ -1217,65 +1138,28 @@ fn safe_catalog_is_minimal_and_never_exposes_deferred_configuration() {
                     "parameters": {"type": "object", "properties": {"secret": {"type": "string"}}},
                     "defer_loading": true
                 }]
-            },
-            {
-                "type": "mcp",
-                "server_label": "hidden_mcp",
-                "server_description": "Safe MCP description",
-                "server_url": "https://mcp.example.test/secret-path",
-                "headers": {"Authorization": "Bearer catalog-secret"},
-                "authorization": "catalog-authorization-secret",
-                "allowed_tools": ["secret_discovered_tool"],
-                "require_approval": "never",
-                "defer_loading": true
-            },
-            {
-                "type": "mcp",
-                "server_label": "hidden_connector",
-                "server_description": "Safe connector description",
-                "connector_id": "connector-secret",
-                "defer_loading": true
             }
         ]),
         json!("find a tool"),
     );
 
     let public_before = serde_json::to_value(&request).expect("public request serializes");
-    let state = ToolSearchState::build(&request).expect("catalog construction is pure and needs no MCP connection");
-    let private = private_request(&state, &request);
+    let mut state = ToolSearchState::build(&request).expect("catalog construction is pure");
+    drop(private_request(&mut state, &request));
     assert_eq!(
         serde_json::to_value(&request).expect("public request still serializes"),
         public_before,
         "private materialization must preserve public deferred configuration"
     );
-    assert!(
-        private
-            .tools
-            .as_deref()
-            .expect("private tools")
-            .iter()
-            .all(|tool| !matches!(tool, agentic_core::ResponsesTool::Mcp(_))),
-        "deferred MCP entries must remain outside the private inference request"
-    );
     assert_eq!(
         synthetic_description(&state),
         "Search the client tool catalog. Available catalog entries: hidden_function — Safe function description; \
-hidden_namespace — Safe namespace description; hidden_mcp — Safe MCP description; hidden_connector — Safe connector \
-description."
+hidden_namespace — Safe namespace description."
     );
 
-    let model_visible = serde_json::to_string(&state.synthetic_function()).expect("synthetic declaration serializes");
-    for secret in [
-        "secret_parameter",
-        "secret_member",
-        "secret member description",
-        "secret-path",
-        "catalog-secret",
-        "catalog-authorization-secret",
-        "secret_discovered_tool",
-        "connector-secret",
-        "require_approval",
-    ] {
+    let model_visible =
+        serde_json::to_string(&state.synthetic_tool_search()).expect("synthetic declaration serializes");
+    for secret in ["secret_parameter", "secret_member", "secret member description"] {
         assert!(!model_visible.contains(secret), "catalog leaked {secret}");
     }
 }
@@ -1305,12 +1189,12 @@ fn replay_restores_loaded_deferred_tool_after_compaction_removed_search_pair() {
     }]))
     .expect("valid restored loaded definitions");
 
-    let state = ToolSearchState::build_with_loaded_tools(&request, &restored, false)
+    let mut state = ToolSearchState::build_with_loaded_tools(&request, &restored, false)
         .expect("typed metadata restores compaction-lost loaded state");
 
     assert_eq!(state.loaded_public_tools().len(), 1);
     assert_eq!(synthetic_description(&state), "Search the client tool catalog");
-    let private_request = private_request(&state, &request);
+    let private_request = private_request(&mut state, &request);
     let private = private_request.tools.as_deref().expect("private tools");
     let loaded = private
         .iter()
@@ -1368,7 +1252,7 @@ fn compacted_replay_does_not_reload_definition_omitted_by_explicit_tools() {
     }]))
     .expect("stored loaded definition");
 
-    let state = ToolSearchState::build_with_loaded_tools(&request, &restored, true)
+    let mut state = ToolSearchState::build_with_loaded_tools(&request, &restored, true)
         .expect("explicit tools define the post-compaction catalog");
     assert!(state.loaded_public_tools().is_empty());
     assert!(state
@@ -1376,117 +1260,12 @@ fn compacted_replay_does_not_reload_definition_omitted_by_explicit_tools() {
         .unwrap()
         .iter()
         .all(|tool| !matches!(tool, agentic_core::types::tools::ResponsesTool::Function(function) if function.name.as_str() == "get_weather")));
-    assert!(private_request(&state, &request)
+    assert!(private_request(&mut state, &request)
         .tools
         .as_deref()
         .expect("private tools")
         .iter()
         .all(|tool| !matches!(tool, agentic_core::types::tools::ResponsesTool::Function(function) if function.name.as_str() == "get_weather")));
-}
-
-#[test]
-fn replayed_mcp_loaded_marker_accepts_reprovided_credentials_but_rejects_public_config_change() {
-    let base_request = request(
-        json!([
-            search_declaration(),
-            {
-                "type": "mcp",
-                "server_label": "weather",
-                "server_description": "Weather tools",
-                "server_url": "https://mcp.example.test/mcp",
-                "headers": {"X-API-Key": "fresh-secret"},
-                "authorization": "fresh-authorization",
-                "require_approval": "never",
-                "defer_loading": true
-            }
-        ]),
-        json!([{
-            "type": "compaction",
-            "encrypted_content": "Weather MCP was loaded earlier."
-        }]),
-    );
-    let restored: Vec<agentic_core::types::tools::ResponsesTool> = serde_json::from_value(json!([{
-        "type": "mcp",
-        "server_label": "weather",
-        "server_description": "Weather tools",
-        "server_url": "https://mcp.example.test/mcp",
-        "require_approval": "never",
-        "defer_loading": true
-    }]))
-    .expect("sanitized persisted MCP marker");
-
-    let state = ToolSearchState::build_with_loaded_tools(&base_request, &restored, true)
-        .expect("reprovided credentials do not conflict with sanitized persisted state");
-    let private_request = private_request(&state, &base_request);
-    let loaded = private_request
-        .tools
-        .as_deref()
-        .expect("private tools")
-        .iter()
-        .find_map(|tool| match tool {
-            agentic_core::types::tools::ResponsesTool::Mcp(mcp) => Some(mcp),
-            _ => None,
-        })
-        .expect("loaded MCP remains effective");
-    assert_eq!(
-        loaded
-            .headers
-            .as_ref()
-            .and_then(|headers| headers.get("X-API-Key"))
-            .map(String::as_str),
-        Some("fresh-secret")
-    );
-    assert_eq!(loaded.authorization.as_deref(), Some("fresh-authorization"));
-    assert_eq!(loaded.defer_loading, None);
-
-    let persisted_history_request = request(
-        json!([
-            search_declaration(),
-            {
-                "type": "mcp",
-                "server_label": "weather",
-                "server_description": "Weather tools",
-                "server_url": "https://mcp.example.test/mcp",
-                "headers": {"X-API-Key": "fresh-secret"},
-                "authorization": "fresh-authorization",
-                "require_approval": "never",
-                "defer_loading": true
-            }
-        ]),
-        json!([
-            {
-                "type": "tool_search_call",
-                "id": "tsc_stored_mcp",
-                "call_id": "call_stored_mcp",
-                "arguments": {"query": "weather"}
-            },
-            {
-                "type": "tool_search_output",
-                "call_id": "call_stored_mcp",
-                "tools": [{
-                    "type": "mcp",
-                    "server_label": "weather",
-                    "server_description": "Weather tools",
-                    "server_url": "https://mcp.example.test/mcp",
-                    "require_approval": "never",
-                    "defer_loading": true
-                }]
-            }
-        ]),
-    );
-    ToolSearchState::build_with_loaded_tools(&persisted_history_request, &restored, true)
-        .expect("trusted restored MCP state reconciles its sanitized persisted output");
-    assert!(
-        ToolSearchState::build(&persisted_history_request).is_err(),
-        "fresh untrusted sanitized output must not weaken credential-sensitive equality"
-    );
-
-    let mut changed = restored;
-    let agentic_core::types::tools::ResponsesTool::Mcp(changed_mcp) = &mut changed[0] else {
-        panic!("MCP marker")
-    };
-    changed_mcp.server_url = Some("https://mcp.example.test/changed".to_owned());
-    assert!(ToolSearchState::build_with_loaded_tools(&base_request, &changed, true).is_err());
 }
 
 #[test]

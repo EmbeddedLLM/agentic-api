@@ -2,7 +2,6 @@
 
 use super::super::models::Conversation as StorageDbConversation;
 use super::item::InOutItem;
-use super::response::ResponseMetadata;
 
 /// Version of a conversation's stored item history.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,11 +28,6 @@ pub struct ConversationSnapshot {
     pub items: Vec<InOutItem>,
     /// Version derived from the last stored item sequence.
     pub version: ConversationVersion,
-    /// Effective public settings from the latest item-bearing persisted turn.
-    ///
-    /// Item-free writes do not advance [`ConversationVersion`] and cannot be
-    /// correlated to a distinct conversation checkpoint without a schema pointer.
-    pub latest_response_metadata: Option<ResponseMetadata>,
 }
 
 /// Domain entity for a stored conversation.

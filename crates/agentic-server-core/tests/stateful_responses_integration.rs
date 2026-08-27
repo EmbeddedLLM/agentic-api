@@ -816,9 +816,6 @@ async fn tool_search_store_false_manual_replay_completes_without_reusable_respon
     let lookup_ctx = RequestContext {
         original_request: make_request("lookup", true, false, Some(final_response.id.clone()), None),
         enriched_request: make_request("lookup", true, false, Some(final_response.id), None),
-        tool_search_state: None,
-        tool_search_private_request: None,
-        tool_search_loaded_tools: None,
         new_input_items: Vec::new(),
         response_id: "resp_lookup".to_owned(),
         conversation_id: None,
@@ -883,9 +880,6 @@ async fn test_previous_response_id_persists_inherited_tools_and_choice() {
             previous_response_id: Some(p2.id.clone()),
             ..make_request("lookup", true, false, None, None)
         },
-        tool_search_state: None,
-        tool_search_private_request: None,
-        tool_search_loaded_tools: None,
         new_input_items: vec![],
         response_id: "resp_lookup".into(),
         conversation_id: None,

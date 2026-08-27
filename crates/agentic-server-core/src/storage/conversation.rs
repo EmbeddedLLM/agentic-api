@@ -3,7 +3,6 @@
 use std::convert::TryFrom;
 use std::sync::Arc;
 
-use super::backend::DatabaseBackend;
 use super::models::{conversation, item, response};
 use super::pool::DbPool;
 use super::types::{
@@ -90,24 +89,7 @@ impl ConversationStore {
     /// Returns an error if a stored item is missing its sequence number or if the database query fails.
     pub async fn rehydrate_snapshot(&self, conversation_id: &str) -> StoreResult<ConversationSnapshot> {
         let pool = self.pool()?;
-        let mut tx = pool.begin().await?;
-        if DatabaseBackend::from_connection(tx.as_mut()) == DatabaseBackend::Postgres {
-            sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
-                .execute(&mut *tx)
-                .await?;
-        }
-        let rows = item::get_items_by_conversation_in_tx(&mut tx, conversation_id).await?;
-        let latest_item_id = rows.last().map(|row| row.id.as_str());
-        let conversation_turns = response::get_conversation_turns_in_tx(&mut tx, conversation_id).await?;
-        let latest_response = latest_item_id.and_then(|latest_item_id| {
-            conversation_turns.into_iter().find(|response| {
-                response
-                    .history_item_ids_vec()
-                    .last()
-                    .is_some_and(|item_id| item_id == latest_item_id)
-            })
-        });
-        tx.commit().await?;
+        let rows = item::get_items_by_conversation(pool, conversation_id).await?;
 
         let mut last_sequence = None;
         for row in &rows {
@@ -120,8 +102,28 @@ impl ConversationStore {
         Ok(ConversationSnapshot {
             items: rows.into_iter().filter_map(|row| row.as_inout()).collect(),
             version: ConversationVersion::from_last_sequence(last_sequence),
-            latest_response_metadata: latest_response.and_then(|row| row.metadata_as()),
         })
+    }
+
+    /// Loads metadata from the item-bearing persisted turn at a captured version.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if either targeted database lookup fails.
+    pub async fn response_metadata_at_version(
+        &self,
+        conversation_id: &str,
+        version: ConversationVersion,
+    ) -> StoreResult<Option<ResponseMetadata>> {
+        let ConversationVersion::LastSequence(sequence) = version else {
+            return Ok(None);
+        };
+        let pool = self.pool()?;
+        let Some(item_id) = item::get_id_by_conversation_sequence(pool, conversation_id, sequence).await? else {
+            return Ok(None);
+        };
+        let response = response::get_conversation_turn_for_item(pool, conversation_id, &item_id).await?;
+        Ok(response.and_then(|row| row.metadata_as()))
     }
 
     /// Persists conversation turn with new items and response metadata.

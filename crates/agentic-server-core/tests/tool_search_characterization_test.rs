@@ -5,6 +5,8 @@ use std::fs;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 
+use agentic_core::RequestPayload;
+use agentic_core::tool::{ToolSearchState, model_visible_namespace_member_name};
 use serde_json::Value;
 
 #[derive(Clone, Copy)]
@@ -18,9 +20,15 @@ struct SemanticFlow {
     execution: &'static str,
     status: &'static str,
     returned_tools: Value,
-    loaded_function_name: String,
-    function_output: Value,
+    loaded_calls: Vec<LoadedCall>,
     final_text: String,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct LoadedCall {
+    namespace: Option<String>,
+    name: String,
+    function_output: Value,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -40,6 +48,13 @@ const DIRECT_VLLM_STREAMING_CASSETTE: &str = "tool-search-direct-vllm-Qwen-Qwen3
 const GATEWAY_BLOCKING_CASSETTE: &str = "tool-search-gateway-Qwen-Qwen3.6-35B-A3B-FP8-nonstreaming.yaml";
 const GATEWAY_STREAMING_CASSETTE: &str = "tool-search-gateway-Qwen-Qwen3.6-35B-A3B-FP8-streaming.yaml";
 const GATEWAY_WEBSOCKET_CASSETTE: &str = "tool-search-gateway-Qwen-Qwen3.6-35B-A3B-FP8-websocket.yaml";
+
+fn tool_search_cassette_directory() -> PathBuf {
+    std::env::var_os("TOOL_SEARCH_CASSETTE_DIR").map_or_else(
+        || Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/cassettes/tool_search"),
+        PathBuf::from,
+    )
+}
 
 fn one_gateway_stream_cassette(directory: &Path, suffix: &str) -> PathBuf {
     let matches = fs::read_dir(directory)
@@ -168,6 +183,99 @@ fn assert_stream_completed(events: &[Value]) {
         .collect::<Vec<_>>();
     assert_eq!(completed.len(), 1, "recorded stream should complete exactly once");
     assert_eq!(completed[0]["response"]["status"], "completed");
+}
+
+fn response_lifecycle_metadata(turn: &support::Turn) -> Vec<Value> {
+    support::recorded_named_sse_events(turn)
+        .into_iter()
+        .filter(|event| {
+            matches!(
+                event["type"].as_str(),
+                Some("response.created" | "response.in_progress" | "response.completed")
+            )
+        })
+        .collect()
+}
+
+fn assert_post_search_response_metadata(turn: &support::Turn, expected_tools: &Value) {
+    let events = response_lifecycle_metadata(turn);
+    assert_eq!(
+        events
+            .iter()
+            .map(|event| event["type"].as_str().expect("lifecycle event type"))
+            .collect::<Vec<_>>(),
+        ["response.created", "response.in_progress", "response.completed"]
+    );
+    let expected_choice = turn
+        .request
+        .body
+        .tool_choice
+        .as_ref()
+        .expect("tool-search flow turn should specify tool_choice");
+    for event in events {
+        assert_eq!(
+            canonical_response_tools(&event["response"]["tools"]),
+            *expected_tools,
+            "{} must expose only public callable tools",
+            event["type"]
+        );
+        assert_eq!(
+            &event["response"]["tool_choice"], expected_choice,
+            "{} must preserve the public tool choice",
+            event["type"]
+        );
+    }
+}
+
+fn canonical_response_tools(tools: &Value) -> Value {
+    let mut tools = tools.clone();
+    let Some(tool_array) = tools.as_array_mut() else {
+        return tools;
+    };
+    for tool in tool_array {
+        canonical_response_tool(tool, false);
+    }
+    tools
+}
+
+fn canonical_response_tool(tool: &mut Value, make_callable: bool) {
+    let Some(tool) = tool.as_object_mut() else {
+        return;
+    };
+    if make_callable {
+        tool.remove("defer_loading");
+    }
+    if tool.get("output_schema").is_some_and(Value::is_null) {
+        tool.remove("output_schema");
+    }
+    if let Some(members) = tool.get_mut("tools").and_then(Value::as_array_mut) {
+        for member in members {
+            canonical_response_tool(member, make_callable);
+        }
+    }
+}
+
+fn expected_loaded_response_tools(directory: &Path) -> Value {
+    let mut tools = fixture_json(directory, "returned_tools.json");
+    for tool in tools.as_array_mut().expect("returned tools fixture") {
+        canonical_response_tool(tool, true);
+    }
+    tools
+}
+
+fn assert_loaded_response_tool_shape(tools: &Value) {
+    let tools = tools.as_array().expect("loaded response tools should be an array");
+    assert_eq!(tools.len(), 2);
+    assert_eq!(tools[0]["type"], "function");
+    assert_eq!(tools[0]["name"], "get_weather");
+    assert!(tools[0].get("defer_loading").is_none());
+    assert_eq!(tools[1]["type"], "namespace");
+    assert_eq!(tools[1]["name"], "travel");
+    let members = tools[1]["tools"].as_array().expect("travel namespace members");
+    assert_eq!(members.len(), 1);
+    assert_eq!(members[0]["type"], "function");
+    assert_eq!(members[0]["name"], "get_timezone");
+    assert!(members[0].get("defer_loading").is_none());
 }
 
 fn assert_observed_call_lifecycle(turn: &support::Turn) -> (String, String, Value) {
@@ -367,14 +475,80 @@ fn normalize_search_step(response: &Value, continuation: &Value, projection: Pro
     }
 }
 
-fn normalize_loaded_step(response: &Value, continuation: &Value, returned_tools: &Value) -> (String, Value) {
+fn returned_identity_for_call(
+    loaded_call: &Value,
+    returned_tools: &Value,
+    projection: Projection,
+) -> (Option<String>, String) {
+    let raw_name = loaded_call["name"]
+        .as_str()
+        .expect("loaded function call should have a name");
+    let raw_namespace = loaded_call.get("namespace").and_then(Value::as_str);
+    let returned_tools = returned_tools
+        .as_array()
+        .expect("search output tools should be an array");
+
+    if let Some(namespace) = raw_namespace {
+        assert!(
+            matches!(projection, Projection::Public),
+            "direct-vLLM calls should use a flattened model-visible name"
+        );
+        let namespace_tool = returned_tools
+            .iter()
+            .find(|tool| tool["type"] == "namespace" && tool["name"] == namespace)
+            .expect("public namespace call should come from the search output");
+        assert!(
+            namespace_tool["tools"]
+                .as_array()
+                .is_some_and(|members| members.iter().any(|member| member["name"] == raw_name)),
+            "public namespace member should come from the search output"
+        );
+        return (Some(namespace.to_owned()), raw_name.to_owned());
+    }
+
+    if returned_tools
+        .iter()
+        .any(|tool| tool["type"] == "function" && tool["name"] == raw_name)
+    {
+        return (None, raw_name.to_owned());
+    }
+
+    assert!(
+        matches!(projection, Projection::Normalized),
+        "public namespace calls should preserve their namespace"
+    );
+    for namespace_tool in returned_tools.iter().filter(|tool| tool["type"] == "namespace") {
+        let namespace = namespace_tool["name"]
+            .as_str()
+            .expect("returned namespace should have a name");
+        for member in namespace_tool["tools"]
+            .as_array()
+            .expect("returned namespace should contain members")
+        {
+            let member_name = member["name"]
+                .as_str()
+                .expect("returned namespace member should have a name");
+            if model_visible_namespace_member_name(namespace, member_name) == raw_name {
+                return (Some(namespace.to_owned()), member_name.to_owned());
+            }
+        }
+    }
+    panic!("called function should come from the search output: {raw_name}");
+}
+
+fn normalize_loaded_step(
+    response: &Value,
+    continuation: &Value,
+    returned_tools: &Value,
+    projection: Projection,
+) -> LoadedCall {
     let output = response["output"]
         .as_array()
-        .expect("second response output should be an array");
+        .expect("loaded-tool response output should be an array");
     assert_eq!(
         client_calls(output).len(),
         1,
-        "second response should contain exactly one client call"
+        "each loaded-tool response should contain exactly one client call"
     );
     let loaded_calls = output
         .iter()
@@ -383,23 +557,12 @@ fn normalize_loaded_step(response: &Value, continuation: &Value, returned_tools:
     assert_eq!(
         loaded_calls.len(),
         1,
-        "second response should call exactly one loaded function"
+        "loaded-tool response should call exactly one loaded function"
     );
     let loaded_call = loaded_calls[0];
     let loaded_call_id = non_empty_call_id(loaded_call);
     assert_eq!(loaded_call["status"], "completed");
-    let loaded_function_name = loaded_call["name"]
-        .as_str()
-        .expect("loaded function call should have a name")
-        .to_string();
-    assert!(
-        returned_tools
-            .as_array()
-            .expect("search output tools should be an array")
-            .iter()
-            .any(|tool| tool["name"].as_str() == Some(&loaded_function_name)),
-        "called function should come from the search output"
-    );
+    let (namespace, name) = returned_identity_for_call(loaded_call, returned_tools, projection);
     let loaded_arguments = loaded_call["arguments"]
         .as_str()
         .and_then(|arguments| serde_json::from_str::<Value>(arguments).ok())
@@ -417,7 +580,11 @@ fn normalize_loaded_step(response: &Value, continuation: &Value, returned_tools:
         1,
         "exactly one function output should link to the loaded call"
     );
-    (loaded_function_name, function_outputs[0]["output"].clone())
+    LoadedCall {
+        namespace,
+        name,
+        function_output: function_outputs[0]["output"].clone(),
+    }
 }
 
 fn normalized_final_text(response: &Value) -> String {
@@ -440,39 +607,149 @@ fn normalized_final_text(response: &Value) -> String {
 }
 
 fn normalize_flow(responses: &[Value], continuation_inputs: &[Value], projection: Projection) -> SemanticFlow {
-    assert_eq!(responses.len(), 3, "tool-search characterization needs three responses");
+    assert_eq!(responses.len(), 4, "tool-search characterization needs four responses");
     assert_eq!(
         continuation_inputs.len(),
-        2,
-        "tool-search characterization needs two continuations"
+        3,
+        "tool-search characterization needs three continuations"
     );
     let returned_tools = normalize_search_step(&responses[0], &continuation_inputs[0], projection);
-    let (loaded_function_name, function_output) =
-        normalize_loaded_step(&responses[1], &continuation_inputs[1], &returned_tools);
+    let loaded_calls = vec![
+        normalize_loaded_step(&responses[1], &continuation_inputs[1], &returned_tools, projection),
+        normalize_loaded_step(&responses[2], &continuation_inputs[2], &returned_tools, projection),
+    ];
+    assert_eq!(
+        loaded_calls
+            .iter()
+            .map(|call| (call.namespace.as_deref(), call.name.as_str()))
+            .collect::<Vec<_>>(),
+        [(None, "get_weather"), (Some("travel"), "get_timezone")],
+        "the flow must call only the selected ordinary function and selected namespace member"
+    );
     SemanticFlow {
         execution: "client",
         status: "completed",
         returned_tools,
-        loaded_function_name,
-        function_output,
-        final_text: normalized_final_text(&responses[2]),
+        loaded_calls,
+        final_text: normalized_final_text(&responses[3]),
     }
 }
 
-fn weather_tool_definition() -> Value {
-    serde_json::json!([{
-        "type": "function",
-        "name": "get_weather",
-        "description": "Get weather",
-        "parameters": {
-            "type": "object",
-            "properties": {"city": {"type": "string"}},
-            "required": ["city"],
-            "additionalProperties": false
+fn mixed_loaded_tool_definitions() -> Value {
+    serde_json::json!([
+        {
+            "type": "function",
+            "name": "get_weather",
+            "description": "Get weather",
+            "parameters": {
+                "type": "object",
+                "properties": {"city": {"type": "string"}},
+                "required": ["city"],
+                "additionalProperties": false
+            },
+            "strict": true,
+            "defer_loading": true
         },
-        "strict": true,
-        "defer_loading": true
-    }])
+        {
+            "type": "namespace",
+            "name": "travel",
+            "description": "Travel tools",
+            "tools": [{
+                "type": "function",
+                "name": "get_timezone",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"city": {"type": "string"}},
+                    "required": ["city"],
+                    "additionalProperties": false
+                },
+                "strict": true,
+                "defer_loading": true
+            }]
+        }
+    ])
+}
+
+fn fixture_json(directory: &Path, filename: &str) -> Value {
+    serde_json::from_str(
+        &fs::read_to_string(directory.join(filename))
+            .unwrap_or_else(|error| panic!("{filename} should be readable: {error}")),
+    )
+    .unwrap_or_else(|error| panic!("{filename} should be valid JSON: {error}"))
+}
+
+fn lowered_fixture_tools(tools: &Value, input: &Value) -> Value {
+    let mut request: RequestPayload = serde_json::from_value(serde_json::json!({
+        "model": "fixture-model",
+        "input": input,
+        "tools": tools,
+        "store": false,
+        "stream": false,
+        "parallel_tool_calls": false
+    }))
+    .expect("fixture should deserialize as a public request");
+    let mut state = ToolSearchState::build(&request).expect("fixture should build tool-search state");
+    state
+        .prepare_inference_request(&mut request)
+        .expect("fixture should prepare private inference state");
+    let upstream = request
+        .to_upstream_request(false)
+        .expect("fixture should lower into an upstream request");
+    serde_json::to_value(upstream).expect("upstream fixture should serialize")["tools"].clone()
+}
+
+#[test]
+fn mixed_catalog_fixtures_match_private_tool_search_lowering() {
+    let directory = tool_search_cassette_directory();
+    let public_tools = fixture_json(&directory, "openai_tools.json");
+    let returned_tools = fixture_json(&directory, "returned_tools.json");
+    let expected_initial = fixture_json(&directory, "vllm_initial_tools.json");
+    let expected_loaded = fixture_json(&directory, "vllm_tools_after_search.json");
+    let openai_tool_choices = fixture_json(&directory, "openai_tool_choice_sequence.json");
+    let gateway_tool_choices = fixture_json(&directory, "gateway_tool_choice_sequence.json");
+
+    for choice in [openai_tool_choices, gateway_tool_choices].iter().flat_map(|choices| {
+        choices
+            .as_array()
+            .expect("public tool-choice sequence should be an array")
+    }) {
+        serde_json::from_value::<RequestPayload>(serde_json::json!({
+            "model": "fixture-model",
+            "input": "fixture input",
+            "tools": public_tools,
+            "tool_choice": choice,
+            "parallel_tool_calls": false
+        }))
+        .expect("every public tool-choice fixture should match the typed request model");
+    }
+
+    assert_eq!(
+        lowered_fixture_tools(&public_tools, &serde_json::json!("find weather and timezone tools")),
+        expected_initial
+    );
+    assert_eq!(
+        lowered_fixture_tools(
+            &public_tools,
+            &serde_json::json!([
+                {
+                    "type": "tool_search_call",
+                    "id": "tsc_fixture",
+                    "call_id": "call_fixture",
+                    "execution": "client",
+                    "status": "completed",
+                    "arguments": {"query": "weather and timezone"}
+                },
+                {
+                    "type": "tool_search_output",
+                    "call_id": "call_fixture",
+                    "execution": "client",
+                    "status": "completed",
+                    "tools": returned_tools
+                }
+            ])
+        ),
+        expected_loaded
+    );
 }
 
 fn public_semantic_fixture(returned_tools: &Value) -> (Vec<Value>, Vec<Value>) {
@@ -491,7 +768,7 @@ fn public_semantic_fixture(returned_tools: &Value) -> (Vec<Value>, Vec<Value>) {
             }]
         }),
         serde_json::json!({
-            "id": "resp_public_function",
+            "id": "resp_public_weather",
             "reasoning": {"summary": "provider noise"},
             "output": [{
                 "id": "fc_public",
@@ -503,10 +780,22 @@ fn public_semantic_fixture(returned_tools: &Value) -> (Vec<Value>, Vec<Value>) {
             }]
         }),
         serde_json::json!({
+            "id": "resp_public_timezone",
+            "output": [{
+                "id": "fc_public_timezone",
+                "type": "function_call",
+                "namespace": "travel",
+                "name": "get_timezone",
+                "call_id": "call_public_timezone",
+                "status": "completed",
+                "arguments": "{\"city\":\"Paris\"}"
+            }]
+        }),
+        serde_json::json!({
             "id": "resp_public_final",
             "output": [{
                 "type": "message",
-                "content": [{"type": "output_text", "text": "\n\nPARIS_WEATHER_OK"}]
+                "content": [{"type": "output_text", "text": "\n\nPARIS_MIXED_TOOLS_OK"}]
             }]
         }),
     ];
@@ -522,6 +811,11 @@ fn public_semantic_fixture(returned_tools: &Value) -> (Vec<Value>, Vec<Value>) {
             "type": "function_call_output",
             "call_id": "call_public_function",
             "output": "weather result"
+        }]),
+        serde_json::json!([{
+            "type": "function_call_output",
+            "call_id": "call_public_timezone",
+            "output": "timezone result"
         }]),
     ];
     (responses, inputs)
@@ -543,7 +837,7 @@ fn normalized_semantic_fixture(returned_tools: &Value) -> (Vec<Value>, Vec<Value
             }]
         }),
         serde_json::json!({
-            "id": "resp_vllm_function",
+            "id": "resp_vllm_weather",
             "output": [{
                 "id": "fc_vllm",
                 "type": "function_call",
@@ -554,10 +848,21 @@ fn normalized_semantic_fixture(returned_tools: &Value) -> (Vec<Value>, Vec<Value
             }]
         }),
         serde_json::json!({
+            "id": "resp_vllm_timezone",
+            "output": [{
+                "id": "fc_vllm_timezone",
+                "type": "function_call",
+                "name": "agentic_ns__travel__get_timezone",
+                "call_id": "call_vllm_timezone",
+                "status": "completed",
+                "arguments": "{\"city\":\"Paris\"}"
+            }]
+        }),
+        serde_json::json!({
             "id": "resp_vllm_final",
             "output": [{
                 "type": "message",
-                "content": [{"type": "output_text", "text": "PARIS_WEATHER_OK"}]
+                "content": [{"type": "output_text", "text": "PARIS_MIXED_TOOLS_OK"}]
             }]
         }),
     ];
@@ -572,28 +877,43 @@ fn normalized_semantic_fixture(returned_tools: &Value) -> (Vec<Value>, Vec<Value
             "call_id": "call_vllm_function",
             "output": "weather result"
         }]),
+        serde_json::json!([{
+            "type": "function_call_output",
+            "call_id": "call_vllm_timezone",
+            "output": "timezone result"
+        }]),
     ];
     (responses, inputs)
 }
 
 fn normalized_manual_inputs(responses: &[Value], inputs: &[Value]) -> Vec<Value> {
-    vec![
-        serde_json::json!([
-            {"type": "message", "role": "user", "content": "find a weather tool"},
-            responses[0]["output"][0].clone(),
-            inputs[0][0].clone(),
-            {"type": "message", "role": "user", "content": "call it"}
-        ]),
-        serde_json::json!([
-            {"type": "message", "role": "user", "content": "find a weather tool"},
-            responses[0]["output"][0].clone(),
-            inputs[0][0].clone(),
-            {"type": "message", "role": "user", "content": "call it"},
-            responses[1]["output"][0].clone(),
-            inputs[1][0].clone(),
-            {"type": "message", "role": "user", "content": "finish"}
-        ]),
-    ]
+    let prompts = ["call weather", "call timezone", "finish"];
+    let mut history = vec![serde_json::json!({
+        "type": "message",
+        "role": "user",
+        "content": "find weather and timezone tools"
+    })];
+    responses
+        .iter()
+        .zip(inputs)
+        .zip(prompts)
+        .map(|((response, input), prompt)| {
+            history.extend(
+                response["output"]
+                    .as_array()
+                    .expect("fixture response output")
+                    .iter()
+                    .cloned(),
+            );
+            history.extend(input.as_array().expect("fixture continuation input").iter().cloned());
+            history.push(serde_json::json!({
+                "type": "message",
+                "role": "user",
+                "content": prompt
+            }));
+            Value::Array(history.clone())
+        })
+        .collect()
 }
 
 fn assert_semantic_mutations_are_visible(
@@ -618,6 +938,14 @@ fn assert_semantic_mutations_are_visible(
         "client function-output mutations must remain semantically visible"
     );
 
+    let mut namespace_output_mutation = normalized_inputs.to_vec();
+    namespace_output_mutation[2][0]["output"] = Value::String("different timezone".to_string());
+    let mutated = normalize_flow(normalized_responses, &namespace_output_mutation, Projection::Normalized);
+    assert_ne!(
+        public, &mutated,
+        "client namespace-member output mutations must remain semantically visible"
+    );
+
     let mut status_mutation = public_responses.to_vec();
     status_mutation[0]["output"][0]["status"] = Value::String("in_progress".to_string());
     assert!(
@@ -628,7 +956,11 @@ fn assert_semantic_mutations_are_visible(
         "public status mutation should be rejected"
     );
 
-    for (output_index, label) in [(0, "normalized search"), (1, "normalized loaded function")] {
+    for (output_index, label) in [
+        (0, "normalized search"),
+        (1, "normalized loaded function"),
+        (2, "normalized loaded namespace member"),
+    ] {
         let mut status_mutation = normalized_responses.to_vec();
         status_mutation[output_index]["output"][0]["status"] = Value::String("in_progress".to_string());
         assert!(
@@ -649,11 +981,21 @@ fn assert_semantic_mutations_are_visible(
         .is_err(),
         "call linkage mutation should be rejected"
     );
+
+    let mut namespace_linkage_mutation = public_inputs.to_vec();
+    namespace_linkage_mutation[2][0]["call_id"] = Value::String("call_wrong".to_string());
+    assert!(
+        catch_unwind(AssertUnwindSafe(|| {
+            normalize_flow(public_responses, &namespace_linkage_mutation, Projection::Public)
+        }))
+        .is_err(),
+        "namespace-member call linkage mutation should be rejected"
+    );
 }
 
 #[test]
 fn raw_semantic_normalization_ignores_provider_ids_usage_and_wire_projection() {
-    let returned_tools = weather_tool_definition();
+    let returned_tools = mixed_loaded_tool_definitions();
     let (public_responses, public_inputs) = public_semantic_fixture(&returned_tools);
     let (normalized_responses, normalized_inputs) = normalized_semantic_fixture(&returned_tools);
     let public = normalize_flow(&public_responses, &public_inputs, Projection::Public);
@@ -686,7 +1028,7 @@ fn offline_sse_terminal_normalization_ignores_event_chunk_grouping() {
             "id": "resp_terminal",
             "output": [{
                 "type": "message",
-                "content": [{"type": "output_text", "text": "PARIS_WEATHER_OK"}]
+                "content": [{"type": "output_text", "text": "PARIS_MIXED_TOOLS_OK"}]
             }]
         }
     });
@@ -761,9 +1103,31 @@ fn named_sse_call_lifecycle_projection_preserves_order_and_linkage() {
     );
 }
 
-#[test]
-fn gateway_http_sse_and_websocket_cassettes_replay_the_public_lifecycle() {
-    let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/cassettes/tool_search");
+fn assert_reference_and_blocking_response_metadata(directory: &Path) -> (Value, SemanticFlow) {
+    let openai_streaming = support::load_cassette(
+        directory
+            .join(OPENAI_STREAMING_CASSETTE)
+            .to_str()
+            .expect("OpenAI streaming cassette path"),
+    );
+    let expected_loaded_tools = expected_loaded_response_tools(directory);
+    assert_loaded_response_tool_shape(&expected_loaded_tools);
+    for turn in &openai_streaming.turns[1..] {
+        assert_post_search_response_metadata(turn, &expected_loaded_tools);
+    }
+
+    let openai_blocking = support::load_cassette(
+        directory
+            .join(OPENAI_BLOCKING_CASSETTE)
+            .to_str()
+            .expect("OpenAI blocking cassette path"),
+    );
+    for turn in &openai_blocking.turns[1..] {
+        let response = terminal_response(turn);
+        assert_eq!(canonical_response_tools(&response["tools"]), expected_loaded_tools);
+        assert_eq!(response["tool_choice"], turn.request.body.tool_choice.clone().unwrap());
+    }
+
     let blocking = support::load_cassette(
         directory
             .join(GATEWAY_BLOCKING_CASSETTE)
@@ -771,16 +1135,27 @@ fn gateway_http_sse_and_websocket_cassettes_replay_the_public_lifecycle() {
             .expect("blocking gateway cassette path"),
     );
     let blocking_responses = blocking.turns.iter().map(terminal_response).collect::<Vec<_>>();
+    for (turn, response) in blocking.turns[1..].iter().zip(&blocking_responses[1..]) {
+        assert_eq!(canonical_response_tools(&response["tools"]), expected_loaded_tools);
+        assert_eq!(response["tool_choice"], turn.request.body.tool_choice.clone().unwrap());
+    }
     let blocking_inputs = blocking.turns[1..]
         .iter()
         .map(|turn| turn.request.body.input.clone())
         .collect::<Vec<_>>();
     let blocking_flow = normalize_flow(&blocking_responses, &blocking_inputs, Projection::Public);
+    (expected_loaded_tools, blocking_flow)
+}
+
+#[test]
+fn gateway_http_sse_and_websocket_cassettes_replay_the_public_lifecycle() {
+    let directory = tool_search_cassette_directory();
+    let (expected_loaded_tools, blocking_flow) = assert_reference_and_blocking_response_metadata(&directory);
 
     for suffix in ["-streaming.yaml", "-websocket.yaml"] {
         let path = one_gateway_stream_cassette(&directory, suffix);
         let cassette = support::load_cassette(path.to_str().expect("gateway stream cassette path"));
-        assert_eq!(cassette.turns.len(), 3);
+        assert_eq!(cassette.turns.len(), 4);
 
         for turn in &cassette.turns {
             let events = support::recorded_named_sse_events(turn);
@@ -804,6 +1179,9 @@ fn gateway_http_sse_and_websocket_cassettes_replay_the_public_lifecycle() {
                 })
             }));
         }
+        for turn in &cassette.turns[1..] {
+            assert_post_search_response_metadata(turn, &expected_loaded_tools);
+        }
 
         let first_events = support::recorded_named_sse_events(&cassette.turns[0]);
         assert!(first_events.iter().any(|event| {
@@ -814,6 +1192,16 @@ fn gateway_http_sse_and_websocket_cassettes_replay_the_public_lifecycle() {
                     && tools
                         .iter()
                         .any(|tool| tool["name"] == "get_weather" && tool["defer_loading"] == true)
+                    && tools
+                        .iter()
+                        .filter(|tool| tool["type"] == "function" && tool["defer_loading"] == true)
+                        .count()
+                        == 3
+                    && tools.iter().any(|tool| {
+                        tool["type"] == "namespace"
+                            && tool["name"] == "travel"
+                            && tool["tools"].as_array().is_some_and(|members| members.len() == 3)
+                    })
             })
         }));
         assert!(first_events.iter().all(|event| {
@@ -861,11 +1249,9 @@ fn gateway_http_sse_and_websocket_cassettes_replay_the_public_lifecycle() {
 
 #[test]
 fn openai_streaming_cassette_preserves_public_lifecycle_and_terminal_identity() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/cassettes/tool_search")
-        .join(OPENAI_STREAMING_CASSETTE);
+    let path = tool_search_cassette_directory().join(OPENAI_STREAMING_CASSETTE);
     let cassette = support::load_cassette(path.to_str().expect("cassette path should be UTF-8"));
-    assert_eq!(cassette.turns.len(), 3);
+    assert_eq!(cassette.turns.len(), 4);
 
     let search_events = support::recorded_named_sse_events(&cassette.turns[0]);
     assert!(
@@ -906,6 +1292,9 @@ fn openai_streaming_cassette_preserves_public_lifecycle_and_terminal_identity() 
 
     let (loaded_item_id, loaded_call_id, loaded_arguments) = assert_observed_call_lifecycle(&cassette.turns[1]);
     assert_eq!(loaded_arguments, serde_json::json!({"city": "Paris"}));
+    let (namespace_item_id, namespace_call_id, namespace_arguments) =
+        assert_observed_call_lifecycle(&cassette.turns[2]);
+    assert_eq!(namespace_arguments, serde_json::json!({"city": "Paris"}));
 
     let responses = cassette.turns.iter().map(terminal_response).collect::<Vec<_>>();
     let terminal_search_call = responses[0]["output"]
@@ -940,7 +1329,19 @@ fn openai_streaming_cassette_preserves_public_lifecycle_and_terminal_identity() 
     assert_eq!(terminal_loaded_call["id"].as_str(), Some(loaded_item_id.as_str()));
     assert_eq!(terminal_loaded_call["call_id"].as_str(), Some(loaded_call_id.as_str()));
 
-    let final_events = support::recorded_named_sse_events(&cassette.turns[2]);
+    let terminal_namespace_call = responses[2]["output"]
+        .as_array()
+        .expect("turn three terminal output should be an array")
+        .iter()
+        .find(|item| item["type"] == "function_call" && item["namespace"] == "travel" && item["name"] == "get_timezone")
+        .expect("turn three terminal response should contain travel.get_timezone");
+    assert_eq!(terminal_namespace_call["id"].as_str(), Some(namespace_item_id.as_str()));
+    assert_eq!(
+        terminal_namespace_call["call_id"].as_str(),
+        Some(namespace_call_id.as_str())
+    );
+
+    let final_events = support::recorded_named_sse_events(&cassette.turns[3]);
     assert!(
         final_events
             .iter()
@@ -951,17 +1352,14 @@ fn openai_streaming_cassette_preserves_public_lifecycle_and_terminal_identity() 
         .map(|turn| turn.request.body.input.clone())
         .collect::<Vec<_>>();
     let semantic = normalize_flow(&responses, &continuation_inputs, Projection::Public);
-    assert_eq!(semantic.loaded_function_name, "get_weather");
-    assert_eq!(semantic.final_text.trim(), "PARIS_WEATHER_OK");
+    assert_eq!(semantic.final_text.trim(), "PARIS_MIXED_TOOLS_OK");
 }
 
 #[test]
 fn direct_vllm_streaming_cassette_characterizes_lifecycle_and_terminal_identity_mismatch() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/cassettes/tool_search")
-        .join(DIRECT_VLLM_STREAMING_CASSETTE);
+    let path = tool_search_cassette_directory().join(DIRECT_VLLM_STREAMING_CASSETTE);
     let cassette = support::load_cassette(path.to_str().expect("cassette path should be UTF-8"));
-    assert_eq!(cassette.turns.len(), 3);
+    assert_eq!(cassette.turns.len(), 4);
 
     let (search_lifecycle_item_id, search_lifecycle_call_id, search_arguments) =
         assert_observed_call_lifecycle(&cassette.turns[0]);
@@ -973,8 +1371,11 @@ fn direct_vllm_streaming_cassette_characterizes_lifecycle_and_terminal_identity_
     let (loaded_lifecycle_item_id, loaded_lifecycle_call_id, loaded_arguments) =
         assert_observed_call_lifecycle(&cassette.turns[1]);
     assert_eq!(loaded_arguments, serde_json::json!({"city": "Paris"}));
+    let (namespace_lifecycle_item_id, namespace_lifecycle_call_id, namespace_arguments) =
+        assert_observed_call_lifecycle(&cassette.turns[2]);
+    assert_eq!(namespace_arguments, serde_json::json!({"city": "Paris"}));
 
-    let final_events = support::recorded_named_sse_events(&cassette.turns[2]);
+    let final_events = support::recorded_named_sse_events(&cassette.turns[3]);
     assert!(
         final_events
             .iter()
@@ -987,7 +1388,7 @@ fn direct_vllm_streaming_cassette_characterizes_lifecycle_and_terminal_identity_
     assert_eq!(final_completed.len(), 1);
     assert_eq!(final_completed[0]["response"]["status"], "completed");
     let final_lifecycle = relevant_call_lifecycle_from_named_sse(
-        cassette.turns[2]
+        cassette.turns[3]
             .response
             .sse
             .as_ref()
@@ -1013,6 +1414,12 @@ fn direct_vllm_streaming_cassette_characterizes_lifecycle_and_terminal_identity_
         .iter()
         .find(|item| item["type"] == "function_call" && item["name"] == "get_weather")
         .expect("turn two terminal response should contain get_weather");
+    let terminal_namespace_call = responses[2]["output"]
+        .as_array()
+        .expect("turn three terminal output should be an array")
+        .iter()
+        .find(|item| item["type"] == "function_call" && item["name"] == "agentic_ns__travel__get_timezone")
+        .expect("turn three terminal response should contain flattened travel.get_timezone");
     assert_ne!(
         terminal_search_call["id"].as_str(),
         Some(search_lifecycle_item_id.as_str()),
@@ -1033,14 +1440,23 @@ fn direct_vllm_streaming_cassette_characterizes_lifecycle_and_terminal_identity_
         Some(loaded_lifecycle_call_id.as_str()),
         "observed vLLM stream regenerates the terminal loaded-function call ID"
     );
+    assert_ne!(
+        terminal_namespace_call["id"].as_str(),
+        Some(namespace_lifecycle_item_id.as_str()),
+        "observed vLLM stream regenerates the terminal namespace-member item ID"
+    );
+    assert_ne!(
+        terminal_namespace_call["call_id"].as_str(),
+        Some(namespace_lifecycle_call_id.as_str()),
+        "observed vLLM stream regenerates the terminal namespace-member call ID"
+    );
 
     let continuation_inputs = cassette.turns[1..]
         .iter()
         .map(|turn| turn.request.body.input.clone())
         .collect::<Vec<_>>();
     let semantic = normalize_flow(&responses, &continuation_inputs, Projection::Normalized);
-    assert_eq!(semantic.loaded_function_name, "get_weather");
-    assert_eq!(semantic.final_text.trim(), "PARIS_WEATHER_OK");
+    assert_eq!(semantic.final_text.trim(), "PARIS_MIXED_TOOLS_OK");
 }
 
 const PROVIDER_PARITY_CASSETTES: [&str; 7] = [
@@ -1091,6 +1507,12 @@ fn assert_public_request_projection(
     )
     .expect("OpenAI tool fixture should be valid JSON");
     assert_eq!(request_bodies[0].get("tools"), Some(&expected_initial));
+    let tool_choice_fixture = if filename.contains("openai-reference") {
+        "openai_tool_choice_sequence.json"
+    } else {
+        "gateway_tool_choice_sequence.json"
+    };
+    assert_tool_choice_sequence(directory, tool_choice_fixture, request_bodies);
     if filename == GATEWAY_BLOCKING_CASSETTE {
         assert!(
             request_bodies
@@ -1108,11 +1530,14 @@ fn assert_public_request_projection(
                 .iter()
                 .all(|body| body.get("store") == Some(&Value::Bool(true)))
         );
-        assert_eq!(request_bodies[1].get("previous_response_id"), responses[0].get("id"));
-        assert_eq!(request_bodies[2].get("previous_response_id"), responses[1].get("id"));
+        for index in 1..request_bodies.len() {
+            assert_eq!(
+                request_bodies[index].get("previous_response_id"),
+                responses[index - 1].get("id")
+            );
+        }
     }
-    assert!(!request_bodies[1].contains_key("tools"));
-    assert!(!request_bodies[2].contains_key("tools"));
+    assert!(request_bodies[1..].iter().all(|body| !body.contains_key("tools")));
 }
 
 fn assert_normalized_request_projection(
@@ -1131,8 +1556,12 @@ fn assert_normalized_request_projection(
     )
     .expect("vLLM post-search tool fixture should be valid JSON");
     assert_eq!(request_bodies[0].get("tools"), Some(&expected_initial));
-    assert_eq!(request_bodies[1].get("tools"), Some(&expected_next));
-    assert_eq!(request_bodies[2].get("tools"), Some(&expected_next));
+    assert_tool_choice_sequence(directory, "vllm_tool_choice_sequence.json", request_bodies);
+    assert!(
+        request_bodies[1..]
+            .iter()
+            .all(|body| body.get("tools") == Some(&expected_next))
+    );
     assert!(
         request_bodies
             .iter()
@@ -1176,6 +1605,30 @@ fn assert_normalized_request_projection(
         &inputs[2][..expected_third_prefix.len()],
         expected_third_prefix.as_slice()
     );
+    let mut expected_fourth_prefix = inputs[2].clone();
+    expected_fourth_prefix.extend(
+        responses[2]["output"]
+            .as_array()
+            .expect("turn three output should be an array")
+            .iter()
+            .cloned(),
+    );
+    assert_eq!(
+        &inputs[3][..expected_fourth_prefix.len()],
+        expected_fourth_prefix.as_slice()
+    );
+}
+
+fn assert_tool_choice_sequence(directory: &Path, filename: &str, request_bodies: &[&serde_json::Map<String, Value>]) {
+    let expected = fixture_json(directory, filename);
+    let expected = expected
+        .as_array()
+        .expect("tool-choice sequence fixture should be an array");
+    assert_eq!(request_bodies.len(), expected.len());
+    for (body, choice) in request_bodies.iter().zip(expected) {
+        assert_eq!(body.get("tool_choice"), Some(choice));
+        assert_eq!(body.get("parallel_tool_calls"), Some(&Value::Bool(false)));
+    }
 }
 
 fn assert_request_projection(
@@ -1211,7 +1664,7 @@ fn normalize_provider_cassette(directory: &Path, filename: &str) -> SemanticFlow
     let raw_text = fs::read_to_string(&path).expect("characterization cassette should be readable");
     let raw_document = serde_yaml::from_str::<Value>(&raw_text).expect("characterization YAML should be valid");
     let cassette = support::load_cassette(path.to_str().expect("cassette path should be UTF-8"));
-    assert_eq!(cassette.turns.len(), 3, "{filename} should contain three turns");
+    assert_eq!(cassette.turns.len(), 4, "{filename} should contain four turns");
     let responses = cassette.turns.iter().map(terminal_response).collect::<Vec<_>>();
     let inputs = cassette.turns[1..]
         .iter()
@@ -1224,7 +1677,7 @@ fn normalize_provider_cassette(directory: &Path, filename: &str) -> SemanticFlow
 
 #[test]
 fn provider_parity_recorder_generated_matrix_has_one_semantic_flow() {
-    let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/cassettes/tool_search");
+    let directory = tool_search_cassette_directory();
     let expected_tools = serde_json::from_str::<Value>(
         &fs::read_to_string(directory.join("returned_tools.json")).expect("returned tool fixture should be readable"),
     )
@@ -1242,10 +1695,14 @@ fn provider_parity_recorder_generated_matrix_has_one_semantic_flow() {
             "returned tool drift in {filename}"
         );
         assert_eq!(
-            semantic.function_output, expected_outputs["get_weather"],
-            "client function-output drift in {filename}"
+            semantic.loaded_calls[0].function_output, expected_outputs["get_weather"],
+            "ordinary function-output drift in {filename}"
         );
-        assert_eq!(semantic.final_text.trim(), "PARIS_WEATHER_OK");
+        assert_eq!(
+            semantic.loaded_calls[1].function_output, expected_outputs["get_timezone"],
+            "namespace-member function-output drift in {filename}"
+        );
+        assert_eq!(semantic.final_text.trim(), "PARIS_MIXED_TOOLS_OK");
         if let Some(expected) = &reference {
             assert_eq!(&semantic, expected, "semantic provider drift in {filename}");
         } else {

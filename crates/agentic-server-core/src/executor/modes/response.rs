@@ -1,6 +1,6 @@
 //! Response storage handler — owns all response store operations.
 
-use crate::storage::{InOutItem, ResponseData, ResponseStore};
+use crate::storage::{InOutItem, ResponseData, ResponseMetadata, ResponseStore};
 use crate::types::io::OutputItem;
 
 use crate::executor::error::{ExecutorError, ExecutorResult};
@@ -68,9 +68,19 @@ impl ResponseHandler {
     ///
     /// # Errors
     /// Returns `ExecutorError` if the store is disabled or the database operation fails.
-    pub async fn execute_turn(&self, ctx: RequestContext, output_items: Vec<OutputItem>) -> ExecutorResult<()> {
-        let metadata = ctx.response_metadata();
+    pub async fn execute_turn(&self, mut ctx: RequestContext, output_items: Vec<OutputItem>) -> ExecutorResult<()> {
+        let metadata = ctx.take_response_metadata();
 
+        self.execute_turn_with_metadata(ctx, output_items, metadata).await
+    }
+
+    /// Persists a response using metadata prepared by request-scoped tool behavior.
+    pub(crate) async fn execute_turn_with_metadata(
+        &self,
+        ctx: RequestContext,
+        output_items: Vec<OutputItem>,
+        metadata: ResponseMetadata,
+    ) -> ExecutorResult<()> {
         let mut new_items = Vec::with_capacity(ctx.new_input_items.len() + output_items.len());
         new_items.extend(ctx.new_input_items.into_iter().map(InOutItem::Input));
         new_items.extend(output_items.into_iter().map(InOutItem::Output));
@@ -122,9 +132,6 @@ mod tests {
         RequestContext {
             enriched_request: req.clone(),
             original_request: req,
-            tool_search_state: None,
-            tool_search_private_request: None,
-            tool_search_loaded_tools: None,
             new_input_items: vec![],
             response_id: "resp_test".into(),
             conversation_id: None,

@@ -7,12 +7,11 @@ use serde_json::Value;
 
 use super::codex::insert_namespace_entries;
 use super::custom::{CustomHandler, CustomToolMap, insert_custom_entry};
-use super::executors::{GatewayExecutors, McpServerToolsError};
+use super::executors::GatewayExecutors;
 use super::function::insert_function_entry;
 use super::mcp::handler::{McpToolMap, McpToolRef};
 use super::mcp::registry::insert_discovered_mcp_entry;
-use super::names::validate_model_visible_declared_names;
-use super::search;
+use super::tool_search::{TOOL_SEARCH_NAME, insert_tool_search_entry};
 use super::web_search::insert_web_search_entry;
 use super::{CodexNamespaceHandler, GatewayExecutor, McpHandler, NamespaceMap, ToolError, ToolOutput, ToolSearchState};
 use crate::events::WireEvent;
@@ -20,7 +19,7 @@ use crate::events::WireEvent;
 use crate::types::io::OutputItem;
 use crate::types::io::output::{FunctionToolCall, McpListTools};
 use crate::types::tools::{CodeInterpreterToolParam, FileSearchToolParam, ResponsesTool};
-use crate::utils::common::{serialize_to_value, serialize_to_value_or_custom_default};
+use crate::utils::common::serialize_to_value_or_custom_default;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -215,37 +214,16 @@ impl ToolRegistry {
         tools: &mut [ResponsesTool],
         executors: &mut GatewayExecutors,
     ) -> Result<Self, ToolError> {
-        Self::build_with_mcp_config_failure_labels(tools, executors, None).await
-    }
-
-    /// Build a request-scoped registry for active client tool search.
-    ///
-    /// Invalid MCP declarations remain request errors unless the search state
-    /// proves that the server definition was already loaded. A failure for a
-    /// loaded definition becomes the same sanitized `mcp_list_tools` failure
-    /// item used for connection and discovery errors, allowing inference to
-    /// continue without exposing private transport configuration.
-    pub(crate) async fn build_with_handlers_for_tool_search(
-        tools: &mut [ResponsesTool],
-        executors: &mut GatewayExecutors,
-        loaded_mcp_server_labels: &HashSet<String>,
-    ) -> Result<Self, ToolError> {
-        Self::build_with_mcp_config_failure_labels(tools, executors, Some(loaded_mcp_server_labels)).await
-    }
-
-    async fn build_with_mcp_config_failure_labels(
-        tools: &mut [ResponsesTool],
-        executors: &mut GatewayExecutors,
-        recoverable_mcp_config_failures: Option<&HashSet<String>>,
-    ) -> Result<Self, ToolError> {
         let mut entries = HashMap::with_capacity(tools.len());
         let mut mcp_tool_map = McpToolMap::default();
         let mut mcp_list_tools_items = Vec::new();
-        // Validate declaration-derived names before MCP I/O, then key namespace
-        // members by the same flat name used in the private inference request.
-        // Discovered MCP names retain their post-list collision pass.
-        validate_model_visible_declared_names(tools)?;
-        let resolved_tools = CodexNamespaceHandler::resolve_namespace_members_after_validation(tools);
+        // Validate every declaration before MCP discovery performs external I/O.
+        tools.iter().try_for_each(ResponsesTool::validate)?;
+
+        // Namespace members must be keyed by the same flat, model-visible name
+        // the model will call. Discovered MCP names retain their separate
+        // post-list collision pass.
+        let resolved_tools = CodexNamespaceHandler.resolve_namespace_members(tools)?;
         McpHandler::validate_server_labels(&resolved_tools)?;
 
         for (index, tool) in resolved_tools.iter().enumerate() {
@@ -253,30 +231,19 @@ impl ToolRegistry {
                 ResponsesTool::Function(p) => {
                     insert_unique_tool_entries(&mut entries, |resolved| insert_function_entry(resolved, p))?;
                 }
-                ResponsesTool::ToolSearch(_) => {
-                    tracing::debug!("client-executed tool_search declaration is omitted from the dispatch registry");
+                ResponsesTool::ToolSearch(param) => {
+                    insert_unique_tool_entries(&mut entries, |resolved| {
+                        insert_tool_search_entry(resolved, param);
+                    })?;
                 }
                 ResponsesTool::Mcp(p) => {
                     let tool_set = match executors.mcp_server_tools(p).await {
                         Ok(tool_set) => tool_set,
-                        Err(McpServerToolsError::RequestServerUrl(error))
-                            if recoverable_mcp_config_failures
-                                .is_some_and(|labels| labels.contains(&p.server_label)) =>
-                        {
+                        // Config errors mean the declaration is invalid; the client can fix it.
+                        Err(error @ ToolError::Config(_)) => return Err(error),
+                        Err(error) => {
                             mcp_list_tools_items.push(McpHandler::failed_list_tools_item(&p.server_label, &error));
                             continue;
-                        }
-                        Err(error) => {
-                            let error = error.into_tool_error();
-                            match error {
-                                // Config errors mean the declaration is invalid; the client can fix it.
-                                error @ ToolError::Config(_) => return Err(error),
-                                error => {
-                                    mcp_list_tools_items
-                                        .push(McpHandler::failed_list_tools_item(&p.server_label, &error));
-                                    continue;
-                                }
-                            }
                         }
                     };
                     let handlers = tool_set.discovered_handlers;
@@ -344,7 +311,9 @@ impl ToolRegistry {
             .map(|(name, entry)| (name.clone(), entry.tool_type))
             .collect::<HashMap<_, _>>();
         if self.tool_search_translation_enabled {
-            tool_types.insert("tool_search".to_owned(), ToolType::ToolSearch);
+            tool_types
+                .entry(TOOL_SEARCH_NAME.to_owned())
+                .or_insert(ToolType::ToolSearch);
         }
         tool_types
     }
@@ -373,10 +342,8 @@ impl ToolRegistry {
         &self.mcp_list_tools_items
     }
 
-    /// Reclassify only the synthetic function prepared by active request-scoped
-    /// tool-search state. An inactive ordinary function named `tool_search`
-    /// remains an ordinary client function.
-    pub(crate) fn classify_tool_search(&mut self, state: &ToolSearchState) -> Result<(), ToolError> {
+    /// Apply request-scoped tool-search translation and replay safeguards.
+    pub(crate) fn apply_tool_search_state(&mut self, state: &ToolSearchState) -> Result<(), ToolError> {
         self.tool_search_translation_enabled = state.is_active();
         self.withheld_function_names.clone_from(state.withheld_function_names());
         if !self.tool_search_translation_enabled {
@@ -391,32 +358,18 @@ impl ToolRegistry {
                 "a loaded tool collides with a withheld function name".to_owned(),
             ));
         }
-        if self
-            .mcp_tool_map
-            .resolves_call_before_load(state.mcp_load_positions(), state.unqualified_call_positions())
-        {
-            return Err(ToolError::Config(
-                "request history calls an MCP function before its server definition is loaded".to_owned(),
-            ));
-        }
-        let Some(synthetic) = state.synthetic_function() else {
+        let Some(_) = state.synthetic_tool_search() else {
             return Ok(());
         };
-        let entry = self.entries.get_mut(&synthetic.name).ok_or_else(|| {
-            ToolError::Config("prepared tool-search function is missing from the private registry".to_owned())
+        let entry = self.entries.get(TOOL_SEARCH_NAME).ok_or_else(|| {
+            ToolError::Config("prepared tool-search declaration is missing from the private registry".to_owned())
         })?;
-        if entry.tool_type != ToolType::Function || entry.handler.is_some() {
+        if entry.tool_type != ToolType::ToolSearch || entry.tool_type.is_gateway_owned() || entry.handler.is_some() {
             return Err(ToolError::Config(
-                "prepared tool-search function has invalid private registry ownership".to_owned(),
+                "prepared tool-search declaration has invalid private registry ownership".to_owned(),
             ));
         }
-        entry.tool_type = ToolType::ToolSearch;
         Ok(())
-    }
-
-    #[must_use]
-    fn has_tool_search(&self) -> bool {
-        self.tool_search_translation_enabled
     }
 
     #[must_use]
@@ -424,106 +377,8 @@ impl ToolRegistry {
         &self.withheld_function_names
     }
 
-    /// Strictly convert a normalized blocking tool-search call to its public
-    /// representation before permissive response rehydration can discard or
-    /// default malformed fields.
-    pub(crate) fn normalize_blocking_response(&self, response: &mut Value) -> Result<(), ToolError> {
-        if !self.has_tool_search() {
-            return Ok(());
-        }
-        let Some(items) = response.get_mut("output").and_then(Value::as_array_mut) else {
-            return Ok(());
-        };
-        let mut search_calls = 0_u8;
-        let mut public_ids = HashSet::with_capacity(items.len());
-        let mut replacements = Vec::new();
-        for (index, item) in items.iter().enumerate() {
-            let Some(object) = item.as_object() else {
-                continue;
-            };
-            if object
-                .get("name")
-                .and_then(Value::as_str)
-                .is_some_and(|name| self.withheld_function_names.contains(name))
-            {
-                return Err(search::invalid_upstream_withheld_function_call());
-            }
-            let reserved = object.get("name").and_then(Value::as_str) == Some("tool_search");
-            let public_id = if reserved {
-                search_calls = search_calls.saturating_add(1);
-                if search_calls > 1 {
-                    return Err(search::invalid_upstream_search_call());
-                }
-                let replacement = normalize_raw_search_call(object)?;
-                let public_id = replacement["id"].as_str().unwrap_or_default().to_owned();
-                replacements.push((index, replacement));
-                public_id
-            } else {
-                object
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .filter(|id| !id.trim().is_empty())
-                    .unwrap_or_default()
-                    .to_owned()
-            };
-            if !public_id.is_empty() && !public_ids.insert(public_id) {
-                return Err(search::invalid_upstream_search_call());
-            }
-        }
-        for (index, replacement) in replacements {
-            items[index] = replacement;
-        }
-        Ok(())
-    }
-
-    /// Restore provider-normalized output types that are not already converted
-    /// by the strict raw blocking-response seam.
-    ///
-    /// # Errors
-    ///
-    /// Reserved for restoration failures reported by output adapters.
-    pub fn restore_final_payload_output(&self, output: &mut [OutputItem]) -> Result<(), ToolError> {
-        if self.has_tool_search() {
-            let mut search_calls = 0_u8;
-            let mut public_ids = HashSet::with_capacity(output.len());
-            let mut replacements = Vec::new();
-            for (index, item) in output.iter().enumerate() {
-                if matches!(item, OutputItem::FunctionCall(call) if self.withheld_function_names.contains(&call.name)) {
-                    return Err(search::invalid_upstream_withheld_function_call());
-                }
-                let replacement = match item {
-                    OutputItem::FunctionCall(call) if call.name == "tool_search" => {
-                        search_calls = search_calls.saturating_add(1);
-                        if search_calls > 1
-                            || call.status != crate::types::event::MessageStatus::Completed
-                            || call.namespace.is_some()
-                        {
-                            return Err(search::invalid_upstream_search_call());
-                        }
-                        Some(search::public_output_item(&call.id, &call.call_id, &call.arguments)?)
-                    }
-                    _ => None,
-                };
-                let candidate = replacement.as_ref().unwrap_or(item);
-                let public_id =
-                    serialize_to_value(candidate).map_err(|_| search::invalid_upstream_search_call())?["id"]
-                        .as_str()
-                        .filter(|id| !id.trim().is_empty())
-                        .unwrap_or_default()
-                        .to_owned();
-                if !public_id.is_empty() && !public_ids.insert(public_id) {
-                    return Err(search::invalid_upstream_search_call());
-                }
-                if let Some(replacement) = replacement {
-                    replacements.push((index, replacement));
-                }
-            }
-            for (index, replacement) in replacements {
-                output[index] = replacement;
-            }
-        }
+    pub fn restore_final_payload_output(&self, output: &mut [OutputItem]) {
         CodexNamespaceHandler.restore_output_items(output, self.namespace_map.as_ref());
-        Ok(())
     }
 
     pub fn restore_stream_event_wire(&self, wire: &mut WireEvent) -> bool {
@@ -579,11 +434,6 @@ impl ToolRegistry {
     }
 }
 
-fn normalize_raw_search_call(object: &serde_json::Map<String, Value>) -> Result<Value, ToolError> {
-    let public = search::public_output_item_from_raw(object)?;
-    serialize_to_value(&public).map_err(|_| search::invalid_upstream_search_call())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -591,6 +441,7 @@ mod tests {
     use crate::tool::mcp::{McpDiscoveredHandler, McpHandler};
     use crate::types::event::MessageStatus;
     use crate::types::tools::McpDiscoveredToolParam;
+    use crate::utils::common::serialize_to_value;
 
     fn declaration(server_label: &str) -> ResponsesTool {
         serde_json::from_value(serde_json::json!({
@@ -632,7 +483,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tool_search_declaration_has_no_registry_entry_or_handler() {
+    async fn tool_search_declaration_has_client_owned_registry_entry() {
         let mut tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([{
             "type": "tool_search",
             "execution": "client",
@@ -644,25 +495,29 @@ mod tests {
 
         let registry = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
             .await
-            .expect("inert declaration does not require a handler");
+            .expect("client-owned declaration does not require a handler");
 
-        assert!(registry.lookup("tool_search").is_none());
-        assert!(registry.entries.is_empty());
+        let entry = registry.lookup("tool_search").expect("tool-search entry");
+        assert_eq!(entry.tool_type, ToolType::ToolSearch);
+        assert_eq!(entry.config["description"], "Find a tool");
+        assert!(entry.server_label.is_none());
+        assert!(entry.handler.is_none());
+        assert_eq!(registry.len(), 1);
     }
 
     #[tokio::test]
-    async fn synthetic_tool_search_is_client_owned_never_dispatched_and_normalizes_blocking_output() {
-        let (request, state) = prepared_search_state();
-        let mut tools = private_tools(&state, &request);
+    async fn synthetic_tool_search_is_client_owned_never_dispatched_and_converts_to_typed_output() {
+        let (request, mut state) = prepared_search_state();
+        let mut tools = private_tools(&mut state, &request);
         let mut executors = GatewayExecutors::default();
         let mut registry = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
             .await
-            .expect("synthetic function builds normally");
+            .expect("typed tool-search declaration builds normally");
 
         registry
-            .classify_tool_search(&state)
-            .expect("prepared synthetic entry is reclassified exactly once");
-        let entry = registry.lookup("tool_search").expect("classified search entry");
+            .apply_tool_search_state(&state)
+            .expect("prepared tool-search entry is already classified");
+        let entry = registry.lookup("tool_search").expect("tool-search entry");
         assert_eq!(entry.tool_type, ToolType::ToolSearch);
         assert!(!entry.tool_type.is_gateway_owned());
 
@@ -680,20 +535,9 @@ mod tests {
             "tool search has no gateway handler"
         );
 
-        let mut response = serde_json::json!({"output": [{
-            "type": "function_call",
-            "id": "fc_search_1",
-            "call_id": "call_search_1",
-            "name": "tool_search",
-            "namespace": null,
-            "arguments": "{\"query\":\"weather\"}",
-            "status": "completed"
-        }]});
-        registry
-            .normalize_blocking_response(&mut response)
-            .expect("valid normalized search call converts once");
+        let output = OutputItem::ToolSearchCall(crate::types::io::ToolSearchCall::try_from(&call).unwrap());
         assert_eq!(
-            response["output"][0],
+            serialize_to_value(&output).unwrap(),
             serde_json::json!({
                 "type": "tool_search_call",
                 "id": "tsc_search_1",
@@ -706,125 +550,48 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn raw_blocking_tool_search_normalization_is_strict_atomic_and_state_driven() {
-        let (request, state) = prepared_search_state();
-        let mut tools = private_tools(&state, &request);
-        let mut registry = ToolRegistry::build_with_handlers(&mut tools, &mut GatewayExecutors::default())
-            .await
-            .expect("registry");
-        registry.classify_tool_search(&state).expect("classification");
-
-        let mut valid = serde_json::json!({"output": [{
-            "type": "function_call",
-            "id": "fc_search",
-            "call_id": "call_search",
-            "name": "tool_search",
-            "namespace": null,
-            "arguments": "{\"query\":\"weather\"}",
-            "status": "completed"
-        }]});
-        registry
-            .normalize_blocking_response(&mut valid)
-            .expect("valid raw call normalizes once");
-        assert_eq!(
-            valid["output"][0],
-            serde_json::json!({
-                "type": "tool_search_call",
-                "id": "tsc_search",
-                "call_id": "call_search",
-                "execution": "client",
-                "arguments": {"query": "weather"},
-                "status": "completed"
-            })
-        );
-
-        let invalid_items = [
-            serde_json::json!({"type":"custom_tool_call","id":"fc_search","call_id":"call_search","name":"tool_search","arguments":"{}"}),
-            serde_json::json!({"type":"function_call","call_id":"call_search","name":"tool_search","arguments":"{}","status":"completed"}),
-            serde_json::json!({"type":"function_call","id":" ","call_id":"call_search","name":"tool_search","arguments":"{}","status":"completed"}),
-            serde_json::json!({"type":"function_call","id":"fc_search","name":"tool_search","arguments":"{}","status":"completed"}),
-            serde_json::json!({"type":"function_call","id":"fc_search","call_id":"","name":"tool_search","arguments":"{}","status":"completed"}),
-            serde_json::json!({"type":"function_call","id":"fc_search","call_id":7,"name":"tool_search","arguments":"{}","status":"completed"}),
-            serde_json::json!({"type":"function_call","id":"fc_search","call_id":"call_search","name":"tool_search","status":"completed"}),
-            serde_json::json!({"type":"function_call","id":"fc_search","call_id":"call_search","name":"tool_search","arguments":null,"status":"completed"}),
-            serde_json::json!({"type":"function_call","id":"fc_search","call_id":"call_search","name":"tool_search","arguments":"{","status":"completed"}),
-            serde_json::json!({"type":"function_call","id":"fc_search","call_id":"call_search","name":"tool_search","arguments":"[]","status":"completed"}),
-            serde_json::json!({"type":"function_call","id":"fc_search","call_id":"call_search","name":"tool_search","arguments":"null","status":"completed"}),
-            serde_json::json!({"type":"function_call","id":"fc_search","call_id":"call_search","name":"tool_search","arguments":"{}"}),
-            serde_json::json!({"type":"function_call","id":"fc_search","call_id":"call_search","name":"tool_search","arguments":"{}","status":"in_progress"}),
-            serde_json::json!({"type":"function_call","id":"fc_search","call_id":"call_search","name":"tool_search","arguments":"{}","status":7}),
-            serde_json::json!({"type":"function_call","id":"fc_search","call_id":"call_search","name":"tool_search","namespace":"tools","arguments":"{}","status":"completed"}),
-            serde_json::json!({"type":"function_call","id":"fc_search","call_id":"call_search","name":"tool_search","namespace":7,"arguments":"{}","status":"completed"}),
-        ];
-        for item in invalid_items {
-            let mut response = serde_json::json!({"output": [item]});
-            assert!(
-                matches!(
-                    registry.normalize_blocking_response(&mut response),
-                    Err(ToolError::Execution(message)) if message == "upstream returned an invalid tool-search call"
-                ),
-                "malformed reserved raw call must fail atomically"
-            );
-        }
-
-        let raw_valid = serde_json::json!({
-            "type":"function_call", "id":"fc_search", "call_id":"call_search", "name":"tool_search",
-            "namespace":null, "arguments":"{}", "status":"completed"
-        });
-        let mut duplicate = serde_json::json!({"output": [raw_valid.clone(), raw_valid.clone()]});
-        assert!(registry.normalize_blocking_response(&mut duplicate).is_err());
-        let mut collision = serde_json::json!({"output": [
-            raw_valid,
-            {"type":"message","id":"tsc_search","role":"assistant","content":[]}
-        ]});
-        assert!(registry.normalize_blocking_response(&mut collision).is_err());
-
-        let mut ordinary_tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([{
-            "type": "function", "name": "tool_search", "parameters": {"type": "object"}
-        }]))
-        .expect("ordinary reserved-name function is valid while search is inactive");
-        let ordinary = ToolRegistry::build_with_handlers(&mut ordinary_tools, &mut GatewayExecutors::default())
-            .await
-            .expect("ordinary registry");
-        let mut inactive_response = serde_json::json!({"output": [invalid_items_for_inactive()]});
-        ordinary
-            .normalize_blocking_response(&mut inactive_response)
-            .expect("inactive ordinary function is never name-only validated as search");
-        assert_eq!(inactive_response["output"][0]["type"], "function_call");
-    }
-
-    #[tokio::test]
-    async fn declaration_free_replay_enables_state_driven_raw_normalization() {
-        let (request, state) = replayed_search_state();
+    async fn declaration_free_replay_enables_state_driven_classification() {
+        let (request, mut state) = replayed_search_state();
         assert!(state.is_active());
-        assert!(state.synthetic_function().is_none());
-        let mut tools = private_tools(&state, &request);
+        assert!(state.synthetic_tool_search().is_none());
+        let mut tools = private_tools(&mut state, &request);
         let mut registry = ToolRegistry::build_with_handlers(&mut tools, &mut GatewayExecutors::default())
             .await
             .expect("loaded function registry");
         assert!(registry.lookup("tool_search").is_none());
         registry
-            .classify_tool_search(&state)
+            .apply_tool_search_state(&state)
             .expect("enable replay translation");
 
-        let mut valid = serde_json::json!({"output": [{
+        let valid: FunctionToolCall = serde_json::from_value(serde_json::json!({
             "type": "function_call", "id": "fc_search", "call_id": "call_search",
             "name": "tool_search", "namespace": null, "arguments": "{\"query\":\"news\"}",
             "status": "completed"
-        }]});
-        registry
-            .normalize_blocking_response(&mut valid)
-            .expect("active replay translates reserved call");
-        assert_eq!(valid["output"][0]["type"], "tool_search_call");
+        }))
+        .unwrap();
+        assert_eq!(registry.tool_type_map().get("tool_search"), Some(&ToolType::ToolSearch));
+        assert!(crate::types::io::ToolSearchCall::try_from(&valid).is_ok());
 
-        let mut malformed = serde_json::json!({"output": [{
+        let malformed: FunctionToolCall = serde_json::from_value(serde_json::json!({
             "type": "function_call", "id": "fc_search", "call_id": "call_search",
             "name": "tool_search", "namespace": null, "arguments": "{}", "status": "in_progress"
-        }]});
-        assert!(matches!(
-            registry.normalize_blocking_response(&mut malformed),
-            Err(ToolError::Execution(_))
-        ));
+        }))
+        .unwrap();
+        assert!(crate::types::io::ToolSearchCall::try_from(&malformed).is_err());
+    }
+
+    #[tokio::test]
+    async fn ordinary_function_named_tool_search_remains_a_function() {
+        let mut tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([{
+            "type": "function",
+            "name": "tool_search",
+            "parameters": {"type": "object"}
+        }]))
+        .unwrap();
+        let registry = ToolRegistry::build_with_handlers(&mut tools, &mut GatewayExecutors::default())
+            .await
+            .unwrap();
+        assert_eq!(registry.tool_type_map().get("tool_search"), Some(&ToolType::Function));
     }
 
     #[tokio::test]
@@ -851,51 +618,34 @@ mod tests {
             "stream": false
         }))
         .expect("active namespace request");
-        let state = ToolSearchState::build(&request).expect("prepared namespace state");
-        let mut tools = private_tools(&state, &request);
+        let mut state = ToolSearchState::build(&request).expect("prepared namespace state");
+        let mut tools = private_tools(&mut state, &request);
         let mut registry = ToolRegistry::build_with_handlers(&mut tools, &mut GatewayExecutors::default())
             .await
             .expect("private registry");
-        registry.classify_tool_search(&state).expect("classification");
+        registry.apply_tool_search_state(&state).expect("state application");
 
-        let mut ordinary = serde_json::json!({"output": [{
-            "type": "function_call", "id": "fc_ordinary", "call_id": "call_ordinary",
-            "name": "agentic_ns__weather__ordinary_prefix_like", "arguments": "{}", "status": "completed"
-        }]});
-        registry
-            .normalize_blocking_response(&mut ordinary)
-            .expect("unrelated prefix-like function remains ordinary");
-        assert_eq!(ordinary["output"][0]["type"], "function_call");
-
-        let mut withheld = serde_json::json!({"output": [{
-            "type": "function_call", "id": "fc_withheld", "call_id": "call_withheld",
-            "name": "agentic_ns__weather__forecast", "arguments": "{}", "status": "completed"
-        }]});
-        assert!(matches!(
-            registry.normalize_blocking_response(&mut withheld),
-            Err(ToolError::Execution(_))
-        ));
-    }
-
-    fn invalid_items_for_inactive() -> Value {
-        serde_json::json!({
-            "type": "function_call",
-            "id": "fc_ordinary",
-            "call_id": "",
-            "name": "tool_search",
-            "arguments": "[]"
-        })
+        assert!(
+            !registry
+                .withheld_function_names()
+                .contains("agentic_ns__weather__ordinary_prefix_like")
+        );
+        assert!(
+            registry
+                .withheld_function_names()
+                .contains("agentic_ns__weather__forecast")
+        );
     }
 
     fn private_tools(
-        state: &ToolSearchState,
+        state: &mut ToolSearchState,
         request: &crate::types::request_response::RequestPayload,
     ) -> Vec<ResponsesTool> {
+        let mut request = request.clone();
         state
-            .private_inference_request(request)
-            .expect("prepared state materializes a private inference request")
-            .tools
-            .expect("private tools")
+            .prepare_inference_request(&mut request)
+            .expect("prepared state materializes a private inference request");
+        request.tools.expect("private tools")
     }
 
     fn prepared_search_state() -> (crate::types::request_response::RequestPayload, ToolSearchState) {
@@ -941,46 +691,6 @@ mod tests {
         (request, state)
     }
 
-    #[test]
-    fn declaration_free_replay_keeps_stream_translation_active_without_a_dispatch_entry() {
-        let (_, state) = replayed_search_state();
-        let mut registry = ToolRegistry::default();
-
-        registry.classify_tool_search(&state).expect("replay classification");
-
-        assert!(registry.lookup("tool_search").is_none());
-        assert_eq!(registry.tool_type_map().get("tool_search"), Some(&ToolType::ToolSearch));
-    }
-
-    #[test]
-    fn streaming_search_id_collision_is_atomic() {
-        let (_, state) = replayed_search_state();
-        let mut registry = ToolRegistry::default();
-        registry.classify_tool_search(&state).expect("replay classification");
-        let mut output: Vec<OutputItem> = serde_json::from_value(serde_json::json!([
-            {
-                "type": "function_call", "id": "fc_same", "call_id": "call_search",
-                "name": "tool_search", "arguments": "{}", "status": "completed"
-            },
-            {
-                "type": "tool_search_call", "id": "tsc_same", "call_id": "call_existing",
-                "execution": "client", "arguments": {}, "status": "completed"
-            }
-        ]))
-        .expect("output items");
-        let before = serialize_to_value(&output).expect("before serializes");
-
-        let error = registry
-            .restore_final_payload_output(&mut output)
-            .expect_err("public ID collision must fail");
-
-        assert!(matches!(
-            error,
-            ToolError::Execution(message) if message == "upstream returned an invalid tool-search call"
-        ));
-        assert_eq!(serialize_to_value(&output).expect("after serializes"), before);
-    }
-
     fn mixed_tool_declarations() -> Vec<ResponsesTool> {
         serde_json::from_value(serde_json::json!([
             {
@@ -1015,9 +725,7 @@ mod tests {
             arguments: "{}".to_owned(),
             status: MessageStatus::Completed,
         })];
-        registry
-            .restore_final_payload_output(&mut output)
-            .expect("ordinary namespace restoration succeeds");
+        registry.restore_final_payload_output(&mut output);
         let OutputItem::FunctionCall(call) = &output[0] else {
             panic!("expected restored function call");
         };
@@ -1170,158 +878,6 @@ mod tests {
                 .is_some_and(|error| error.contains("failed"))
         );
         assert!(registry.is_empty());
-    }
-
-    fn invalid_private_mcp_declaration(server_label: &str) -> ResponsesTool {
-        serde_json::from_value(serde_json::json!({
-            "type": "mcp",
-            "server_label": server_label,
-            "server_url": "http://url-user:url-password@127.0.0.1:1/mcp?token=query-secret",
-            "headers": {"X-Private-Token": "header-secret"},
-            "authorization": "authorization-secret",
-            "require_approval": "never"
-        }))
-        .expect("invalid private MCP declaration remains a typed declaration")
-    }
-
-    async fn assert_loaded_mcp_config_error(
-        tool: ResponsesTool,
-        mut executors: GatewayExecutors,
-        expected_message: &str,
-    ) {
-        let ResponsesTool::Mcp(param) = &tool else {
-            panic!("expected MCP declaration");
-        };
-        let loaded_mcp_server_labels = HashSet::from([param.server_label.clone()]);
-        let mut tools = vec![tool];
-
-        let error =
-            ToolRegistry::build_with_handlers_for_tool_search(&mut tools, &mut executors, &loaded_mcp_server_labels)
-                .await
-                .expect_err("loaded MCP policy error must remain a request error");
-
-        assert!(
-            matches!(error, ToolError::Config(ref message) if message.contains(expected_message)),
-            "unexpected loaded MCP configuration error: {error}"
-        );
-    }
-
-    #[tokio::test]
-    async fn ordinary_invalid_mcp_configuration_remains_a_config_error() {
-        let mut tools = vec![invalid_private_mcp_declaration("private_weather")];
-        let mut executors = GatewayExecutors::default();
-
-        let error = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
-            .await
-            .expect_err("ordinary invalid MCP configuration must fail the request");
-
-        assert!(matches!(
-            error,
-            ToolError::Config(message)
-                if message == "MCP server 'private_weather' has no valid request-declared configuration"
-        ));
-    }
-
-    #[tokio::test]
-    async fn loaded_tool_search_mcp_config_failure_becomes_a_sanitized_list_tools_item() {
-        let mut tools = vec![invalid_private_mcp_declaration("private_weather")];
-        let mut executors = GatewayExecutors::default();
-        let loaded_mcp_server_labels = HashSet::from(["private_weather".to_owned()]);
-
-        let registry =
-            ToolRegistry::build_with_handlers_for_tool_search(&mut tools, &mut executors, &loaded_mcp_server_labels)
-                .await
-                .expect("loaded MCP failure must retain public list-tools semantics");
-
-        let [list_tools] = registry.mcp_list_tools_items() else {
-            panic!("expected one MCP list-tools failure item");
-        };
-        assert_eq!(list_tools.server_label, "private_weather");
-        assert!(list_tools.tools.is_empty());
-        assert_eq!(
-            list_tools.error.as_deref(),
-            Some("MCP server 'private_weather' failed to connect or list tools")
-        );
-        let public_item = serialize_to_value(list_tools)
-            .expect("public list-tools item serializes")
-            .to_string();
-        for secret in [
-            "url-user",
-            "url-password",
-            "query-secret",
-            "header-secret",
-            "authorization-secret",
-        ] {
-            assert!(!public_item.contains(secret), "public list-tools item leaked {secret}");
-        }
-        assert!(registry.is_empty());
-    }
-
-    #[tokio::test]
-    async fn loaded_tool_search_mcp_policy_and_identity_errors_remain_strict() {
-        let connector = serde_json::from_value(serde_json::json!({
-            "type": "mcp",
-            "server_label": "connector",
-            "connector_id": "connector_dropbox",
-            "require_approval": "never"
-        }))
-        .expect("connector declaration");
-        assert_loaded_mcp_config_error(connector, GatewayExecutors::default(), "connector_id is not supported").await;
-
-        let missing_approval = serde_json::from_value(serde_json::json!({
-            "type": "mcp",
-            "server_label": "missing_approval",
-            "server_url": "http://127.0.0.1:1/mcp"
-        }))
-        .expect("missing approval declaration");
-        assert_loaded_mcp_config_error(
-            missing_approval,
-            GatewayExecutors::default(),
-            "require_approval must be set to 'never'",
-        )
-        .await;
-
-        let unsupported_approval = serde_json::from_value(serde_json::json!({
-            "type": "mcp",
-            "server_label": "unsupported_approval",
-            "server_url": "http://127.0.0.1:1/mcp",
-            "require_approval": "always"
-        }))
-        .expect("unsupported approval declaration");
-        assert_loaded_mcp_config_error(
-            unsupported_approval,
-            GatewayExecutors::default(),
-            "approval gating is not yet supported",
-        )
-        .await;
-
-        let mut configured = GatewayExecutors::default();
-        configured.insert(GatewayExecutorRegistration::Mcp {
-            server_label: "configured".to_owned(),
-            handlers: vec![discovered_handler("configured", "read", "mcp__configured__read")],
-        });
-        let configured_override = serde_json::from_value(serde_json::json!({
-            "type": "mcp",
-            "server_label": "configured",
-            "server_url": "http://127.0.0.1:1/mcp",
-            "require_approval": "never"
-        }))
-        .expect("configured override declaration");
-        assert_loaded_mcp_config_error(configured_override, configured, "configured by the gateway").await;
-
-        let mut filtered = GatewayExecutors::default();
-        filtered.insert(GatewayExecutorRegistration::Mcp {
-            server_label: "filtered".to_owned(),
-            handlers: vec![discovered_handler("filtered", "delete", "mcp__filtered__delete")],
-        });
-        let empty_allowed_tools = serde_json::from_value(serde_json::json!({
-            "type": "mcp",
-            "server_label": "filtered",
-            "allowed_tools": ["read"],
-            "require_approval": "never"
-        }))
-        .expect("empty allowed tool declaration");
-        assert_loaded_mcp_config_error(empty_allowed_tools, filtered, "empty final allowed tool set").await;
     }
 
     #[tokio::test]

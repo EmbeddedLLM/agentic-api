@@ -81,6 +81,8 @@ user blocks emitted by Claude Code 2.1.218.
 --openai URL           OpenAI upstream (default https://api.openai.com)
 --tools FILE           JSON file containing a tools array (responses mode only)
 --tool-choice VALUE    "auto", "none", "required", or JSON e.g. '{"type":"function","name":"foo"}'
+--tool-choice-sequence FILE
+                       JSON array with one tool_choice value per linear Responses turn
 --tool-outputs FILE    JSON object mapping called tool names to output strings
 --tool-search-output-tools FILE
                        JSON array returned for a client tool-search call
@@ -202,7 +204,7 @@ turns:
 | `record_custom_tool_cassettes.sh` | Matching two-turn custom-tool flows (streaming + non-streaming) | gateway and OpenAI reference |
 | `record_mcp_cassettes.sh` | Native MCP counter tool discovery and calls (streaming + non-streaming) | gateway and OpenAI reference |
 | `record_web_search_cassettes.sh` | Matching web-search calls (streaming + non-streaming) | gateway and OpenAI reference |
-| `record_tool_search_cassettes.sh` | Three-turn client tool-search characterization; gateway blocking, HTTP/SSE, and WebSocket acceptance | OpenAI reference, direct vLLM, and gateway |
+| `record_tool_search_cassettes.sh` | Four-turn mixed function/namespace client tool-search characterization; gateway blocking, HTTP/SSE, and WebSocket acceptance | OpenAI reference, direct vLLM, and gateway |
 
 ### Text-only (OpenAI)
 
@@ -229,15 +231,30 @@ VLLM_URL=http://0.0.0.0:5050 MODEL=Qwen/Qwen3-30B-A3B-FP8 bash tests/cassettes/r
 
 ### Client tool search (OpenAI reference, direct vLLM, and gateway)
 
-The recorder captures three turns: search call, linked search output and loaded function call, then linked function
-output and final message. OpenAI and gateway use public `tool_search_call`/`tool_search_output`; direct vLLM uses a
-private synthetic `tool_search` function. Direct vLLM and gateway blocking use `store: false` full-item replay;
-gateway SSE/WebSocket profiles use stored continuation. The private projection is not the gateway-to-vLLM envelope.
+The recorder captures four turns: a search call, a linked search output followed by one loaded ordinary function
+call, its linked function call output followed by one loaded namespace-member call, then that call's linked output and
+the final message. The initial catalog contains several deferred ordinary functions and a namespace with several
+deferred members; the search output loads exactly one ordinary function and exactly one member of that namespace.
+OpenAI and gateway use public `tool_search_call`/`tool_search_output` and public `{ namespace, name }` calls; direct
+vLLM uses a private synthetic `tool_search` function and the flattened namespace-member name. Direct vLLM and gateway
+blocking use `store: false` full-item replay; gateway SSE/WebSocket profiles use stored continuation. The private
+projection is not the gateway-to-vLLM envelope.
+
+Each profile also records a four-entry `tool_choice` sequence so inference cannot repeat a prior call or emit another
+call on the final turn. OpenAI uses `required`, selected `get_weather`, `auto`, then `none`: its function selector
+cannot identify a function nested in a namespace, and the stored continuation intentionally omits the repeated `tools`
+parameter required by `required`, so the third-turn prompt identifies `travel.get_timezone` and the characterization
+strictly rejects a wrong or multiple call. Gateway profiles use `required`, selected `get_weather`,
+selected public `travel.get_timezone`, then `none`, so the gateway can resolve the namespace member to its flattened
+upstream identity. Direct vLLM selects the synthetic `tool_search`, `get_weather`, that flattened namespace member,
+then `none`. The first public choice is `required` because the gateway's typed public `tool_choice` currently has no
+`type: "tool_search"` selector; deferred declarations leave tool search as the only available choice on that turn.
 
 The complete set is exactly seven flows: OpenAI blocking/SSE, direct-vLLM blocking/SSE, and gateway blocking/SSE/WS.
 HTTP uses the embedded proxy; WebSocket uses bounded direct capture. Recorded vLLM was `0.25.1`; the target must expose
 the Responses API with a compatible function-call parser, but `/version` did not expose exact flags. Use a fresh gateway
-database.
+database. After recording, the script runs `tool_search_characterization_test` as the single semantic validator for the
+matrix.
 
 Start the gateway with this SQLite path absent:
 

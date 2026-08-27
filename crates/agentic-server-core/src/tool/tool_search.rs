@@ -2,24 +2,219 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::types::event::MessageStatus;
 use crate::types::io::{
-    FunctionTool, FunctionToolResultMessage, InputFunctionToolCall, InputItem, InputToolSearchCall, OutputItem,
-    ResponsesInput, ToolCallOutput, ToolChoice, ToolSearchCall, ToolSearchOutputMessage,
+    FunctionTool, FunctionToolResultMessage, InputFunctionToolCall, InputItem, InputToolSearchCall, ResponsesInput,
+    ToolCallOutput, ToolChoice, ToolSearchOutputMessage,
 };
-use crate::types::request_response::{RequestPayload, ToolSearchReadiness};
+use crate::types::request_response::RequestPayload;
 use crate::types::tools::{
-    CodexNamespaceMember, CodexNamespaceToolParam, FunctionToolParam, NonEmptyToolName, ResponsesTool,
-    ToolSearchExecution, ToolSearchStatus, ToolSearchToolParam,
+    CodexNamespaceMember, CodexNamespaceToolParam, FunctionToolParam, ResponsesTool, ToolSearchStatus,
+    ToolSearchToolParam,
 };
-use crate::utils::common::{deserialize_from_str, serialize_to_string, serialize_to_value};
+use crate::utils::common::{
+    deserialize_from_value, serialize_to_string, serialize_to_value, serialize_to_value_or_custom_default,
+};
 
-use super::ToolError;
-use super::names::validate_model_visible_declared_names;
+use super::CodexNamespaceHandler;
+use super::handler::{ToolError, ToolHandler};
+use super::registry::{ToolEntry, ToolRegistry, ToolType};
 
-const SYNTHETIC_TOOL_NAME: &str = "tool_search";
+pub(crate) const TOOL_SEARCH_NAME: &str = "tool_search";
+const DEFAULT_DESCRIPTION: &str = "Search the client tool catalog";
+const DEFAULT_QUERY_DESCRIPTION: &str = "A concise description of the needed capabilities.";
+
+/// Handler for client-executed `type: "tool_search"` declarations.
+///
+/// The declaration remains a first-class tool-search type throughout request
+/// preparation and registry construction. This handler performs the one
+/// provider-specific lowering step to the ordinary function shape understood
+/// by upstreams without native tool-search support.
+#[derive(Debug)]
+pub struct ToolSearchHandler;
+
+/// Request-scoped tool-search preparation owned by the tool layer.
+///
+/// The executor carries this value for the lifetime of one turn, while the
+/// underlying public/private projection state remains an implementation detail
+/// of the tool-search behavior.
+#[derive(Debug, Default)]
+pub(crate) struct PreparedToolSearch {
+    state: Option<ToolSearchState>,
+}
+
+impl PreparedToolSearch {
+    /// Build and consume the private inference projection for a fully
+    /// rehydrated request.
+    pub(crate) fn prepare(
+        request: &mut RequestPayload,
+        restored_loaded_tools: &[ResponsesTool],
+        restore_only_declared: bool,
+    ) -> Result<Self, ToolError> {
+        let state = ToolSearchHandler::prepare_request(request, restored_loaded_tools, restore_only_declared)?;
+        Ok(Self { state })
+    }
+
+    /// Apply the derived model-visible routing safeguards to a request registry.
+    pub(crate) fn apply_to_registry(&self, registry: &mut ToolRegistry) -> Result<(), ToolError> {
+        if let Some(state) = &self.state {
+            registry.apply_tool_search_state(state)?;
+        }
+        Ok(())
+    }
+
+    /// Return the public declarations for a response envelope when tool search
+    /// is active. `Some([])` intentionally differs from an inactive request.
+    #[must_use]
+    pub(crate) fn public_response_tools(&self) -> Option<Vec<ResponsesTool>> {
+        let state = self.state.as_ref().filter(|state| state.is_active())?;
+        let mut tools = state.public_response_tools();
+        for tool in &mut tools {
+            tool.sanitize_for_persistence();
+        }
+        Some(tools)
+    }
+
+    /// Move the public persistence projection out of active state.
+    pub(crate) fn take_public_metadata(&mut self) -> Option<(Option<Vec<ResponsesTool>>, Vec<ResponsesTool>)> {
+        self.state
+            .as_mut()
+            .filter(|state| state.is_active())
+            .map(ToolSearchState::take_public_metadata)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn state(&self) -> Option<&ToolSearchState> {
+        self.state.as_ref()
+    }
+}
+
+impl ToolSearchHandler {
+    /// Prepare the private inference view from fully rehydrated public state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ToolError::Config`] when the public tool-search history or
+    /// effective tool selection is invalid.
+    pub(crate) fn prepare_request(
+        request: &mut RequestPayload,
+        restored_loaded_tools: &[ResponsesTool],
+        restore_only_declared: bool,
+    ) -> Result<Option<ToolSearchState>, ToolError> {
+        let mut state =
+            ToolSearchState::build_with_loaded_tools(request, restored_loaded_tools, restore_only_declared)?;
+        if !state.is_active() {
+            return Ok(None);
+        }
+        state.prepare_inference_request(request)?;
+        Ok(Some(state))
+    }
+
+    #[must_use]
+    pub(crate) fn normalized_param(param: &ToolSearchToolParam) -> ToolSearchToolParam {
+        let mut normalized = param.clone();
+        normalized.description = Some(
+            param
+                .description
+                .as_deref()
+                .filter(|description| !description.trim().is_empty())
+                .unwrap_or(DEFAULT_DESCRIPTION)
+                .to_owned(),
+        );
+        normalized.parameters = Some(
+            param
+                .parameters
+                .as_ref()
+                .filter(|parameters| parameters.get("type").and_then(Value::as_str) == Some("object"))
+                .cloned()
+                .unwrap_or_else(default_parameters),
+        );
+        normalized
+    }
+
+    #[must_use]
+    fn function_tool(param: &ToolSearchToolParam) -> FunctionTool {
+        let normalized = Self::normalized_param(param);
+        FunctionTool {
+            type_: "function".to_owned(),
+            name: TOOL_SEARCH_NAME.to_owned(),
+            description: normalized.description,
+            parameters: normalized.parameters.map(Value::Object),
+            strict: Some(true),
+        }
+    }
+}
+
+impl ToolHandler for ToolSearchHandler {
+    fn tool_type(&self) -> ToolType {
+        ToolType::ToolSearch
+    }
+
+    fn validate(&self, param: &Value) -> Result<(), ToolError> {
+        deserialize_from_value::<ToolSearchToolParam>(param.clone())
+            .map(|_| ())
+            .map_err(|error| ToolError::Config(format!("invalid tool_search declaration: {error}")))
+    }
+
+    fn normalize(&self, param: &Value) -> Vec<FunctionTool> {
+        match deserialize_from_value::<ToolSearchToolParam>(param.clone()) {
+            Ok(param) => vec![Self::function_tool(&param)],
+            Err(error) => {
+                tracing::warn!(%error, "tool_search normalize called before validation");
+                vec![]
+            }
+        }
+    }
+}
+
+pub(crate) fn insert_tool_search_entry(entries: &mut HashMap<String, ToolEntry>, param: &ToolSearchToolParam) {
+    serialize_to_value_or_custom_default(
+        param,
+        "tool_search config serialization failed",
+        |config| {
+            if entries
+                .insert(
+                    TOOL_SEARCH_NAME.to_owned(),
+                    ToolEntry {
+                        tool_type: ToolType::ToolSearch,
+                        config,
+                        server_label: None,
+                        handler: None,
+                    },
+                )
+                .is_some()
+            {
+                tracing::warn!(
+                    name = TOOL_SEARCH_NAME,
+                    "duplicate tool name — previous definition overwritten"
+                );
+            }
+        },
+        (),
+    );
+}
+
+fn default_parameters() -> Map<String, Value> {
+    let query = Map::from_iter([
+        ("type".to_owned(), Value::String("string".to_owned())),
+        (
+            "description".to_owned(),
+            Value::String(DEFAULT_QUERY_DESCRIPTION.to_owned()),
+        ),
+    ]);
+    let properties = Map::from_iter([("query".to_owned(), Value::Object(query))]);
+    Map::from_iter([
+        ("type".to_owned(), Value::String("object".to_owned())),
+        ("properties".to_owned(), Value::Object(properties)),
+        (
+            "required".to_owned(),
+            Value::Array(vec![Value::String("query".to_owned())]),
+        ),
+        ("additionalProperties".to_owned(), Value::Bool(false)),
+    ])
+}
 
 /// Stable public identity used to compare definitions accumulated from search outputs.
 ///
@@ -29,13 +224,12 @@ const SYNTHETIC_TOOL_NAME: &str = "tool_search";
 enum LoadedToolIdentity {
     Function(String),
     Namespace(String),
-    Mcp(String),
 }
 
 impl LoadedToolIdentity {
     fn name(&self) -> &str {
         match self {
-            Self::Function(name) | Self::Namespace(name) | Self::Mcp(name) => name,
+            Self::Function(name) | Self::Namespace(name) => name,
         }
     }
 
@@ -43,7 +237,6 @@ impl LoadedToolIdentity {
         match self {
             Self::Function(_) => "function",
             Self::Namespace(_) => "namespace",
-            Self::Mcp(_) => "MCP server",
         }
     }
 }
@@ -84,8 +277,6 @@ struct DefinitionAccumulator<'a> {
     definition_indexes: &'a mut HashMap<String, usize>,
     loaded_public_tools: &'a mut Vec<ResponsesTool>,
     withheld_function_names: &'a mut HashSet<String>,
-    mcp_load_positions: &'a mut HashMap<String, usize>,
-    trusted_restored_identities: &'a HashSet<LoadedToolIdentity>,
     prior_unknown_namespace_calls: HashMap<String, HashSet<String>>,
     unqualified_call_positions: HashMap<String, usize>,
     current_history_position: Option<usize>,
@@ -97,7 +288,6 @@ struct DefinitionViews<'a> {
     definition_indexes: &'a mut HashMap<String, usize>,
     loaded_public_tools: &'a mut Vec<ResponsesTool>,
     withheld_function_names: &'a mut HashSet<String>,
-    mcp_load_positions: &'a mut HashMap<String, usize>,
 }
 
 #[derive(Serialize)]
@@ -113,25 +303,18 @@ enum CatalogEntry {
         #[serde(skip_serializing_if = "Option::is_none")]
         description: Option<String>,
     },
-    Mcp {
-        server_label: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        server_description: Option<String>,
-    },
 }
 
 impl CatalogEntry {
     fn display_name(&self) -> &str {
         match self {
             Self::Function { name, .. } | Self::Namespace { name, .. } => name,
-            Self::Mcp { server_label, .. } => server_label,
         }
     }
 
     fn description(&self) -> Option<&str> {
         match self {
             Self::Function { description, .. } | Self::Namespace { description, .. } => description.as_deref(),
-            Self::Mcp { server_description, .. } => server_description.as_deref(),
         }
     }
 }
@@ -139,17 +322,16 @@ impl CatalogEntry {
 /// Pure, request-scoped state derived from fully rehydrated public history.
 ///
 /// The state deliberately has no `Serialize` implementation and its `Debug`
-/// output contains counts only. Canonical definitions can contain MCP
-/// credentials and stay private to equality checks.
+/// output contains counts only.
 pub struct ToolSearchState {
     activity: ToolSearchActivity,
+    has_completed_search: bool,
     public_effective_tools: Option<Vec<ResponsesTool>>,
     private_upstream_tools: Option<Vec<ResponsesTool>>,
     private_upstream_input: Option<ResponsesInput>,
     loaded_public_tools: Vec<ResponsesTool>,
-    synthetic_function: Option<FunctionTool>,
+    synthetic_tool_search: Option<ToolSearchToolParam>,
     withheld_function_names: HashSet<String>,
-    mcp_load_positions: HashMap<String, usize>,
     unqualified_call_positions: HashMap<String, usize>,
 }
 
@@ -159,6 +341,7 @@ impl fmt::Debug for ToolSearchState {
             .debug_struct("ToolSearchState")
             .field("activity", &self.activity)
             .field("active", &self.is_active())
+            .field("has_completed_search", &self.has_completed_search)
             .field(
                 "public_effective_tool_count",
                 &self.public_effective_tools.as_ref().map_or(0, Vec::len),
@@ -169,9 +352,8 @@ impl fmt::Debug for ToolSearchState {
             )
             .field("loaded_public_tool_count", &self.loaded_public_tools.len())
             .field("has_private_upstream_input", &self.private_upstream_input.is_some())
-            .field("has_synthetic_function", &self.synthetic_function.is_some())
+            .field("has_synthetic_tool_search", &self.synthetic_tool_search.is_some())
             .field("withheld_function_count", &self.withheld_function_names.len())
-            .field("mcp_load_count", &self.mcp_load_positions.len())
             .field("unqualified_history_call_count", &self.unqualified_call_positions.len())
             .finish()
     }
@@ -181,13 +363,13 @@ impl Default for ToolSearchState {
     fn default() -> Self {
         Self {
             activity: ToolSearchActivity::Inactive,
+            has_completed_search: false,
             public_effective_tools: None,
             private_upstream_tools: None,
             private_upstream_input: None,
             loaded_public_tools: Vec::new(),
-            synthetic_function: None,
+            synthetic_tool_search: None,
             withheld_function_names: HashSet::new(),
-            mcp_load_positions: HashMap::new(),
             unqualified_call_positions: HashMap::new(),
         }
     }
@@ -224,8 +406,7 @@ impl ToolSearchState {
         restore_only_declared: bool,
     ) -> Result<Self, ToolError> {
         let active_input = request.input.model_input();
-        let readiness = request.tool_search_readiness_for_input(active_input.as_ref())?;
-        if readiness == ToolSearchReadiness::Inactive {
+        if !validate_tool_search_request(request, active_input.as_ref())? {
             return Ok(Self::default());
         }
 
@@ -236,6 +417,10 @@ impl ToolSearchState {
         let has_search_history = input_items
             .iter()
             .any(|item| matches!(item, InputItem::ToolSearchCall(_) | InputItem::ToolSearchOutput(_)));
+        let has_completed_search = !restored_loaded_tools.is_empty()
+            || input_items
+                .iter()
+                .any(|item| matches!(item, InputItem::ToolSearchOutput(_)));
         let declaration = request
             .tools
             .as_deref()
@@ -258,11 +443,10 @@ impl ToolSearchState {
         index_initial_definitions(&public_tools, &mut definitions, &mut definition_indexes)?;
         let mut withheld_function_names =
             initial_withheld_function_names(&public_tools, &definitions, &definition_indexes)?;
-        let mut mcp_load_positions = HashMap::new();
         let mut unqualified_call_positions = HashMap::new();
 
         let mut loaded_public_tools = Vec::new();
-        let trusted_restored_identities = restore_loaded_definitions(
+        restore_loaded_definitions(
             restored_loaded_tools,
             DefinitionViews {
                 public_tools: &mut public_tools,
@@ -270,7 +454,6 @@ impl ToolSearchState {
                 definition_indexes: &mut definition_indexes,
                 loaded_public_tools: &mut loaded_public_tools,
                 withheld_function_names: &mut withheld_function_names,
-                mcp_load_positions: &mut mcp_load_positions,
             },
             restore_only_declared,
         )?;
@@ -282,36 +465,32 @@ impl ToolSearchState {
                 definition_indexes: &mut definition_indexes,
                 loaded_public_tools: &mut loaded_public_tools,
                 withheld_function_names: &mut withheld_function_names,
-                mcp_load_positions: &mut mcp_load_positions,
             },
             &mut unqualified_call_positions,
-            &trusted_restored_identities,
         )?;
 
-        validate_model_visible_declared_names(&public_tools)?;
+        CodexNamespaceHandler.validate_namespace_collisions(Some(&public_tools))?;
 
         let catalog = build_catalog(&public_tools, &definitions, &definition_indexes);
-        let synthetic_function = declaration
-            .map(|declaration| synthetic_function(declaration, &catalog))
-            .transpose()?;
+        let synthetic_tool_search = declaration.map(|declaration| synthetic_tool_search(declaration, &catalog));
         let private_tools = build_private_tools(
             &public_tools,
             &definitions,
             &definition_indexes,
-            synthetic_function.as_ref(),
+            synthetic_tool_search.as_ref(),
         );
         let public_effective_tools = (tools_were_present || !public_tools.is_empty()).then_some(public_tools);
         let private_upstream_tools = (tools_were_present || !private_tools.is_empty()).then_some(private_tools);
 
         Ok(Self {
             activity: ToolSearchActivity::Active,
+            has_completed_search,
             public_effective_tools,
             private_upstream_tools,
             private_upstream_input: Some(private_upstream_input),
             loaded_public_tools,
-            synthetic_function,
+            synthetic_tool_search,
             withheld_function_names,
-            mcp_load_positions,
             unqualified_call_positions,
         })
     }
@@ -326,6 +505,19 @@ impl ToolSearchState {
         self.public_effective_tools.as_deref()
     }
 
+    /// Public declarations available for selection in response metadata.
+    /// Before search completes, the response echoes the declared catalog. Once
+    /// search resolves availability, it exposes only initially available and
+    /// loaded definitions while preserving their public namespace shape.
+    #[must_use]
+    pub(crate) fn public_response_tools(&self) -> Vec<ResponsesTool> {
+        let public_tools = self.public_effective_tools.as_deref().unwrap_or_default();
+        if !self.has_completed_search {
+            return public_tools.to_vec();
+        }
+        available_public_tools(public_tools, &self.loaded_public_tools)
+    }
+
     /// Public definitions resolved by completed search outputs, in first-load order.
     ///
     /// This remains separate from `public_effective_tools`: an initially
@@ -335,10 +527,10 @@ impl ToolSearchState {
         &self.loaded_public_tools
     }
 
-    /// Private synthetic function declaration used by request-scoped registry and upstream normalization.
+    /// Private tool-search declaration used by request-scoped registry and upstream normalization.
     #[must_use]
-    pub const fn synthetic_function(&self) -> Option<&FunctionTool> {
-        self.synthetic_function.as_ref()
+    pub const fn synthetic_tool_search(&self) -> Option<&ToolSearchToolParam> {
+        self.synthetic_tool_search.as_ref()
     }
 
     #[must_use]
@@ -346,32 +538,77 @@ impl ToolSearchState {
         &self.withheld_function_names
     }
 
-    #[must_use]
-    pub(crate) fn mcp_load_positions(&self) -> &HashMap<String, usize> {
-        &self.mcp_load_positions
-    }
-
-    #[must_use]
-    pub(crate) fn unqualified_call_positions(&self) -> &HashMap<String, usize> {
-        &self.unqualified_call_positions
-    }
-
-    /// Materialize the private inference request for function, namespace, and
-    /// MCP tools from views prepared in the single state-building pass. The
-    /// public request is borrowed and never mutated.
+    /// Replace the request's public tool-search views with the prepared private
+    /// input and tools used for inference. The retained state then contains
+    /// only public metadata needed after inference.
     ///
     /// # Errors
     ///
     /// Returns [`ToolError::Config`] when the effective tool choice conflicts
     /// with the prepared private tool set.
-    pub fn private_inference_request(&self, public: &RequestPayload) -> Result<RequestPayload, ToolError> {
-        validate_effective_tool_choice(public.tool_choice.as_ref(), &self.withheld_function_names)?;
-        let mut private = public.clone();
-        if let Some(input) = &self.private_upstream_input {
-            private.input.clone_from(input);
+    pub fn prepare_inference_request(&mut self, request: &mut RequestPayload) -> Result<(), ToolError> {
+        validate_effective_tool_choice(request.tool_choice.as_ref(), &self.withheld_function_names)?;
+        let input = self.private_upstream_input.take().ok_or_else(|| {
+            ToolError::Config("tool-search private inference input has already been consumed".to_owned())
+        })?;
+        request.input = input;
+        request.tools = self.private_upstream_tools.take();
+        Ok(())
+    }
+
+    pub(crate) fn take_public_metadata(&mut self) -> (Option<Vec<ResponsesTool>>, Vec<ResponsesTool>) {
+        (
+            self.public_effective_tools.take(),
+            std::mem::take(&mut self.loaded_public_tools),
+        )
+    }
+}
+
+fn validate_tool_search_request(request: &RequestPayload, input: &ResponsesInput) -> Result<bool, ToolError> {
+    if !request.contains_tool_search_state_for_input(input) {
+        return Ok(false);
+    }
+
+    let tools = request.tools.as_deref().unwrap_or_default();
+    if tools
+        .iter()
+        .filter(|tool| matches!(tool, ResponsesTool::ToolSearch(_)))
+        .count()
+        > 1
+    {
+        return Err(ToolError::Config(
+            "tool search accepts at most one tool_search declaration".to_owned(),
+        ));
+    }
+    if request.parallel_tool_calls == Some(true) {
+        return Err(ToolError::Config(
+            "parallel_tool_calls must be false when tool search is active".to_owned(),
+        ));
+    }
+
+    for tool in tools {
+        tool.validate()?;
+        if has_reserved_tool_search_name(tool) {
+            return Err(ToolError::Config(
+                "model-visible tool name 'tool_search' is reserved while tool search is active".to_owned(),
+            ));
         }
-        private.tools.clone_from(&self.private_upstream_tools);
-        Ok(private)
+    }
+
+    Ok(true)
+}
+
+fn has_reserved_tool_search_name(tool: &ResponsesTool) -> bool {
+    match tool {
+        ResponsesTool::Function(function) => function.name.as_str() == TOOL_SEARCH_NAME,
+        ResponsesTool::Custom(custom) => custom.name.as_str() == TOOL_SEARCH_NAME,
+        ResponsesTool::Namespace(namespace) => namespace.name == TOOL_SEARCH_NAME,
+        ResponsesTool::ToolSearch(_)
+        | ResponsesTool::Mcp(_)
+        | ResponsesTool::WebSearch(_)
+        | ResponsesTool::FileSearch(_)
+        | ResponsesTool::CodeInterpreter(_)
+        | ResponsesTool::Unknown => false,
     }
 }
 
@@ -404,79 +641,44 @@ fn restore_loaded_definitions(
     restored_loaded_tools: &[ResponsesTool],
     views: DefinitionViews<'_>,
     restore_only_declared: bool,
-) -> Result<HashSet<LoadedToolIdentity>, ToolError> {
+) -> Result<(), ToolError> {
     let DefinitionViews {
         public_tools,
         definitions,
         definition_indexes,
         loaded_public_tools,
         withheld_function_names,
-        mcp_load_positions,
     } = views;
-    let no_trusted_restored_identities = HashSet::new();
-    let mut trusted_restored_identities = HashSet::with_capacity(restored_loaded_tools.len());
     let mut accumulator = DefinitionAccumulator {
         public_tools,
         definitions,
         definition_indexes,
         loaded_public_tools,
         withheld_function_names,
-        mcp_load_positions,
-        trusted_restored_identities: &no_trusted_restored_identities,
         prior_unknown_namespace_calls: HashMap::new(),
         unqualified_call_positions: HashMap::new(),
         current_history_position: None,
     };
     for tool in restored_loaded_tools {
-        let Some(tool) = restored_definition_for_load(
-            tool,
-            accumulator.public_tools,
-            accumulator.definitions,
-            accumulator.definition_indexes,
-            restore_only_declared,
-        )?
+        let Some(tool) = restored_definition_for_load(tool, accumulator.definition_indexes, restore_only_declared)?
         else {
             continue;
         };
         load_definition(&tool, &mut accumulator)?;
-        let identity = loaded_tool_identity(&tool)?.ok_or_else(|| {
-            ToolError::Config("stored tool-search availability contains an unsupported definition".to_owned())
-        })?;
-        trusted_restored_identities.insert(identity);
     }
-    Ok(trusted_restored_identities)
+    Ok(())
 }
 
 fn restored_definition_for_load(
     restored: &ResponsesTool,
-    public_tools: &[ResponsesTool],
-    definitions: &[DefinitionRecord],
     definition_indexes: &HashMap<String, usize>,
     restore_only_declared: bool,
 ) -> Result<Option<ResponsesTool>, ToolError> {
     let identity = loaded_tool_identity(restored)?.ok_or_else(|| {
         ToolError::Config("stored tool-search availability contains an unsupported definition".to_owned())
     })?;
-    let Some(record) = definition_indexes
-        .get(identity.name())
-        .and_then(|index| definitions.get(*index))
-    else {
-        return Ok((!restore_only_declared).then(|| restored.clone()));
-    };
-    if record.identity != identity {
-        return Ok(Some(restored.clone()));
-    }
-    let declared = &public_tools[record.public_index];
-    if matches!((restored, declared), (ResponsesTool::Mcp(_), ResponsesTool::Mcp(_))) {
-        let mut sanitized = declared.clone();
-        sanitized.sanitize_for_persistence();
-        if canonical_definition(&sanitized)? != canonical_definition(restored)? {
-            return Err(ToolError::Config(format!(
-                "loaded definition for identity '{}' conflicts with its existing type, schema, description, or configuration",
-                identity.name()
-            )));
-        }
-        return Ok(Some(declared.clone()));
+    if restore_only_declared && !definition_indexes.contains_key(identity.name()) {
+        return Ok(None);
     }
     Ok(Some(restored.clone()))
 }
@@ -498,64 +700,12 @@ fn stable_hash(value: &str) -> u64 {
     })
 }
 
-pub(crate) fn public_output_item(item_id: &str, call_id: &str, arguments: &str) -> Result<OutputItem, ToolError> {
-    if item_id.trim().is_empty() || call_id.trim().is_empty() {
-        return Err(invalid_upstream_search_call());
-    }
-    let arguments = deserialize_from_str::<Value>(arguments)
-        .ok()
-        .and_then(|value| value.as_object().cloned())
-        .ok_or_else(invalid_upstream_search_call)?;
-    Ok(OutputItem::ToolSearchCall(ToolSearchCall {
-        id: public_item_id(item_id),
-        call_id: call_id.to_owned(),
-        execution: ToolSearchExecution::Client,
-        arguments,
-        status: ToolSearchStatus::Completed,
-    }))
-}
-
-pub(crate) fn public_output_item_from_raw(object: &serde_json::Map<String, Value>) -> Result<OutputItem, ToolError> {
-    if object.get("type").and_then(Value::as_str) != Some("function_call")
-        || object.get("name").and_then(Value::as_str) != Some(SYNTHETIC_TOOL_NAME)
-        || object.get("status").and_then(Value::as_str) != Some("completed")
-        || object.get("namespace").is_some_and(|namespace| !namespace.is_null())
-    {
-        return Err(invalid_upstream_search_call());
-    }
-    let item_id = required_non_blank_string(object.get("id"))?;
-    let call_id = required_non_blank_string(object.get("call_id"))?;
-    let arguments = required_non_blank_string(object.get("arguments"))?;
-    public_output_item(item_id, call_id, arguments)
-}
-
-pub(crate) fn public_added_item(item_id: &str, call_id: &str) -> Result<Value, ToolError> {
-    if item_id.trim().is_empty() || call_id.trim().is_empty() {
-        return Err(invalid_upstream_search_call());
-    }
-    Ok(serde_json::json!({
-        "id": public_item_id(item_id),
-        "type": "tool_search_call",
-        "status": "in_progress",
-        "arguments": {},
-        "call_id": call_id,
-        "execution": "client",
-    }))
-}
-
-fn required_non_blank_string(value: Option<&Value>) -> Result<&str, ToolError> {
-    value
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(invalid_upstream_search_call)
-}
-
 pub(crate) fn invalid_upstream_search_call() -> ToolError {
-    ToolError::Execution("upstream returned an invalid tool-search call".to_owned())
+    ToolError::InvalidUpstreamToolSearch
 }
 
 pub(crate) fn invalid_upstream_withheld_function_call() -> ToolError {
-    ToolError::Execution("upstream returned a call for a function that has not been loaded".to_owned())
+    ToolError::UpstreamWithheldFunctionCall
 }
 
 fn index_initial_definitions(
@@ -588,8 +738,9 @@ fn definition_record(
 ) -> Result<DefinitionRecord, ToolError> {
     let namespace_members = match tool {
         ResponsesTool::Namespace(namespace) => Some(namespace_member_records(namespace, dynamically_loaded)?),
-        ResponsesTool::Function(_) | ResponsesTool::Mcp(_) => None,
+        ResponsesTool::Function(_) => None,
         ResponsesTool::ToolSearch(_)
+        | ResponsesTool::Mcp(_)
         | ResponsesTool::WebSearch(_)
         | ResponsesTool::FileSearch(_)
         | ResponsesTool::CodeInterpreter(_)
@@ -708,7 +859,6 @@ struct CanonicalToolSearchOutput<'a> {
 enum ModelVisibleLoadedTool<'a> {
     Function(ModelVisibleFunction<'a>),
     Namespace(ModelVisibleNamespace<'a>),
-    Mcp(ModelVisibleMcp<'a>),
 }
 
 #[derive(Serialize)]
@@ -728,20 +878,10 @@ struct ModelVisibleNamespace<'a> {
     description: Option<&'a str>,
 }
 
-#[derive(Serialize)]
-struct ModelVisibleMcp<'a> {
-    #[serde(rename = "type")]
-    type_: &'static str,
-    server_label: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    server_description: Option<&'a str>,
-}
-
 fn prepare_history(
     input: &ResponsesInput,
     views: DefinitionViews<'_>,
     unqualified_call_positions: &mut HashMap<String, usize>,
-    trusted_restored_identities: &HashSet<LoadedToolIdentity>,
 ) -> Result<ResponsesInput, ToolError> {
     let ResponsesInput::Items(items) = input else {
         return Ok(input.clone());
@@ -756,7 +896,6 @@ fn prepare_history(
         definition_indexes,
         loaded_public_tools,
         withheld_function_names,
-        mcp_load_positions,
     } = views;
     let mut definition_accumulator = DefinitionAccumulator {
         public_tools,
@@ -764,8 +903,6 @@ fn prepare_history(
         definition_indexes,
         loaded_public_tools,
         withheld_function_names,
-        mcp_load_positions,
-        trusted_restored_identities,
         prior_unknown_namespace_calls: HashMap::new(),
         unqualified_call_positions: std::mem::take(unqualified_call_positions),
         current_history_position: None,
@@ -889,7 +1026,7 @@ fn prepare_search_call(
     Ok(InputItem::FunctionCall(InputFunctionToolCall {
         id: Some(call.id.clone()),
         call_id: call.call_id.clone(),
-        name: SYNTHETIC_TOOL_NAME.to_owned(),
+        name: TOOL_SEARCH_NAME.to_owned(),
         namespace: None,
         arguments: canonical_arguments,
         status: Some(MessageStatus::Completed),
@@ -918,6 +1055,11 @@ fn prepare_search_output(
     if pending.call_id != output.call_id {
         return Err(ToolError::Config(
             "tool_search_output call_id does not match the preceding unresolved call".to_owned(),
+        ));
+    }
+    if output.status != ToolSearchStatus::Completed {
+        return Err(ToolError::Config(
+            "tool_search_output must be completed before it may load tool definitions".to_owned(),
         ));
     }
     for tool in &output.tools {
@@ -950,12 +1092,8 @@ fn model_visible_output_tools(tools: &[ResponsesTool]) -> Result<Vec<ModelVisibl
                 name: &namespace.name,
                 description: namespace.description.as_deref(),
             })),
-            ResponsesTool::Mcp(mcp) => Ok(ModelVisibleLoadedTool::Mcp(ModelVisibleMcp {
-                type_: "mcp",
-                server_label: &mcp.server_label,
-                server_description: mcp.server_description.as_deref(),
-            })),
             ResponsesTool::ToolSearch(_)
+            | ResponsesTool::Mcp(_)
             | ResponsesTool::WebSearch(_)
             | ResponsesTool::FileSearch(_)
             | ResponsesTool::CodeInterpreter(_)
@@ -974,16 +1112,6 @@ fn load_definition(tool: &ResponsesTool, definitions: &mut DefinitionAccumulator
     if let Some(index) = definitions.definition_indexes.get(identity.name()).copied() {
         let record = &mut definitions.definitions[index];
         if record.identity != identity || record.canonical != canonical {
-            if record.identity == identity
-                && matches!(tool, ResponsesTool::Mcp(_))
-                && definitions.trusted_restored_identities.contains(&identity)
-            {
-                let mut sanitized = definitions.public_tools[record.public_index].clone();
-                sanitized.sanitize_for_persistence();
-                if canonical_definition(&sanitized)? == canonical {
-                    return Ok(());
-                }
-            }
             return Err(ToolError::Config(format!(
                 "loaded definition for identity '{}' conflicts with its existing type, schema, description, or configuration",
                 identity.name()
@@ -1008,19 +1136,6 @@ fn load_definition(tool: &ResponsesTool, definitions: &mut DefinitionAccumulator
             {
                 return Err(withheld_function_history_call());
             }
-            let deferred_mcp = matches!(
-                &definitions.public_tools[record.public_index],
-                ResponsesTool::Mcp(mcp) if mcp.defer_loading == Some(true)
-            );
-            if let LoadedToolIdentity::Mcp(server_label) = &record.identity
-                && deferred_mcp
-                && let Some(position) = definitions.current_history_position
-            {
-                definitions
-                    .mcp_load_positions
-                    .entry(server_label.clone())
-                    .or_insert(position);
-            }
             record.loaded = true;
             definitions.withheld_function_names.remove(record.identity.name());
             definitions
@@ -1044,14 +1159,6 @@ fn load_definition(tool: &ResponsesTool, definitions: &mut DefinitionAccumulator
             &definitions.prior_unknown_namespace_calls,
             &definitions.unqualified_call_positions,
         )?,
-        ResponsesTool::Mcp(mcp) => {
-            if let Some(position) = definitions.current_history_position {
-                definitions
-                    .mcp_load_positions
-                    .entry(mcp.server_label.clone())
-                    .or_insert(position);
-            }
-        }
         _ => {}
     }
     let public_index = definitions.public_tools.len();
@@ -1170,8 +1277,8 @@ fn loaded_tool_identity(tool: &ResponsesTool) -> Result<Option<LoadedToolIdentit
     let identity = match tool {
         ResponsesTool::Function(function) => LoadedToolIdentity::Function(function.name.as_str().to_owned()),
         ResponsesTool::Namespace(namespace) => LoadedToolIdentity::Namespace(namespace.name.clone()),
-        ResponsesTool::Mcp(mcp) => LoadedToolIdentity::Mcp(mcp.server_label.clone()),
         ResponsesTool::ToolSearch(_)
+        | ResponsesTool::Mcp(_)
         | ResponsesTool::WebSearch(_)
         | ResponsesTool::FileSearch(_)
         | ResponsesTool::CodeInterpreter(_)
@@ -1187,7 +1294,7 @@ fn loaded_tool_identity(tool: &ResponsesTool) -> Result<Option<LoadedToolIdentit
     if matches!(
         &identity,
         LoadedToolIdentity::Function(name) | LoadedToolIdentity::Namespace(name)
-            if name == SYNTHETIC_TOOL_NAME
+            if name == TOOL_SEARCH_NAME
     ) {
         return Err(ToolError::Config(
             "model-visible tool name 'tool_search' is reserved while tool search is active".to_owned(),
@@ -1242,10 +1349,6 @@ fn build_catalog(
                         description: namespace.description.clone(),
                     })
                 }
-                ResponsesTool::Mcp(mcp) if mcp.defer_loading == Some(true) => Some(CatalogEntry::Mcp {
-                    server_label: mcp.server_label.clone(),
-                    server_description: mcp.server_description.clone(),
-                }),
                 ResponsesTool::Function(_)
                 | ResponsesTool::Namespace(_)
                 | ResponsesTool::Mcp(_)
@@ -1263,9 +1366,9 @@ fn build_catalog(
 /// Catalog prose deliberately follows the provider-characterization shape:
 /// declaration text, then one ordered semicolon-delimited list of `name —
 /// description` entries. It never uses schemas or execution configuration.
-fn synthetic_description(declaration: &ToolSearchToolParam, catalog: &[CatalogEntry]) -> String {
+fn synthetic_description(description: &str, catalog: &[CatalogEntry]) -> String {
     if catalog.is_empty() {
-        return declaration.description.clone();
+        return description.to_owned();
     }
     let entries = catalog
         .iter()
@@ -1287,42 +1390,108 @@ fn synthetic_description(declaration: &ToolSearchToolParam, catalog: &[CatalogEn
     let noun = if catalog.len() == 1 { "entry" } else { "entries" };
     format!(
         "{}. Available catalog {noun}: {entries}.",
-        declaration.description.trim().trim_end_matches('.')
+        description.trim().trim_end_matches('.')
     )
 }
 
-fn synthetic_function(declaration: &ToolSearchToolParam, catalog: &[CatalogEntry]) -> Result<FunctionTool, ToolError> {
-    let name = NonEmptyToolName::try_from(SYNTHETIC_TOOL_NAME)
-        .map_err(|_| ToolError::Config("reserved synthetic tool name is invalid".to_owned()))?;
-    let param = FunctionToolParam {
-        name,
-        description: Some(synthetic_description(declaration, catalog)),
-        parameters: Some(Value::Object(declaration.parameters.clone())),
-        strict: Some(true),
-        defer_loading: None,
-        extra: HashMap::new(),
-    };
-    Ok(FunctionTool::from(&param))
+fn synthetic_tool_search(declaration: &ToolSearchToolParam, catalog: &[CatalogEntry]) -> ToolSearchToolParam {
+    let mut normalized = ToolSearchHandler::normalized_param(declaration);
+    let description = normalized.description.as_deref().unwrap_or_default();
+    normalized.description = Some(synthetic_description(description, catalog));
+    normalized
 }
 
 fn build_private_tools(
     public_tools: &[ResponsesTool],
     definitions: &[DefinitionRecord],
     definition_indexes: &HashMap<String, usize>,
-    synthetic_function: Option<&FunctionTool>,
+    synthetic_tool_search: Option<&ToolSearchToolParam>,
 ) -> Vec<ResponsesTool> {
     public_tools
         .iter()
         .filter_map(|tool| match tool {
-            ResponsesTool::ToolSearch(_) => synthetic_function.map(function_tool_as_response),
-            ResponsesTool::Function(_) | ResponsesTool::Namespace(_) | ResponsesTool::Mcp(_) => {
+            ResponsesTool::ToolSearch(_) => synthetic_tool_search.cloned().map(ResponsesTool::ToolSearch),
+            ResponsesTool::Function(_) | ResponsesTool::Namespace(_) => {
                 private_definition(tool, definitions, definition_indexes)
             }
-            ResponsesTool::WebSearch(_)
+            ResponsesTool::Mcp(_)
+            | ResponsesTool::WebSearch(_)
             | ResponsesTool::FileSearch(_)
             | ResponsesTool::CodeInterpreter(_)
             | ResponsesTool::Custom(_)
             | ResponsesTool::Unknown => Some(tool.clone()),
+        })
+        .collect()
+}
+
+fn available_public_tools(public_tools: &[ResponsesTool], loaded_tools: &[ResponsesTool]) -> Vec<ResponsesTool> {
+    let mut loaded_functions = HashSet::new();
+    let mut loaded_namespace_members = HashMap::<&str, HashSet<&str>>::new();
+    for tool in loaded_tools {
+        match tool {
+            ResponsesTool::Function(function) => {
+                loaded_functions.insert(function.name.as_str());
+            }
+            ResponsesTool::Namespace(namespace) => {
+                let members = loaded_namespace_members.entry(namespace.name.as_str()).or_default();
+                members.extend(namespace.tools.iter().filter_map(|member| match member {
+                    CodexNamespaceMember::Function(function) => Some(function.name.as_str()),
+                    CodexNamespaceMember::Unknown => None,
+                }));
+            }
+            ResponsesTool::ToolSearch(_)
+            | ResponsesTool::Mcp(_)
+            | ResponsesTool::WebSearch(_)
+            | ResponsesTool::FileSearch(_)
+            | ResponsesTool::CodeInterpreter(_)
+            | ResponsesTool::Custom(_)
+            | ResponsesTool::Unknown => {}
+        }
+    }
+
+    public_tools
+        .iter()
+        .filter_map(|tool| match tool {
+            ResponsesTool::Function(function) => {
+                let loaded = loaded_functions.contains(function.name.as_str());
+                if function.defer_loading == Some(true) && !loaded {
+                    return None;
+                }
+                let mut available = function.clone();
+                if loaded {
+                    available.defer_loading = None;
+                }
+                Some(ResponsesTool::Function(available))
+            }
+            ResponsesTool::Namespace(namespace) => {
+                let loaded_members = loaded_namespace_members.get(namespace.name.as_str());
+                let mut available = namespace.clone();
+                available.tools = available
+                    .tools
+                    .into_iter()
+                    .filter_map(|member| match member {
+                        CodexNamespaceMember::Function(mut function) => {
+                            let loaded = loaded_members.is_some_and(|members| members.contains(function.name.as_str()));
+                            if function.defer_loading == Some(true) && !loaded {
+                                return None;
+                            }
+                            if loaded {
+                                function.defer_loading = None;
+                            }
+                            Some(CodexNamespaceMember::Function(function))
+                        }
+                        CodexNamespaceMember::Unknown => None,
+                    })
+                    .collect();
+                (!available.tools.is_empty()).then_some(ResponsesTool::Namespace(available))
+            }
+            ResponsesTool::Mcp(_)
+            | ResponsesTool::WebSearch(_)
+            | ResponsesTool::FileSearch(_)
+            | ResponsesTool::CodeInterpreter(_)
+            | ResponsesTool::Custom(_)
+            | ResponsesTool::Unknown => Some(tool.clone()),
+            ResponsesTool::ToolSearch(_) => None,
         })
         .collect()
 }
@@ -1347,11 +1516,6 @@ fn private_definition(
                 .as_ref(),
         )
         .map(ResponsesTool::Namespace),
-        ResponsesTool::Mcp(mcp) if loaded || mcp.defer_loading != Some(true) => {
-            let mut mcp = mcp.clone();
-            mcp.defer_loading = None;
-            Some(ResponsesTool::Mcp(mcp))
-        }
         ResponsesTool::Function(_)
         | ResponsesTool::Mcp(_)
         | ResponsesTool::ToolSearch(_)
@@ -1396,22 +1560,107 @@ fn namespace_has_withheld_member(member_records: Option<&NamespaceMemberRecords>
     member_records.is_some_and(|members| members.unloaded_count != 0)
 }
 
-fn function_tool_as_response(function: &FunctionTool) -> ResponsesTool {
-    ResponsesTool::Function(FunctionToolParam {
-        name: NonEmptyToolName::try_from(function.name.as_str())
-            .expect("the synthetic function uses a fixed non-empty name"),
-        description: function.description.clone(),
-        parameters: function.parameters.clone(),
-        strict: function.strict,
-        defer_loading: None,
-        extra: HashMap::new(),
-    })
-}
-
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
-    use crate::types::tools::McpDiscoveredToolParam;
+
+    fn param(value: Value) -> ToolSearchToolParam {
+        let ResponsesTool::ToolSearch(param) = serde_json::from_value(value).expect("valid tool_search declaration")
+        else {
+            panic!("expected tool_search");
+        };
+        param
+    }
+
+    #[test]
+    fn handler_validates_and_normalizes_exactly_one_function() {
+        let param = param(json!({
+            "type": "tool_search",
+            "execution": "client",
+            "description": "Find matching tools",
+            "parameters": {"type": "object", "properties": {"term": {"type": "string"}}}
+        }));
+        let value = serde_json::to_value(&param).unwrap();
+
+        ToolSearchHandler.validate(&value).unwrap();
+        assert_eq!(ToolSearchHandler.tool_type(), ToolType::ToolSearch);
+        assert_eq!(
+            serde_json::to_value(ToolSearchHandler.normalize(&value)).unwrap(),
+            json!([{
+                "type": "function",
+                "name": "tool_search",
+                "description": "Find matching tools",
+                "parameters": {"type": "object", "properties": {"term": {"type": "string"}}},
+                "strict": true
+            }])
+        );
+    }
+
+    #[test]
+    fn normalization_uses_safe_defaults() {
+        let param = param(json!({"type": "tool_search", "execution": "client", "description": "  "}));
+        let value = serde_json::to_value(&param).unwrap();
+        assert_eq!(
+            serde_json::to_value(ToolSearchHandler.normalize(&value)).unwrap(),
+            json!([{
+                "type": "function",
+                "name": "tool_search",
+                "description": "Search the client tool catalog",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"query": {
+                        "type": "string",
+                        "description": "A concise description of the needed capabilities."
+                    }},
+                    "required": ["query"],
+                    "additionalProperties": false
+                },
+                "strict": true
+            }])
+        );
+    }
+
+    #[test]
+    fn prepared_response_tools_remove_request_scoped_mcp_secrets_and_discovery() {
+        let mut request: RequestPayload = serde_json::from_value(json!({
+            "model": "test",
+            "input": "find weather",
+            "parallel_tool_calls": false,
+            "tools": [
+                {"type": "tool_search", "execution": "client"},
+                {
+                    "type": "mcp",
+                    "server_label": "weather",
+                    "server_url": "https://mcp.example.test/mcp",
+                    "headers": {"Authorization": "Bearer header-secret"},
+                    "authorization": "field-secret",
+                    "_agentic_discovered_tools": [{
+                        "server_label": "weather",
+                        "tool_name": "forecast",
+                        "internal_name": "mcp__weather__forecast",
+                        "tool": {"name": "forecast", "inputSchema": {"type": "object"}}
+                    }]
+                }
+            ]
+        }))
+        .expect("request shape");
+
+        let prepared = PreparedToolSearch::prepare(&mut request, &[], false).expect("tool-search preparation");
+        let serialized = serde_json::to_value(prepared.public_response_tools().expect("active public tools"))
+            .expect("public tools serialize");
+        let serialized = serialized.to_string();
+
+        for secret in [
+            "header-secret",
+            "field-secret",
+            "mcp__weather__forecast",
+            "_agentic_discovered_tools",
+        ] {
+            assert!(!serialized.contains(secret));
+        }
+    }
 
     #[test]
     fn public_tool_search_item_ids_are_stable_and_domain_separated() {
@@ -1424,8 +1673,75 @@ mod tests {
     }
 
     #[test]
-    fn internal_discovered_mcp_details_never_enter_model_visible_pair_projection() {
-        let mut request: RequestPayload = serde_json::from_value(serde_json::json!({
+    fn response_tools_after_search_keep_immediate_and_loaded_public_availability() {
+        let request: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test",
+            "store": false,
+            "tools": [
+                {
+                    "type": "tool_search",
+                    "execution": "client",
+                    "description": "Find tools",
+                    "parameters": {"type": "object"}
+                },
+                {"type": "function", "name": "always_ready"},
+                {"type": "function", "name": "get_weather", "defer_loading": true},
+                {"type": "function", "name": "not_loaded", "defer_loading": true},
+                {
+                    "type": "namespace",
+                    "name": "travel",
+                    "tools": [
+                        {"type": "function", "name": "always_ready_member"},
+                        {"type": "function", "name": "get_timezone", "defer_loading": true},
+                        {"type": "function", "name": "not_loaded_member", "defer_loading": true}
+                    ]
+                }
+            ],
+            "input": [
+                {
+                    "type": "tool_search_call",
+                    "id": "tsc_1",
+                    "call_id": "call_search_1",
+                    "arguments": {"query": "weather and timezone"}
+                },
+                {
+                    "type": "tool_search_output",
+                    "call_id": "call_search_1",
+                    "tools": [
+                        {"type": "function", "name": "get_weather", "defer_loading": true},
+                        {
+                            "type": "namespace",
+                            "name": "travel",
+                            "tools": [{"type": "function", "name": "get_timezone", "defer_loading": true}]
+                        }
+                    ]
+                }
+            ]
+        }))
+        .expect("valid mixed-availability tool-search request");
+
+        let state = ToolSearchState::build(&request).expect("tool-search state");
+        let tools = serialize_to_value(&state.public_response_tools()).expect("response tools serialize");
+        assert_eq!(
+            tools,
+            serde_json::json!([
+                {"type": "function", "name": "always_ready"},
+                {"type": "function", "name": "get_weather"},
+                {
+                    "type": "namespace",
+                    "name": "travel",
+                    "tools": [
+                        {"type": "function", "name": "always_ready_member"},
+                        {"type": "function", "name": "get_timezone"}
+                    ]
+                }
+            ])
+        );
+    }
+
+    #[test]
+    fn tool_search_output_rejects_mcp_definitions() {
+        let request: RequestPayload = serde_json::from_value(serde_json::json!({
             "model": "test",
             "store": false,
             "parallel_tool_calls": false,
@@ -1448,51 +1764,18 @@ mod tests {
                     "tools": [{
                         "type": "mcp",
                         "server_label": "weather",
-                        "server_description": "Weather tools",
-                        "server_url": "https://mcp.example.test/mcp",
-                        "defer_loading": true
+                        "server_url": "https://mcp.example.test/mcp"
                     }]
                 }
             ]
         }))
-        .expect("valid tool-search request");
-        let ResponsesInput::Items(items) = &mut request.input else {
-            panic!("test request uses item history")
-        };
-        let InputItem::ToolSearchOutput(output) = &mut items[1] else {
-            panic!("test request contains a search output")
-        };
-        let ResponsesTool::Mcp(mcp) = &mut output.tools[0] else {
-            panic!("test output returns MCP")
-        };
-        mcp.discovered_tools.push(McpDiscoveredToolParam {
-            server_label: "weather".to_owned(),
-            tool_name: "discovered-tool-sentinel".to_owned(),
-            internal_name: "internal-name-sentinel".to_owned(),
-            tool: serde_json::from_value(serde_json::json!({
-                "name": "discovered-tool-sentinel",
-                "description": "discovered-description-sentinel",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {"discovered-schema-sentinel": {"type": "string"}}
-                }
-            }))
-            .expect("valid discovered tool"),
-        });
+        .expect("typed request");
 
-        let state = ToolSearchState::build(&request).expect("internal execution state remains valid");
-        let private = state
-            .private_inference_request(&request)
-            .expect("active state materializes a private inference request");
-        let private_input = serialize_to_string(&private.input).expect("private input serializes");
-        for forbidden in [
-            "_agentic_discovered_tools",
-            "discovered-tool-sentinel",
-            "internal-name-sentinel",
-            "discovered-description-sentinel",
-            "discovered-schema-sentinel",
-        ] {
-            assert!(!private_input.contains(forbidden), "private input leaked {forbidden}");
-        }
+        let error = ToolSearchState::build(&request).expect_err("MCP is not a client-loaded tool definition");
+
+        assert!(matches!(
+            error,
+            ToolError::Config(message) if message.contains("unsupported tool definition")
+        ));
     }
 }

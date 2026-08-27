@@ -193,15 +193,20 @@ pub struct InputToolSearchCall {
     pub status: ToolSearchStatus,
 }
 
-impl From<ToolSearchCall> for InputToolSearchCall {
-    fn from(call: ToolSearchCall) -> Self {
-        Self {
-            id: call.id,
-            call_id: call.call_id,
-            execution: call.execution,
-            arguments: call.arguments,
-            status: call.status,
+impl TryFrom<&ToolSearchCall> for InputToolSearchCall {
+    type Error = ToolSearchStatus;
+
+    fn try_from(call: &ToolSearchCall) -> Result<Self, Self::Error> {
+        if call.status != ToolSearchStatus::Completed {
+            return Err(call.status);
         }
+        Ok(Self {
+            id: call.id.clone(),
+            call_id: call.call_id.clone(),
+            execution: call.execution,
+            arguments: call.arguments.clone(),
+            status: ToolSearchStatus::Completed,
+        })
     }
 }
 
@@ -485,6 +490,33 @@ mod tests {
     }
 
     #[test]
+    fn tool_search_items_accept_documented_statuses() {
+        for status in ["in_progress", "completed", "incomplete"] {
+            let call: InputItem = serde_json::from_value(serde_json::json!({
+                "type": "tool_search_call",
+                "id": "tsc_1",
+                "call_id": "call_search_1",
+                "arguments": {"query": "weather"},
+                "status": status
+            }))
+            .expect("documented tool-search call status");
+            let output: InputItem = serde_json::from_value(serde_json::json!({
+                "type": "tool_search_output",
+                "call_id": "call_search_1",
+                "status": status,
+                "tools": []
+            }))
+            .expect("documented tool-search output status");
+
+            assert_eq!(serde_json::to_value(call).expect("call serializes")["status"], status);
+            assert_eq!(
+                serde_json::to_value(output).expect("output serializes")["status"],
+                status
+            );
+        }
+    }
+
+    #[test]
     fn responses_input_detects_only_typed_tool_search_state() {
         let search: ResponsesInput = serde_json::from_value(serde_json::json!([{
             "type": "tool_search_output",
@@ -536,12 +568,6 @@ mod tests {
                 "call_id": "call_search_1",
                 "arguments": "not an object",
                 "status": "completed"
-            }),
-            serde_json::json!({
-                "type": "tool_search_output",
-                "call_id": "call_search_1",
-                "status": "in_progress",
-                "tools": []
             }),
             serde_json::json!({
                 "type": "tool_search_output",

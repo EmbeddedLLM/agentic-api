@@ -12,15 +12,15 @@ use crate::executor::gateway::{
 };
 use crate::executor::gateway_accumulator::{GatewayStreamAccumulator, StreamEvent, emit_sse_frame};
 use crate::executor::inference::{call_inference, fetch_response_json};
-use crate::executor::request::{ExecutionContext, RequestContext};
+use crate::executor::request::{ExecutionContext, PreparedTurn, RequestContext};
 use crate::tool::ToolRegistry;
 use crate::types::request_response::ResponsePayload;
-use crate::utils::common::{deserialize_from_str, serialize_to_string, serialize_to_value};
+use crate::utils::common::{serialize_to_string, serialize_to_value};
 
 const MAX_DEFERRED_STREAM_BYTES: usize = 256 * 1024;
 
 struct StreamEmitContext<'a> {
-    request: &'a RequestContext,
+    request: &'a PreparedTurn,
     registry: &'a ToolRegistry,
     sender: &'a tokio::sync::mpsc::UnboundedSender<StreamEvent>,
     accumulator: &'a mut GatewayStreamAccumulator,
@@ -40,13 +40,12 @@ pub(super) async fn fetch_blocking_payload(
 ) -> ExecutorResult<ResponsePayload> {
     let url = exec_ctx.responses_url();
     // Non-streaming request: stream=false -> full JSON body -> from_json.
-    let upstream_request = ctx.inference_request().to_upstream_request(false)?;
+    let upstream_request = ctx.enriched_request.to_upstream_request(false)?;
     let upstream_json = serialize_to_string(&upstream_request).map_err(ExecutorError::JsonError)?;
 
     let body = fetch_response_json(upstream_json, &url, &exec_ctx.client, auth).await?;
-    let mut raw: Value = deserialize_from_str(&body).map_err(ExecutorError::JsonError)?;
-    registry.normalize_blocking_response(&mut raw)?;
-    let acc = ResponseAccumulator::from_value(raw, ctx.conversation_id.as_deref())?;
+    let acc = ResponseAccumulator::from_json(&body, ctx.conversation_id.as_deref())?
+        .with_tool_types(registry.tool_type_map(), registry.withheld_function_names())?;
     let mut payload = acc.finalize(
         &ctx.enriched_request.model,
         ctx.original_request.previous_response_id.as_deref(),
@@ -58,7 +57,7 @@ pub(super) async fn fetch_blocking_payload(
 }
 
 pub(super) async fn fetch_stream_payload(
-    ctx: &RequestContext,
+    ctx: &PreparedTurn,
     exec_ctx: &ExecutionContext,
     auth: Option<&str>,
     registry: &ToolRegistry,
@@ -69,7 +68,7 @@ pub(super) async fn fetch_stream_payload(
     output_offset: usize,
 ) -> ExecutorResult<StreamPayload> {
     let url = exec_ctx.responses_url();
-    let upstream_request = ctx.inference_request().to_upstream_request(true)?;
+    let upstream_request = ctx.request().enriched_request.to_upstream_request(true)?;
     let upstream_json = serialize_to_string(&upstream_request).map_err(ExecutorError::JsonError)?;
     let mut line_stream = Box::pin(call_inference(
         upstream_json,
@@ -78,9 +77,11 @@ pub(super) async fn fetch_stream_payload(
         auth.map(str::to_owned),
         exec_ctx.streaming_timeout,
     ));
-    let mut acc = ResponseAccumulator::new(ctx.response_id.clone(), ctx.conversation_id.clone());
-    let mut function_sse = FunctionSseTranslator::new(registry.tool_type_map())
-        .with_withheld_function_names(registry.withheld_function_names());
+    let tool_types = registry.tool_type_map();
+    let mut acc = ResponseAccumulator::new(ctx.request().response_id.clone(), ctx.request().conversation_id.clone())
+        .with_tool_types(tool_types.clone(), registry.withheld_function_names())?;
+    let mut function_sse =
+        FunctionSseTranslator::new(tool_types).with_withheld_function_names(registry.withheld_function_names());
     let mut defer_from_output_index = None;
     let mut deferred_events = Vec::new();
     let mut deferred_bytes = 0;
@@ -88,7 +89,7 @@ pub(super) async fn fetch_stream_payload(
         let line = line_result?;
         if stream.is_none() {
             if let Some(frame) = acc.process_sse_line(&line) {
-                log_upstream_failure(&frame, &ctx.response_id);
+                log_upstream_failure(&frame, &ctx.request().response_id);
             }
             continue;
         }
@@ -96,7 +97,7 @@ pub(super) async fn fetch_stream_payload(
             let previous_defer_from_output_index = defer_from_output_index;
             defer_from_output_index = translation.defer_from_output_index.map(u64::from);
             for frame in &translation.frames {
-                log_upstream_failure(frame, &ctx.response_id);
+                log_upstream_failure(frame, &ctx.request().response_id);
             }
             if let Some((accumulator, sender)) = stream.as_mut() {
                 let mut emit_ctx = StreamEmitContext {
@@ -141,10 +142,13 @@ pub(super) async fn fetch_stream_payload(
         function_sse.finish()?;
     }
     acc.finish_stream();
+    if let Some(error) = acc.take_processing_error() {
+        return Err(error);
+    }
     let mut payload = acc.finalize(
-        &ctx.enriched_request.model,
-        ctx.original_request.previous_response_id.as_deref(),
-        ctx.original_request.instructions.as_deref(),
+        &ctx.request().enriched_request.model,
+        ctx.request().original_request.previous_response_id.as_deref(),
+        ctx.request().original_request.instructions.as_deref(),
     );
     if matches!(payload.status.as_str(), "error" | "failed" | "incomplete") {
         payload.output.retain(|item| {
@@ -155,7 +159,7 @@ pub(super) async fn fetch_stream_payload(
             )
         });
     }
-    ctx.inject_ids(&mut payload);
+    ctx.request().inject_ids(&mut payload);
     Ok(StreamPayload {
         payload,
         deferred_events,
@@ -192,7 +196,7 @@ fn log_upstream_failure(frame: &EventFrame, gateway_response_id: &str) {
 
 pub(super) fn emit_deferred_stream_events(
     deferred_events: Vec<EventFrame>,
-    request: &RequestContext,
+    request: &PreparedTurn,
     registry: &ToolRegistry,
     accumulator: &mut GatewayStreamAccumulator,
     sender: &tokio::sync::mpsc::UnboundedSender<StreamEvent>,
@@ -221,7 +225,7 @@ fn should_defer_stream_event(frame: &EventFrame, defer_from_output_index: Option
 }
 
 fn emit_stream_frame(frame: &mut EventFrame, emit_ctx: &mut StreamEmitContext<'_>) -> ExecutorResult<bool> {
-    apply_context_response_ids(&mut frame.wire, emit_ctx.request);
+    apply_context_response_ids(&mut frame.wire, emit_ctx.request.request());
     restore_public_tool_search_response_tools(&mut frame.wire, emit_ctx.request)?;
     emit_ctx.registry.restore_stream_event_wire(&mut frame.wire);
     let emitted = emit_ctx.accumulator.process_event(frame, emit_ctx.output_offset);
@@ -231,7 +235,7 @@ fn emit_stream_frame(frame: &mut EventFrame, emit_ctx: &mut StreamEmitContext<'_
     Ok(emitted)
 }
 
-fn restore_public_tool_search_response_tools(wire: &mut WireEvent, request: &RequestContext) -> ExecutorResult<()> {
+fn restore_public_tool_search_response_tools(wire: &mut WireEvent, request: &PreparedTurn) -> ExecutorResult<()> {
     let Some(response) = wire.rest.get_mut("response").and_then(Value::as_object_mut) else {
         return Ok(());
     };
@@ -340,7 +344,7 @@ mod tests {
     use crate::types::io::ResponsesInput;
     use crate::types::request_response::RequestPayload;
 
-    fn request_context() -> RequestContext {
+    fn request_context() -> PreparedTurn {
         let request = RequestPayload {
             model: "test".to_owned(),
             input: ResponsesInput::Text("hi".to_owned()),
@@ -361,17 +365,15 @@ mod tests {
             cache_salt: None,
             context_management: None,
         };
-        RequestContext {
+        let request = RequestContext {
             original_request: request.clone(),
             enriched_request: request,
-            tool_search_state: None,
-            tool_search_private_request: None,
-            tool_search_loaded_tools: None,
             new_input_items: Vec::new(),
             response_id: "resp_test".to_owned(),
             conversation_id: None,
             conversation_version: None,
-        }
+        };
+        PreparedTurn::new(request, crate::tool::PreparedToolSearch::default())
     }
 
     fn frame(output_index: u64, payload: Value) -> EventFrame {

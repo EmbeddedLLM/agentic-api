@@ -9,6 +9,7 @@ use super::function::FunctionHandler;
 use super::handler::{ToolError, ToolHandler, ToolOutput};
 use super::mcp::McpHandler;
 use super::registry::ToolType;
+use super::tool_search::ToolSearchHandler;
 use super::web_search::web_search_function_tool;
 
 impl ResponsesTool {
@@ -28,24 +29,17 @@ impl ResponsesTool {
                     "function tool config serialization failed".to_owned(),
                 )),
             ),
-            Self::ToolSearch(param) => {
-                if param.description.trim().is_empty() {
-                    return Err(ToolError::Config(
-                        "tool_search description must not be empty or whitespace".to_owned(),
-                    ));
-                }
-                if param.parameters.get("type").and_then(serde_json::Value::as_str) != Some("object") {
-                    return Err(ToolError::Config(
-                        "tool_search parameters must declare top-level JSON Schema type 'object'".to_owned(),
-                    ));
-                }
-                Ok(())
-            }
             Self::Mcp(param) => serialize_to_value_or_custom_default(
                 param,
                 "MCP tool config serialization failed",
                 |param| McpHandler::spec_from_param(&param).validate(&param),
                 Err(ToolError::Config("MCP tool config serialization failed".to_owned())),
+            ),
+            Self::ToolSearch(param) => serialize_to_value_or_custom_default(
+                param,
+                "tool_search config serialization failed",
+                |param| ToolSearchHandler.validate(&param),
+                Err(ToolError::Config("tool_search config serialization failed".to_owned())),
             ),
             Self::WebSearch(_) | Self::FileSearch(_) | Self::CodeInterpreter(_) | Self::Unknown => Ok(()),
             Self::Namespace(param) => serialize_to_value_or_custom_default(
@@ -90,6 +84,8 @@ impl ResponsesTool {
     ///
     /// - `Function` variants convert via [`From<&FunctionToolParam>`] for `FunctionTool`.
     ///   Returns an empty list and logs at `debug` level if the name is empty.
+    /// - `ToolSearch` variants lower through [`ToolSearchHandler`] to the
+    ///   synthetic client-executed function understood by vLLM.
     /// - `Mcp` variants convert gateway MCP built-ins to the function specs
     ///   vLLM can call.
     /// - Unformatted `Custom` variants become function tools with one string
@@ -111,10 +107,12 @@ impl ResponsesTool {
                 |param| FunctionHandler.normalize(&param).into_iter().take(1).collect(),
                 vec![],
             ),
-            Self::ToolSearch(_) => {
-                tracing::debug!("tool_search declaration skipped until request-scoped state preparation");
-                vec![]
-            }
+            Self::ToolSearch(param) => serialize_to_value_or_custom_default(
+                param,
+                "tool_search config serialization failed",
+                |param| ToolSearchHandler.normalize(&param).into_iter().take(1).collect(),
+                vec![],
+            ),
             Self::Mcp(p) => serialize_to_value_or_custom_default(
                 p,
                 "MCP tool config serialization failed",

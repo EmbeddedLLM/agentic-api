@@ -14,7 +14,7 @@ use tracing::{debug, warn};
 
 use agentic_core::ResponseUsage;
 use agentic_core::executor::{
-    BoxStream, ExecuteRequest, ExecutorError, RequestContext, persist_turn, rehydrate_for_execution,
+    BoxStream, ExecuteRequest, ExecutorError, RequestContext, persist_turn, rehydrate_conversation,
 };
 use agentic_core::types::request_response::RequestPayload;
 use agentic_core::utils::common::utcnow_str;
@@ -257,7 +257,7 @@ async fn complete_without_inference(
     state: &AppState,
     payload: RequestPayload,
 ) -> Result<(), WsError> {
-    let ctx = rehydrate_for_execution(payload, &state.exec_ctx).await?;
+    let ctx = rehydrate_conversation(payload, &state.exec_ctx).await?;
     let created_at = utcnow_str();
     let created_event = empty_response_event(&ctx, created_at, "response.created", "in_progress", 0, None);
     let completed_event = empty_response_event(

@@ -90,14 +90,19 @@ impl McpClientPool {
                 } => McpClient::connect_stdio(&command, &args, env.as_ref(), cwd.as_deref()).await,
             };
 
-            if let Ok(client) = result {
-                clients.insert(server_label, Arc::new(client));
-            } else {
-                tracing::warn!(
-                    server_label = %server_label,
-                    "failed to connect MCP server from config"
-                );
-                connection_errors.insert(server_label, "MCP transport connection failed".to_owned());
+            match result {
+                Ok(client) => {
+                    clients.insert(server_label, Arc::new(client));
+                }
+                Err(error) => {
+                    let error_message = error.to_string();
+                    tracing::warn!(
+                        server_label = %server_label,
+                        error = %error_message,
+                        "failed to connect MCP server from config"
+                    );
+                    connection_errors.insert(server_label, error_message);
+                }
             }
         }
 
@@ -125,9 +130,12 @@ fn server_entry_from_param(param: &McpToolParam, allowed_hosts: &[String]) -> Op
     };
 
     if let Some(url) = clean_string(param.server_url.as_deref()) {
-        let Ok(url) = validate_request_server_url_with_allowed_hosts(&url, allowed_hosts) else {
-            tracing::warn!(server_label, "MCP tool param server_url rejected");
-            return None;
+        let url = match validate_request_server_url_with_allowed_hosts(&url, allowed_hosts) {
+            Ok(url) => url,
+            Err(reason) => {
+                tracing::warn!(server_label, url, reason, "MCP tool param server_url rejected");
+                return None;
+            }
         };
 
         return Some((
@@ -153,10 +161,7 @@ fn request_headers(param: &McpToolParam) -> Option<HashMap<String, String>> {
     (!headers.is_empty()).then_some(headers)
 }
 
-pub(crate) fn validate_request_server_url_with_allowed_hosts(
-    value: &str,
-    allowed_hosts: &[String],
-) -> Result<String, String> {
+fn validate_request_server_url_with_allowed_hosts(value: &str, allowed_hosts: &[String]) -> Result<String, String> {
     let url = Url::parse(value).map_err(|error| format!("invalid URL: {error}"))?;
     match url.scheme() {
         "http" | "https" => {}

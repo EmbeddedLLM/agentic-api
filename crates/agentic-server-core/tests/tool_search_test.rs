@@ -27,13 +27,6 @@ use serde_json::{Value, json};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
-#[derive(Default)]
-struct McpRequestCounts {
-    initialize: AtomicUsize,
-    list_tools: AtomicUsize,
-    call_tool: AtomicUsize,
-}
-
 #[derive(Debug)]
 struct CountingWebSearch {
     calls: Arc<AtomicUsize>,
@@ -234,21 +227,6 @@ fn streaming_partial_search_failure_response() -> String {
     streaming_response(events)
 }
 
-fn streaming_pending_call_overflow_response() -> String {
-    let mut events = vec![json!({
-        "type": "response.created",
-        "response": {"id": "upstream_pending_overflow", "status": "in_progress"}
-    })];
-    events.extend((0..=128).map(|output_index| {
-        json!({
-            "type": "response.output_item.added", "output_index": output_index,
-            "item": {"id": format!("fc_pending_{output_index}"), "type": "function_call",
-                "call_id": format!("call_pending_{output_index}"), "arguments": "", "status": "in_progress"}
-        })
-    }));
-    streaming_response(events)
-}
-
 fn streaming_gateway_call_then_malformed_search_response() -> String {
     let events = [
         json!({"type":"response.created","response":{"id":"up_mixed","status":"in_progress"}}),
@@ -352,84 +330,6 @@ async fn run_streaming(request: RequestPayload, context: Arc<ExecutionContext>) 
     events
 }
 
-async fn spawn_counting_mcp() -> (String, Arc<McpRequestCounts>, tokio::task::JoinHandle<()>) {
-    let counts = Arc::new(McpRequestCounts::default());
-    let route_counts = Arc::clone(&counts);
-    let app = Router::new().route(
-        "/mcp",
-        post(move |body: Bytes| {
-            let route_counts = Arc::clone(&route_counts);
-            async move {
-                let request: Value = serde_json::from_slice(&body).expect("MCP request JSON");
-                let method = request["method"].as_str().unwrap_or_default();
-                let id = request.get("id").cloned().unwrap_or(Value::Null);
-                let response = match method {
-                    "initialize" => {
-                        route_counts.initialize.fetch_add(1, Ordering::SeqCst);
-                        Some(json!({
-                            "jsonrpc": "2.0",
-                            "id": id,
-                            "result": {
-                                "protocolVersion": "2025-06-18",
-                                "capabilities": {"tools": {}},
-                                "serverInfo": {"name": "counting-mcp", "version": "1.0.0"}
-                            }
-                        }))
-                    }
-                    "notifications/initialized" => None,
-                    "tools/list" => {
-                        route_counts.list_tools.fetch_add(1, Ordering::SeqCst);
-                        Some(json!({
-                            "jsonrpc": "2.0",
-                            "id": id,
-                            "result": {
-                                "tools": [{
-                                    "name": "forecast",
-                                    "description": "Return a forecast",
-                                    "inputSchema": {
-                                        "type": "object",
-                                        "properties": {"city": {"type": "string"}}
-                                    }
-                                }]
-                            }
-                        }))
-                    }
-                    "tools/call" => {
-                        route_counts.call_tool.fetch_add(1, Ordering::SeqCst);
-                        Some(json!({
-                            "jsonrpc": "2.0",
-                            "id": id,
-                            "result": {
-                                "content": [{"type": "text", "text": "sunny"}],
-                                "isError": false
-                            }
-                        }))
-                    }
-                    other => panic!("unexpected MCP method {other}"),
-                };
-
-                match response {
-                    Some(response) => axum::response::Response::builder()
-                        .status(200)
-                        .header("Content-Type", "application/json")
-                        .body(axum::body::Body::from(response.to_string()))
-                        .expect("MCP response")
-                        .into_response(),
-                    None => axum::response::Response::builder()
-                        .status(202)
-                        .body(axum::body::Body::empty())
-                        .expect("MCP notification response")
-                        .into_response(),
-                }
-            }
-        }),
-    );
-    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind MCP server");
-    let address = listener.local_addr().expect("MCP address");
-    let handle = tokio::spawn(async move { axum::serve(listener, app).await.expect("MCP server") });
-    (format!("http://{address}/mcp"), counts, handle)
-}
-
 fn request(input: &Value, tools: &Value) -> RequestPayload {
     serde_json::from_value(json!({
         "model": "test",
@@ -485,27 +385,6 @@ fn assert_private_request_sequence(requests: &[Value]) {
     }
 }
 
-fn assert_mcp_private_request_sequence(requests: &[Value], mcp_url: &str) {
-    assert_eq!(requests.len(), 3);
-    let initial_tool_names = requests[0]["tools"]
-        .as_array()
-        .expect("initial private tools")
-        .iter()
-        .filter_map(|tool| tool["name"].as_str())
-        .collect::<Vec<_>>();
-    assert_eq!(initial_tool_names, ["tool_search"]);
-    assert!(!requests[0].to_string().contains(mcp_url));
-    for request in &requests[1..] {
-        let tools = request["tools"].as_array().expect("private tools");
-        let tool_names = tools
-            .iter()
-            .filter_map(|tool| tool["name"].as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(tool_names, ["tool_search", "mcp__weather__forecast"]);
-        assert!(tools.iter().all(|tool| tool.get("defer_loading").is_none()));
-    }
-}
-
 fn search_declaration() -> Value {
     json!({
         "type": "tool_search",
@@ -530,18 +409,6 @@ fn deferred_weather() -> Value {
             "required": ["city"]
         },
         "strict": true,
-        "defer_loading": true
-    })
-}
-
-fn deferred_weather_mcp(server_url: &str) -> Value {
-    json!({
-        "type": "mcp",
-        "server_label": "weather",
-        "server_description": "Weather server",
-        "server_url": server_url,
-        "allowed_tools": ["forecast"],
-        "require_approval": "never",
         "defer_loading": true
     })
 }
@@ -820,38 +687,6 @@ async fn upstream_failure_after_partial_search_preserves_provider_error_without_
 }
 
 #[tokio::test]
-async fn search_active_pending_call_overflow_uses_standard_response_failed() {
-    let (llm_url, _requests, _server) =
-        spawn_sequenced_streaming_llm(vec![streaming_pending_call_overflow_response()]).await;
-    let context = Arc::new(ExecutionContext::new(
-        ConversationHandler::new(ConversationStore::disabled()),
-        ResponseHandler::new(ResponseStore::disabled()),
-        Arc::new(reqwest::Client::new()),
-        llm_url,
-    ));
-    let mut payload = request(
-        &json!("find weather"),
-        &json!([search_declaration(), deferred_weather()]),
-    );
-    payload.stream = true;
-
-    let events = run_streaming(payload, context).await;
-
-    let failed = events.last().expect("response.failed");
-    assert_eq!(failed["type"], "response.failed");
-    assert_eq!(failed["response"]["error"]["code"], "tool_error");
-    assert!(events.iter().all(|event| event["type"] != "error"));
-    assert!(events.iter().all(|event| event["type"] != "response.completed"));
-    assert_eq!(
-        events
-            .iter()
-            .map(|event| event["sequence_number"].as_u64())
-            .collect::<Vec<_>>(),
-        (0..u64::try_from(events.len()).unwrap()).map(Some).collect::<Vec<_>>()
-    );
-}
-
-#[tokio::test]
 async fn malformed_streaming_search_is_not_dispatched_or_persisted_after_start() {
     let (llm_url, _requests, _server) =
         spawn_sequenced_streaming_llm(vec![streaming_gateway_call_then_malformed_search_response()]).await;
@@ -987,326 +822,6 @@ async fn function_only_nonstreaming_manual_three_request_flow() {
     );
 
     assert_private_request_sequence(&requests.lock().await);
-}
-
-#[tokio::test]
-async fn deferred_mcp_load_uses_existing_discovery_lifecycle_and_dispatch_once() {
-    let (mcp_url, mcp_counts, _mcp_server) = spawn_counting_mcp().await;
-    let (llm_url, requests, _llm_server) = spawn_sequenced_llm(vec![
-        json!({
-            "id": "upstream_search",
-            "object": "response",
-            "status": "completed",
-            "model": "test",
-            "created_at": 0,
-            "output": [{
-                "type": "function_call",
-                "id": "fc_search_weather",
-                "call_id": "call_search_weather",
-                "name": "tool_search",
-                "arguments": "{\"query\":\"weather\"}",
-                "status": "completed"
-            }]
-        }),
-        json!({
-            "id": "upstream_mcp_call",
-            "object": "response",
-            "status": "completed",
-            "model": "test",
-            "created_at": 0,
-            "output": [{
-                "type": "function_call",
-                "id": "fc_forecast",
-                "call_id": "call_forecast",
-                "name": "mcp__weather__forecast",
-                "arguments": "{\"city\":\"Paris\"}",
-                "status": "completed"
-            }]
-        }),
-        json!({
-            "id": "upstream_final",
-            "object": "response",
-            "status": "completed",
-            "model": "test",
-            "created_at": 0,
-            "output": [{
-                "type": "message",
-                "id": "msg_final",
-                "role": "assistant",
-                "status": "completed",
-                "content": [{"type": "output_text", "text": "MCP_WEATHER_OK", "annotations": []}]
-            }]
-        }),
-    ])
-    .await;
-    let context = Arc::new(ExecutionContext::new(
-        ConversationHandler::new(ConversationStore::disabled()),
-        ResponseHandler::new(ResponseStore::disabled()),
-        Arc::new(reqwest::Client::new()),
-        llm_url,
-    ));
-    let deferred_mcp = deferred_weather_mcp(&mcp_url);
-    let user = json!({"type": "message", "role": "user", "content": "find weather"});
-    let tools = json!([search_declaration(), deferred_mcp.clone()]);
-
-    let search_response = run(request(&json!([user.clone()]), &tools), Arc::clone(&context)).await;
-    assert_eq!(mcp_counts.initialize.load(Ordering::SeqCst), 0);
-    assert_eq!(mcp_counts.list_tools.load(Ordering::SeqCst), 0);
-    assert_eq!(mcp_counts.call_tool.load(Ordering::SeqCst), 0);
-    let public_search_call = serde_json::to_value(&search_response.output[0]).expect("search call serializes");
-    assert_eq!(public_search_call["type"], "tool_search_call");
-    assert_eq!(public_search_call["call_id"], "call_search_weather");
-
-    let payload = request(
-        &json!([
-            user,
-            public_search_call,
-            {
-                "type": "tool_search_output",
-                "call_id": "call_search_weather",
-                "tools": [deferred_mcp.clone()]
-            }
-        ]),
-        &tools,
-    );
-
-    let response = run(payload, context).await;
-
-    assert_eq!(mcp_counts.initialize.load(Ordering::SeqCst), 1);
-    assert_eq!(mcp_counts.list_tools.load(Ordering::SeqCst), 1);
-    assert_eq!(mcp_counts.call_tool.load(Ordering::SeqCst), 1);
-    assert!(matches!(&response.output[0], OutputItem::McpListTools(_)));
-    let OutputItem::McpCall(call) = &response.output[1] else {
-        panic!("loaded MCP call must use the normal public MCP lifecycle")
-    };
-    assert_eq!(call.server_label, "weather");
-    assert_eq!(call.name, "forecast");
-    assert_eq!(call.output.as_deref(), Some("sunny"));
-    assert!(matches!(&response.output[2], OutputItem::Message(_)));
-
-    assert_mcp_private_request_sequence(&requests.lock().await, &mcp_url);
-}
-
-#[tokio::test]
-async fn deferred_and_dynamic_mcp_discovery_rejects_matching_history_call_before_load() {
-    for declared_before_search in [true, false] {
-        let (mcp_url, mcp_counts, _mcp_server) = spawn_counting_mcp().await;
-        let (llm_url, requests, _llm_server) = spawn_sequenced_llm(Vec::new()).await;
-        let context = Arc::new(ExecutionContext::new(
-            ConversationHandler::new(ConversationStore::disabled()),
-            ResponseHandler::new(ResponseStore::disabled()),
-            Arc::new(reqwest::Client::new()),
-            llm_url,
-        ));
-        let deferred_mcp = deferred_weather_mcp(&mcp_url);
-        let tools = if declared_before_search {
-            json!([search_declaration(), deferred_mcp.clone()])
-        } else {
-            json!([search_declaration()])
-        };
-        let payload = request(
-            &json!([
-                {
-                    "type": "function_call", "id": "fc_early", "call_id": "call_early",
-                    "name": "mcp__weather__forecast", "arguments": "{}", "status": "completed"
-                },
-                {"type": "function_call_output", "call_id": "call_early", "output": "not executed"},
-                {
-                    "type": "tool_search_call", "id": "tsc_load", "call_id": "call_load",
-                    "arguments": {"query": "weather"}
-                },
-                {"type": "tool_search_output", "call_id": "call_load", "tools": [deferred_mcp]}
-            ]),
-            &tools,
-        );
-
-        let Err(error) = Box::pin(ExecuteRequest::new(payload, context).run()).await else {
-            panic!("an MCP function cannot be called before its server is loaded")
-        };
-
-        assert_eq!(error.http_status(), http::StatusCode::BAD_REQUEST);
-        assert_eq!(mcp_counts.initialize.load(Ordering::SeqCst), 1);
-        assert_eq!(mcp_counts.list_tools.load(Ordering::SeqCst), 1);
-        assert_eq!(mcp_counts.call_tool.load(Ordering::SeqCst), 0);
-        assert!(requests.lock().await.is_empty(), "inference must not run");
-    }
-}
-
-#[tokio::test]
-async fn immediate_mcp_stays_available_before_an_identical_search_result() {
-    let (mcp_url, mcp_counts, _mcp_server) = spawn_counting_mcp().await;
-    let (llm_url, requests, _llm_server) = spawn_sequenced_llm(vec![json!({
-        "id": "upstream_final", "object": "response", "status": "completed", "model": "test",
-        "created_at": 0, "output": [{
-            "type": "message", "id": "msg_final", "role": "assistant", "status": "completed",
-            "content": [{"type": "output_text", "text": "IMMEDIATE_MCP_OK", "annotations": []}]
-        }]
-    })])
-    .await;
-    let context = Arc::new(ExecutionContext::new(
-        ConversationHandler::new(ConversationStore::disabled()),
-        ResponseHandler::new(ResponseStore::disabled()),
-        Arc::new(reqwest::Client::new()),
-        llm_url,
-    ));
-    let mut immediate_mcp = deferred_weather_mcp(&mcp_url);
-    immediate_mcp
-        .as_object_mut()
-        .expect("MCP declaration")
-        .remove("defer_loading");
-    let payload = request(
-        &json!([
-            {
-                "type": "function_call", "id": "fc_early", "call_id": "call_early",
-                "name": "mcp__weather__forecast", "arguments": "{}", "status": "completed"
-            },
-            {"type": "function_call_output", "call_id": "call_early", "output": "already handled"},
-            {
-                "type": "tool_search_call", "id": "tsc_identical", "call_id": "call_identical",
-                "arguments": {"query": "weather"}
-            },
-            {
-                "type": "tool_search_output", "call_id": "call_identical",
-                "tools": [immediate_mcp.clone()]
-            }
-        ]),
-        &json!([search_declaration(), immediate_mcp]),
-    );
-
-    let response = run(payload, context).await;
-
-    assert!(matches!(&response.output[1], OutputItem::Message(_)));
-    assert_eq!(mcp_counts.initialize.load(Ordering::SeqCst), 1);
-    assert_eq!(mcp_counts.list_tools.load(Ordering::SeqCst), 1);
-    assert_eq!(mcp_counts.call_tool.load(Ordering::SeqCst), 0);
-    assert_eq!(requests.lock().await.len(), 1, "request must reach inference");
-}
-
-#[tokio::test]
-async fn loaded_deferred_mcp_failure_uses_sanitized_public_list_tools_item() {
-    let (llm_url, requests, _llm_server) = spawn_sequenced_llm(vec![json!({
-        "id": "upstream_after_mcp_failure",
-        "object": "response",
-        "status": "completed",
-        "model": "test",
-        "created_at": 0,
-        "output": [{
-            "type": "message",
-            "id": "msg_final",
-            "role": "assistant",
-            "status": "completed",
-            "content": [{"type": "output_text", "text": "MCP_FAILURE_HANDLED", "annotations": []}]
-        }]
-    })])
-    .await;
-    let context = Arc::new(ExecutionContext::new(
-        ConversationHandler::new(ConversationStore::disabled()),
-        ResponseHandler::new(ResponseStore::disabled()),
-        Arc::new(reqwest::Client::new()),
-        llm_url,
-    ));
-    let deferred_mcp = json!({
-        "type": "mcp",
-        "server_label": "private_weather",
-        "server_description": "Private weather server",
-        "server_url": "http://url-user:url-password@127.0.0.1:1/mcp?token=query-secret",
-        "headers": {"X-Private-Token": "header-secret"},
-        "authorization": "authorization-secret",
-        "require_approval": "never",
-        "defer_loading": true
-    });
-    let payload = request(
-        &json!([
-            {
-                "type": "tool_search_call",
-                "id": "tsc_private_weather",
-                "call_id": "call_search_private_weather",
-                "arguments": {"query": "weather"}
-            },
-            {
-                "type": "tool_search_output",
-                "call_id": "call_search_private_weather",
-                "tools": [deferred_mcp.clone()]
-            }
-        ]),
-        &json!([search_declaration(), deferred_mcp]),
-    );
-
-    let response = run(payload, context).await;
-
-    let OutputItem::McpListTools(list_tools) = &response.output[0] else {
-        panic!("loaded MCP configuration failure must retain public list-tools semantics")
-    };
-    assert_eq!(list_tools.server_label, "private_weather");
-    assert!(list_tools.tools.is_empty());
-    assert_eq!(
-        list_tools.error.as_deref(),
-        Some("MCP server 'private_weather' failed to connect or list tools")
-    );
-    assert!(matches!(&response.output[1], OutputItem::Message(_)));
-
-    let public_response = serde_json::to_string(&response).expect("response serializes");
-    let upstream_requests = requests.lock().await;
-    assert_eq!(upstream_requests.len(), 1);
-    let upstream_request = upstream_requests[0].to_string();
-    for secret in [
-        "url-user",
-        "url-password",
-        "query-secret",
-        "header-secret",
-        "authorization-secret",
-    ] {
-        assert!(!public_response.contains(secret), "public response leaked {secret}");
-        assert!(!upstream_request.contains(secret), "upstream request leaked {secret}");
-    }
-}
-
-#[tokio::test]
-async fn loaded_mcp_cannot_collide_with_a_still_withheld_function() {
-    let (mcp_url, mcp_counts, _mcp_server) = spawn_counting_mcp().await;
-    let (llm_url, requests, _llm_server) = spawn_sequenced_llm(Vec::new()).await;
-    let context = Arc::new(ExecutionContext::new(
-        ConversationHandler::new(ConversationStore::disabled()),
-        ResponseHandler::new(ResponseStore::disabled()),
-        Arc::new(reqwest::Client::new()),
-        llm_url,
-    ));
-    let deferred_mcp = deferred_weather_mcp(&mcp_url);
-    let payload = request(
-        &json!([
-            {
-                "type": "tool_search_call",
-                "id": "tsc_collision",
-                "call_id": "call_search_collision",
-                "arguments": {"query": "weather"}
-            },
-            {
-                "type": "tool_search_output",
-                "call_id": "call_search_collision",
-                "tools": [deferred_mcp.clone()]
-            }
-        ]),
-        &json!([
-            search_declaration(),
-            {
-                "type": "function",
-                "name": "mcp__weather__forecast",
-                "parameters": {"type": "object"},
-                "defer_loading": true
-            },
-            deferred_mcp
-        ]),
-    );
-
-    let Err(error) = Box::pin(ExecuteRequest::new(payload, context).run()).await else {
-        panic!("loaded MCP discovered name must not overwrite a declared function")
-    };
-
-    assert_eq!(error.http_status(), http::StatusCode::BAD_REQUEST);
-    assert_eq!(mcp_counts.initialize.load(Ordering::SeqCst), 1);
-    assert_eq!(mcp_counts.list_tools.load(Ordering::SeqCst), 1);
-    assert_eq!(mcp_counts.call_tool.load(Ordering::SeqCst), 0);
-    assert!(requests.lock().await.is_empty(), "collision must fail before inference");
 }
 
 #[tokio::test]
@@ -1476,17 +991,30 @@ async fn namespace_nonstreaming_manual_flow_reuses_flattening_and_restoration() 
         "status": "completed", "tools": [loaded_weather_namespace_subset()]
     });
     let second_input = json!([user.clone(), public_search_call, public_search_output]);
-    let second = run(
-        request(&second_input, &json!([namespace.clone()])),
-        Arc::clone(&context),
-    )
-    .await;
+    let public_choice = json!({"type": "function", "namespace": namespace_name, "name": member_name});
+    let mut second_request = request(&second_input, &json!([namespace.clone()]));
+    second_request.tool_choice = Some(serde_json::from_value(public_choice.clone()).expect("public namespace choice"));
+    let second = run(second_request, Arc::clone(&context)).await;
     let OutputItem::FunctionCall(call) = &second.output[0] else {
         panic!("loaded namespace member remains a client function call")
     };
     assert_eq!(call.namespace.as_deref(), Some(namespace_name));
     assert_eq!(call.name, member_name);
     assert_ne!(call.name, flat_name, "private flat name must not leak publicly");
+    let mut available_namespace = namespace.clone();
+    available_namespace["tools"][1]
+        .as_object_mut()
+        .expect("loaded namespace member")
+        .remove("defer_loading");
+    assert_eq!(
+        serde_json::to_value(second.tools.as_ref().expect("response tools")).expect("response tools serialize"),
+        json!([available_namespace])
+    );
+    assert_eq!(
+        serde_json::to_value(second.tool_choice.as_ref().expect("response tool choice"))
+            .expect("response tool choice serializes"),
+        public_choice
+    );
 
     let mut third_items = second_input.as_array().expect("history").clone();
     third_items.push(serde_json::to_value(&second.output[0]).expect("namespace call serializes"));
@@ -1498,6 +1026,8 @@ async fn namespace_nonstreaming_manual_flow_reuses_flattening_and_restoration() 
 
     let requests = requests.lock().await;
     assert_eq!(requests.len(), 3);
+    assert_eq!(requests[1]["tool_choice"]["name"], flat_name);
+    assert!(requests[1]["tool_choice"].get("namespace").is_none());
     assert_eq!(requests[1]["tools"].as_array().map(Vec::len), Some(2));
     assert!(
         requests[1]["tools"]
@@ -1741,7 +1271,7 @@ fn provider_parity_matrix_is_exact_and_gateway_has_no_private_search_leaks() {
                 return None;
             }
             let cassette = support::load_cassette(path.to_str().expect("cassette path"));
-            (cassette.turns.len() == 3).then(|| {
+            (cassette.turns.len() == 4).then(|| {
                 path.file_name()
                     .and_then(|filename| filename.to_str())
                     .expect("cassette filename")

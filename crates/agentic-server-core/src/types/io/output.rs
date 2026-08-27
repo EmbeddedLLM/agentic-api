@@ -3,7 +3,7 @@ use serde_json::Value;
 
 use crate::events::EventPayload;
 use crate::executor::error::ExecutorError;
-use crate::tool::ToolRegistry;
+use crate::tool::{ToolError, ToolRegistry, tool_search};
 use crate::types::event::MessageStatus;
 use crate::types::tools::{ToolSearchExecution, ToolSearchStatus};
 use crate::utils::common::deserialize_from_value_opt;
@@ -11,7 +11,7 @@ use crate::utils::uuid7_str;
 
 use super::input::{
     CompactionItem, InputContent, InputFunctionToolCall, InputItem, InputMessage, InputMessageContent,
-    InputTextContent, deserialize_non_blank_string,
+    InputTextContent, InputToolSearchCall, deserialize_non_blank_string,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,7 +110,7 @@ pub struct FunctionToolCall {
 /// translation must populate both fields explicitly.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolSearchCall {
-    #[serde(deserialize_with = "deserialize_tool_search_item_id")]
+    #[serde(deserialize_with = "deserialize_non_blank_string")]
     pub id: String,
     #[serde(deserialize_with = "deserialize_non_blank_string")]
     pub call_id: String,
@@ -119,17 +119,76 @@ pub struct ToolSearchCall {
     pub status: ToolSearchStatus,
 }
 
-fn deserialize_tool_search_item_id<'de, D>(deserializer: D) -> Result<String, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let id = deserialize_non_blank_string(deserializer)?;
-    if id.strip_prefix("tsc_").is_none_or(str::is_empty) {
-        return Err(serde::de::Error::custom(
-            "emitted tool_search_call id must use the 'tsc_' prefix with a non-empty suffix",
-        ));
+impl TryFrom<&FunctionToolCall> for ToolSearchCall {
+    type Error = ToolError;
+
+    fn try_from(call: &FunctionToolCall) -> Result<Self, Self::Error> {
+        let mut public = Self::started_from_function(call)?;
+        if call.status != MessageStatus::Completed {
+            return Err(tool_search::invalid_upstream_search_call());
+        }
+        public.arguments = serde_json::from_str::<Value>(&call.arguments)
+            .ok()
+            .and_then(|value| value.as_object().cloned())
+            .ok_or_else(tool_search::invalid_upstream_search_call)?;
+        public.status = ToolSearchStatus::Completed;
+        Ok(public)
     }
-    Ok(id)
+}
+
+impl ToolSearchCall {
+    pub(crate) fn started_from_function(call: &FunctionToolCall) -> Result<Self, ToolError> {
+        if call.id.trim().is_empty()
+            || call.call_id.trim().is_empty()
+            || call.name != "tool_search"
+            || call.namespace.is_some()
+        {
+            return Err(tool_search::invalid_upstream_search_call());
+        }
+        Ok(Self {
+            id: tool_search::public_item_id(&call.id),
+            call_id: call.call_id.clone(),
+            execution: ToolSearchExecution::Client,
+            arguments: serde_json::Map::new(),
+            status: ToolSearchStatus::InProgress,
+        })
+    }
+}
+
+impl TryFrom<&EventPayload> for ToolSearchCall {
+    type Error = ToolError;
+
+    fn try_from(payload: &EventPayload) -> Result<Self, Self::Error> {
+        let EventPayload::OutputItemAdded {
+            item_id,
+            call_id,
+            execution,
+            status,
+            arguments,
+            ..
+        } = payload
+        else {
+            return Err(tool_search::invalid_upstream_search_call());
+        };
+        let call_id = call_id
+            .as_deref()
+            .filter(|call_id| !call_id.trim().is_empty())
+            .ok_or_else(tool_search::invalid_upstream_search_call)?;
+        if item_id.trim().is_empty() {
+            return Err(tool_search::invalid_upstream_search_call());
+        }
+        let execution = execution.ok_or_else(tool_search::invalid_upstream_search_call)?;
+        if status.as_deref() != Some("in_progress") || arguments.as_ref().is_none_or(|value| !value.is_empty()) {
+            return Err(tool_search::invalid_upstream_search_call());
+        }
+        Ok(Self {
+            id: item_id.clone(),
+            call_id: call_id.to_owned(),
+            execution,
+            arguments: serde_json::Map::new(),
+            status: ToolSearchStatus::InProgress,
+        })
+    }
 }
 
 /// A freeform custom tool invocation.
@@ -686,6 +745,17 @@ impl ApplyDone for FunctionToolCall {
     }
 }
 
+impl ApplyDone for ToolSearchCall {
+    fn apply_done(&mut self, payload: &EventPayload, _buffer: &mut String) {
+        let EventPayload::OutputItemDone { item, .. } = payload else {
+            return;
+        };
+        if let Some(call) = deserialize_from_value_opt::<Self>(item.clone()) {
+            *self = call;
+        }
+    }
+}
+
 impl ApplyDone for CustomToolCall {
     fn apply_done(&mut self, payload: &EventPayload, buffer: &mut String) {
         match payload {
@@ -803,7 +873,7 @@ impl OutputItem {
             Self::Message(message) => Some(InputItem::Message(message.clone().into())),
             Self::Reasoning(reasoning) => Some(InputItem::Reasoning(reasoning.clone())),
             Self::FunctionCall(call) => Some(InputItem::FunctionCall(InputFunctionToolCall::from(call.clone()))),
-            Self::ToolSearchCall(call) => Some(InputItem::ToolSearchCall(call.clone().into())),
+            Self::ToolSearchCall(call) => InputToolSearchCall::try_from(call).ok().map(InputItem::ToolSearchCall),
             Self::CustomToolCall(call) => Some(InputItem::FunctionCall(call.clone().into())),
             Self::Compaction(item) => Some(InputItem::Compaction(item.clone())),
             Self::WebSearchCall(_) | Self::McpCall(_) | Self::McpListTools(_) | Self::Unknown => None,
@@ -820,7 +890,7 @@ mod tests {
     fn emitted_tool_search_call_is_explicit_and_requires_client_action() {
         let wire = serde_json::json!({
             "type": "tool_search_call",
-            "id": "tsc_1",
+            "id": "provider_item_1",
             "call_id": "call_search_1",
             "execution": "client",
             "arguments": {"query": "weather"},
@@ -855,8 +925,6 @@ mod tests {
 
         for (field, value) in [
             ("id", serde_json::json!("   ")),
-            ("id", serde_json::json!("fc_1")),
-            ("id", serde_json::json!("tsc_")),
             ("call_id", serde_json::json!("   ")),
             ("arguments", serde_json::json!("not an object")),
         ] {
@@ -874,6 +942,59 @@ mod tests {
                 serde_json::from_value::<OutputItem>(wire).is_err(),
                 "newly emitted calls reject invalid {field}"
             );
+        }
+    }
+
+    #[test]
+    fn unfinished_tool_search_call_statuses_deserialize_but_are_not_replayable() {
+        for status in ["in_progress", "incomplete"] {
+            let item: OutputItem = serde_json::from_value(serde_json::json!({
+                "type": "tool_search_call",
+                "id": "provider_item_1",
+                "call_id": "call_search_1",
+                "execution": "client",
+                "arguments": {},
+                "status": status
+            }))
+            .unwrap();
+
+            assert!(item.to_input_item().is_none());
+        }
+    }
+
+    #[test]
+    fn synthetic_function_call_conversion_is_validated() {
+        let valid = FunctionToolCall {
+            id: "fc_search".to_owned(),
+            call_id: "call_search".to_owned(),
+            name: "tool_search".to_owned(),
+            namespace: None,
+            arguments: r#"{"query":"weather"}"#.to_owned(),
+            status: MessageStatus::Completed,
+        };
+        let public = ToolSearchCall::try_from(&valid).unwrap();
+        assert_eq!(public.id, "tsc_search");
+        assert_eq!(public.arguments["query"], "weather");
+
+        for invalid in [
+            FunctionToolCall {
+                name: "ordinary".to_owned(),
+                ..valid.clone()
+            },
+            FunctionToolCall {
+                namespace: Some("tools".to_owned()),
+                ..valid.clone()
+            },
+            FunctionToolCall {
+                arguments: "[]".to_owned(),
+                ..valid.clone()
+            },
+            FunctionToolCall {
+                status: MessageStatus::InProgress,
+                ..valid.clone()
+            },
+        ] {
+            assert!(ToolSearchCall::try_from(&invalid).is_err());
         }
     }
 
@@ -1051,6 +1172,9 @@ mod tests {
             name: None,
             namespace: None,
             call_id: None,
+            execution: None,
+            status: None,
+            arguments: None,
         };
         let mut item = McpListTools::try_from(&added).unwrap();
         assert_eq!(item.id, "mcpl_1");

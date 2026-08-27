@@ -197,6 +197,10 @@ async fn execute_gateway_call_with_timeout(
         Err(ToolError::Execution(message) | ToolError::Config(message)) => {
             (execution_error_output(&call, &message)?, GatewayCallStatus::Failed)
         }
+        Err(error @ (ToolError::InvalidUpstreamToolSearch | ToolError::UpstreamWithheldFunctionCall)) => (
+            execution_error_output(&call, &error.to_string())?,
+            GatewayCallStatus::Failed,
+        ),
     };
     let public_output = gateway_public_output(dispatch.tool_type, &call, &output, status, registry);
     Ok(GatewayCallResult {
@@ -587,7 +591,7 @@ pub(super) fn append_output_items_to_input(input: &mut ResponsesInput, output_it
 pub(super) fn append_tool_outputs(ctx: &mut RequestContext, tool_outputs: Vec<InputItem>) {
     for output in tool_outputs {
         ctx.new_input_items.push(output.clone());
-        append_input_item(&mut ctx.inference_request_mut().input, output);
+        append_input_item(&mut ctx.enriched_request.input, output);
     }
 }
 

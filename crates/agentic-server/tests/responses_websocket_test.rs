@@ -884,9 +884,6 @@ async fn test_websocket_generate_false_prewarm_redacts_mcp_runtime_credentials()
     let lookup_ctx = RequestContext {
         original_request: request.clone(),
         enriched_request: request,
-        tool_search_state: None,
-        tool_search_private_request: None,
-        tool_search_loaded_tools: None,
         new_input_items: vec![],
         response_id: "resp_lookup".to_owned(),
         conversation_id: None,

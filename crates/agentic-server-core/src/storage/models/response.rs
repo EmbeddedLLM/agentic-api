@@ -67,21 +67,31 @@ pub async fn get(pool: &DbPool, id: &str) -> DbResult<Option<Response>> {
         .await
 }
 
-/// Get responses written by conversation turns within an existing transaction.
+/// Get the conversation turn that persisted a specific item.
 ///
 /// Responses branched through `previous_response_id` retain the originating
 /// conversation ID for response-chain rehydration, but are not conversation turns.
 ///
 /// # Errors
 /// Returns `DbResult::Err` if the database query fails.
-pub async fn get_conversation_turns_in_tx(
-    tx: &mut DbTransaction<'_>,
+pub async fn get_conversation_turn_for_item(
+    pool: &DbPool,
     conversation_id: &str,
-) -> DbResult<Vec<Response>> {
-    sqlx::query_as::<_, Response>("SELECT * FROM responses WHERE conversation_id = $1 AND previous_response_id IS NULL")
-        .bind(conversation_id)
-        .fetch_all(&mut **tx)
-        .await
+    item_id: &str,
+) -> DbResult<Option<Response>> {
+    let escaped_item_id = item_id.replace('!', "!!").replace('%', "!%").replace('_', "!_");
+    let history_suffix = format!("%\"{escaped_item_id}\"]");
+    sqlx::query_as::<_, Response>(
+        "SELECT * FROM responses \
+         WHERE conversation_id = $1 \
+           AND previous_response_id IS NULL \
+           AND history_item_ids LIKE $2 ESCAPE '!' \
+         LIMIT 1",
+    )
+    .bind(conversation_id)
+    .bind(history_suffix)
+    .fetch_optional(pool)
+    .await
 }
 
 impl Response {

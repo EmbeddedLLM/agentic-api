@@ -1,6 +1,9 @@
 //! Conversation storage handler — owns all conversation store operations.
 
-use crate::storage::{ConversationData, ConversationSnapshot, ConversationStore, InOutItem, StorageError};
+use crate::storage::{
+    ConversationData, ConversationSnapshot, ConversationStore, ConversationVersion, InOutItem, ResponseMetadata,
+    StorageError,
+};
 use crate::types::io::OutputItem;
 
 use crate::executor::error::{ExecutorError, ExecutorResult};
@@ -89,17 +92,47 @@ impl ConversationHandler {
             .map_err(ExecutorError::Storage)
     }
 
+    /// Loads metadata for the persisted turn matching a captured conversation version.
+    ///
+    /// # Errors
+    /// Returns `ExecutorError` if `conversation_id` is absent, the store is
+    /// disabled, or the database query fails.
+    pub(crate) async fn response_metadata_at_version(
+        &self,
+        ctx: &RequestContext,
+        version: ConversationVersion,
+    ) -> ExecutorResult<Option<ResponseMetadata>> {
+        let conv_id = ctx.original_request.conversation_id.as_deref().ok_or_else(|| {
+            ExecutorError::InvalidRequest("conversation_id is required for response metadata lookup".into())
+        })?;
+        self.store
+            .response_metadata_at_version(conv_id, version)
+            .await
+            .map_err(ExecutorError::Storage)
+    }
+
     /// Persists one conversation turn — only the new items from this turn.
     ///
     /// Takes `ctx` and `output_items` by value so fields can be moved directly
-    /// into [`crate::storage::ResponseMetadata`]. The store tracks sequence
+    /// into [`ResponseMetadata`]. The store tracks sequence
     /// numbers and appends, so prior history must not be re-inserted.
     ///
     /// # Errors
     /// Returns `ExecutorError` if `conversation_id` is absent on the context,
     /// the store is disabled, or the database operation fails.
-    pub async fn execute_turn(&self, ctx: RequestContext, output_items: Vec<OutputItem>) -> ExecutorResult<()> {
-        let metadata = ctx.response_metadata();
+    pub async fn execute_turn(&self, mut ctx: RequestContext, output_items: Vec<OutputItem>) -> ExecutorResult<()> {
+        let metadata = ctx.take_response_metadata();
+
+        self.execute_turn_with_metadata(ctx, output_items, metadata).await
+    }
+
+    /// Persists a conversation turn using metadata prepared by request-scoped tool behavior.
+    pub(crate) async fn execute_turn_with_metadata(
+        &self,
+        ctx: RequestContext,
+        output_items: Vec<OutputItem>,
+        metadata: ResponseMetadata,
+    ) -> ExecutorResult<()> {
         let conversation_id = ctx
             .conversation_id
             .ok_or_else(|| ExecutorError::InvalidRequest("conversation_id is required for execute_turn".into()))?;
@@ -163,9 +196,6 @@ mod tests {
         RequestContext {
             enriched_request: req.clone(),
             original_request: req,
-            tool_search_state: None,
-            tool_search_private_request: None,
-            tool_search_loaded_tools: None,
             new_input_items: vec![],
             response_id: "resp_test".into(),
             conversation_id: conversation_id.map(str::to_string),

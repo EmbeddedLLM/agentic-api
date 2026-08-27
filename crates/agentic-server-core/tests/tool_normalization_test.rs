@@ -99,9 +99,6 @@ fn upstream_request_value(payload: RequestPayload, stream: bool) -> Value {
     let ctx = RequestContext {
         original_request: payload.clone(),
         enriched_request: payload,
-        tool_search_state: None,
-        tool_search_private_request: None,
-        tool_search_loaded_tools: None,
         new_input_items: Vec::new(),
         response_id: "resp_test".to_string(),
         conversation_id: None,

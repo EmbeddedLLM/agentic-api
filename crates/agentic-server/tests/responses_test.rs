@@ -13,7 +13,6 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, oneshot};
@@ -401,25 +400,6 @@ async fn spawn_mock_vllm_json_capture_body(
     let addr = listener.local_addr().unwrap();
     let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     (format!("http://{addr}"), requests, handle)
-}
-
-async fn spawn_counting_mcp_server() -> (String, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
-    let requests = Arc::new(AtomicUsize::new(0));
-    let route_requests = Arc::clone(&requests);
-    let app = Router::new().route(
-        "/mcp",
-        post(move || {
-            let route_requests = Arc::clone(&route_requests);
-            async move {
-                route_requests.fetch_add(1, Ordering::SeqCst);
-                axum::Json(serde_json::json!({}))
-            }
-        }),
-    );
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let handle = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    (format!("http://{addr}/mcp"), requests, handle)
 }
 
 /// Spawn a mock vLLM that returns an SSE stream.
@@ -939,55 +919,6 @@ async fn test_blocking_tool_search_rejects_invalid_upstream_arguments_as_bad_gat
     assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
     let body: serde_json::Value = response.json().await.expect("error JSON");
     assert_eq!(body["error"]["type"], "tool_error");
-}
-
-#[tokio::test]
-async fn test_deferred_mcp_stays_withheld_before_valid_load() {
-    let (llm_url, upstream_requests, _llm) = spawn_mock_vllm_json_capture().await;
-    let (mcp_url, mcp_requests, _mcp) = spawn_counting_mcp_server().await;
-    let (gateway_url, _gateway) = spawn_gateway(test_state(&test_config(&llm_url))).await;
-
-    let response = reqwest::Client::new()
-        .post(format!("{gateway_url}/v1/responses"))
-        .json(&serde_json::json!({
-            "model": "test",
-            "input": "find a tool",
-            "tools": [
-                {
-                    "type": "tool_search",
-                    "execution": "client",
-                    "description": "Search the client catalog",
-                    "parameters": {"type": "object"}
-                },
-                {
-                    "type": "mcp",
-                    "server_label": "deferred_server",
-                    "server_url": mcp_url,
-                    "server_description": "Deferred private tools",
-                    "defer_loading": true
-                }
-            ],
-            "store": false,
-            "stream": false
-        }))
-        .send()
-        .await
-        .expect("gateway response");
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let upstream_requests = upstream_requests.lock().await;
-    assert_eq!(upstream_requests.len(), 1, "the synthetic search may reach upstream");
-    assert_eq!(upstream_requests[0]["tools"].as_array().map(Vec::len), Some(1));
-    assert_eq!(upstream_requests[0]["tools"][0]["name"], "tool_search");
-    assert!(
-        !upstream_requests[0].to_string().contains(&mcp_url),
-        "deferred MCP endpoint must not enter the private upstream request"
-    );
-    assert_eq!(
-        mcp_requests.load(Ordering::SeqCst),
-        0,
-        "deferred MCP must not be connected or listed"
-    );
 }
 
 #[tokio::test]

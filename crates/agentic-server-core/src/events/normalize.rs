@@ -108,6 +108,9 @@ fn extract_output_item_added(json: &Value) -> EventPayload {
         name: json_str_opt(item, "name"),
         namespace: json_str_opt(item, "namespace"),
         call_id: json_str_opt(item, "call_id"),
+        execution: item.get("execution").cloned().and_then(deserialize_from_value_opt),
+        status: json_str_opt(item, "status"),
+        arguments: item.get("arguments").and_then(Value::as_object).cloned(),
     }
 }
 

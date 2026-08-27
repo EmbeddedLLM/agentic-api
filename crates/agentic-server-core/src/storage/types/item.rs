@@ -80,20 +80,12 @@ impl TryFrom<&InOutItem> for String {
 
     fn try_from(item: &InOutItem) -> Result<Self, Self::Error> {
         let (mut value, kind) = match item {
-            InOutItem::Input(input) => {
-                let mut persisted = input.clone();
-                if let InputItem::ToolSearchOutput(output) = &mut persisted {
-                    for tool in &mut output.tools {
-                        tool.sanitize_for_persistence();
-                    }
-                }
-                (
-                    serialize_to_value(&persisted).map_err(StorageError::Serialization)?,
-                    ItemKind::Input,
-                )
-            }
+            InOutItem::Input(input) => (
+                serde_json::to_value(input).map_err(StorageError::Serialization)?,
+                ItemKind::Input,
+            ),
             InOutItem::Output(output) => (
-                serialize_to_value(output).map_err(StorageError::Serialization)?,
+                serde_json::to_value(output).map_err(StorageError::Serialization)?,
                 ItemKind::Output,
             ),
         };
@@ -166,33 +158,6 @@ mod tests {
         assert!(json.contains("input"));
         assert!(json.contains("user"));
         assert!(json.contains("test"));
-    }
-
-    #[test]
-    fn tool_search_output_persistence_sanitizes_mcp_credentials_without_changing_public_type() {
-        let input: InputItem = serde_json::from_value(serde_json::json!({
-            "type": "tool_search_output",
-            "call_id": "call_search_1",
-            "tools": [{
-                "type": "mcp",
-                "server_label": "private-server",
-                "server_description": "Private server",
-                "server_url": "https://mcp.example.test/mcp",
-                "headers": {"X-API-Key": "secret"},
-                "authorization": "bearer-secret",
-                "defer_loading": true
-            }]
-        }))
-        .expect("valid public tool-search output");
-
-        let stored = String::try_from(&InOutItem::Input(input)).expect("serialize stored item");
-        let value: Value = serde_json::from_str(&stored).expect("stored JSON");
-
-        assert_eq!(value["type"], "tool_search_output");
-        assert_eq!(value["tools"][0]["server_label"], "private-server");
-        assert!(value["tools"][0].get("headers").is_none());
-        assert!(value["tools"][0].get("authorization").is_none());
-        assert!(value["tools"][0].get("_agentic_discovered_tools").is_none());
     }
 
     #[test]

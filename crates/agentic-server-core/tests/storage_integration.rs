@@ -867,21 +867,20 @@ async fn test_response_store_get_after_persist() {
 }
 
 #[tokio::test]
-async fn test_tool_search_conversation_snapshot_includes_latest_effective_metadata() {
+async fn test_tool_search_conversation_metadata_matches_snapshot_version() {
     let pool = setup_pool().await;
     let store = ConversationStore::new(Arc::clone(&pool));
     let conversation = store.create().await.expect("create conversation");
-    let initial = ResponseMetadata {
-        model: "initial-model".to_owned(),
-        ..ResponseMetadata::default()
-    };
     store
         .persist(
             &conversation.conversation_id,
             "resp_tool_search_initial",
             None,
             vec![create_input_item("initial")],
-            &initial,
+            &ResponseMetadata {
+                model: "initial-model".to_owned(),
+                ..ResponseMetadata::default()
+            },
         )
         .await
         .expect("persist initial turn");
@@ -911,8 +910,7 @@ async fn test_tool_search_conversation_snapshot_includes_latest_effective_metada
         .await
         .expect("persist latest turn");
 
-    // Simulate replicas whose clocks and process-local UUID order disagree
-    // with the committed conversation-item sequence.
+    // Simulate replicas whose clocks and process-local UUID order disagree with committed conversation-item sequence.
     sqlx::query("UPDATE responses SET created_at = $1 WHERE id = $2")
         .bind(9_999_i64)
         .bind("resp_tool_search_initial")
@@ -955,9 +953,24 @@ async fn test_tool_search_conversation_snapshot_includes_latest_effective_metada
         .rehydrate_snapshot(&conversation.conversation_id)
         .await
         .expect("rehydrate typed snapshot");
-    let metadata = snapshot
-        .latest_response_metadata
-        .expect("latest response metadata accompanies conversation items");
+    store
+        .persist(
+            &conversation.conversation_id,
+            "resp_after_snapshot",
+            None,
+            vec![create_input_item("after snapshot")],
+            &ResponseMetadata {
+                model: "after-snapshot-model".to_owned(),
+                ..ResponseMetadata::default()
+            },
+        )
+        .await
+        .expect("persist a newer conversation turn");
+    let metadata = store
+        .response_metadata_at_version(&conversation.conversation_id, snapshot.version)
+        .await
+        .expect("load response metadata at snapshot version")
+        .expect("response metadata accompanies conversation items");
     assert_eq!(metadata.model, "latest-model");
     assert_eq!(metadata.tool_search_loaded_tools.as_deref().map(<[_]>::len), Some(1));
 }
@@ -1022,65 +1035,19 @@ async fn test_tool_search_conversation_conflict_does_not_persist_stale_loaded_st
         .expect_err("stale turn conflicts");
     assert!(matches!(error, StorageError::ConversationConflict { .. }));
 
-    let latest = store
+    let snapshot = store
         .rehydrate_snapshot(&conversation.conversation_id)
         .await
-        .expect("rehydrate winning state")
-        .latest_response_metadata
+        .expect("rehydrate winning state");
+    let latest = store
+        .response_metadata_at_version(&conversation.conversation_id, snapshot.version)
+        .await
+        .expect("load winning metadata")
         .expect("winning metadata");
     assert_eq!(latest.model, "winner");
     let serialized = serde_json::to_value(latest.tool_search_loaded_tools).unwrap();
     assert_eq!(serialized[0]["name"], "winning_tool");
     assert!(!serialized.to_string().contains("stale_tool"));
-}
-
-#[tokio::test]
-async fn test_tool_search_output_storage_round_trip_redacts_mcp_credentials() {
-    let pool = setup_pool().await;
-    let store = ResponseStore::new(pool);
-    let output: InputItem = serde_json::from_value(serde_json::json!({
-        "type": "tool_search_output",
-        "call_id": "call_search_private",
-        "tools": [{
-            "type": "mcp",
-            "server_label": "private_server",
-            "server_description": "Private server",
-            "server_url": "https://mcp.example.test/mcp",
-            "headers": {"X-API-Key": "header-secret"},
-            "authorization": "authorization-secret",
-            "defer_loading": true
-        }]
-    }))
-    .expect("valid public search output");
-    store
-        .persist(
-            "resp_tool_search_private",
-            None,
-            vec![InOutItem::Input(output)],
-            &ResponseMetadata::default(),
-        )
-        .await
-        .expect("persist public search output");
-
-    let history = store
-        .rehydrate("resp_tool_search_private")
-        .await
-        .expect("rehydrate public search output");
-    let InOutItem::Input(InputItem::ToolSearchOutput(output)) = &history[0] else {
-        panic!("public search output type must survive storage")
-    };
-    let agentic_core::types::tools::ResponsesTool::Mcp(mcp) = &output.tools[0] else {
-        panic!("MCP declaration must survive storage")
-    };
-    assert_eq!(mcp.server_label, "private_server");
-    assert!(mcp.headers.is_none());
-    assert!(mcp.authorization.is_none());
-    assert!(
-        serde_json::to_value(mcp)
-            .expect("stored MCP serializes")
-            .get("_agentic_discovered_tools")
-            .is_none()
-    );
 }
 
 #[tokio::test]

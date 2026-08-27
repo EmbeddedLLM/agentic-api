@@ -7,6 +7,7 @@
 //! runs on a blocking thread while the async task continues reading from the
 //! network — keeping the tokio executor thread free between chunk arrivals.
 
+use std::collections::{HashMap, HashSet};
 use std::pin::Pin;
 use std::sync::mpsc;
 
@@ -17,14 +18,16 @@ use futures::{Stream, StreamExt};
 use crate::events::{EventFrame, EventPayload, SSEEventType, SSEItemType, normalize_sse_line};
 use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::executor::function_sse::{FunctionSseTranslation, FunctionSseTranslator};
+use crate::tool::ToolType;
 use crate::types::event::{MessageStatus, ResponseStatus};
 use crate::types::io::output::McpListTools;
 use crate::types::io::{
     ApplyDone, CompactionItem, CustomToolCall, FunctionToolCall, OutputItem, OutputMessage, OutputTextContent,
-    ReasoningOutput, ReasoningTextContent, ResponseUsage,
+    ReasoningOutput, ReasoningTextContent, ResponseUsage, ToolSearchCall,
 };
 use crate::types::io::{McpCall, WebSearchCall};
 use crate::types::request_response::{IncompleteDetails, ResponsePayload};
+use crate::types::tools::ToolSearchStatus;
 use crate::utils::common::{deserialize_from_str, deserialize_from_value_opt};
 use crate::utils::uuid7_str;
 
@@ -38,6 +41,7 @@ enum InFlight {
     WebSearchCall { item: Option<WebSearchCall> },
     McpCall { item: McpCall },
     McpListTools { item: McpListTools },
+    ToolSearchCall(ToolSearchCall),
     Compaction { item: CompactionItem },
 }
 
@@ -51,45 +55,68 @@ impl std::fmt::Debug for InFlight {
             Self::WebSearchCall { .. } => write!(f, "InFlight::WebSearchCall {{ .. }}"),
             Self::McpCall { .. } => write!(f, "InFlight::McpCall {{ .. }}"),
             Self::McpListTools { .. } => write!(f, "InFlight::McpListTools {{ .. }}"),
+            Self::ToolSearchCall(..) => write!(f, "InFlight::ToolSearchCall(..)"),
             Self::Compaction { .. } => write!(f, "InFlight::Compaction {{ .. }}"),
         }
     }
 }
 
 impl InFlight {
-    fn finalize(self) -> Option<OutputItem> {
+    fn finalize(
+        self,
+        tool_types: &HashMap<String, ToolType>,
+        discard_incomplete_tool_search: bool,
+    ) -> ExecutorResult<Option<OutputItem>> {
         match self {
             Self::Reasoning { mut item, text } => {
                 if !text.is_empty() {
                     item.content.push(ReasoningTextContent::new(text));
                 }
-                Some(OutputItem::Reasoning(item))
+                Ok(Some(OutputItem::Reasoning(item)))
             }
             Self::FunctionCall { mut item, arguments } => {
+                if tool_types.get(&item.name) == Some(&ToolType::ToolSearch)
+                    && item.status != MessageStatus::Completed
+                    && discard_incomplete_tool_search
+                {
+                    return Ok(None);
+                }
                 if !arguments.is_empty() && item.arguments.is_empty() {
                     item.arguments = arguments;
                 }
                 item.status = MessageStatus::Completed;
-                Some(OutputItem::FunctionCall(item))
+                if tool_types.get(&item.name) == Some(&ToolType::ToolSearch) {
+                    ToolSearchCall::try_from(&item)
+                        .map(OutputItem::ToolSearchCall)
+                        .map(Some)
+                        .map_err(ExecutorError::Tool)
+                } else {
+                    Ok(Some(OutputItem::FunctionCall(item)))
+                }
             }
             Self::Message { mut item, text } => {
                 if !text.is_empty() {
                     item.content.push(OutputTextContent::new(text));
                 }
                 item.status = MessageStatus::Completed;
-                Some(OutputItem::Message(item))
+                Ok(Some(OutputItem::Message(item)))
             }
             Self::CustomToolCall { mut item, input } => {
                 if item.input.is_empty() {
                     item.input = input;
                 }
                 item.status = Some(MessageStatus::Completed);
-                Some(OutputItem::CustomToolCall(item))
+                Ok(Some(OutputItem::CustomToolCall(item)))
             }
-            Self::WebSearchCall { item } => item.map(OutputItem::WebSearchCall),
-            Self::McpCall { item } => Some(OutputItem::McpCall(item)),
-            Self::McpListTools { item } => Some(OutputItem::McpListTools(item)),
-            Self::Compaction { item } => Some(OutputItem::Compaction(item)),
+            Self::WebSearchCall { item } => Ok(item.map(OutputItem::WebSearchCall)),
+            Self::McpCall { item } => Ok(Some(OutputItem::McpCall(item))),
+            Self::McpListTools { item } => Ok(Some(OutputItem::McpListTools(item))),
+            Self::ToolSearchCall(item) if item.status == ToolSearchStatus::Completed => {
+                Ok(Some(OutputItem::ToolSearchCall(item)))
+            }
+            Self::ToolSearchCall(_) if discard_incomplete_tool_search => Ok(None),
+            Self::ToolSearchCall(_) => Err(crate::tool::tool_search::invalid_upstream_search_call().into()),
+            Self::Compaction { item } => Ok(Some(OutputItem::Compaction(item))),
         }
     }
 }
@@ -131,6 +158,9 @@ pub struct ResponseAccumulator {
     in_flight: IndexMap<String, InFlightEntry>,
     /// Completed streaming items waiting to be emitted in `output_index` order.
     completed: Vec<(u32, OutputItem)>,
+    /// Request-scoped model-visible tool classification.
+    tool_types: HashMap<String, ToolType>,
+    processing_error: Option<ExecutorError>,
 }
 
 impl ResponseAccumulator {
@@ -147,7 +177,45 @@ impl ResponseAccumulator {
             error: None,
             in_flight: IndexMap::new(),
             completed: Vec::new(),
+            tool_types: HashMap::new(),
+            processing_error: None,
         }
+    }
+
+    pub(super) fn with_tool_types(
+        mut self,
+        tool_types: HashMap<String, ToolType>,
+        withheld_function_names: &HashSet<String>,
+    ) -> ExecutorResult<Self> {
+        let discard_incomplete_tool_search = matches!(self.status, ResponseStatus::Error | ResponseStatus::Incomplete);
+        let output = std::mem::take(&mut self.output);
+        self.output = output
+            .into_iter()
+            .map(|item| {
+                if matches!(&item, OutputItem::FunctionCall(call) if withheld_function_names.contains(&call.name)) {
+                    return Err(crate::tool::tool_search::invalid_upstream_withheld_function_call().into());
+                }
+                if discard_incomplete_tool_search
+                    && matches!(&item, OutputItem::FunctionCall(call)
+                        if tool_types.get(&call.name) == Some(&ToolType::ToolSearch)
+                            && call.status != MessageStatus::Completed)
+                {
+                    return Ok(None);
+                }
+                if discard_incomplete_tool_search
+                    && matches!(&item, OutputItem::ToolSearchCall(call)
+                        if call.status != ToolSearchStatus::Completed)
+                {
+                    return Ok(None);
+                }
+                normalize_output_item(item, &tool_types).map(Some)
+            })
+            .collect::<ExecutorResult<Vec<_>>>()?
+            .into_iter()
+            .flatten()
+            .collect();
+        self.tool_types = tool_types;
+        Ok(self)
     }
 
     /// Parses a non-streaming JSON response body.
@@ -155,13 +223,7 @@ impl ResponseAccumulator {
     /// # Errors
     /// Returns `ExecutorError::ParseError` if JSON parsing fails or required fields are missing.
     pub fn from_json(body: &str, conversation_id: Option<&str>) -> ExecutorResult<Self> {
-        let json: serde_json::Value = deserialize_from_str(body).map_err(ExecutorError::JsonError)?;
-        Self::from_value(json, conversation_id)
-    }
-
-    /// Rehydrate a parsed non-streaming response without parsing the body a
-    /// second time after raw protocol validation.
-    pub(super) fn from_value(mut json: serde_json::Value, conversation_id: Option<&str>) -> ExecutorResult<Self> {
+        let mut json: serde_json::Value = deserialize_from_str(body).map_err(ExecutorError::JsonError)?;
         let response_id = json["id"]
             .as_str()
             .ok_or_else(|| ExecutorError::ParseError("missing 'id' field in response".into()))?
@@ -169,9 +231,9 @@ impl ResponseAccumulator {
 
         let output = deserialize_from_value_opt::<Vec<serde_json::Value>>(json["output"].take())
             .map(|items| {
-                let mut out = Vec::with_capacity(items.len());
-                out.extend(items.into_iter().filter_map(deserialize_from_value_opt::<OutputItem>));
-                out
+                let mut output = Vec::with_capacity(items.len());
+                output.extend(items.into_iter().filter_map(deserialize_from_value_opt::<OutputItem>));
+                output
             })
             .unwrap_or_default();
 
@@ -193,6 +255,8 @@ impl ResponseAccumulator {
             error,
             in_flight: IndexMap::new(),
             completed: Vec::new(),
+            tool_types: HashMap::new(),
+            processing_error: None,
         })
     }
 
@@ -234,17 +298,20 @@ impl ResponseAccumulator {
         // Properly async join — does not block the tokio executor thread.
         worker_handle
             .await
-            .map_err(|_| ExecutorError::StreamError("Worker thread panicked".into()))
+            .map_err(|_| ExecutorError::StreamError("Worker thread panicked".into()))?
     }
 
     /// Worker function that processes SSE lines from the channel (runs on blocking thread).
-    fn process_stream_chunks(rx: mpsc::Receiver<String>, conversation_id: Option<String>) -> Self {
+    fn process_stream_chunks(rx: mpsc::Receiver<String>, conversation_id: Option<String>) -> ExecutorResult<Self> {
         let mut acc = Self::new(uuid7_str("resp_"), conversation_id);
         for line in rx {
             let _ = acc.process_sse_line(&line);
         }
         acc.finish_stream();
-        acc
+        if let Some(error) = acc.take_processing_error() {
+            return Err(error);
+        }
+        Ok(acc)
     }
 
     /// Processes pre-collected raw SSE lines synchronously.
@@ -264,11 +331,14 @@ impl ResponseAccumulator {
 
     /// Finalizes all streaming items in upstream `output_index` order.
     pub(crate) fn finalize_all(&mut self) {
-        self.completed.extend(
-            self.in_flight
-                .drain(..)
-                .filter_map(|(_, entry)| entry.item.finalize().map(|item| (entry.output_index, item))),
-        );
+        let discard_incomplete_tool_search = matches!(self.status, ResponseStatus::Error | ResponseStatus::Incomplete);
+        for (_, entry) in self.in_flight.drain(..) {
+            match entry.item.finalize(&self.tool_types, discard_incomplete_tool_search) {
+                Ok(Some(item)) => self.completed.push((entry.output_index, item)),
+                Err(error) if self.processing_error.is_none() => self.processing_error = Some(error),
+                Ok(None) | Err(_) => {}
+            }
+        }
         self.completed.sort_by_key(|(output_index, _)| *output_index);
         self.output
             .extend(self.completed.drain(..).map(|(_, output_item)| output_item));
@@ -276,8 +346,7 @@ impl ResponseAccumulator {
 
     pub(crate) fn process_sse_line(&mut self, line: &str) -> Option<EventFrame> {
         let frame = normalize_sse_line(line)?;
-        self.capture_terminal_details_if_needed(&frame);
-        self.process_event(&frame);
+        self.process_normalized_frame(&frame);
         Some(frame)
     }
 
@@ -292,10 +361,19 @@ impl ResponseAccumulator {
         let call_key = function_event_key(&frame.payload);
         let call = call_key.and_then(|(item_id, output_index)| self.accumulated_function_call(item_id, output_index));
         translator.validate_before_accumulation(&frame, call)?;
-        self.capture_terminal_details_if_needed(&frame);
-        self.process_event(&frame);
+        self.process_normalized_frame(&frame);
+        if let Some(error) = self.take_processing_error() {
+            return Err(error);
+        }
         let call = call_key.and_then(|(item_id, output_index)| self.accumulated_function_call(item_id, output_index));
-        translator.translate(frame, call).map(Some)
+        let tool_search_call =
+            call_key.and_then(|(item_id, output_index)| self.accumulated_tool_search_call(item_id, output_index));
+        translator.translate(frame, call, tool_search_call).map(Some)
+    }
+
+    fn process_normalized_frame(&mut self, frame: &EventFrame) {
+        self.capture_terminal_details_if_needed(frame);
+        self.process_event(frame);
     }
 
     fn accumulated_function_call(&self, item_id: &str, output_index: u32) -> Option<AccumulatedFunctionCall<'_>> {
@@ -308,14 +386,14 @@ impl ResponseAccumulator {
                     entry.output_index == output_index && matches!(entry.item, InFlight::FunctionCall { .. })
                 })
             });
-        if let Some(InFlightEntry {
-            output_index,
-            item: InFlight::FunctionCall { item, arguments },
-        }) = entry
-        {
+        if let Some(entry) = entry {
+            let (item, arguments) = match &entry.item {
+                InFlight::FunctionCall { item, arguments } => (item, arguments.as_str()),
+                _ => return None,
+            };
             return Some(AccumulatedFunctionCall {
                 item,
-                output_index: *output_index,
+                output_index: entry.output_index,
                 arguments,
             });
         }
@@ -329,6 +407,13 @@ impl ResponseAccumulator {
                 output_index: *completed_index,
                 arguments: &item.arguments,
             })
+        })
+    }
+
+    fn accumulated_tool_search_call(&self, item_id: &str, output_index: u32) -> Option<&ToolSearchCall> {
+        self.in_flight.get(item_id).and_then(|entry| match &entry.item {
+            InFlight::ToolSearchCall(item) if entry.output_index == output_index => Some(item),
+            _ => None,
         })
     }
 
@@ -374,7 +459,11 @@ impl ResponseAccumulator {
                 self.start_output_item(payload);
             }
             (SSEEventType::OutputItemDone, payload @ EventPayload::OutputItemDone { .. }) => {
-                self.complete_call_item(payload);
+                if let Err(error) = self.complete_call_item(payload)
+                    && self.processing_error.is_none()
+                {
+                    self.processing_error = Some(error);
+                }
             }
             (SSEEventType::ReasoningTextDelta, EventPayload::ReasoningDelta { delta, item_id }) => {
                 if let Some(InFlight::Reasoning { text, .. }) =
@@ -499,6 +588,15 @@ impl ResponseAccumulator {
             SSEItemType::McpListTools => McpListTools::try_from(payload)
                 .ok()
                 .map(|item| InFlight::McpListTools { item }),
+            SSEItemType::ToolSearchCall => match ToolSearchCall::try_from(payload) {
+                Ok(item) => Some(InFlight::ToolSearchCall(item)),
+                Err(error) => {
+                    if self.processing_error.is_none() {
+                        self.processing_error = Some(error.into());
+                    }
+                    None
+                }
+            },
         };
         if let Some(item) = item {
             let needs_internal_key = matches!(&item, InFlight::FunctionCall { .. })
@@ -523,12 +621,12 @@ impl ResponseAccumulator {
     }
 
     fn finish_response(&mut self, status: ResponseStatus, usage: Option<ResponseUsage>) {
-        self.finalize_all();
         self.status = status;
+        self.finalize_all();
         self.usage = usage;
     }
 
-    fn complete_call_item(&mut self, payload: &EventPayload) {
+    fn complete_call_item(&mut self, payload: &EventPayload) -> ExecutorResult<()> {
         let EventPayload::OutputItemDone {
             item_id,
             item_type,
@@ -537,17 +635,46 @@ impl ResponseAccumulator {
             ..
         } = payload
         else {
-            return;
+            return Ok(());
         };
         let in_flight_key = self.in_flight_call_key(item_id, *item_type, *output_index);
         let done_item = deserialize_from_value_opt::<OutputItem>(raw_item.clone());
         if let Some(entry) = in_flight_key.as_deref().and_then(|key| self.in_flight.get_mut(key)) {
-            match (&mut entry.item, done_item) {
-                (InFlight::FunctionCall { item, arguments }, _) => item.apply_done(payload, arguments),
-                (InFlight::CustomToolCall { item, input }, _) => item.apply_done(payload, input),
-                (InFlight::McpCall { item }, _) => item.apply_done(payload, &mut String::new()),
-                (InFlight::McpListTools { item }, _) => item.apply_done(payload, &mut String::new()),
-                (InFlight::Compaction { item }, _) => item.apply_done(payload, &mut String::new()),
+            let replacement = match (&mut entry.item, done_item) {
+                (InFlight::FunctionCall { item, arguments }, _) => {
+                    let is_tool_search = self.tool_types.get(&item.name) == Some(&ToolType::ToolSearch)
+                        || raw_item
+                            .get("name")
+                            .and_then(serde_json::Value::as_str)
+                            .is_some_and(|name| self.tool_types.get(name) == Some(&ToolType::ToolSearch));
+                    item.apply_done(payload, arguments);
+                    if is_tool_search {
+                        let public = ToolSearchCall::try_from(&*item).map_err(ExecutorError::Tool)?;
+                        Some(InFlight::ToolSearchCall(public))
+                    } else {
+                        None
+                    }
+                }
+                (InFlight::CustomToolCall { item, input }, _) => {
+                    item.apply_done(payload, input);
+                    None
+                }
+                (InFlight::McpCall { item }, _) => {
+                    item.apply_done(payload, &mut String::new());
+                    None
+                }
+                (InFlight::McpListTools { item }, _) => {
+                    item.apply_done(payload, &mut String::new());
+                    None
+                }
+                (InFlight::ToolSearchCall(item), _) => {
+                    item.apply_done(payload, &mut String::new());
+                    None
+                }
+                (InFlight::Compaction { item }, _) => {
+                    item.apply_done(payload, &mut String::new());
+                    None
+                }
                 (InFlight::WebSearchCall { item }, Some(OutputItem::WebSearchCall(mut call))) => {
                     if call.id.is_empty() {
                         call.id = in_flight_key
@@ -556,30 +683,45 @@ impl ResponseAccumulator {
                             .map_or_else(|| uuid7_str("ws_"), str::to_owned);
                     }
                     *item = Some(call);
+                    None
                 }
-                _ => {}
+                _ => None,
+            };
+            if let Some(replacement) = replacement {
+                entry.item = replacement;
             }
-            return;
+            return Ok(());
         }
 
-        if let Some(
-            mut output_item @ (OutputItem::FunctionCall(_)
-            | OutputItem::CustomToolCall(_)
-            | OutputItem::WebSearchCall(_)
-            | OutputItem::McpCall(_)
-            | OutputItem::McpListTools(_)
-            | OutputItem::Compaction(_)),
-        ) = done_item
-        {
-            let OutputItem::WebSearchCall(call) = &mut output_item else {
-                self.completed.push((*output_index, output_item));
-                return;
-            };
-            if call.id.is_empty() {
-                call.id = uuid7_str("ws_");
-            }
-            self.completed.push((*output_index, output_item));
+        self.complete_untracked_call_item(done_item, *output_index)
+    }
+
+    fn complete_untracked_call_item(&mut self, done_item: Option<OutputItem>, output_index: u32) -> ExecutorResult<()> {
+        let Some(mut output_item) = done_item
+            .map(|item| normalize_output_item(item, &self.tool_types))
+            .transpose()?
+        else {
+            return Ok(());
+        };
+        if !matches!(
+            output_item,
+            OutputItem::FunctionCall(_)
+                | OutputItem::ToolSearchCall(_)
+                | OutputItem::CustomToolCall(_)
+                | OutputItem::WebSearchCall(_)
+                | OutputItem::McpCall(_)
+                | OutputItem::McpListTools(_)
+                | OutputItem::Compaction(_)
+        ) {
+            return Ok(());
         }
+        if let OutputItem::WebSearchCall(call) = &mut output_item
+            && call.id.is_empty()
+        {
+            call.id = uuid7_str("ws_");
+        }
+        self.completed.push((output_index, output_item));
+        Ok(())
     }
 
     fn in_flight_call_key(&self, item_id: &str, item_type: SSEItemType, output_index: u32) -> Option<String> {
@@ -601,6 +743,10 @@ impl ResponseAccumulator {
         self.incomplete_details = Some(IncompleteDetails {
             reason: Some(reason.into()),
         });
+    }
+
+    pub(super) fn take_processing_error(&mut self) -> Option<ExecutorError> {
+        self.processing_error.take()
     }
 
     /// Finalizes the accumulator into a `ResponsePayload`.
@@ -627,6 +773,8 @@ impl ResponseAccumulator {
             previous_response_id: previous_response_id.map(str::to_string),
             conversation_id: self.conversation_id,
             instructions: instructions.map(str::to_string),
+            tools: None,
+            tool_choice: None,
         }
     }
 }
@@ -639,8 +787,23 @@ fn in_flight_matches_call_type(item: &InFlight, item_type: SSEItemType) -> bool 
             | (InFlight::WebSearchCall { .. }, SSEItemType::WebSearchCall)
             | (InFlight::McpCall { .. }, SSEItemType::McpCall)
             | (InFlight::McpListTools { .. }, SSEItemType::McpListTools)
+            | (InFlight::ToolSearchCall(_), SSEItemType::ToolSearchCall)
             | (InFlight::Compaction { .. }, SSEItemType::Compaction)
     )
+}
+
+fn normalize_output_item(item: OutputItem, tool_types: &HashMap<String, ToolType>) -> ExecutorResult<OutputItem> {
+    match item {
+        OutputItem::FunctionCall(call) if tool_types.get(&call.name) == Some(&ToolType::ToolSearch) => {
+            ToolSearchCall::try_from(&call)
+                .map(OutputItem::ToolSearchCall)
+                .map_err(ExecutorError::Tool)
+        }
+        OutputItem::ToolSearchCall(call) if call.status != ToolSearchStatus::Completed => {
+            Err(crate::tool::tool_search::invalid_upstream_search_call().into())
+        }
+        item => Ok(item),
+    }
 }
 
 fn function_event_key(payload: &EventPayload) -> Option<(&str, u32)> {
@@ -801,6 +964,9 @@ mod tests {
                 name: None,
                 namespace: None,
                 call_id: None,
+                execution: None,
+                status: None,
+                arguments: None,
             },
             wire: WireEvent::new("test"),
         });
@@ -1341,6 +1507,9 @@ mod tests {
                 name: Some("get_weather".into()),
                 namespace: Some("mcp__weather".into()),
                 call_id: Some("call_abc".into()),
+                execution: None,
+                status: None,
+                arguments: None,
             },
             wire: WireEvent::new("test"),
         });
@@ -1416,6 +1585,9 @@ mod tests {
                 name: Some("search".into()),
                 namespace: None,
                 call_id: Some("call_1".into()),
+                execution: None,
+                status: None,
+                arguments: None,
             },
             wire: WireEvent::new("test"),
         });
@@ -1465,6 +1637,9 @@ mod tests {
                 name: Some("get_weather".into()),
                 namespace: None,
                 call_id: Some("call_1".into()),
+                execution: None,
+                status: None,
+                arguments: None,
             },
             wire: WireEvent::new("test"),
         });
@@ -1489,6 +1664,9 @@ mod tests {
                 name: Some("get_time".into()),
                 namespace: None,
                 call_id: Some("call_2".into()),
+                execution: None,
+                status: None,
+                arguments: None,
             },
             wire: WireEvent::new("test"),
         });
@@ -1532,6 +1710,9 @@ mod tests {
                 name: None,
                 namespace: None,
                 call_id: None,
+                execution: None,
+                status: None,
+                arguments: None,
             },
             wire: WireEvent::new("test"),
         });
@@ -1555,6 +1736,9 @@ mod tests {
                 name: Some("lookup".into()),
                 namespace: None,
                 call_id: Some("call_x".into()),
+                execution: None,
+                status: None,
+                arguments: None,
             },
             wire: WireEvent::new("test"),
         });
@@ -1598,6 +1782,9 @@ mod tests {
                 name: Some("old_name".into()),
                 namespace: None,
                 call_id: Some("old_call".into()),
+                execution: None,
+                status: None,
+                arguments: None,
             },
             wire: WireEvent::new("test"),
         });
@@ -1693,6 +1880,9 @@ mod tests {
                 name: Some("tool".into()),
                 namespace: None,
                 call_id: Some("c1".into()),
+                execution: None,
+                status: None,
+                arguments: None,
             },
             wire: WireEvent::new("test"),
         });
@@ -1750,6 +1940,9 @@ mod tests {
                 name: Some("partial".into()),
                 namespace: None,
                 call_id: Some("c1".into()),
+                execution: None,
+                status: None,
+                arguments: None,
             },
             wire: WireEvent::new("test"),
         });
@@ -1807,6 +2000,70 @@ mod tests {
         }
 
         assert_eq!(acc.usage.unwrap().total_tokens, 15);
+    }
+
+    #[test]
+    fn test_native_tool_search_call_accumulates_as_first_class_item() {
+        let lines = vec![
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"id":"tsc_native","type":"tool_search_call","status":"in_progress","call_id":"call_search","execution":"client","arguments":{}}}"#.to_owned(),
+            r#"data: {"type":"response.output_item.done","output_index":0,"item":{"id":"tsc_native","type":"tool_search_call","status":"completed","call_id":"call_search","execution":"client","arguments":{"query":"weather"}}}"#.to_owned(),
+            r#"data: {"type":"response.completed","response":{"id":"resp_native","status":"completed","usage":null}}"#.to_owned(),
+        ];
+
+        let acc = ResponseAccumulator::from_sse_lines(lines, None);
+        assert!(acc.processing_error.is_none());
+        let [OutputItem::ToolSearchCall(call)] = acc.output.as_slice() else {
+            panic!("expected one native tool-search call");
+        };
+        assert_eq!(call.id, "tsc_native");
+        assert_eq!(call.call_id, "call_search");
+        assert_eq!(call.status, ToolSearchStatus::Completed);
+        assert_eq!(
+            call.arguments,
+            serde_json::json!({"query": "weather"}).as_object().unwrap().clone()
+        );
+    }
+
+    #[test]
+    fn failed_response_discards_unfinished_tool_search_items() {
+        let added_items = [
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"id":"fc_search","type":"function_call","status":"in_progress","call_id":"call_search","name":"tool_search","arguments":""}}"#,
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"id":"tsc_native","type":"tool_search_call","status":"in_progress","call_id":"call_search","execution":"client","arguments":{}}}"#,
+        ];
+        for added in added_items {
+            let mut acc = ResponseAccumulator::new("resp_failed".to_owned(), None)
+                .with_tool_types(
+                    HashMap::from([("tool_search".to_owned(), ToolType::ToolSearch)]),
+                    &HashSet::new(),
+                )
+                .unwrap();
+            acc.process_sse_line(added);
+            acc.process_sse_line(
+                r#"data: {"type":"response.failed","response":{"id":"resp_failed","status":"failed","usage":null}}"#,
+            );
+
+            assert_eq!(acc.status, ResponseStatus::Error);
+            assert!(acc.output.is_empty());
+            assert!(acc.processing_error.is_none());
+        }
+    }
+
+    #[test]
+    fn completed_response_rejects_unfinished_synthetic_tool_search() {
+        let mut acc = ResponseAccumulator::new("resp_invalid".to_owned(), None)
+            .with_tool_types(
+                HashMap::from([("tool_search".to_owned(), ToolType::ToolSearch)]),
+                &HashSet::new(),
+            )
+            .unwrap();
+        acc.process_sse_line(
+            r#"data: {"type":"response.output_item.added","output_index":0,"item":{"id":"fc_search","type":"function_call","status":"in_progress","call_id":"call_search","name":"tool_search","arguments":""}}"#,
+        );
+        acc.process_sse_line(
+            r#"data: {"type":"response.completed","response":{"id":"resp_invalid","status":"completed","usage":null}}"#,
+        );
+
+        assert!(acc.processing_error.is_some());
     }
 
     #[test]

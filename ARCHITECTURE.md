@@ -198,7 +198,7 @@ access happen — those live in `tool/`, `executor/`, and `storage/` respectivel
   (the normalized `FunctionTool` and `ToolChoice`, distinct from tool *declarations*),
   `usage.rs` (token accounting structs).
 - **`types/tools/params.rs`** — the tool **declaration** shapes a client sends:
-  `ResponsesTool` (tagged enum: `Function`, `Mcp`, `WebSearch`, `FileSearch`,
+  `ResponsesTool` (tagged enum: `Function`, `ToolSearch`, `Mcp`, `WebSearch`, `FileSearch`,
   `CodeInterpreter`, `Namespace`, `Custom`, `Unknown`) and each variant's param struct.
   This is a good concrete example of the module boundary: `ResponsesTool` is *defined*
   here as a pure shape, but its behavior — `validate()` and `to_function_tools()` — is

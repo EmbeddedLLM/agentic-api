@@ -151,33 +151,33 @@ pub struct CustomToolParam {
 pub enum ToolSearchExecution {
     #[default]
     Client,
+    // TODO: Support `Server` execution type for gateway built-in tool
 }
 
-/// Terminal tool-search calls and outputs are accepted only after completion.
-/// Streaming `in_progress` state belongs to event lifecycle payloads rather
-/// than this persisted public-item status.
+/// Lifecycle status of a public tool-search call or output item.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolSearchStatus {
+    InProgress,
     #[default]
     Completed,
+    Incomplete,
 }
 
 /// Parameters for a client-executed tool-search declaration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct ToolSearchToolParam {
     pub execution: ToolSearchExecution,
-    pub description: String,
-    pub parameters: serde_json::Map<String, Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parameters: Option<serde_json::Map<String, Value>>,
 }
 
 /// Parameters for a gateway MCP built-in tool declaration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpToolParam {
     pub server_label: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub server_description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -190,8 +190,6 @@ pub struct McpToolParam {
     pub allowed_tools: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub require_approval: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub defer_loading: Option<bool>,
     /// Request-scoped `tools/list` results used by MCP normalization. This
     /// field is populated internally and ignored on the public request wire.
     #[serde(
@@ -388,9 +386,7 @@ mod tests {
         let mut tool = serde_json::from_value::<ResponsesTool>(serde_json::json!({
             "type": "mcp",
             "server_label": "repo",
-            "server_description": "Repository tools",
-            "server_url": "https://mcp.example.test/mcp?continuation_token=query-secret",
-            "defer_loading": true,
+            "server_url": "https://mcp.example.test/mcp",
             "headers": {
                 "Authorization": "Bearer header-secret",
                 "X-Request-ID": "request-1"
@@ -422,12 +418,7 @@ mod tests {
         assert!(persisted.get("authorization").is_none());
         assert!(persisted.get("_agentic_discovered_tools").is_none());
         assert_eq!(persisted["server_label"], "repo");
-        assert_eq!(persisted["server_description"], "Repository tools");
-        assert_eq!(
-            persisted["server_url"], "https://mcp.example.test/mcp?continuation_token=query-secret",
-            "persistence preserves the complete endpoint for continuation; model-visible catalogs and public failures must redact it"
-        );
-        assert_eq!(persisted["defer_loading"], true);
+        assert_eq!(persisted["server_url"], "https://mcp.example.test/mcp");
         assert_eq!(persisted["allowed_tools"], serde_json::json!(["read_file"]));
         assert_eq!(persisted["require_approval"], "never");
     }
@@ -453,10 +444,34 @@ mod tests {
             !tool.is_gateway_owned(),
             "client-executed tool search must bypass gateway dispatch"
         );
-        assert!(
-            tool.to_function_tools().is_empty(),
-            "client-executed tool search must bypass generic upstream normalization"
+        assert_eq!(
+            serde_json::to_value(tool.to_function_tools()).unwrap(),
+            serde_json::json!([{
+                "type": "function",
+                "name": "tool_search",
+                "description": "Find a tool for the requested task",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"]
+                },
+                "strict": true
+            }]),
+            "the upstream-normalization boundary lowers tool search exactly once"
         );
+        assert_eq!(serde_json::to_value(tool).expect("tool serializes"), declaration);
+    }
+
+    #[test]
+    fn responses_tool_search_declaration_omits_optional_fields() {
+        let declaration = serde_json::json!({
+            "type": "tool_search",
+            "execution": "client"
+        });
+
+        let tool: ResponsesTool = serde_json::from_value(declaration.clone()).expect("valid minimal declaration");
+
+        tool.validate().expect("omitted optional fields are valid");
         assert_eq!(serde_json::to_value(tool).expect("tool serializes"), declaration);
     }
 
@@ -477,11 +492,6 @@ mod tests {
             serde_json::json!({
                 "type": "tool_search",
                 "execution": "client",
-                "description": "Missing parameters"
-            }),
-            serde_json::json!({
-                "type": "tool_search",
-                "execution": "client",
                 "description": "Parameters must be an object",
                 "parameters": "not an object"
             }),
@@ -494,7 +504,7 @@ mod tests {
     }
 
     #[test]
-    fn responses_tool_search_declaration_rejects_bad_description_or_schema() {
+    fn responses_tool_search_declaration_accepts_model_facing_values_for_private_normalization() {
         for (description, parameters) in [
             ("   ", serde_json::json!({"type": "object"})),
             ("Find a tool", serde_json::json!({})),
@@ -508,10 +518,8 @@ mod tests {
             }))
             .expect("structurally valid declaration");
 
-            assert!(
-                tool.validate().is_err(),
-                "invalid declaration semantics must fail validation"
-            );
+            tool.validate()
+                .expect("typed public values are normalized only when building the private synthetic function");
         }
     }
 

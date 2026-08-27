@@ -5,7 +5,8 @@
 
 use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::executor::modes::{ConversationHandler, ResponseHandler};
-use crate::executor::request::RequestContext;
+use crate::executor::prepare::prepare_tool_search;
+use crate::executor::request::{PreparedTurn, RequestContext};
 use crate::types::event::ResponseStatus;
 use crate::types::io::OutputItem;
 use crate::types::request_response::ResponsePayload;
@@ -13,17 +14,19 @@ use tracing::error;
 
 #[must_use]
 pub(crate) fn should_persist(ctx: &RequestContext) -> bool {
-    ctx.original_request.store || ctx.original_request.conversation_id.is_some()
+    ctx.original_request.store
+        || ctx.original_request.previous_response_id.is_some()
+        || ctx.original_request.conversation_id.is_some()
 }
 
 pub(crate) async fn persist_if_needed(
     payload: ResponsePayload,
-    ctx: RequestContext,
+    ctx: PreparedTurn,
     conv_handler: ConversationHandler,
     resp_handler: ResponseHandler,
 ) -> ExecutorResult<()> {
-    if should_persist(&ctx) {
-        persist_response(payload, ctx, conv_handler, resp_handler)
+    if should_persist(ctx.request()) {
+        persist_prepared_response(payload, ctx, conv_handler, resp_handler)
             .await
             .map_err(|source| {
                 error!(error = ?source, "failed to persist response");
@@ -57,7 +60,25 @@ pub async fn persist_response(
         return Ok(());
     }
 
-    persist_turn(ctx, payload.output, &conv_handler, &resp_handler).await
+    let ctx = prepare_tool_search(ctx, &conv_handler, &resp_handler).await?;
+    persist_prepared_turn(ctx, payload.output, &conv_handler, &resp_handler).await
+}
+
+async fn persist_prepared_response(
+    payload: ResponsePayload,
+    ctx: PreparedTurn,
+    conv_handler: ConversationHandler,
+    resp_handler: ResponseHandler,
+) -> ExecutorResult<()> {
+    if !matches!(
+        payload.status.parse::<ResponseStatus>().unwrap_or_default(),
+        ResponseStatus::Completed | ResponseStatus::Incomplete
+    ) || payload.id.is_empty()
+    {
+        return Ok(());
+    }
+
+    persist_prepared_turn(ctx, payload.output, &conv_handler, &resp_handler).await
 }
 
 /// Persists one completed turn with the handler selected by its explicit conversation discriminator.
@@ -70,9 +91,25 @@ pub async fn persist_turn(
     conv_handler: &ConversationHandler,
     resp_handler: &ResponseHandler,
 ) -> ExecutorResult<()> {
+    let ctx = prepare_tool_search(ctx, conv_handler, resp_handler).await?;
+    persist_prepared_turn(ctx, output_items, conv_handler, resp_handler).await
+}
+
+pub(crate) async fn persist_prepared_turn(
+    mut ctx: PreparedTurn,
+    output_items: Vec<OutputItem>,
+    conv_handler: &ConversationHandler,
+    resp_handler: &ResponseHandler,
+) -> ExecutorResult<()> {
+    let metadata = ctx.take_response_metadata();
+    let ctx = ctx.into_request();
     if ctx.original_request.conversation_id.is_some() {
-        conv_handler.execute_turn(ctx, output_items).await
+        conv_handler
+            .execute_turn_with_metadata(ctx, output_items, metadata)
+            .await
     } else {
-        resp_handler.execute_turn(ctx, output_items).await
+        resp_handler
+            .execute_turn_with_metadata(ctx, output_items, metadata)
+            .await
     }
 }

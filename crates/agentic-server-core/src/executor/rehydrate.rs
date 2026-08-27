@@ -4,7 +4,6 @@
 //! injecting them into the enriched request before it is forwarded to the LLM.
 
 use crate::executor::error::{ExecutorError, ExecutorResult};
-use crate::executor::prepare::prepare_tool_search;
 use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::storage::InOutItem;
 use crate::types::io::{InputItem, ResponsesInput, resolve_tool_choice, resolve_tools};
@@ -36,9 +35,6 @@ pub async fn rehydrate_conversation(
     let mut ctx = RequestContext {
         enriched_request: request,
         original_request,
-        tool_search_state: None,
-        tool_search_private_request: None,
-        tool_search_loaded_tools: None,
         new_input_items,
         response_id,
         conversation_id: None,
@@ -62,22 +58,6 @@ pub async fn rehydrate_conversation(
     }
 
     ctx.enriched_request.input = ResponsesInput::Items(ctx.new_input_items.clone());
-    Ok(ctx)
-}
-
-/// Rehydrate the complete public request history, then invoke the shared
-/// state-preparation seam before registry construction.
-///
-/// # Errors
-///
-/// Returns rehydration errors or deterministic tool-search state-validation
-/// errors.
-pub async fn rehydrate_for_execution(
-    request: RequestPayload,
-    exec_ctx: &ExecutionContext,
-) -> ExecutorResult<RequestContext> {
-    let mut ctx = rehydrate_conversation(request, exec_ctx).await?;
-    prepare_tool_search(&mut ctx)?;
     Ok(ctx)
 }
 
@@ -117,21 +97,17 @@ async fn from_conversation(ctx: &mut RequestContext, exec_ctx: &ExecutionContext
         exec_ctx.conv_handler.rehydrate_snapshot(ctx),
     )?;
 
-    let latest_response_metadata = snapshot.latest_response_metadata;
     let mut items = InOutItem::into_input_items(snapshot.items);
     items.reserve(ctx.new_input_items.len());
     items.extend(ctx.new_input_items.iter().cloned());
 
     ctx.enriched_request.input = ResponsesInput::Items(items);
-    if let Some(metadata) = latest_response_metadata.as_ref() {
-        apply_effective_settings(ctx, metadata);
-    }
     ctx.conversation_id = Some(conv_data.conversation_id);
     ctx.conversation_version = Some(snapshot.version);
     Ok(())
 }
 
-fn apply_effective_settings(ctx: &mut RequestContext, stored: &crate::storage::ResponseMetadata) {
+pub(crate) fn apply_effective_settings(ctx: &mut RequestContext, stored: &crate::storage::ResponseMetadata) {
     let tools_explicitly_set = ctx.original_request.tools.is_some();
     ctx.enriched_request.tools = resolve_tools(
         ctx.original_request.tools.as_deref(),
@@ -143,8 +119,6 @@ fn apply_effective_settings(ctx: &mut RequestContext, stored: &crate::storage::R
         &stored.effective_tool_choice,
         ctx.original_request.tool_choice.is_some(),
     ));
-    ctx.tool_search_loaded_tools
-        .clone_from(&stored.tool_search_loaded_tools);
 }
 
 #[cfg(test)]
@@ -241,7 +215,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execution_rehydration_prepares_function_only_blocking_private_request() {
+    async fn rehydration_remains_public_until_explicit_tool_search_preparation() {
         let exec_ctx = execution_context(ConversationStore::disabled(), ResponseStore::disabled());
         let request: RequestPayload = serde_json::from_value(serde_json::json!({
             "model": "test",
@@ -256,16 +230,35 @@ mod tests {
         }))
         .expect("valid tool-search request");
 
-        let ctx = rehydrate_for_execution(request, &exec_ctx)
+        let ctx = rehydrate_conversation(request, &exec_ctx)
             .await
-            .expect("blocking store:false search is valid after preparation");
+            .expect("blocking store:false search rehydrates");
+
+        assert!(matches!(
+            ctx.enriched_request.tools.as_deref(),
+            Some([crate::types::tools::ResponsesTool::ToolSearch(search)])
+                if search.execution == crate::types::tools::ToolSearchExecution::Client
+        ));
+
+        let ctx = crate::executor::prepare::prepare_tool_search(ctx, &exec_ctx.conv_handler, &exec_ctx.resp_handler)
+            .await
+            .expect("explicit handler preparation accepts the rehydrated request");
 
         assert!(
-            ctx.tool_search_state
-                .as_ref()
+            ctx.tool_search()
+                .state()
                 .is_some_and(crate::tool::ToolSearchState::is_active)
         );
-        assert!(ctx.tool_search_private_request.is_some());
+        let upstream = ctx
+            .request()
+            .enriched_request
+            .to_upstream_request(false)
+            .expect("prepared tool-search request lowers at the upstream boundary");
+        assert!(matches!(
+            upstream.tools.as_deref(),
+            Some([crate::types::request_response::UpstreamTool::Function(function)])
+                if function.name == "tool_search"
+        ));
     }
 
     #[tokio::test]
@@ -291,9 +284,12 @@ mod tests {
             .expect("seed prior response");
         let exec_ctx = execution_context(ConversationStore::disabled(), response_store);
 
-        let error = rehydrate_for_execution(request(None, Some("resp_search")), &exec_ctx)
+        let ctx = rehydrate_conversation(request(None, Some("resp_search")), &exec_ctx)
             .await
-            .expect_err("orphan in stored public history must fail after rehydration");
+            .expect("orphan history remains a valid rehydrated public shape");
+        let error = crate::executor::prepare::prepare_tool_search(ctx, &exec_ctx.conv_handler, &exec_ctx.resp_handler)
+            .await
+            .expect_err("explicit preparation rejects orphan stored public history");
 
         assert!(
             matches!(error, ExecutorError::Tool(ToolError::Config(ref message)) if message.contains("orphan")),
@@ -361,15 +357,16 @@ mod tests {
         }]))
         .expect("valid new public search output");
 
-        let mut ctx = rehydrate_conversation(continuation, &exec_ctx)
+        let ctx = rehydrate_conversation(continuation, &exec_ctx)
             .await
             .expect("stored public call rehydrates before new output");
-        assert!(ctx.tool_search_state.is_none());
-        prepare_tool_search(&mut ctx).expect("stored continuation derives valid tool-search state");
+        let ctx = crate::executor::prepare::prepare_tool_search(ctx, &exec_ctx.conv_handler, &exec_ctx.resp_handler)
+            .await
+            .expect("stored continuation derives valid tool-search state");
 
         let state = ctx
-            .tool_search_state
-            .as_ref()
+            .tool_search()
+            .state()
             .expect("valid state was prepared after rehydration");
         assert!(state.is_active());
         assert_eq!(state.loaded_public_tools().len(), 1);
@@ -377,13 +374,8 @@ mod tests {
             &state.loaded_public_tools()[0],
             crate::types::tools::ResponsesTool::Function(function) if function.name.as_str() == "get_weather"
         ));
-        let private_input = serde_json::to_value(
-            &ctx.tool_search_private_request
-                .as_deref()
-                .expect("active state materializes a private inference request")
-                .input,
-        )
-        .expect("prepared private history serializes");
+        let private_input =
+            serde_json::to_value(&ctx.request().enriched_request.input).expect("prepared private history serializes");
         assert_eq!(private_input[0]["call_id"], "call_search_stored");
         assert_eq!(private_input[1]["call_id"], "call_search_stored");
     }

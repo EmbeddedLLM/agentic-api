@@ -4,7 +4,6 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use super::mcp::handler::McpServerToolSet;
-use super::mcp::pool::validate_request_server_url_with_allowed_hosts;
 use super::mcp::{McpClientPool, McpDiscoveredHandler, McpHandler};
 use super::registry::ToolType;
 use super::web_search::WebSearchHandler;
@@ -18,26 +17,6 @@ pub enum GatewayExecutorRegistration {
         server_label: String,
         handlers: Vec<McpDiscoveredHandler>,
     },
-}
-
-/// Classifies MCP registry-build failures without weakening ordinary request
-/// validation. Only a rejected request-declared transport URL can be converted
-/// to a public discovery-failure item after tool search proves that definition
-/// was loaded; all other configuration errors remain strict request errors.
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum McpServerToolsError {
-    #[error(transparent)]
-    Tool(#[from] ToolError),
-    #[error(transparent)]
-    RequestServerUrl(ToolError),
-}
-
-impl McpServerToolsError {
-    pub(crate) fn into_tool_error(self) -> ToolError {
-        match self {
-            Self::Tool(error) | Self::RequestServerUrl(error) => error,
-        }
-    }
 }
 
 impl<T> From<Arc<T>> for GatewayExecutorRegistration
@@ -162,11 +141,7 @@ impl GatewayExecutors {
     /// Returns a configuration error for an invalid declaration or an empty
     /// allowed tool set, and an execution error when the server cannot connect.
     pub async fn mcp_handler(&mut self, param: &McpToolParam) -> Result<Vec<McpDiscoveredHandler>, ToolError> {
-        Ok(self
-            .mcp_server_tools(param)
-            .await
-            .map_err(McpServerToolsError::into_tool_error)?
-            .discovered_handlers)
+        Ok(self.mcp_server_tools(param).await?.discovered_handlers)
     }
 
     /// Returns the request-scoped tools and public discovery item for one MCP server.
@@ -175,13 +150,12 @@ impl GatewayExecutors {
     ///
     /// Returns a configuration error for an invalid declaration or an empty
     /// allowed tool set, and an execution error when the server cannot connect.
-    pub(crate) async fn mcp_server_tools(
-        &mut self,
-        param: &McpToolParam,
-    ) -> Result<McpServerToolSet, McpServerToolsError> {
+    pub(crate) async fn mcp_server_tools(&mut self, param: &McpToolParam) -> Result<McpServerToolSet, ToolError> {
         let server_label = param.server_label.trim();
         if server_label.is_empty() {
-            return Err(ToolError::Config("MCP declaration requires a non-empty server_label".to_owned()).into());
+            return Err(ToolError::Config(
+                "MCP declaration requires a non-empty server_label".to_owned(),
+            ));
         }
         let configured_handlers = self.mcp.get(server_label);
         let configured_server = self.mcp_configs.contains_key(server_label);
@@ -189,8 +163,7 @@ impl GatewayExecutors {
         if (configured_server || configured_handlers.is_some()) && param.server_url.is_some() {
             return Err(ToolError::Config(format!(
                 "MCP server '{server_label}' is configured by the gateway; omit server_url from the request"
-            ))
-            .into());
+            )));
         }
         if let Some(configured_handlers) = configured_handlers {
             let discovered_handlers = require_non_empty_mcp_handlers(
@@ -205,7 +178,9 @@ impl GatewayExecutors {
 
         if configured_server {
             let Some(entry) = self.mcp_configs.get(server_label).cloned() else {
-                return Err(ToolError::Config(format!("configured MCP server '{server_label}' is missing")).into());
+                return Err(ToolError::Config(format!(
+                    "configured MCP server '{server_label}' is missing"
+                )));
             };
             let cached_client = self.mcp_clients.read().await.get(server_label).cloned();
             let client = if let Some(client) = cached_client {
@@ -219,8 +194,7 @@ impl GatewayExecutors {
                         "configured MCP server '{server_label}' failed to connect: {}",
                         pool.connection_error(server_label)
                             .unwrap_or("unknown connection error")
-                    ))
-                    .into());
+                    )));
                 };
                 self.mcp_clients
                     .write()
@@ -251,22 +225,16 @@ impl GatewayExecutors {
             ));
         }
 
-        validate_request_declared_mcp_transport(param, &self.mcp_allowed_hosts)?;
-
         let pool =
             McpClientPool::from_params_with_allowed_hosts(std::slice::from_ref(param), &self.mcp_allowed_hosts).await;
         let Some(client) = pool.get(server_label).cloned() else {
             return Err(pool.connection_error(server_label).map_or_else(
                 || {
-                    McpServerToolsError::from(ToolError::Config(format!(
+                    ToolError::Config(format!(
                         "MCP server '{server_label}' has no valid request-declared configuration"
-                    )))
+                    ))
                 },
-                |error| {
-                    McpServerToolsError::from(ToolError::Execution(format!(
-                        "MCP server '{server_label}' failed to connect: {error}"
-                    )))
-                },
+                |error| ToolError::Execution(format!("MCP server '{server_label}' failed to connect: {error}")),
             ));
         };
         let tool_set = McpHandler::discover_tools(server_label, client, param.allowed_tools.as_deref()).await?;
@@ -302,25 +270,6 @@ fn require_non_empty_mcp_handlers(
         )));
     }
     Ok(handlers)
-}
-
-fn validate_request_declared_mcp_transport(
-    param: &McpToolParam,
-    allowed_hosts: &[String],
-) -> Result<(), McpServerToolsError> {
-    if param
-        .server_url
-        .as_deref()
-        .is_none_or(|url| validate_request_server_url_with_allowed_hosts(url, allowed_hosts).is_ok())
-    {
-        return Ok(());
-    }
-
-    let server_label = param.server_label.trim();
-    tracing::warn!(server_label, "MCP tool param server_url rejected");
-    Err(McpServerToolsError::RequestServerUrl(ToolError::Config(format!(
-        "MCP server '{server_label}' has no valid request-declared configuration"
-    ))))
 }
 
 fn validate_mcp_execution_options(param: &McpToolParam, configured_server: bool) -> Result<(), ToolError> {

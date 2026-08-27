@@ -1,4 +1,5 @@
 use crate::executor::error::{ExecutorError, ExecutorResult};
+use crate::executor::persist::persist_prepared_turn;
 use crate::executor::prepare::prepare_tool_search;
 use crate::executor::rehydrate::rehydrate_conversation;
 use crate::executor::request::{ExecutionContext, RequestContext};
@@ -201,9 +202,6 @@ pub(crate) async fn compact_items(
     let ctx = RequestContext {
         original_request,
         enriched_request,
-        tool_search_state: None,
-        tool_search_private_request: None,
-        tool_search_loaded_tools: None,
         new_input_items: Vec::new(),
         response_id: uuid7_str("resp_"),
         conversation_id: None,
@@ -242,7 +240,7 @@ pub(crate) async fn maybe_compact_context(
     let Some(threshold) = threshold else {
         return Ok(None);
     };
-    let estimated_tokens = estimate_input_tokens(&ctx.inference_request().input);
+    let estimated_tokens = estimate_input_tokens(&ctx.enriched_request.input);
     if estimated_tokens <= threshold {
         return Ok(None);
     }
@@ -254,15 +252,8 @@ pub(crate) async fn maybe_compact_context(
     );
     let model = ctx.enriched_request.model.clone();
     let instructions = ctx.enriched_request.instructions.clone();
-    let has_private_request = ctx.tool_search_private_request.is_some();
-    let input = std::mem::replace(
-        &mut ctx.inference_request_mut().input,
-        ResponsesInput::Items(Vec::new()),
-    );
+    let input = std::mem::replace(&mut ctx.enriched_request.input, ResponsesInput::Items(Vec::new()));
     let (compacted, usage) = compact_items(&model, input, instructions.as_deref(), exec_ctx, auth).await?;
-    if has_private_request {
-        ctx.inference_request_mut().input = ResponsesInput::Items(compacted.clone());
-    }
     ctx.enriched_request.input = ResponsesInput::Items(compacted.clone());
     ctx.new_input_items = compacted;
     Ok(Some(usage))
@@ -291,19 +282,19 @@ pub async fn compact_response(
         request.instructions,
     );
     payload.previous_response_id = request.previous_response_id;
-    let mut ctx = rehydrate_conversation(payload, exec_ctx).await?;
-    prepare_tool_search(&mut ctx)?;
-    let model = ctx.enriched_request.model.clone();
-    let instructions = ctx.enriched_request.instructions.clone();
+    let ctx = rehydrate_conversation(payload, exec_ctx).await?;
+    let mut ctx = prepare_tool_search(ctx, &exec_ctx.conv_handler, &exec_ctx.resp_handler).await?;
+    let model = ctx.request().enriched_request.model.clone();
+    let instructions = ctx.request().enriched_request.instructions.clone();
     let input = std::mem::replace(
-        &mut ctx.inference_request_mut().input,
+        &mut ctx.request_mut().enriched_request.input,
         ResponsesInput::Items(Vec::new()),
     );
     let (output, usage) = compact_items(&model, input, instructions.as_deref(), exec_ctx, auth).await?;
 
-    let response_id = ctx.response_id.clone();
-    ctx.new_input_items.clone_from(&output);
-    match exec_ctx.resp_handler.execute_turn(ctx, Vec::new()).await {
+    let response_id = ctx.request().response_id.clone();
+    ctx.request_mut().new_input_items.clone_from(&output);
+    match persist_prepared_turn(ctx, Vec::new(), &exec_ctx.conv_handler, &exec_ctx.resp_handler).await {
         Ok(()) | Err(ExecutorError::Storage(crate::StorageError::NotConfigured)) => {}
         Err(error) => return Err(error),
     }

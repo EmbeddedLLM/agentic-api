@@ -9,11 +9,38 @@ use crate::types::tools::{CodexNamespaceMember, CodexNamespaceToolParam, NonEmpt
 use crate::utils::common::serialize_to_value_or_custom_default;
 
 use super::handler::{ToolError, ToolHandler};
-use super::names::{model_visible_namespace_member_name, validate_model_visible_declared_names};
 use super::registry::{ToolEntry, ToolType};
 
-#[cfg(test)]
-use super::names::{MAX_MODEL_VISIBLE_TOOL_NAME_LEN, MODEL_VISIBLE_NAMESPACE_MEMBER_PREFIX};
+// Upstream Responses-compatible backends only see flat function names. Prefix
+// flattened Codex namespace members so generated names are recognizable,
+// unlikely to collide with user functions, and can be restored to
+// `{ namespace, name }` on the way back to the client.
+pub const MODEL_VISIBLE_NAMESPACE_MEMBER_PREFIX: &str = "agentic_ns__";
+pub const MAX_MODEL_VISIBLE_TOOL_NAME_LEN: usize = 64;
+
+const HASHED_NAMESPACE_MEMBER_SUFFIX_LEN: usize = 18;
+
+fn stable_name_hash(value: &str) -> u64 {
+    const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+    value.bytes().fold(FNV_OFFSET_BASIS, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(FNV_PRIME)
+    })
+}
+
+#[must_use]
+pub fn model_visible_namespace_member_name(namespace: &str, member: &str) -> String {
+    let full_name = format!("{MODEL_VISIBLE_NAMESPACE_MEMBER_PREFIX}{namespace}__{member}");
+    if full_name.chars().count() <= MAX_MODEL_VISIBLE_TOOL_NAME_LEN {
+        return full_name;
+    }
+
+    let hash = stable_name_hash(&full_name);
+    let readable_len = MAX_MODEL_VISIBLE_TOOL_NAME_LEN - HASHED_NAMESPACE_MEMBER_SUFFIX_LEN;
+    let readable_prefix = full_name.chars().take(readable_len).collect::<String>();
+    format!("{readable_prefix}__{hash:016x}")
+}
 
 /// Registers one `ToolEntry` per `Function` member of `p`, keyed by the
 /// member's already-flattened, model-visible name — callers must resolve
@@ -93,10 +120,41 @@ impl NamespaceMap {
 
 #[derive(Default)]
 struct NamespaceMapBuilder {
+    top_level_registry_keys: HashMap<String, ToolType>,
     map: NamespaceMap,
 }
 
 impl NamespaceMapBuilder {
+    fn new(top_level_registry_keys: HashMap<String, ToolType>) -> Self {
+        Self {
+            top_level_registry_keys,
+            ..Self::default()
+        }
+    }
+
+    fn validate_and_record_flat_member(
+        &mut self,
+        namespace_name: &str,
+        member_name: &str,
+    ) -> Result<String, ToolError> {
+        let flat_name = model_visible_namespace_member_name(namespace_name, member_name);
+        if let Some(tool_kind) = self.top_level_registry_keys.get(&flat_name) {
+            return Err(ToolError::Config(format!(
+                "codex namespace member {namespace_name}.{member_name} generates name {flat_name}, which collides with a declared {}",
+                tool_kind.description()
+            )));
+        }
+        if let Some(existing) = self.map.calls.get(&flat_name) {
+            if existing.member.namespace != namespace_name || existing.member.name != member_name {
+                return Err(ToolError::Config(format!(
+                    "codex namespace member {namespace_name}.{member_name} collides with {}.{} at generated name {flat_name}",
+                    existing.member.namespace, existing.member.name
+                )));
+            }
+        }
+        Ok(self.record_flat_member_with_flat_name(namespace_name, member_name, flat_name))
+    }
+
     fn record_flat_member_with_flat_name(
         &mut self,
         namespace_name: &str,
@@ -165,21 +223,14 @@ impl CodexNamespaceHandler {
     /// collides with another declared function-call tool or with another
     /// namespace member.
     pub fn resolve_namespace_members(&self, tools: &[ResponsesTool]) -> Result<Vec<ResponsesTool>, ToolError> {
-        validate_model_visible_declared_names(tools)?;
-        Ok(Self::resolve_namespace_members_after_validation(tools))
-    }
-
-    /// Rewrite namespace members after the shared declaration-name validation
-    /// has already succeeded at the caller's request boundary.
-    pub(crate) fn resolve_namespace_members_after_validation(tools: &[ResponsesTool]) -> Vec<ResponsesTool> {
-        let mut builder = NamespaceMapBuilder::default();
+        let mut builder = NamespaceMapBuilder::new(typed_top_level_registry_keys(tools));
         tools
             .iter()
             .map(|tool| match tool {
                 ResponsesTool::Namespace(namespace) => {
-                    ResponsesTool::Namespace(rename_namespace_members(namespace, &mut builder))
+                    rename_namespace_members(namespace, &mut builder).map(ResponsesTool::Namespace)
                 }
-                other => other.clone(),
+                other => Ok(other.clone()),
             })
             .collect()
     }
@@ -209,7 +260,19 @@ impl CodexNamespaceHandler {
     /// collides with another declared function-call tool or with another
     /// namespace member.
     pub fn validate_namespace_collisions(&self, tools: Option<&[ResponsesTool]>) -> Result<(), ToolError> {
-        tools.map_or(Ok(()), validate_model_visible_declared_names)
+        let Some(tools) = tools else {
+            return Ok(());
+        };
+        let mut builder = NamespaceMapBuilder::new(typed_top_level_registry_keys(tools));
+        for tool in tools {
+            let ResponsesTool::Namespace(namespace) = tool else {
+                continue;
+            };
+            for member_name in typed_function_member_names(namespace) {
+                builder.validate_and_record_flat_member(&namespace.name, &member_name)?;
+            }
+        }
+        Ok(())
     }
 
     /// Resolves the request's `tool_choice` (defaulting to `ToolChoice::Auto`
@@ -318,11 +381,10 @@ fn namespace_map_from_tools(tools: Option<&[ResponsesTool]>) -> Result<Option<Na
     let Some(tools) = tools else {
         return Ok(None);
     };
-    validate_model_visible_declared_names(tools)?;
-    let mut builder = NamespaceMapBuilder::default();
+    let mut builder = NamespaceMapBuilder::new(typed_top_level_registry_keys(tools));
     for tool in tools {
         if let ResponsesTool::Namespace(namespace) = tool {
-            let _ = rename_namespace_members(namespace, &mut builder);
+            let _ = rename_namespace_members(namespace, &mut builder)?;
         }
     }
     Ok(Some(builder.finish()))
@@ -351,27 +413,31 @@ fn rewrite_input_with_map(input: &mut ResponsesInput, map: &NamespaceMap) {
 /// flat, model-visible form, recording each rename in `builder` along the
 /// way.
 ///
+/// # Errors
+///
+/// Returns [`ToolError::Config`] when a generated namespace member name
+/// collides with another declared function-call tool or with another namespace
+/// member.
 fn rename_namespace_members(
     namespace: &CodexNamespaceToolParam,
     builder: &mut NamespaceMapBuilder,
-) -> CodexNamespaceToolParam {
+) -> Result<CodexNamespaceToolParam, ToolError> {
     let function_member_names = typed_function_member_names(namespace);
     if function_member_names.is_empty() {
         tracing::debug!(
             namespace = %namespace.name,
             "namespace tool has no function members to rename for upstream"
         );
-        return namespace.clone();
+        return Ok(namespace.clone());
     }
     let tools = namespace
         .tools
         .iter()
         .map(|member| {
             let CodexNamespaceMember::Function(function) = member else {
-                return member.clone();
+                return Ok(member.clone());
             };
-            let flat_name_text = model_visible_namespace_member_name(&namespace.name, function.name.as_str());
-            builder.record_flat_member_with_flat_name(&namespace.name, function.name.as_str(), flat_name_text.clone());
+            let flat_name_text = builder.validate_and_record_flat_member(&namespace.name, function.name.as_str())?;
             let flat_name = NonEmptyToolName::try_from(flat_name_text.clone())
                 .expect("generated namespace member names include a non-empty prefix");
             tracing::debug!(
@@ -382,14 +448,34 @@ fn rename_namespace_members(
             );
             let mut function = function.clone();
             function.name = flat_name;
-            CodexNamespaceMember::Function(function)
+            Ok(CodexNamespaceMember::Function(function))
         })
-        .collect();
+        .collect::<Result<Vec<_>, ToolError>>()?;
 
-    CodexNamespaceToolParam {
+    Ok(CodexNamespaceToolParam {
         tools,
         ..namespace.clone()
-    }
+    })
+}
+
+fn typed_top_level_registry_keys(tools: &[ResponsesTool]) -> HashMap<String, ToolType> {
+    tools
+        .iter()
+        .filter_map(|tool| {
+            let registry_key = match tool {
+                ResponsesTool::Function(function) => function.name.as_str().to_owned(),
+                ResponsesTool::WebSearch(_) => "web_search".to_owned(),
+                ResponsesTool::FileSearch(_) => "file_search".to_owned(),
+                ResponsesTool::CodeInterpreter(_) => "code_interpreter".to_owned(),
+                ResponsesTool::ToolSearch(_)
+                | ResponsesTool::Mcp(_)
+                | ResponsesTool::Namespace(_)
+                | ResponsesTool::Custom(_)
+                | ResponsesTool::Unknown => return None,
+            };
+            tool.tool_type().map(|tool_type| (registry_key, tool_type))
+        })
+        .collect()
 }
 
 fn typed_function_member_names(namespace: &CodexNamespaceToolParam) -> Vec<String> {
@@ -449,6 +535,10 @@ fn rewrite_tool_choice_with_map(choice: &ToolChoice, map: &NamespaceMap) -> Tool
 fn restore_response_value_with_map(value: &mut Value, map: &NamespaceMap) -> bool {
     let mut changed = false;
 
+    if let Some(object) = value.as_object_mut() {
+        changed |= restore_response_metadata_with_map(object, map);
+    }
+
     if let Some(item) = value.as_object_mut().and_then(|object| object.get_mut("item")) {
         changed |= restore_call_value_with_map(item, map);
     }
@@ -499,8 +589,35 @@ fn restore_call_value_with_map(value: &mut Value, map: &NamespaceMap) -> bool {
     true
 }
 
+fn restore_response_metadata_with_map(object: &mut Map<String, Value>, map: &NamespaceMap) -> bool {
+    object
+        .get_mut("tool_choice")
+        .is_some_and(|choice| restore_tool_choice_with_map(choice, map))
+}
+
+fn restore_tool_choice_with_map(choice: &mut Value, map: &NamespaceMap) -> bool {
+    let Some(object) = choice.as_object_mut() else {
+        return false;
+    };
+    if object.get("type").and_then(Value::as_str) != Some("function")
+        || object.get("namespace").and_then(Value::as_str).is_some()
+    {
+        return false;
+    }
+    let Some(mapping) = object
+        .get("name")
+        .and_then(Value::as_str)
+        .and_then(|name| map.mapping_for_call(name))
+    else {
+        return false;
+    };
+    object.insert("namespace".to_owned(), Value::String(mapping.member.namespace.clone()));
+    object.insert("name".to_owned(), Value::String(mapping.member.name.clone()));
+    true
+}
+
 fn restore_response_map_with_map(object: &mut Map<String, Value>, map: &NamespaceMap) -> bool {
-    let mut changed = false;
+    let mut changed = restore_response_metadata_with_map(object, map);
     if let Some(item) = object.get_mut("item") {
         changed |= restore_call_value_with_map(item, map);
     }
@@ -792,7 +909,7 @@ mod tests {
     #[cfg(debug_assertions)]
     #[should_panic(expected = "namespace collisions must be validated before recording namespace members")]
     fn namespace_map_builder_debug_asserts_when_member_collision_validation_is_skipped() {
-        let mut builder = NamespaceMapBuilder::default();
+        let mut builder = NamespaceMapBuilder::new(HashMap::new());
 
         assert_eq!(
             builder.record_flat_member_with_flat_name("a__b", "c", "agentic_ns__a__b__c".to_owned()),
@@ -888,5 +1005,38 @@ mod tests {
         assert_eq!(value["item"]["namespace"], "mcp__agentic_fixture");
         assert_eq!(value["item"]["name"], "add_numbers");
         assert_eq!(value["item"]["arguments"], "{\"numbers\":[8,0]}");
+    }
+
+    #[test]
+    fn response_lifecycle_metadata_restores_public_namespace_tool_choice() {
+        let tools: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([{
+            "type": "namespace",
+            "name": "travel",
+            "tools": [{"type": "function", "name": "get_timezone"}]
+        }]))
+        .unwrap();
+        let map = CodexNamespaceHandler
+            .build_namespace_map(Some(&tools))
+            .expect("valid namespace map");
+        let mut wire = WireEvent::new("response.created");
+        wire.rest.insert(
+            "response".to_owned(),
+            serde_json::json!({
+                "tool_choice": {
+                    "type": "function",
+                    "name": "agentic_ns__travel__get_timezone"
+                }
+            }),
+        );
+
+        assert!(CodexNamespaceHandler.restore_response_wire(&mut wire, map.as_ref()));
+        assert_eq!(
+            wire.rest["response"]["tool_choice"],
+            serde_json::json!({
+                "type": "function",
+                "namespace": "travel",
+                "name": "get_timezone"
+            })
+        );
     }
 }
