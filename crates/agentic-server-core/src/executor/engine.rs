@@ -103,7 +103,7 @@ async fn run_until_gateway_tools_complete(
     stream_upstream: bool,
     mut stream: Option<(&mut GatewayStreamAccumulator, &mpsc::UnboundedSender<StreamEvent>)>,
 ) -> ExecutorResult<(ResponsePayload, PreparedTurn)> {
-    if ctx.request().enriched_request.input.has_compaction_trigger() {
+    if ctx.request().original_request.input.has_compaction_trigger() {
         let (payload, ctx) = run_compaction_trigger(ctx, exec_ctx, auth).await?;
         if let Some((stream_accumulator, stream_sender)) = stream.as_mut() {
             emit_response_start_events(&payload, stream_accumulator, stream_sender)?;
@@ -894,6 +894,11 @@ mod tests {
         else {
             panic!("non-streaming trigger request must return a payload");
         };
+
+        let [OutputItem::Compaction(compaction)] = response.output.as_slice() else {
+            panic!("tool-search compaction trigger must return one compaction item");
+        };
+        assert_eq!(compaction.encrypted_content, "durable summary");
 
         let upstream = captured.lock().await.take().expect("summary inference ran");
         let upstream_input = upstream["input"].as_array().expect("summary input items");
