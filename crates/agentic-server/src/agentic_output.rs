@@ -131,13 +131,32 @@ pub fn redact_url(url: &str) -> String {
     };
     let suffix_start = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     let (authority, suffix) = rest.split_at(suffix_start);
-    let Some((userinfo, host)) = authority.split_once('@') else {
+    let Some((_userinfo, host)) = authority.rsplit_once('@') else {
         return url.to_owned();
     };
-    let Some((username, _password)) = userinfo.split_once(':') else {
-        return url.to_owned();
-    };
-    format!("{scheme}://{username}:[REDACTED]@{host}{suffix}")
+    format!("{scheme}://[REDACTED]@{host}{suffix}")
+}
+
+#[must_use]
+pub fn redact_urls(text: &str) -> String {
+    let mut output = String::with_capacity(text.len());
+    let mut remaining = text;
+    while let Some(separator) = remaining.find("://") {
+        let scheme_start = remaining[..separator]
+            .rfind(|character: char| !(character.is_ascii_alphanumeric() || matches!(character, '+' | '-' | '.')))
+            .map_or(0, |index| index + 1);
+        let authority_start = separator + 3;
+        let url_end = remaining[authority_start..]
+            .find(|character: char| character.is_whitespace() || matches!(character, '`' | '"' | '\'' | '<' | '>'))
+            .map_or(remaining.len(), |index| authority_start + index);
+        let candidate = &remaining[scheme_start..url_end];
+
+        output.push_str(&remaining[..scheme_start]);
+        output.push_str(&redact_url(candidate));
+        remaining = &remaining[url_end..];
+    }
+    output.push_str(remaining);
+    output
 }
 
 fn display_width(value: &str) -> usize {
@@ -149,7 +168,7 @@ fn display_width(value: &str) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{colorize_help, redact_url, render_banner, render_examples, render_help};
+    use super::{colorize_help, redact_url, redact_urls, render_banner, render_examples, render_help};
 
     #[test]
     fn banner_rows_have_equal_display_width() {
@@ -206,15 +225,27 @@ mod tests {
     fn redact_url_hides_password() {
         assert_eq!(
             redact_url("postgresql://alice:secret@db.example/agentic"),
-            "postgresql://alice:[REDACTED]@db.example/agentic"
+            "postgresql://[REDACTED]@db.example/agentic"
         );
         assert_eq!(
             redact_url("postgresql://alice:secret@db.example"),
-            "postgresql://alice:[REDACTED]@db.example"
+            "postgresql://[REDACTED]@db.example"
         );
         assert_eq!(
             redact_url("postgresql://alice:secret@db.example?sslmode=require"),
-            "postgresql://alice:[REDACTED]@db.example?sslmode=require"
+            "postgresql://[REDACTED]@db.example?sslmode=require"
+        );
+        assert_eq!(
+            redact_url("https://secret-token@example.com/path"),
+            "https://[REDACTED]@example.com/path"
+        );
+    }
+
+    #[test]
+    fn redact_urls_hides_userinfo_inside_diagnostics() {
+        assert_eq!(
+            redact_urls("error: invalid value `https://secret-token@example.com?bad=1` for '--upstream'"),
+            "error: invalid value `https://[REDACTED]@example.com?bad=1` for '--upstream'"
         );
     }
 

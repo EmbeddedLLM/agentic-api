@@ -176,7 +176,7 @@ llm_api_base = "http://127.0.0.1:5050"
 # database_url = "postgresql://agentic-api@localhost/agentic_api"
 
 [web_search]
-base_url = "https://ydc-index.io"
+base_url = "https://api.ydc-index.io"
 api_key_env = "YOU_API_KEY"
 
 [mcp]
