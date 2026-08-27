@@ -283,7 +283,10 @@ to the Deployment’s container environment:
                   name: agentic-api-secrets
                   key: you-api-key
             - name: YOU_API_BASE_URL
-              value: https://api.ydc-index.io
+              value: https://ydc-index.io
+            # Opt Claude Code's WebSearch function into gateway execution.
+            - name: MESSAGES_GATEWAY_TOOL_ALIASES
+              value: WebSearch=web_search
 ```
 
 Create the secret before applying the Deployment:

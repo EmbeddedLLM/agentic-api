@@ -1,5 +1,10 @@
+import json
 import sys
+import tempfile
+import threading
 import unittest
+import urllib.request
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -13,6 +18,12 @@ CASSETTE = (
     / "crates/agentic-server-core/tests/cassettes/messages/"
     "messages-web-search-Qwen-Qwen3-30B-A3B-FP8-streaming.yaml"
 )
+RESPONSES_CASSETTE = (
+    REPOSITORY_ROOT
+    / "crates/agentic-server-core/tests/cassettes/reasoning/responses/"
+    "reasoning-single-Qwen-Qwen3-30B-A3B-FP8-streaming.yaml"
+)
+QWEN_MODEL = "Qwen/Qwen3-30B-A3B-FP8"
 
 
 def cache_control(ttl: str = "5m") -> dict[str, str]:
@@ -95,6 +106,74 @@ class ReplayServerTests(unittest.TestCase):
 
         self.assertIn('"name":"WebSearch"', adapted)
         self.assertNotIn('"name":"web_search"', adapted)
+
+    def test_load_turns_reads_recorded_responses_stream(self) -> None:
+        turns = replay.load_turns(RESPONSES_CASSETTE)
+
+        self.assertEqual(len(turns), 1)
+        self.assertEqual(turns[0].status_code, 200)
+        self.assertIn(b"event: response.created", turns[0].body)
+        self.assertIn(b"HELLO", turns[0].body)
+
+    def test_validate_responses_capture_accepts_codex_wire_shape(self) -> None:
+        records = [
+            {
+                "kind": "responses_transport",
+                "body": {"path": "/v1/responses", "headers": {}},
+            },
+            {
+                "kind": "responses",
+                "body": {
+                    "model": QWEN_MODEL,
+                    "stream": True,
+                    "input": "Reply with exactly one word: HELLO",
+                },
+            },
+        ]
+
+        replay.validate_responses_capture(records, QWEN_MODEL)
+
+    def test_validate_responses_capture_rejects_wrong_model(self) -> None:
+        records = [
+            {
+                "kind": "responses_transport",
+                "body": {"path": "/v1/responses", "headers": {}},
+            },
+            {
+                "kind": "responses",
+                "body": {"model": "claude-sonnet-4-5", "stream": True, "input": "HELLO"},
+            },
+        ]
+
+        with self.assertRaisesRegex(AssertionError, "requested model"):
+            replay.validate_responses_capture(records, QWEN_MODEL)
+
+    def test_responses_route_replays_recorded_stream_and_captures_request(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            capture_path = Path(temp_dir) / "capture.jsonl"
+            capture_path.write_text("")
+            state = replay.ReplayState(replay.load_turns(RESPONSES_CASSETTE), capture_path)
+            server = ThreadingHTTPServer(("127.0.0.1", 0), replay.make_handler(state))
+            thread = threading.Thread(target=server.serve_forever)
+            thread.start()
+            try:
+                request = urllib.request.Request(
+                    f"http://127.0.0.1:{server.server_port}/v1/responses",
+                    data=json.dumps(
+                        {"model": QWEN_MODEL, "stream": True, "input": "HELLO"}
+                    ).encode(),
+                    headers={"Content-Type": "application/json"},
+                )
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    body = response.read()
+                records = replay.load_capture(capture_path)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join()
+
+        self.assertIn(b"event: response.created", body)
+        replay.validate_responses_capture(records, QWEN_MODEL)
 
     def test_validate_capture_accepts_claude_code_wire_shape_and_tool_round(self) -> None:
         records = capture_records(messages_request(), messages_request(with_tool_result=True))

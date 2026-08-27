@@ -417,7 +417,7 @@ for a saturated database or inference service.
 ## Enable and verify web search
 
 The `web_search_preview` built-in tool is executed by Agentic API when `YOU_API_KEY` and `YOU_API_BASE_URL` are
-configured. Keep the key in a Secret and use the current You.com Search API base URL, `https://api.ydc-index.io`.
+configured. Keep the key in a Secret and use the current You.com Search API base URL, `https://ydc-index.io`.
 
 Create the Secret from a protected environment file so the key does not enter shell history or process arguments:
 
@@ -441,7 +441,10 @@ patches:
     patch: |-
       - op: add
         path: /data/YOU_API_BASE_URL
-        value: https://api.ydc-index.io
+        value: https://ydc-index.io
+      - op: add
+        path: /data/MESSAGES_GATEWAY_TOOL_ALIASES
+        value: WebSearch=web_search
   - target:
       kind: Deployment
       name: agentic-api
@@ -452,6 +455,10 @@ patches:
           secretRef:
             name: agentic-api-web-search
 ```
+
+`MESSAGES_GATEWAY_TOOL_ALIASES` is required only when Claude Code's client-owned `WebSearch` function should be
+executed by the gateway. Responses API clients declare web search structurally and do not need this alias. Leaving
+the setting empty preserves the default client-owned behavior.
 
 Apply the overlay, restart the Deployment after every Secret update, and wait for readiness:
 
