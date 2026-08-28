@@ -136,6 +136,10 @@ vllm serve Qwen/Qwen3-30B-A3B-FP8 \
   --reasoning-parser qwen3 --port 5050
 ```
 
+Serving through [NVIDIA Dynamo](https://github.com/ai-dynamo/dynamo) instead of a standalone `vllm serve`? Point the
+gateway at the Dynamo frontend the same way; see
+[Running Agentic API in front of NVIDIA Dynamo](docs/guides/dynamo-upstream.md).
+
 **2. Start Agentic API**, pointing it at the vLLM server (set the `YOU_*` variables to enable built-in web search):
 
 ```bash

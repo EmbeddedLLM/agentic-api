@@ -1,0 +1,160 @@
+turns:
+- filename: t1
+  request:
+    body:
+      input: 'Remember the word APPLE. Just say: OK'
+      max_output_tokens: 2048
+      model: openai/gpt-oss-20b
+      store: true
+      stream: false
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      background: false
+      billing: null
+      completed_at: 1787829072
+      conversation: null
+      created_at: 1787829072
+      error: null
+      frequency_penalty: 0.0
+      id: resp_e823dacfde14451baad50ab4915bd39b
+      incomplete_details: null
+      instructions: null
+      max_output_tokens: 2048
+      max_tool_calls: null
+      metadata: {}
+      model: openai/gpt-oss-20b
+      object: response
+      output:
+      - content:
+        - annotations: []
+          logprobs: []
+          text: OK
+          type: output_text
+        id: msg_aeb098ffaa8c4c0092ed38e3586e8e24
+        role: assistant
+        status: completed
+        type: message
+      parallel_tool_calls: true
+      presence_penalty: 0.0
+      previous_response_id: null
+      prompt: null
+      prompt_cache_key: null
+      prompt_cache_retention: null
+      reasoning: null
+      safety_identifier: null
+      service_tier: auto
+      status: completed
+      store: true
+      temperature: 1.0
+      text:
+        format:
+          type: text
+      tool_choice: auto
+      tools: []
+      top_logprobs: 0
+      top_p: 1.0
+      truncation: disabled
+      usage:
+        input_tokens: 77
+        input_tokens_details:
+          cached_tokens: 0
+        output_tokens: 35
+        output_tokens_details:
+          reasoning_tokens: 0
+        total_tokens: 112
+    headers:
+      content-type: application/json
+    status_code: 200
+- filename: t2
+  request:
+    body:
+      input:
+      - content: 'Remember the word APPLE. Just say: OK'
+        role: user
+        type: message
+      - content:
+        - text: OK
+          type: output_text
+        id: msg_aeb098ffaa8c4c0092ed38e3586e8e24
+        role: assistant
+        status: completed
+        type: message
+      - content: What word did I ask you to remember? Reply with just the word.
+        role: user
+        type: message
+      max_output_tokens: 2048
+      model: openai/gpt-oss-20b
+      store: true
+      stream: false
+    headers:
+      accept: '*/*'
+      content-type: application/json
+      user-agent: python-httpx/0.28.1
+    method: POST
+    path: /v1/responses
+    query_params: {}
+  response:
+    body:
+      background: false
+      billing: null
+      completed_at: 1787829074
+      conversation: null
+      created_at: 1787829074
+      error: null
+      frequency_penalty: 0.0
+      id: resp_f24a1d1897c74063bfcbbd6fc91b5667
+      incomplete_details: null
+      instructions: null
+      max_output_tokens: 2048
+      max_tool_calls: null
+      metadata: {}
+      model: openai/gpt-oss-20b
+      object: response
+      output:
+      - content:
+        - annotations: []
+          logprobs: []
+          text: APPLE
+          type: output_text
+        id: msg_a52548907c8844198586ba7ce6eef89e
+        role: assistant
+        status: completed
+        type: message
+      parallel_tool_calls: true
+      presence_penalty: 0.0
+      previous_response_id: null
+      prompt: null
+      prompt_cache_key: null
+      prompt_cache_retention: null
+      reasoning: null
+      safety_identifier: null
+      service_tier: auto
+      status: completed
+      store: true
+      temperature: 1.0
+      text:
+        format:
+          type: text
+      tool_choice: auto
+      tools: []
+      top_logprobs: 0
+      top_p: 1.0
+      truncation: disabled
+      usage:
+        input_tokens: 103
+        input_tokens_details:
+          cached_tokens: 64
+        output_tokens: 35
+        output_tokens_details:
+          reasoning_tokens: 0
+        total_tokens: 138
+    headers:
+      content-type: application/json
+    status_code: 200

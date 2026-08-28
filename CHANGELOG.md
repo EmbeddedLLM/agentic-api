@@ -14,6 +14,16 @@ All notable changes to Agentic API are documented here.
   decisions while excluding them from model input, preventing repeated public
   list-tools emission on later turns.
 
+### Added
+
+- Documented running Agentic API in front of NVIDIA Dynamo and recorded Dynamo cassettes for stateful and
+  function-call flows.
+
+### Testing
+
+- Added Dynamo upstream replay tests, a generic cassette validator (`scripts/validate-cassettes.py`), and a dedicated
+  CI job for them.
+
 ## [0.5.0] - 2026-08-25
 
 ### Changed
