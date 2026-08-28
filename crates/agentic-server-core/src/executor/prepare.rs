@@ -3,8 +3,8 @@
 use crate::executor::error::ExecutorResult;
 use crate::executor::modes::{ConversationHandler, ResponseHandler};
 use crate::executor::rehydrate::apply_effective_settings;
-use crate::executor::request::{PreparedTurn, RequestContext};
-use crate::tool::PreparedToolSearch;
+use crate::executor::request::RequestContext;
+use crate::tool::ToolRegistry;
 use crate::types::tools::ResponsesTool;
 
 /// Prepare the tool-search projection for a fully rehydrated public request.
@@ -12,16 +12,16 @@ use crate::types::tools::ResponsesTool;
 /// Compaction may remove the call/output pair that records which deferred
 /// definitions were loaded. Only that path performs a targeted metadata read;
 /// ordinary rehydration does not gain an additional storage query.
-pub(crate) async fn prepare_tool_search(
+pub(crate) async fn prepare_request_tools(
     mut ctx: RequestContext,
     conv_handler: &ConversationHandler,
     resp_handler: &ResponseHandler,
-) -> ExecutorResult<PreparedTurn> {
+) -> ExecutorResult<(RequestContext, ToolRegistry)> {
     let restored_loaded_tools = restored_loaded_tools(&mut ctx, conv_handler, resp_handler).await?;
     let restore_only_declared = ctx.original_request.tools.is_some();
-    let tool_search =
-        PreparedToolSearch::prepare(&mut ctx.enriched_request, &restored_loaded_tools, restore_only_declared)?;
-    Ok(PreparedTurn::new(ctx, tool_search))
+    let registry =
+        ToolRegistry::prepare_request(&mut ctx.enriched_request, &restored_loaded_tools, restore_only_declared)?;
+    Ok((ctx, registry))
 }
 
 async fn restored_loaded_tools(

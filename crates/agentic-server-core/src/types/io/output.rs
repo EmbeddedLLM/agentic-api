@@ -210,42 +210,6 @@ impl TryFrom<BlockingFunctionToolCall> for FunctionToolCall {
     }
 }
 
-impl TryFrom<&EventPayload> for ToolSearchCall {
-    type Error = ToolError;
-
-    fn try_from(payload: &EventPayload) -> Result<Self, Self::Error> {
-        let EventPayload::OutputItemAdded {
-            item_id,
-            call_id,
-            execution,
-            status,
-            arguments,
-            ..
-        } = payload
-        else {
-            return Err(tool_search::invalid_upstream_search_call());
-        };
-        let call_id = call_id
-            .as_deref()
-            .filter(|call_id| !call_id.trim().is_empty())
-            .ok_or_else(tool_search::invalid_upstream_search_call)?;
-        if item_id.trim().is_empty() {
-            return Err(tool_search::invalid_upstream_search_call());
-        }
-        let execution = execution.ok_or_else(tool_search::invalid_upstream_search_call)?;
-        if status.as_deref() != Some("in_progress") || arguments.as_ref().is_none_or(|value| !value.is_empty()) {
-            return Err(tool_search::invalid_upstream_search_call());
-        }
-        Ok(Self {
-            id: item_id.clone(),
-            call_id: call_id.to_owned(),
-            execution,
-            arguments: serde_json::Map::new(),
-            status: ToolSearchStatus::InProgress,
-        })
-    }
-}
-
 /// A freeform custom tool invocation.
 ///
 /// `input` is opaque text and must not be parsed as function-call JSON.
@@ -800,17 +764,6 @@ impl ApplyDone for FunctionToolCall {
     }
 }
 
-impl ApplyDone for ToolSearchCall {
-    fn apply_done(&mut self, payload: &EventPayload, _buffer: &mut String) {
-        let EventPayload::OutputItemDone { item, .. } = payload else {
-            return;
-        };
-        if let Some(call) = deserialize_from_value_opt::<Self>(item.clone()) {
-            *self = call;
-        }
-    }
-}
-
 impl ApplyDone for CustomToolCall {
     fn apply_done(&mut self, payload: &EventPayload, buffer: &mut String) {
         match payload {
@@ -1227,9 +1180,6 @@ mod tests {
             name: None,
             namespace: None,
             call_id: None,
-            execution: None,
-            status: None,
-            arguments: None,
         };
         let mut item = McpListTools::try_from(&added).unwrap();
         assert_eq!(item.id, "mcpl_1");

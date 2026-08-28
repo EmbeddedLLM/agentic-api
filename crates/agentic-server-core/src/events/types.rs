@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::types::io::ResponseUsage;
-use crate::types::tools::ToolSearchExecution;
 
 /// The type of an output item received during streaming.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,7 +12,6 @@ pub enum SSEItemType {
     WebSearchCall,
     McpCall,
     McpListTools,
-    ToolSearchCall,
     Compaction,
     Message,
 }
@@ -28,7 +26,6 @@ impl SSEItemType {
             Self::WebSearchCall => "web_search_call",
             Self::McpCall => "mcp_call",
             Self::McpListTools => "mcp_list_tools",
-            Self::ToolSearchCall => "tool_search_call",
             Self::Compaction => "compaction",
             Self::Message => "message",
         }
@@ -44,7 +41,6 @@ impl From<&str> for SSEItemType {
             "web_search_call" => Self::WebSearchCall,
             "mcp_call" => Self::McpCall,
             "mcp_list_tools" => Self::McpListTools,
-            "tool_search_call" => Self::ToolSearchCall,
             "compaction" => Self::Compaction,
             _ => Self::Message,
         }
@@ -256,9 +252,6 @@ pub enum EventPayload {
         name: Option<String>,
         namespace: Option<String>,
         call_id: Option<String>,
-        execution: Option<ToolSearchExecution>,
-        status: Option<String>,
-        arguments: Option<Map<String, Value>>,
     },
 
     /// `response.output_item.done`

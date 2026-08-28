@@ -3,18 +3,15 @@ use std::time::Duration;
 
 use crate::config::{Config, default_database_url};
 use crate::error::Error;
-use crate::executor::error::ExecutorResult;
 use crate::executor::modes::{ConversationHandler, ResponseHandler};
 use crate::storage::backend::redact_database_urls;
 use crate::storage::{
-    ConversationStore, ConversationVersion, DatabaseBackend, ResponseMetadata, ResponseStore,
-    create_pool_with_schema_and_configs,
+    ConversationStore, ConversationVersion, DatabaseBackend, ResponseStore, create_pool_with_schema_and_configs,
 };
-use crate::tool::{GatewayExecutor, GatewayExecutors, PreparedToolSearch, ToolRegistry};
+use crate::tool::{GatewayExecutor, GatewayExecutors};
 use crate::types::io::InputItem;
 use crate::types::messages::GatewayToolMap;
 use crate::types::request_response::{RequestPayload, ResponsePayload};
-use crate::types::tools::ResponsesTool;
 
 /// Env var configuring client-tool → gateway-executor aliases for `/v1/messages`
 /// (e.g. `WebSearch=web_search`). Empty/unset means no aliases — client
@@ -41,20 +38,6 @@ pub struct RequestContext {
 }
 
 impl RequestContext {
-    /// Construct generic response metadata for callers that do not need
-    /// tool-specific preparation.
-    #[must_use]
-    pub(crate) fn take_response_metadata(&mut self) -> ResponseMetadata {
-        ResponseMetadata {
-            model: std::mem::take(&mut self.enriched_request.model),
-            previous_response_id: self.original_request.previous_response_id.take(),
-            effective_tools: self.enriched_request.tools.take(),
-            tool_search_loaded_tools: None,
-            effective_tool_choice: self.enriched_request.tool_choice.take().unwrap_or_default(),
-            effective_instructions: self.enriched_request.instructions.take(),
-        }
-    }
-
     /// Inject our `response_id` and `conversation_id` into a `ResponsePayload`
     /// received from the LLM (which carries the upstream's own IDs).
     pub(crate) fn inject_ids(&self, payload: &mut ResponsePayload) {
@@ -63,63 +46,6 @@ impl RequestContext {
         payload
             .previous_response_id
             .clone_from(&self.original_request.previous_response_id);
-    }
-}
-
-/// Fully prepared executor state for one Responses turn.
-///
-/// The generic request context stays tool-agnostic; tool-search preparation is
-/// carried beside it and is unavailable outside the executor crate.
-#[derive(Debug)]
-pub(crate) struct PreparedTurn {
-    request: RequestContext,
-    tool_search: PreparedToolSearch,
-}
-
-impl PreparedTurn {
-    #[must_use]
-    pub(crate) const fn new(request: RequestContext, tool_search: PreparedToolSearch) -> Self {
-        Self { request, tool_search }
-    }
-
-    #[must_use]
-    pub(crate) const fn request(&self) -> &RequestContext {
-        &self.request
-    }
-
-    pub(crate) const fn request_mut(&mut self) -> &mut RequestContext {
-        &mut self.request
-    }
-
-    pub(crate) fn apply_tool_search_to_registry(&self, registry: &mut ToolRegistry) -> ExecutorResult<()> {
-        self.tool_search.apply_to_registry(registry)?;
-        Ok(())
-    }
-
-    #[must_use]
-    pub(crate) fn tool_search_response_tools(&self) -> Option<Vec<ResponsesTool>> {
-        self.tool_search.public_response_tools()
-    }
-
-    #[must_use]
-    pub(crate) fn into_request(self) -> RequestContext {
-        self.request
-    }
-
-    #[must_use]
-    pub(crate) fn take_response_metadata(&mut self) -> ResponseMetadata {
-        let public_metadata = self.tool_search.take_public_metadata();
-        let mut metadata = self.request.take_response_metadata();
-        if let Some((effective_tools, loaded_tools)) = public_metadata {
-            metadata.effective_tools = effective_tools;
-            metadata.tool_search_loaded_tools = Some(loaded_tools);
-        }
-        metadata
-    }
-
-    #[cfg(test)]
-    pub(crate) fn tool_search(&self) -> &PreparedToolSearch {
-        &self.tool_search
     }
 }
 

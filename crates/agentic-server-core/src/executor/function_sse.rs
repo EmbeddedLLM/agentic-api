@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use serde_json::Value;
 
@@ -6,10 +6,8 @@ use crate::events::{EventFrame, EventPayload, SSEEventType, SSEItemType};
 use crate::executor::accumulator::AccumulatedFunctionCall;
 use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::executor::gateway_accumulator::synthetic_event;
-use crate::tool::{ToolType, tool_search};
-use crate::types::io::{OutputItem, ToolSearchCall};
-use crate::types::tools::ToolSearchStatus;
-use crate::utils::common::{serialize_to_string, serialize_to_value};
+use crate::tool::ToolType;
+use crate::utils::common::serialize_to_string;
 
 const MAX_PENDING_FUNCTION_BYTES: usize = 256 * 1024;
 
@@ -18,7 +16,6 @@ enum FunctionCallShape {
     PublicFunction,
     GatewayOwned,
     Custom(CustomCallState),
-    ToolSearch,
 }
 
 #[derive(Debug)]
@@ -54,38 +51,21 @@ pub(super) struct FunctionSseTranslator {
     pending_unnamed: HashMap<u32, PendingFunctionCall>,
     pending_bytes: usize,
     first_gateway_output_index: Option<u32>,
-    tool_search_enabled: bool,
-    withheld_function_names: HashSet<String>,
-    upstream_terminal_failure: bool,
 }
 
 impl FunctionSseTranslator {
     pub(super) fn new(tool_types: HashMap<String, ToolType>) -> Self {
-        let tool_search_enabled = tool_types.get("tool_search") == Some(&ToolType::ToolSearch);
         Self {
             tool_types,
-            tool_search_enabled,
             ..Self::default()
         }
-    }
-
-    pub(super) fn with_withheld_function_names(mut self, names: &HashSet<String>) -> Self {
-        self.withheld_function_names.clone_from(names);
-        self
     }
 
     pub(super) fn translate(
         &mut self,
         frame: EventFrame,
         call: Option<AccumulatedFunctionCall<'_>>,
-        tool_search_call: Option<&ToolSearchCall>,
     ) -> ExecutorResult<FunctionSseTranslation> {
-        if matches!(
-            frame.event_type,
-            SSEEventType::ResponseFailed | SSEEventType::ResponseIncomplete
-        ) {
-            self.upstream_terminal_failure = true;
-        }
         let mut translated = match &frame.payload {
             EventPayload::OutputItemAdded {
                 item_id,
@@ -93,7 +73,7 @@ impl FunctionSseTranslator {
                 output_index,
                 name: Some(name),
                 ..
-            } => self.start_call(item_id, name, *output_index, Some(frame.clone()), call, None),
+            } => self.start_call(item_id, name, *output_index, Some(frame.clone()), call),
             EventPayload::OutputItemAdded {
                 item_id: _,
                 item_type: SSEItemType::FunctionCall,
@@ -117,7 +97,7 @@ impl FunctionSseTranslator {
                 item,
             } => {
                 let name = item.get("name").and_then(Value::as_str).unwrap_or_default();
-                self.finish_call(item_id, name, *output_index, frame.clone(), call, tool_search_call)
+                self.finish_call(item_id, name, *output_index, frame.clone(), call)
             }
             _ => Ok(FunctionSseTranslation {
                 frames: vec![frame],
@@ -128,157 +108,6 @@ impl FunctionSseTranslator {
         Ok(translated)
     }
 
-    pub(super) fn finish(&self) -> ExecutorResult<()> {
-        if !self.upstream_terminal_failure
-            && (self
-                .active
-                .values()
-                .any(|shape| matches!(shape, FunctionCallShape::ToolSearch))
-                || (self.tool_search_enabled && !self.pending_unnamed.is_empty()))
-        {
-            return Err(tool_search::invalid_upstream_search_call().into());
-        }
-        Ok(())
-    }
-
-    pub(super) fn unfinished_search_item_ids(&self) -> HashSet<&str> {
-        let mut item_ids = HashSet::new();
-        if self.tool_search_enabled {
-            item_ids.extend(self.pending_unnamed.values().flat_map(|pending| {
-                pending.frames.iter().filter_map(|frame| match &frame.payload {
-                    EventPayload::OutputItemAdded { item_id, .. } if !item_id.is_empty() => Some(item_id.as_str()),
-                    _ => None,
-                })
-            }));
-        }
-        item_ids
-    }
-
-    pub(super) fn validate_before_accumulation(
-        &mut self,
-        frame: &EventFrame,
-        call: Option<AccumulatedFunctionCall<'_>>,
-    ) -> ExecutorResult<()> {
-        self.validate_withheld_function_names(frame)?;
-        match &frame.payload {
-            EventPayload::OutputItemAdded {
-                item_type: SSEItemType::FunctionCall,
-                name: None,
-                ..
-            } => self.validate_pending_frame_before_accumulation(frame),
-            EventPayload::FunctionCallArgsDone {
-                arguments,
-                name,
-                output_index,
-                ..
-            } if self.tool_type(name) == ToolType::ToolSearch
-                || matches!(self.active.get(output_index), Some(FunctionCallShape::ToolSearch)) =>
-            {
-                if arguments.len() > MAX_PENDING_FUNCTION_BYTES {
-                    return Err(tool_search::invalid_upstream_search_call().into());
-                }
-                Ok(())
-            }
-            EventPayload::OutputItemDone {
-                item_type: SSEItemType::FunctionCall,
-                output_index,
-                item,
-                ..
-            } if item
-                .get("name")
-                .and_then(Value::as_str)
-                .is_some_and(|name| self.tool_type(name) == ToolType::ToolSearch)
-                || matches!(self.active.get(output_index), Some(FunctionCallShape::ToolSearch)) =>
-            {
-                if item
-                    .get("arguments")
-                    .and_then(Value::as_str)
-                    .is_some_and(|arguments| arguments.len() > MAX_PENDING_FUNCTION_BYTES)
-                {
-                    return Err(tool_search::invalid_upstream_search_call().into());
-                }
-                Ok(())
-            }
-            EventPayload::FunctionCallArgsDelta {
-                delta, output_index, ..
-            } => {
-                let Some(shape) = self.active.get_mut(output_index) else {
-                    return self.validate_pending_frame_before_accumulation(frame);
-                };
-                match shape {
-                    FunctionCallShape::Custom(_) => {
-                        let current = call.map_or(0, |call| call.arguments().len());
-                        ensure_function_call_size_for(current, delta.len())
-                    }
-                    FunctionCallShape::ToolSearch => {
-                        ensure_function_call_size_for(call.map_or(0, |call| call.arguments().len()), delta.len())
-                            .map_err(|_| tool_search::invalid_upstream_search_call().into())
-                    }
-                    FunctionCallShape::PublicFunction | FunctionCallShape::GatewayOwned => Ok(()),
-                }
-            }
-            _ => Ok(()),
-        }
-    }
-
-    fn validate_withheld_function_names(&self, frame: &EventFrame) -> ExecutorResult<()> {
-        let terminal_has_withheld_call = frame.event_type == SSEEventType::ResponseCompleted
-            && frame
-                .wire
-                .rest
-                .get("response")
-                .and_then(|response| response.get("output"))
-                .and_then(Value::as_array)
-                .is_some_and(|output| {
-                    output.iter().any(|item| {
-                        item.get("type").and_then(Value::as_str) == Some("function_call")
-                            && item
-                                .get("name")
-                                .and_then(Value::as_str)
-                                .is_some_and(|name| self.withheld_function_names.contains(name))
-                    })
-                });
-        let lifecycle_name = match &frame.payload {
-            EventPayload::OutputItemAdded {
-                item_type: SSEItemType::FunctionCall,
-                name: Some(name),
-                ..
-            }
-            | EventPayload::FunctionCallArgsDone { name, .. } => Some(name.as_str()),
-            EventPayload::OutputItemDone {
-                item_type: SSEItemType::FunctionCall,
-                item,
-                ..
-            } => item.get("name").and_then(Value::as_str),
-            _ => None,
-        };
-        if terminal_has_withheld_call || lifecycle_name.is_some_and(|name| self.withheld_function_names.contains(name))
-        {
-            return Err(tool_search::invalid_upstream_withheld_function_call().into());
-        }
-        Ok(())
-    }
-
-    fn validate_pending_frame_before_accumulation(&self, frame: &EventFrame) -> ExecutorResult<()> {
-        let bytes = serialize_to_string(&frame.wire)
-            .map_err(ExecutorError::JsonError)?
-            .len();
-        if self.pending_bytes.saturating_add(bytes) > MAX_PENDING_FUNCTION_BYTES {
-            return Err(self.pending_limit_error(format!(
-                "unnamed function-call SSE exceeded {MAX_PENDING_FUNCTION_BYTES} buffered bytes"
-            )));
-        }
-        Ok(())
-    }
-
-    fn pending_limit_error(&self, message: String) -> ExecutorError {
-        if self.tool_search_enabled {
-            tool_search::invalid_upstream_search_call().into()
-        } else {
-            ExecutorError::StreamError(message)
-        }
-    }
-
     fn start_call(
         &mut self,
         item_id: &str,
@@ -286,7 +115,6 @@ impl FunctionSseTranslator {
         output_index: u32,
         original: Option<EventFrame>,
         call: Option<AccumulatedFunctionCall<'_>>,
-        tool_search_call: Option<&ToolSearchCall>,
     ) -> ExecutorResult<FunctionSseTranslation> {
         match self.tool_type(name) {
             ToolType::Custom => {
@@ -321,30 +149,7 @@ impl FunctionSseTranslator {
                 self.active.insert(output_index, FunctionCallShape::GatewayOwned);
                 Ok(FunctionSseTranslation::default())
             }
-            ToolType::ToolSearch => {
-                let started = if let Some(call) = call {
-                    ToolSearchCall::started_from_function(call.item)?
-                } else {
-                    let mut started = tool_search_call
-                        .cloned()
-                        .ok_or_else(tool_search::invalid_upstream_search_call)?;
-                    started.arguments.clear();
-                    started.status = ToolSearchStatus::InProgress;
-                    started
-                };
-                let public_item =
-                    serialize_to_value(&OutputItem::ToolSearchCall(started)).map_err(ExecutorError::JsonError)?;
-                self.active.insert(output_index, FunctionCallShape::ToolSearch);
-                Ok(FunctionSseTranslation {
-                    frames: vec![tool_search_frame(
-                        SSEEventType::OutputItemAdded,
-                        output_index,
-                        public_item,
-                    )?],
-                    defer_from_output_index: None,
-                })
-            }
-            ToolType::Function | ToolType::CodexNamespace => {
+            ToolType::Function | ToolType::ToolSearch | ToolType::CodexNamespace => {
                 self.active.insert(output_index, FunctionCallShape::PublicFunction);
                 Ok(FunctionSseTranslation {
                     frames: original.into_iter().collect(),
@@ -366,9 +171,7 @@ impl FunctionSseTranslator {
                 frames: vec![original],
                 defer_from_output_index: None,
             }),
-            Some(FunctionCallShape::GatewayOwned | FunctionCallShape::ToolSearch) => {
-                Ok(FunctionSseTranslation::default())
-            }
+            Some(FunctionCallShape::GatewayOwned) => Ok(FunctionSseTranslation::default()),
             Some(FunctionCallShape::Custom(state)) => {
                 let frame = match call {
                     Some(call) => incremental_custom_delta(state, call.arguments())?,
@@ -391,10 +194,10 @@ impl FunctionSseTranslator {
         original: EventFrame,
         call: Option<AccumulatedFunctionCall<'_>>,
     ) -> ExecutorResult<FunctionSseTranslation> {
-        let mut translated = self.resolve_pending(item_id, name, output_index, call, None)?;
+        let mut translated = self.resolve_pending(item_id, name, output_index, call)?;
         match self.active.get_mut(&output_index) {
             Some(FunctionCallShape::PublicFunction) | None => translated.frames.push(original),
-            Some(FunctionCallShape::GatewayOwned | FunctionCallShape::ToolSearch) => {}
+            Some(FunctionCallShape::GatewayOwned) => {}
             Some(FunctionCallShape::Custom(state)) => {
                 if let Some(call) = call {
                     translated.frames.extend(finish_custom_input(state, call.arguments())?);
@@ -411,9 +214,8 @@ impl FunctionSseTranslator {
         output_index: u32,
         original: EventFrame,
         call: Option<AccumulatedFunctionCall<'_>>,
-        tool_search_call: Option<&ToolSearchCall>,
     ) -> ExecutorResult<FunctionSseTranslation> {
-        let mut translated = self.resolve_pending(item_id, name, output_index, call, tool_search_call)?;
+        let mut translated = self.resolve_pending(item_id, name, output_index, call)?;
         match self.active.remove(&output_index) {
             Some(FunctionCallShape::PublicFunction) | None => translated.frames.push(original),
             Some(FunctionCallShape::GatewayOwned) => {}
@@ -425,14 +227,6 @@ impl FunctionSseTranslator {
                     translated.frames.push(custom_done_frame(&state, &call)?);
                 }
             }
-            Some(FunctionCallShape::ToolSearch) => {
-                let public_call = tool_search_call.ok_or_else(tool_search::invalid_upstream_search_call)?;
-                let item = serialize_to_value(&OutputItem::ToolSearchCall(public_call.clone()))
-                    .map_err(ExecutorError::JsonError)?;
-                translated
-                    .frames
-                    .push(tool_search_frame(SSEEventType::OutputItemDone, output_index, item)?);
-            }
         }
         Ok(translated)
     }
@@ -443,7 +237,6 @@ impl FunctionSseTranslator {
         name: &str,
         output_index: u32,
         call: Option<AccumulatedFunctionCall<'_>>,
-        tool_search_call: Option<&ToolSearchCall>,
     ) -> ExecutorResult<FunctionSseTranslation> {
         if self.active.contains_key(&output_index) {
             return Ok(FunctionSseTranslation::default());
@@ -459,24 +252,10 @@ impl FunctionSseTranslator {
                 }
             )
         });
-        let start_item_id = original_added.and_then(|frame| match &frame.payload {
-            EventPayload::OutputItemAdded { item_id, .. } => Some(item_id.as_str()),
-            _ => None,
-        });
-        let mut translated = self.start_call(
-            start_item_id.unwrap_or(item_id),
-            name,
-            output_index,
-            original_added.cloned(),
-            call,
-            tool_search_call,
-        )?;
+        let mut translated = self.start_call(item_id, name, output_index, original_added.cloned(), call)?;
 
         for frame in pending {
-            if let EventPayload::FunctionCallArgsDelta {
-                item_id, output_index, ..
-            } = &frame.payload
-            {
+            if let EventPayload::FunctionCallArgsDelta { output_index, .. } = &frame.payload {
                 let delta = self.translate_delta(item_id, *output_index, frame.clone(), call)?;
                 translated.frames.extend(delta.frames);
             }
@@ -500,7 +279,7 @@ impl FunctionSseTranslator {
             .map_err(ExecutorError::JsonError)?
             .len();
         if self.pending_bytes.saturating_add(bytes) > MAX_PENDING_FUNCTION_BYTES {
-            return Err(self.pending_limit_error(format!(
+            return Err(ExecutorError::StreamError(format!(
                 "unnamed function-call SSE exceeded {MAX_PENDING_FUNCTION_BYTES} buffered bytes"
             )));
         }
@@ -524,12 +303,6 @@ impl FunctionSseTranslator {
         self.pending_bytes = self.pending_bytes.saturating_sub(pending.bytes);
         pending.frames
     }
-}
-
-fn tool_search_frame(event_type: SSEEventType, output_index: u32, item: Value) -> ExecutorResult<EventFrame> {
-    let mut frame = synthetic_event(event_type, [("item".to_owned(), item)])?;
-    frame.wire.output_index = Some(u64::from(output_index));
-    Ok(frame)
 }
 
 fn custom_added_frame(call: &AccumulatedFunctionCall<'_>) -> ExecutorResult<EventFrame> {
@@ -641,15 +414,6 @@ fn ensure_function_call_size(arguments: &str) -> ExecutorResult<()> {
     Ok(())
 }
 
-fn ensure_function_call_size_for(current: usize, additional: usize) -> ExecutorResult<()> {
-    if current.saturating_add(additional) > MAX_PENDING_FUNCTION_BYTES {
-        return Err(ExecutorError::StreamError(format!(
-            "function-call SSE exceeded {MAX_PENDING_FUNCTION_BYTES} buffered bytes"
-        )));
-    }
-    Ok(())
-}
-
 fn partial_custom_input(state: &mut CustomCallState, arguments: &str) -> ExecutorResult<Option<String>> {
     let input_start = if let Some(input_start) = state.input_start {
         input_start
@@ -748,8 +512,6 @@ fn custom_input_start(arguments: &str) -> Option<usize> {
 mod tests {
     use super::*;
     use crate::executor::accumulator::ResponseAccumulator;
-    use crate::types::event::MessageStatus;
-    use crate::types::io::FunctionToolCall;
 
     fn sse(value: &Value) -> String {
         format!("data: {value}")
@@ -762,393 +524,8 @@ mod tests {
     ) -> FunctionSseTranslation {
         accumulator
             .process_sse_line_with_translator(&sse(value), translator)
-            .unwrap_or_else(|error| panic!("translation succeeds for {value}: {error}"))
+            .expect("translation succeeds")
             .expect("SSE event")
-    }
-
-    fn tool_search_accumulator(response_id: &str) -> ResponseAccumulator {
-        ResponseAccumulator::new(response_id.to_owned(), None)
-            .with_tool_types(
-                HashMap::from([("tool_search".to_owned(), ToolType::ToolSearch)]),
-                &HashSet::new(),
-            )
-            .expect("tool-search accumulator configuration is valid")
-    }
-
-    fn search_event_sequence(item_id: &str, call_id: &str, arguments: &str) -> [Value; 5] {
-        let split = arguments.len() / 2;
-        let (first, second) = arguments.split_at(split);
-        [
-            serde_json::json!({
-                "type": "response.output_item.added", "output_index": 0,
-                "item": {"id": item_id, "type": "function_call", "call_id": call_id,
-                    "name": "tool_search", "arguments": "", "status": "in_progress"}
-            }),
-            serde_json::json!({
-                "type": "response.function_call_arguments.delta", "output_index": 0,
-                "item_id": item_id, "call_id": call_id, "delta": first
-            }),
-            serde_json::json!({
-                "type": "response.function_call_arguments.delta", "output_index": 0,
-                "item_id": item_id, "call_id": call_id, "delta": second
-            }),
-            serde_json::json!({
-                "type": "response.function_call_arguments.done", "output_index": 0,
-                "item_id": item_id, "call_id": call_id, "name": "tool_search", "arguments": arguments
-            }),
-            serde_json::json!({
-                "type": "response.output_item.done", "output_index": 0,
-                "item": {"id": item_id, "type": "function_call", "call_id": call_id,
-                    "name": "tool_search", "arguments": arguments, "status": "completed"}
-            }),
-        ]
-    }
-
-    #[test]
-    fn tool_search_stream_emits_only_public_added_and_done_with_stable_identity() {
-        let mut accumulator = tool_search_accumulator("resp_1");
-        let mut translator = FunctionSseTranslator::new(HashMap::from([
-            ("tool_search".to_owned(), ToolType::ToolSearch),
-            ("weather".to_owned(), ToolType::Function),
-        ]));
-        let arguments = r#"{"query":"weather"}"#;
-        let mut frames = Vec::new();
-
-        for (index, event) in search_event_sequence("fc_search", "call_search", arguments)
-            .into_iter()
-            .enumerate()
-        {
-            frames.extend(translate(&mut accumulator, &mut translator, &event).frames);
-            if index == 1 {
-                let ordinary = serde_json::json!({
-                    "type": "response.output_item.added", "output_index": 1,
-                    "item": {"id": "fc_weather", "type": "function_call", "call_id": "call_weather",
-                        "name": "weather", "arguments": "", "status": "in_progress"}
-                });
-                frames.extend(translate(&mut accumulator, &mut translator, &ordinary).frames);
-            }
-        }
-
-        assert_eq!(
-            frames.iter().map(|frame| frame.event_type).collect::<Vec<_>>(),
-            [
-                SSEEventType::OutputItemAdded,
-                SSEEventType::OutputItemAdded,
-                SSEEventType::OutputItemDone
-            ]
-        );
-        let search_frames = frames
-            .iter()
-            .filter(|frame| frame.wire.output_index == Some(0))
-            .collect::<Vec<_>>();
-        assert_eq!(search_frames.len(), 2);
-        assert_eq!(search_frames[0].wire.rest["item"]["type"], "tool_search_call");
-        assert_eq!(search_frames[0].wire.rest["item"]["status"], "in_progress");
-        assert_eq!(search_frames[0].wire.rest["item"]["arguments"], serde_json::json!({}));
-        assert_eq!(search_frames[1].wire.rest["item"]["type"], "tool_search_call");
-        assert_eq!(search_frames[1].wire.rest["item"]["status"], "completed");
-        assert_eq!(
-            search_frames[1].wire.rest["item"]["arguments"],
-            serde_json::json!({"query": "weather"})
-        );
-        assert_eq!(search_frames[0].wire.rest["item"]["id"], "tsc_search");
-        assert_eq!(
-            search_frames[0].wire.rest["item"]["id"],
-            search_frames[1].wire.rest["item"]["id"]
-        );
-        assert_eq!(search_frames[0].wire.rest["item"]["call_id"], "call_search");
-        assert_eq!(
-            search_frames[0].wire.rest["item"]["call_id"],
-            search_frames[1].wire.rest["item"]["call_id"]
-        );
-        assert_eq!(frames[1].wire.rest["item"]["type"], "function_call");
-
-        let blocking = OutputItem::ToolSearchCall(
-            ToolSearchCall::try_from(&FunctionToolCall {
-                id: "fc_search".to_owned(),
-                call_id: "call_search".to_owned(),
-                name: "tool_search".to_owned(),
-                namespace: None,
-                arguments: arguments.to_owned(),
-                status: MessageStatus::Completed,
-            })
-            .expect("blocking translation uses the same typed conversion"),
-        );
-        let blocking = serialize_to_value(&blocking).expect("blocking item serializes");
-        let replay: crate::types::io::InputItem =
-            serde_json::from_value(blocking.clone()).expect("public item replays");
-        let replay = serialize_to_value(&replay).expect("replay serializes");
-        assert_eq!(blocking, search_frames[1].wire.rest["item"]);
-        assert_eq!(replay, search_frames[1].wire.rest["item"]);
-    }
-
-    #[test]
-    fn tool_search_stream_rejects_malformed_arguments_and_empty_call_id() {
-        for (call_id, arguments) in [("call_search", "[1]"), ("call_search", "{"), ("", "{}")] {
-            let mut accumulator = tool_search_accumulator("resp_1");
-            let mut translator =
-                FunctionSseTranslator::new(HashMap::from([("tool_search".to_owned(), ToolType::ToolSearch)]));
-            let mut error = None;
-            for event in search_event_sequence("fc_search", call_id, arguments) {
-                match accumulator.process_sse_line_with_translator(&sse(&event), &mut translator) {
-                    Ok(_) => {}
-                    Err(found) => {
-                        error = Some(found);
-                        break;
-                    }
-                }
-            }
-            assert!(
-                error
-                    .expect("invalid synthetic search stream must fail")
-                    .to_string()
-                    .contains("invalid tool-search call")
-            );
-        }
-    }
-
-    #[test]
-    fn tool_search_stream_rejects_premature_eof() {
-        let mut accumulator = tool_search_accumulator("resp_1");
-        let mut translator =
-            FunctionSseTranslator::new(HashMap::from([("tool_search".to_owned(), ToolType::ToolSearch)]));
-        let added = &search_event_sequence("fc_search", "call_search", r#"{"query":"weather"}"#)[0];
-        translate(&mut accumulator, &mut translator, added);
-
-        assert!(
-            translator.finish().is_err(),
-            "an unfinished search call must fail at EOF"
-        );
-    }
-
-    #[test]
-    fn tool_search_stream_accepts_authoritative_done_without_argument_deltas() {
-        let mut accumulator = tool_search_accumulator("resp_done_only");
-        let mut translator =
-            FunctionSseTranslator::new(HashMap::from([("tool_search".to_owned(), ToolType::ToolSearch)]));
-        let mut events = search_event_sequence("fc_search", "call_search", r#"{"query":"weather"}"#);
-        events[0]
-            .get_mut("item")
-            .and_then(Value::as_object_mut)
-            .expect("added function item")
-            .remove("name");
-
-        let frames = [0, 4]
-            .into_iter()
-            .flat_map(|index| translate(&mut accumulator, &mut translator, &events[index]).frames)
-            .collect::<Vec<_>>();
-
-        assert_eq!(
-            frames.iter().map(|frame| frame.event_type).collect::<Vec<_>>(),
-            [SSEEventType::OutputItemAdded, SSEEventType::OutputItemDone]
-        );
-        assert_eq!(
-            frames[1].wire.rest["item"]["arguments"],
-            serde_json::json!({"query": "weather"})
-        );
-        assert!(translator.finish().is_ok());
-    }
-
-    #[test]
-    fn tool_search_stream_accepts_omitted_done_name_for_active_call() {
-        let mut accumulator = tool_search_accumulator("resp_omitted_done_name");
-        let mut translator =
-            FunctionSseTranslator::new(HashMap::from([("tool_search".to_owned(), ToolType::ToolSearch)]));
-        let arguments = r#"{"query": "add numbers"}"#;
-        let events = [
-            serde_json::json!({
-                "type": "response.output_item.added", "output_index": 1,
-                "item": {"id": "fc_search", "type": "function_call", "call_id": "call_search",
-                    "name": "tool_search", "arguments": "", "status": "in_progress"}
-            }),
-            serde_json::json!({
-                "type": "response.function_call_arguments.delta", "output_index": 1,
-                "item_id": "fc_search", "delta": "{}"
-            }),
-            serde_json::json!({
-                "type": "response.function_call_arguments.delta", "output_index": 1,
-                "item_id": "fc_search", "delta": "{\"query\": \""
-            }),
-            serde_json::json!({
-                "type": "response.function_call_arguments.delta", "output_index": 1,
-                "item_id": "fc_search", "delta": "add numbers"
-            }),
-            serde_json::json!({
-                "type": "response.function_call_arguments.delta", "output_index": 1,
-                "item_id": "fc_search", "delta": "\"}"
-            }),
-            serde_json::json!({
-                "type": "response.function_call_arguments.done", "output_index": 1,
-                "item_id": "fc_search", "arguments": arguments
-            }),
-            serde_json::json!({
-                "type": "response.output_item.done", "output_index": 1,
-                "item": {"id": "fc_search", "type": "function_call", "call_id": "call_search",
-                    "name": "tool_search", "arguments": arguments, "status": "completed"}
-            }),
-        ];
-
-        let frames = events
-            .iter()
-            .flat_map(|event| translate(&mut accumulator, &mut translator, event).frames)
-            .collect::<Vec<_>>();
-
-        assert_eq!(
-            frames.iter().map(|frame| frame.event_type).collect::<Vec<_>>(),
-            [SSEEventType::OutputItemAdded, SSEEventType::OutputItemDone]
-        );
-        assert_eq!(frames[0].wire.output_index, Some(1));
-        assert_eq!(frames[1].wire.output_index, Some(1));
-        assert_eq!(frames[0].wire.rest["item"]["id"], "tsc_search");
-        assert_eq!(frames[0].wire.rest["item"]["call_id"], "call_search");
-        assert_eq!(frames[0].wire.rest["item"]["execution"], "client");
-        assert_eq!(frames[0].wire.rest["item"]["status"], "in_progress");
-        assert_eq!(frames[1].wire.rest["item"]["id"], "tsc_search");
-        assert_eq!(frames[1].wire.rest["item"]["call_id"], "call_search");
-        assert_eq!(frames[1].wire.rest["item"]["execution"], "client");
-        assert_eq!(frames[1].wire.rest["item"]["status"], "completed");
-        assert_eq!(
-            frames[1].wire.rest["item"]["arguments"],
-            serde_json::json!({"query": "add numbers"})
-        );
-        assert!(translator.finish().is_ok());
-    }
-
-    #[test]
-    fn unfinished_search_ids_include_pending_candidates_with_other_loaded_tools_only_until_resolved() {
-        let tool_types = HashMap::from([
-            ("tool_search".to_owned(), ToolType::ToolSearch),
-            ("weather".to_owned(), ToolType::Function),
-        ]);
-        let unnamed = serde_json::json!({
-            "type": "response.output_item.added", "output_index": 0,
-            "item": {"id": "fc_candidate", "type": "function_call", "call_id": "call_candidate",
-                "arguments": "", "status": "in_progress"}
-        });
-
-        let mut pending_accumulator = tool_search_accumulator("resp_pending");
-        let mut pending_translator = FunctionSseTranslator::new(tool_types.clone());
-        translate(&mut pending_accumulator, &mut pending_translator, &unnamed);
-        assert_eq!(
-            pending_translator.unfinished_search_item_ids(),
-            HashSet::from(["fc_candidate"])
-        );
-
-        let mut ordinary_accumulator = ResponseAccumulator::new("resp_ordinary".to_owned(), None);
-        let mut ordinary_translator = FunctionSseTranslator::new(tool_types);
-        translate(&mut ordinary_accumulator, &mut ordinary_translator, &unnamed);
-        let resolved = serde_json::json!({
-            "type": "response.function_call_arguments.done", "output_index": 0,
-            "item_id": "fc_candidate", "call_id": "call_candidate", "name": "weather",
-            "arguments": "{}"
-        });
-        translate(&mut ordinary_accumulator, &mut ordinary_translator, &resolved);
-        assert!(ordinary_translator.unfinished_search_item_ids().is_empty());
-    }
-
-    #[test]
-    fn upstream_failure_may_terminate_an_incomplete_search_without_false_completion() {
-        let mut accumulator = tool_search_accumulator("resp_1");
-        let mut translator =
-            FunctionSseTranslator::new(HashMap::from([("tool_search".to_owned(), ToolType::ToolSearch)]));
-        let added = &search_event_sequence("fc_search", "call_search", "{}")[0];
-        translate(&mut accumulator, &mut translator, added);
-        let failed = serde_json::json!({
-            "type": "response.failed",
-            "response": {
-                "id": "upstream_failed", "status": "failed", "usage": null,
-                "error": {"code": "provider_failure", "message": "provider stopped"},
-                "incomplete_details": {"reason": "upstream_error"}
-            }
-        });
-        let translated = translate(&mut accumulator, &mut translator, &failed);
-
-        assert_eq!(translated.frames.len(), 1);
-        assert_eq!(translated.frames[0].event_type, SSEEventType::ResponseFailed);
-        assert!(translator.finish().is_ok());
-    }
-
-    #[test]
-    fn pending_function_stream_state_has_aggregate_byte_limit() {
-        let mut bytes_accumulator = ResponseAccumulator::new("resp_2".to_owned(), None);
-        let mut bytes_translator = FunctionSseTranslator::new(HashMap::new());
-        let mut byte_error = None;
-        for output_index in 0..128 {
-            let unnamed = serde_json::json!({
-                "type": "response.output_item.added", "output_index": output_index,
-                "item": {"id": format!("fc_bytes_{output_index}"), "type": "function_call",
-                    "call_id": format!("call_bytes_{output_index}"), "arguments": "", "status": "in_progress"}
-            });
-            if let Err(error) =
-                bytes_accumulator.process_sse_line_with_translator(&sse(&unnamed), &mut bytes_translator)
-            {
-                byte_error = Some(error);
-                break;
-            }
-            let delta = serde_json::json!({
-                "type": "response.function_call_arguments.delta", "output_index": output_index,
-                "item_id": format!("fc_bytes_{output_index}"), "delta": "x".repeat(4 * 1024)
-            });
-            match bytes_accumulator.process_sse_line_with_translator(&sse(&delta), &mut bytes_translator) {
-                Ok(_) => {}
-                Err(error) => {
-                    byte_error = Some(error);
-                    break;
-                }
-            }
-        }
-        assert!(
-            byte_error
-                .expect("aggregate pending bytes must be bounded")
-                .to_string()
-                .contains("unnamed function-call SSE exceeded")
-        );
-    }
-
-    #[test]
-    fn tool_search_argument_buffer_accepts_exact_limit_and_rejects_one_more_byte() {
-        let prefix = r#"{"query":""#;
-        let suffix = r#""}"#;
-        let exact_arguments = format!(
-            "{prefix}{}{suffix}",
-            "x".repeat(MAX_PENDING_FUNCTION_BYTES - prefix.len() - suffix.len())
-        );
-        assert_eq!(exact_arguments.len(), MAX_PENDING_FUNCTION_BYTES);
-
-        let mut exact_accumulator = tool_search_accumulator("resp_exact");
-        let mut exact_translator =
-            FunctionSseTranslator::new(HashMap::from([("tool_search".to_owned(), ToolType::ToolSearch)]));
-        let exact_events = search_event_sequence("fc_exact", "call_exact", &exact_arguments);
-        translate(&mut exact_accumulator, &mut exact_translator, &exact_events[0]);
-        assert!(
-            exact_accumulator
-                .process_sse_line_with_translator(&sse(&exact_events[1]), &mut exact_translator)
-                .is_ok()
-        );
-        assert!(
-            exact_accumulator
-                .process_sse_line_with_translator(&sse(&exact_events[2]), &mut exact_translator)
-                .is_ok()
-        );
-
-        let over_arguments = format!("{exact_arguments}x");
-        let mut over_accumulator = tool_search_accumulator("resp_over");
-        let mut over_translator =
-            FunctionSseTranslator::new(HashMap::from([("tool_search".to_owned(), ToolType::ToolSearch)]));
-        let over_events = search_event_sequence("fc_over", "call_over", &over_arguments);
-        translate(&mut over_accumulator, &mut over_translator, &over_events[0]);
-        assert!(
-            over_accumulator
-                .process_sse_line_with_translator(&sse(&over_events[1]), &mut over_translator)
-                .is_ok()
-        );
-        assert!(
-            over_accumulator
-                .process_sse_line_with_translator(&sse(&over_events[2]), &mut over_translator)
-                .expect_err("one byte beyond the search-call limit must fail")
-                .to_string()
-                .contains("invalid tool-search call")
-        );
     }
 
     #[test]

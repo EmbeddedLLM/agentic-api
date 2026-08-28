@@ -51,7 +51,7 @@ fn upgrade_responses_ws(
         .max_frame_size(MAX_BODY_SIZE)
         .on_upgrade(move |socket| async move {
             let _websocket_guard = websocket_guard;
-            Box::pin(responses_ws_loop(socket, state, headers, principal)).await;
+            responses_ws_loop(socket, state, headers, principal).await;
         })
 }
 

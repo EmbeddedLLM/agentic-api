@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use super::io::{
     FunctionTool, InputItem, InputMessage, InputMessageContent, OutputItem, ResponseUsage, ResponsesInput, ToolChoice,
 };
-use super::tools::{CodexNamespaceMember, ResponsesTool};
+use super::tools::ResponsesTool;
 use crate::tool::{CodexNamespaceHandler, CustomHandler, ToolError};
 use crate::utils::common::serialize_to_string;
 
@@ -106,37 +106,6 @@ where
 }
 
 impl RequestPayload {
-    /// Whether this request contains public tool-search history, an explicit
-    /// search declaration, or any declaration whose schema is deferred.
-    #[must_use]
-    pub fn contains_tool_search_state(&self) -> bool {
-        self.contains_tool_search_state_for_input(&self.input)
-    }
-
-    #[must_use]
-    pub(crate) fn contains_tool_search_state_for_input(&self, input: &ResponsesInput) -> bool {
-        input.contains_tool_search_state()
-            || self
-                .tools
-                .as_deref()
-                .is_some_and(|tools| tools.iter().any(tool_activates_tool_search))
-    }
-
-    fn ensure_tool_search_ready(&self) -> Result<(), ToolError> {
-        if self.input.contains_tool_search_state()
-            || self
-                .tools
-                .as_deref()
-                .is_some_and(|tools| tools.iter().any(tool_has_deferred_definition))
-        {
-            Err(ToolError::Config(
-                "tool_search requests require prepared request-scoped state before upstream conversion".to_owned(),
-            ))
-        } else {
-            Ok(())
-        }
-    }
-
     /// Construct an `UpstreamRequest` suitable for forwarding to vLLM.
     ///
     /// Codex `namespace` tools' members are first renamed to their flat,
@@ -152,7 +121,6 @@ impl RequestPayload {
     /// member, or when a custom tool declares a format whose constrained
     /// decoding cannot be preserved upstream.
     pub fn to_upstream_request(&self, stream: bool) -> Result<UpstreamRequest<'_>, ToolError> {
-        self.ensure_tool_search_ready()?;
         // The gateway currently executes tool calls serially. Accept the client's
         // preference for compatibility, but do not advertise parallel execution
         // to the upstream model.
@@ -196,26 +164,6 @@ impl RequestPayload {
             parallel_tool_calls,
             cache_salt: self.cache_salt.as_deref(),
         })
-    }
-}
-
-fn tool_activates_tool_search(tool: &ResponsesTool) -> bool {
-    matches!(tool, ResponsesTool::ToolSearch(_)) || tool_has_deferred_definition(tool)
-}
-
-fn tool_has_deferred_definition(tool: &ResponsesTool) -> bool {
-    match tool {
-        ResponsesTool::Function(function) => function.defer_loading == Some(true),
-        ResponsesTool::Namespace(namespace) => namespace.tools.iter().any(
-            |member| matches!(member, CodexNamespaceMember::Function(function) if function.defer_loading == Some(true)),
-        ),
-        ResponsesTool::ToolSearch(_)
-        | ResponsesTool::Mcp(_)
-        | ResponsesTool::WebSearch(_)
-        | ResponsesTool::FileSearch(_)
-        | ResponsesTool::CodeInterpreter(_)
-        | ResponsesTool::Custom(_)
-        | ResponsesTool::Unknown => false,
     }
 }
 
@@ -367,96 +315,6 @@ impl From<ResponsesInput> for Vec<InputItem> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn tool_search_declaration() -> Value {
-        serde_json::json!({
-            "type": "tool_search",
-            "execution": "client",
-            "description": "Find a tool",
-            "parameters": {
-                "type": "object",
-                "properties": {"query": {"type": "string"}}
-            }
-        })
-    }
-
-    fn tool_search_request(tools: Vec<Value>, input: Value, parallel_tool_calls: Option<bool>) -> RequestPayload {
-        let mut request = serde_json::json!({
-            "model": "test",
-            "parallel_tool_calls": parallel_tool_calls
-        });
-        request["input"] = input;
-        request["tools"] = Value::Array(tools);
-        serde_json::from_value(request).expect("request fixture should deserialize")
-    }
-
-    #[test]
-    fn deferred_declarations_require_tool_search_state_preparation() {
-        for tool in [
-            serde_json::json!({
-                "type": "function",
-                "name": "deferred_function",
-                "defer_loading": true
-            }),
-            serde_json::json!({
-                "type": "namespace",
-                "name": "deferred_namespace",
-                "tools": [{
-                    "type": "function",
-                    "name": "deferred_member",
-                    "defer_loading": true
-                }]
-            }),
-        ] {
-            let request = tool_search_request(vec![tool], serde_json::json!("hi"), Some(false));
-            assert!(request.contains_tool_search_state());
-            assert!(request.to_upstream_request(false).is_err());
-        }
-    }
-
-    #[test]
-    fn to_upstream_request_rejects_unprepared_tool_search_state() {
-        let request = tool_search_request(
-            vec![tool_search_declaration()],
-            serde_json::json!([
-                {
-                    "type": "tool_search_call",
-                    "id": "tsc_1",
-                    "call_id": "call_search_1",
-                    "arguments": {"query": "weather"}
-                },
-                {
-                    "type": "tool_search_output",
-                    "call_id": "call_search_1",
-                    "tools": []
-                }
-            ]),
-            Some(false),
-        );
-
-        assert!(
-            request.to_upstream_request(false).is_err(),
-            "unprepared tool-search state must not be silently dropped or lowered"
-        );
-    }
-
-    #[test]
-    fn reserved_tool_search_name_is_allowed_without_tool_search_state() {
-        let request = tool_search_request(
-            vec![serde_json::json!({"type": "function", "name": "tool_search"})],
-            serde_json::json!("hi"),
-            Some(true),
-        );
-
-        let upstream = serde_json::to_value(
-            request
-                .to_upstream_request(false)
-                .expect("reserved name applies only while tool search is active"),
-        )
-        .expect("upstream request serializes");
-        assert_eq!(upstream["tools"][0]["name"], "tool_search");
-        assert_eq!(upstream["parallel_tool_calls"], false);
-    }
 
     #[test]
     fn compact_request_accepts_codex_compatibility_fields() {

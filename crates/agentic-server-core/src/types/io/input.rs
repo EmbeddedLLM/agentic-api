@@ -370,18 +370,6 @@ pub(crate) fn latest_compaction_window(items: &[InputItem]) -> Option<Compaction
 }
 
 impl ResponsesInput {
-    /// Whether ordered public input history contains typed tool-search state.
-    #[must_use]
-    pub fn contains_tool_search_state(&self) -> bool {
-        matches!(
-            self,
-            Self::Items(items)
-                if items
-                    .iter()
-                    .any(|item| matches!(item, InputItem::ToolSearchCall(_) | InputItem::ToolSearchOutput(_)))
-        )
-    }
-
     #[must_use]
     pub fn contains_compaction(&self) -> bool {
         matches!(self, Self::Items(items) if items.iter().any(|item| matches!(item, InputItem::Compaction(_))))
@@ -514,25 +502,6 @@ mod tests {
                 status
             );
         }
-    }
-
-    #[test]
-    fn responses_input_detects_only_typed_tool_search_state() {
-        let search: ResponsesInput = serde_json::from_value(serde_json::json!([{
-            "type": "tool_search_output",
-            "call_id": "call_search_1",
-            "tools": []
-        }]))
-        .expect("typed search state");
-        let ordinary: ResponsesInput = serde_json::from_value(serde_json::json!([{
-            "type": "function_call_output",
-            "call_id": "call_1",
-            "output": "done"
-        }]))
-        .expect("ordinary function state");
-
-        assert!(search.contains_tool_search_state());
-        assert!(!ordinary.contains_tool_search_state());
     }
 
     #[test]

@@ -240,17 +240,17 @@ mod tests {
                 if search.execution == crate::types::tools::ToolSearchExecution::Client
         ));
 
-        let ctx = crate::executor::prepare::prepare_tool_search(ctx, &exec_ctx.conv_handler, &exec_ctx.resp_handler)
-            .await
-            .expect("explicit handler preparation accepts the rehydrated request");
+        let (ctx, registry) =
+            crate::executor::prepare::prepare_request_tools(ctx, &exec_ctx.conv_handler, &exec_ctx.resp_handler)
+                .await
+                .expect("explicit handler preparation accepts the rehydrated request");
 
         assert!(
-            ctx.tool_search()
-                .state()
+            registry
+                .tool_search_state()
                 .is_some_and(crate::tool::ToolSearchState::is_active)
         );
         let upstream = ctx
-            .request()
             .enriched_request
             .to_upstream_request(false)
             .expect("prepared tool-search request lowers at the upstream boundary");
@@ -287,9 +287,10 @@ mod tests {
         let ctx = rehydrate_conversation(request(None, Some("resp_search")), &exec_ctx)
             .await
             .expect("orphan history remains a valid rehydrated public shape");
-        let error = crate::executor::prepare::prepare_tool_search(ctx, &exec_ctx.conv_handler, &exec_ctx.resp_handler)
-            .await
-            .expect_err("explicit preparation rejects orphan stored public history");
+        let error =
+            crate::executor::prepare::prepare_request_tools(ctx, &exec_ctx.conv_handler, &exec_ctx.resp_handler)
+                .await
+                .expect_err("explicit preparation rejects orphan stored public history");
 
         assert!(
             matches!(error, ExecutorError::Tool(ToolError::Config(ref message)) if message.contains("orphan")),
@@ -360,13 +361,13 @@ mod tests {
         let ctx = rehydrate_conversation(continuation, &exec_ctx)
             .await
             .expect("stored public call rehydrates before new output");
-        let ctx = crate::executor::prepare::prepare_tool_search(ctx, &exec_ctx.conv_handler, &exec_ctx.resp_handler)
-            .await
-            .expect("stored continuation derives valid tool-search state");
+        let (ctx, registry) =
+            crate::executor::prepare::prepare_request_tools(ctx, &exec_ctx.conv_handler, &exec_ctx.resp_handler)
+                .await
+                .expect("stored continuation derives valid tool-search state");
 
-        let state = ctx
-            .tool_search()
-            .state()
+        let state = registry
+            .tool_search_state()
             .expect("valid state was prepared after rehydration");
         assert!(state.is_active());
         assert_eq!(state.loaded_public_tools().len(), 1);
@@ -375,7 +376,7 @@ mod tests {
             crate::types::tools::ResponsesTool::Function(function) if function.name.as_str() == "get_weather"
         ));
         let private_input =
-            serde_json::to_value(&ctx.request().enriched_request.input).expect("prepared private history serializes");
+            serde_json::to_value(&ctx.enriched_request.input).expect("prepared private history serializes");
         assert_eq!(private_input[0]["call_id"], "call_search_stored");
         assert_eq!(private_input[1]["call_id"], "call_search_stored");
     }
