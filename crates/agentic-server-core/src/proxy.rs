@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::pin::Pin;
 use std::time::Duration;
 
@@ -31,6 +32,18 @@ fn is_hop_by_hop(name: &str) -> bool {
 
 fn is_request_drop(name: &str) -> bool {
     is_hop_by_hop(name) || REQUEST_DROP_EXTRA.iter().any(|h| h.eq_ignore_ascii_case(name))
+}
+
+fn connection_options(headers: &HeaderMap) -> HashSet<HeaderName> {
+    let mut options = HashSet::new();
+    for value in headers.get_all("connection") {
+        for option in value.as_bytes().split(|byte| *byte == b',') {
+            if let Ok(name) = HeaderName::from_bytes(option.trim_ascii()) {
+                options.insert(name);
+            }
+        }
+    }
+    options
 }
 
 /// Raw request data forwarded to the default Responses upstream endpoint.
@@ -100,9 +113,10 @@ impl ProxyState {
 /// did not supply one.
 #[must_use]
 pub fn upstream_request_headers(headers: &HeaderMap, config: &Config, auth: ProxyAuth) -> reqwest::header::HeaderMap {
+    let connection_options = connection_options(headers);
     let mut out = reqwest::header::HeaderMap::new();
     for (name, value) in headers {
-        if is_request_drop(name.as_str()) {
+        if is_request_drop(name.as_str()) || connection_options.contains(name) {
             continue;
         }
         if let Ok(n) = reqwest::header::HeaderName::from_bytes(name.as_str().as_bytes()) {
@@ -136,9 +150,10 @@ pub fn upstream_request_headers(headers: &HeaderMap, config: &Config, auth: Prox
 }
 
 fn filter_response_headers(headers: &reqwest::header::HeaderMap) -> HeaderMap {
+    let connection_options = connection_options(headers);
     let mut out = HeaderMap::new();
     for (name, value) in headers {
-        if is_hop_by_hop(name.as_str()) {
+        if is_hop_by_hop(name.as_str()) || connection_options.contains(name) {
             continue;
         }
         if let Ok(n) = HeaderName::from_bytes(name.as_str().as_bytes()) {
@@ -403,6 +418,26 @@ mod tests {
     }
 
     #[test]
+    fn filter_request_headers_strips_connection_options() {
+        let mut headers = HeaderMap::new();
+        headers.append(
+            "connection",
+            HeaderValue::from_bytes(b"keep-alive, \tX-Request-Hop\t").unwrap(),
+        );
+        headers.append("connection", "x-repeated-hop".parse().unwrap());
+        headers.insert("x-request-hop", "first".parse().unwrap());
+        headers.insert("x-repeated-hop", "second".parse().unwrap());
+        headers.insert("x-end-to-end", "preserved".parse().unwrap());
+
+        let filtered = upstream_request_headers(&headers, &test_config_no_key(), ProxyAuth::OpenAiBearer);
+
+        assert!(!filtered.contains_key("connection"));
+        assert!(!filtered.contains_key("x-request-hop"));
+        assert!(!filtered.contains_key("x-repeated-hop"));
+        assert_eq!(filtered["x-end-to-end"], "preserved");
+    }
+
+    #[test]
     fn filter_request_headers_strips_host_and_content_length() {
         let mut headers = HeaderMap::new();
         headers.insert("host", "example.com".parse().unwrap());
@@ -495,6 +530,26 @@ mod tests {
         assert!(filtered.contains_key("content-type"));
         assert!(filtered.contains_key("x-request-id"));
         assert!(!filtered.contains_key("connection"));
+    }
+
+    #[test]
+    fn filter_response_headers_strips_connection_options() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.append(
+            "connection",
+            reqwest::header::HeaderValue::from_bytes(b"upgrade, \tX-Response-Hop\t").unwrap(),
+        );
+        headers.append("connection", "x-repeated-hop".parse().unwrap());
+        headers.insert("x-response-hop", "first".parse().unwrap());
+        headers.insert("x-repeated-hop", "second".parse().unwrap());
+        headers.insert("x-end-to-end", "preserved".parse().unwrap());
+
+        let filtered = filter_response_headers(&headers);
+
+        assert!(!filtered.contains_key("connection"));
+        assert!(!filtered.contains_key("x-response-hop"));
+        assert!(!filtered.contains_key("x-repeated-hop"));
+        assert_eq!(filtered["x-end-to-end"], "preserved");
     }
 
     #[test]
