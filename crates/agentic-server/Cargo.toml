@@ -32,7 +32,7 @@ url.workspace = true
 bytes.workspace = true
 criterion.workspace = true
 futures.workspace = true
-reqwest = { workspace = true, features = ["json"] }
+reqwest = { workspace = true, features = ["json", "stream"] }
 rand = "0.8"
 rsa = "0.9"
 serde_json.workspace = true
@@ -44,6 +44,11 @@ uuid = { version = "1", features = ["v7"] }
 
 [[bench]]
 name = "benches"
+harness = false
+
+[[bench]]
+name = "response_provider"
+path = "benches/client/response_provider/main.rs"
 harness = false
 
 [lints]
