@@ -1,12 +1,11 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::events::{EventFrame, EventPayload, SSEEventType, SSEItemType, normalize_sse_line};
 use crate::types::event::{MessageStatus, ResponseStatus};
-use crate::types::io::output::{BlockingFunctionToolCall, FunctionToolCall, OutputItem};
+use crate::types::io::output::FunctionToolCall;
 use crate::types::io::{
     FunctionTool, FunctionToolResultMessage, InputFunctionToolCall, InputItem, InputToolSearchCall, ResponsesInput,
     ToolCallOutput, ToolChoice, ToolSearchCall, ToolSearchOutputMessage,
@@ -553,7 +552,6 @@ fn request_contains_tool_search_state(request: &RequestPayload, input: &Response
             .is_some_and(|tools| tools.iter().any(tool_activates_tool_search))
 }
 
-
 pub(crate) fn request_has_tool_search_state(request: &RequestPayload) -> bool {
     request_contains_tool_search_state(request, &request.input)
 }
@@ -707,319 +705,73 @@ pub(crate) fn invalid_upstream_withheld_function_call() -> ToolError {
     ToolError::UpstreamWithheldFunctionCall
 }
 
-const MAX_STREAM_FUNCTION_BYTES: usize = 256 * 1024;
-
-#[derive(Default)]
-pub(crate) struct ToolSearchStreamState {
-    active: HashMap<u32, ToolSearchCall>,
-    completed: HashMap<u32, ToolSearchCall>,
-    canonical_calls: HashMap<String, ToolSearchCall>,
-    pending: HashMap<u32, Value>,
-    argument_bytes: HashMap<u32, usize>,
-    unfinished_item_ids: HashSet<String>,
-    emitted_added: HashSet<u32>,
-    terminal_failure: bool,
+pub(crate) fn started_public_call(call: &FunctionToolCall) -> Result<ToolSearchCall, ToolError> {
+    if call.id.trim().is_empty()
+        || call.call_id.trim().is_empty()
+        || call.name != TOOL_SEARCH_NAME
+        || call.namespace.is_some()
+    {
+        return Err(invalid_upstream_search_call());
+    }
+    Ok(ToolSearchCall {
+        id: public_item_id(&call.id),
+        call_id: call.call_id.clone(),
+        execution: crate::types::tools::ToolSearchExecution::Client,
+        arguments: Map::new(),
+        status: ToolSearchStatus::InProgress,
+    })
 }
 
-impl fmt::Debug for ToolSearchStreamState {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("ToolSearchStreamState")
-            .field("active_count", &self.active.len())
-            .field("completed_count", &self.completed.len())
-            .field("canonical_call_count", &self.canonical_calls.len())
-            .field("pending_count", &self.pending.len())
-            .field("argument_stream_count", &self.argument_bytes.len())
-            .field("unfinished_item_count", &self.unfinished_item_ids.len())
-            .field("emitted_added_count", &self.emitted_added.len())
-            .field("terminal_failure", &self.terminal_failure)
-            .finish()
+pub(crate) fn completed_public_call(call: &FunctionToolCall) -> Result<ToolSearchCall, ToolError> {
+    if call.status != MessageStatus::Completed {
+        return Err(invalid_upstream_search_call());
     }
+    let mut public = started_public_call(call)?;
+    public.arguments = json_object(&call.arguments)?;
+    public.status = ToolSearchStatus::Completed;
+    Ok(public)
 }
 
-impl ToolSearchStreamState {
-    pub(crate) fn reset(&mut self) {
-        *self = Self::default();
-    }
-
-    pub(crate) fn prepare_line(
-        &mut self,
-        line: &str,
-        enabled: bool,
-        withheld_function_names: &HashSet<String>,
-    ) -> Result<Option<String>, ToolError> {
-        let tracking_search = !self.active.is_empty() || !self.pending.is_empty() || !self.canonical_calls.is_empty();
-        if !enabled && withheld_function_names.is_empty() && !tracking_search && !might_contain_tool_search_wire(line) {
-            return Ok(None);
-        }
-        let Some(mut frame) = normalize_sse_line(line) else {
-            return Ok(None);
+pub(crate) fn project_synthetic_call(
+    call: &FunctionToolCall,
+    discard_incomplete: bool,
+    unfinished_stream_call: bool,
+) -> Result<Option<ToolSearchCall>, ToolError> {
+    if unfinished_stream_call || call.status != MessageStatus::Completed {
+        return if discard_incomplete {
+            Ok(None)
+        } else {
+            Err(invalid_upstream_search_call())
         };
-        let native = frame
-            .wire
-            .rest
-            .get("item")
-            .and_then(|item| item.get("type"))
-            .and_then(Value::as_str)
-            == Some("tool_search_call");
-        let tracking_native = native || !self.active.is_empty() || !self.canonical_calls.is_empty();
-        if !enabled && withheld_function_names.is_empty() && !tracking_native {
-            return Ok(None);
-        }
-        validate_withheld_stream_frame(&frame, withheld_function_names)?;
-        if matches!(
-            frame.event_type,
-            SSEEventType::ResponseFailed | SSEEventType::ResponseIncomplete
-        ) {
-            self.terminal_failure = true;
-        }
-        if !enabled && !tracking_native {
-            return Ok(None);
-        }
-        let native_call = native.then(|| adapt_native_stream_frame(&mut frame)).transpose()?;
-        self.validate_function_frame(&frame)?;
-        if let Some(call) = native_call {
-            let output_index = frame
-                .wire
-                .output_index
-                .and_then(|index| u32::try_from(index).ok())
-                .unwrap_or_default();
-            let mut started = call.clone();
-            started.arguments.clear();
-            started.status = ToolSearchStatus::InProgress;
-            self.active.insert(output_index, started);
-            self.unfinished_item_ids.insert(call.id.clone());
-            if call.status == ToolSearchStatus::Completed {
-                self.canonical_calls.insert(call.id.clone(), call.clone());
-                self.completed.insert(output_index, call.clone());
-                self.unfinished_item_ids.remove(&call.id);
-            }
-        }
-        let canonicalized_output_index = event_output_index(&frame.payload)
-            .filter(|output_index| self.active.contains_key(output_index))
-            .filter(|output_index| frame.wire.output_index != Some(u64::from(*output_index)));
-        if let Some(output_index) = canonicalized_output_index {
-            frame.wire.output_index = Some(u64::from(output_index));
-        }
-        if native || canonicalized_output_index.is_some() {
-            let wire = serialize_to_string(&frame.wire).map_err(|_| invalid_upstream_search_call())?;
-            return Ok(Some(format!("data: {wire}")));
-        }
-        Ok(None)
     }
-
-    fn validate_function_frame(&mut self, frame: &EventFrame) -> Result<(), ToolError> {
-        match &frame.payload {
-            EventPayload::OutputItemAdded {
-                item_type: SSEItemType::FunctionCall,
-                output_index,
-                name,
-                item_id,
-                ..
-            } => {
-                let item = stream_item(frame)?;
-                match name.as_deref() {
-                    Some(TOOL_SEARCH_NAME) => {
-                        let call = strict_started_function(item)?;
-                        self.start(*output_index, &call);
-                    }
-                    Some(_) => {}
-                    None => {
-                        self.pending.insert(*output_index, item.clone());
-                        if !item_id.is_empty() {
-                            self.unfinished_item_ids.insert(item_id.clone());
-                        }
-                    }
-                }
-            }
-            EventPayload::FunctionCallArgsDelta {
-                delta, output_index, ..
-            } if self.active.contains_key(output_index) || self.pending.contains_key(output_index) => {
-                let bytes = self.argument_bytes.entry(*output_index).or_default();
-                *bytes = bytes.saturating_add(delta.len());
-                if *bytes > MAX_STREAM_FUNCTION_BYTES {
-                    return Err(invalid_upstream_search_call());
-                }
-            }
-            EventPayload::FunctionCallArgsDone {
-                arguments,
-                name,
-                output_index,
-                ..
-            } => {
-                if name == TOOL_SEARCH_NAME || self.active.contains_key(output_index) {
-                    if arguments.len() > MAX_STREAM_FUNCTION_BYTES || json_object(arguments).is_err() {
-                        return Err(invalid_upstream_search_call());
-                    }
-                    if !self.active.contains_key(output_index) {
-                        let mut item = self
-                            .pending
-                            .remove(output_index)
-                            .ok_or_else(invalid_upstream_search_call)?;
-                        item.as_object_mut()
-                            .ok_or_else(invalid_upstream_search_call)?
-                            .insert("name".to_owned(), Value::String(TOOL_SEARCH_NAME.to_owned()));
-                        let call = strict_started_function(&item)?;
-                        self.start(*output_index, &call);
-                    }
-                } else {
-                    self.clear_pending(*output_index);
-                }
-            }
-            EventPayload::OutputItemDone {
-                item_type: SSEItemType::FunctionCall,
-                output_index,
-                item,
-                ..
-            } => {
-                let name = item.get("name").and_then(Value::as_str);
-                if name == Some(TOOL_SEARCH_NAME) || self.active.contains_key(output_index) {
-                    if item
-                        .get("arguments")
-                        .and_then(Value::as_str)
-                        .is_some_and(|arguments| arguments.len() > MAX_STREAM_FUNCTION_BYTES)
-                    {
-                        return Err(invalid_upstream_search_call());
-                    }
-                    let function = strict_function_call(item)?;
-                    if !self.active.contains_key(output_index) {
-                        self.start(*output_index, &function);
-                    }
-                    if function.status == MessageStatus::Completed {
-                        let public = ToolSearchCall::try_from(&function)?;
-                        self.canonical_calls.insert(function.id.clone(), public.clone());
-                        self.completed.insert(*output_index, public);
-                        self.unfinished_item_ids.remove(&function.id);
-                    }
-                } else {
-                    self.clear_pending(*output_index);
-                }
-            }
-            EventPayload::Response { .. } if frame.event_type == SSEEventType::ResponseCompleted => {
-                validate_terminal_output(frame, true)?;
-            }
-            EventPayload::Response { .. }
-                if matches!(
-                    frame.event_type,
-                    SSEEventType::ResponseFailed | SSEEventType::ResponseIncomplete
-                ) =>
-            {
-                validate_terminal_output(frame, false)?;
-            }
-            _ => {}
-        }
-        Ok(())
-    }
-
-    fn start(&mut self, output_index: u32, function: &FunctionToolCall) {
-        if let Ok(public) = ToolSearchCall::started_from_function(function) {
-            self.unfinished_item_ids.insert(function.id.clone());
-            self.active.insert(output_index, public);
-            self.pending.remove(&output_index);
-        }
-    }
-
-    fn clear_pending(&mut self, output_index: u32) {
-        if let Some(item) = self.pending.remove(&output_index)
-            && let Some(item_id) = item.get("id").and_then(Value::as_str)
-        {
-            self.unfinished_item_ids.remove(item_id);
-        }
-        self.argument_bytes.remove(&output_index);
-    }
-
-    pub(crate) fn translate_frames(&mut self, frames: Vec<EventFrame>) -> Result<Vec<EventFrame>, ToolError> {
-        let mut public = Vec::with_capacity(frames.len());
-        for frame in frames {
-            let output_index = frame.wire.output_index.and_then(|index| u32::try_from(index).ok());
-            let is_function_added = matches!(
-                frame.payload,
-                EventPayload::OutputItemAdded {
-                    item_type: SSEItemType::FunctionCall,
-                    ..
-                }
-            );
-            if is_function_added && output_index.is_some_and(|index| self.active.contains_key(&index)) {
-                let index = output_index.unwrap_or_default();
-                if self.emitted_added.insert(index) {
-                    public.push(public_stream_frame(
-                        SSEEventType::OutputItemAdded,
-                        index,
-                        self.active.get(&index).ok_or_else(invalid_upstream_search_call)?,
-                    )?);
-                }
-                continue;
-            }
-            if matches!(
-                frame.payload,
-                EventPayload::FunctionCallArgsDelta { .. } | EventPayload::FunctionCallArgsDone { .. }
-            ) && output_index.is_some_and(|index| self.active.contains_key(&index))
-            {
-                continue;
-            }
-            let is_function_done = matches!(
-                frame.payload,
-                EventPayload::OutputItemDone {
-                    item_type: SSEItemType::FunctionCall,
-                    ..
-                }
-            );
-            if is_function_done && output_index.is_some_and(|index| self.active.contains_key(&index)) {
-                let index = output_index.unwrap_or_default();
-                if self.emitted_added.insert(index) {
-                    public.push(public_stream_frame(
-                        SSEEventType::OutputItemAdded,
-                        index,
-                        self.active.get(&index).ok_or_else(invalid_upstream_search_call)?,
-                    )?);
-                }
-                if let Some(done) = self.completed.remove(&index) {
-                    public.push(public_stream_frame(SSEEventType::OutputItemDone, index, &done)?);
-                }
-                self.active.remove(&index);
-                self.argument_bytes.remove(&index);
-                continue;
-            }
-            public.push(frame);
-        }
-        Ok(public)
-    }
-
-    pub(crate) fn finish(&self) -> Result<(), ToolError> {
-        let has_unfinished_active = self
-            .active
-            .keys()
-            .any(|output_index| !self.completed.contains_key(output_index));
-        if !self.terminal_failure && (has_unfinished_active || !self.pending.is_empty()) {
-            return Err(invalid_upstream_search_call());
-        }
-        Ok(())
-    }
-
-    pub(crate) fn unfinished_item_ids(&self) -> &HashSet<String> {
-        &self.unfinished_item_ids
-    }
-
-    pub(crate) fn canonical_call(&self, internal_item_id: &str) -> Option<&ToolSearchCall> {
-        self.canonical_calls.get(internal_item_id)
-    }
+    completed_public_call(call).map(Some)
 }
 
-fn event_output_index(payload: &EventPayload) -> Option<u32> {
-    match payload {
-        EventPayload::OutputItemAdded { output_index, .. }
-        | EventPayload::OutputItemDone { output_index, .. }
-        | EventPayload::FunctionCallArgsDelta { output_index, .. }
-        | EventPayload::FunctionCallArgsDone { output_index, .. } => Some(*output_index),
-        _ => None,
+pub(crate) fn project_native_call(
+    call: &ToolSearchCall,
+    discard_incomplete: bool,
+) -> Result<Option<ToolSearchCall>, ToolError> {
+    if call.status == ToolSearchStatus::Completed {
+        return Ok(Some(call.clone()));
     }
+    if discard_incomplete {
+        return Ok(None);
+    }
+    Err(invalid_upstream_search_call())
 }
 
-fn stream_item(frame: &EventFrame) -> Result<&Value, ToolError> {
-    frame.wire.rest.get("item").ok_or_else(invalid_upstream_search_call)
+pub(crate) fn ensure_function_is_available(is_withheld: bool) -> Result<(), ToolError> {
+    if is_withheld {
+        return Err(invalid_upstream_withheld_function_call());
+    }
+    Ok(())
 }
 
-fn strict_started_function(item: &Value) -> Result<FunctionToolCall, ToolError> {
+pub(crate) fn validate_public_arguments(arguments: &str) -> Result<(), ToolError> {
+    json_object(arguments).map(|_| ())
+}
+
+pub(crate) fn strict_started_function(item: &Value) -> Result<FunctionToolCall, ToolError> {
     let function = strict_function_call(item)?;
     if function.status != MessageStatus::InProgress || !function.arguments.is_empty() {
         return Err(invalid_upstream_search_call());
@@ -1027,169 +779,47 @@ fn strict_started_function(item: &Value) -> Result<FunctionToolCall, ToolError> 
     Ok(function)
 }
 
-fn strict_function_call(item: &Value) -> Result<FunctionToolCall, ToolError> {
-    BlockingFunctionToolCall::try_from(item).and_then(FunctionToolCall::try_from)
+#[derive(Debug, Deserialize)]
+struct StrictFunctionToolCall {
+    id: String,
+    call_id: String,
+    name: String,
+    #[serde(default)]
+    namespace: Option<Value>,
+    arguments: String,
+    status: MessageStatus,
+}
+
+pub(crate) fn strict_function_call(item: &Value) -> Result<FunctionToolCall, ToolError> {
+    let call: StrictFunctionToolCall =
+        deserialize_from_value(item.clone()).map_err(|_| invalid_upstream_search_call())?;
+    if call.namespace.is_some() {
+        return Err(invalid_upstream_search_call());
+    }
+    let call = FunctionToolCall {
+        id: call.id,
+        call_id: call.call_id,
+        name: call.name,
+        namespace: None,
+        arguments: call.arguments,
+        status: call.status,
+    };
+    started_public_call(&call)?;
+    if call.status == MessageStatus::Completed {
+        json_object(&call.arguments)?;
+    }
+    Ok(call)
+}
+
+pub(crate) fn strict_native_call(item: Value) -> Result<ToolSearchCall, ToolError> {
+    if item.get("namespace").is_some_and(|namespace| !namespace.is_null()) {
+        return Err(invalid_upstream_search_call());
+    }
+    deserialize_from_value(item).map_err(|_| invalid_upstream_search_call())
 }
 
 fn json_object(arguments: &str) -> Result<Map<String, Value>, ToolError> {
     deserialize_from_str(arguments).map_err(|_| invalid_upstream_search_call())
-}
-
-fn adapt_native_stream_frame(frame: &mut EventFrame) -> Result<ToolSearchCall, ToolError> {
-    let item = stream_item(frame)?;
-    let arguments = item
-        .get("arguments")
-        .and_then(Value::as_object)
-        .ok_or_else(invalid_upstream_search_call)
-        .and_then(serialize_stream_arguments)?;
-    let item = item.clone();
-    let public = ToolSearchCall::from_blocking_output(item)?;
-    let status = match public.status {
-        ToolSearchStatus::Completed => MessageStatus::Completed,
-        ToolSearchStatus::InProgress | ToolSearchStatus::Incomplete => MessageStatus::InProgress,
-    };
-    if frame.event_type == SSEEventType::OutputItemAdded
-        && (public.status != ToolSearchStatus::InProgress || !public.arguments.is_empty())
-    {
-        return Err(invalid_upstream_search_call());
-    }
-    let function = FunctionToolCall {
-        id: public.id.clone(),
-        call_id: public.call_id.clone(),
-        name: TOOL_SEARCH_NAME.to_owned(),
-        namespace: None,
-        arguments: if frame.event_type == SSEEventType::OutputItemAdded {
-            String::new()
-        } else {
-            arguments
-        },
-        status,
-    };
-    let item =
-        serialize_to_value(&OutputItem::FunctionCall(function.clone())).map_err(|_| invalid_upstream_search_call())?;
-    frame.wire.rest.insert("item".to_owned(), item.clone());
-    frame.payload = match frame.event_type {
-        SSEEventType::OutputItemAdded => EventPayload::OutputItemAdded {
-            item_id: function.id,
-            item_type: SSEItemType::FunctionCall,
-            output_index: frame
-                .wire
-                .output_index
-                .and_then(|index| u32::try_from(index).ok())
-                .unwrap_or_default(),
-            name: Some(function.name),
-            namespace: None,
-            call_id: Some(function.call_id),
-        },
-        SSEEventType::OutputItemDone => EventPayload::OutputItemDone {
-            item_id: function.id,
-            item_type: SSEItemType::FunctionCall,
-            output_index: frame
-                .wire
-                .output_index
-                .and_then(|index| u32::try_from(index).ok())
-                .unwrap_or_default(),
-            item,
-        },
-        _ => return Err(invalid_upstream_search_call()),
-    };
-    Ok(public)
-}
-
-fn serialize_stream_arguments(arguments: &Map<String, Value>) -> Result<String, ToolError> {
-    let arguments = serialize_to_string(arguments).map_err(|_| invalid_upstream_search_call())?;
-    if arguments.len() > MAX_STREAM_FUNCTION_BYTES {
-        return Err(invalid_upstream_search_call());
-    }
-    Ok(arguments)
-}
-
-fn public_stream_frame(
-    event_type: SSEEventType,
-    output_index: u32,
-    call: &ToolSearchCall,
-) -> Result<EventFrame, ToolError> {
-    let item =
-        serialize_to_value(&OutputItem::ToolSearchCall(call.clone())).map_err(|_| invalid_upstream_search_call())?;
-    let mut rest = Map::new();
-    rest.insert("item".to_owned(), item);
-    let mut frame = EventFrame::synthetic(event_type, rest).ok_or_else(invalid_upstream_search_call)?;
-    frame.wire.output_index = Some(u64::from(output_index));
-    Ok(frame)
-}
-
-fn validate_withheld_stream_frame(
-    frame: &EventFrame,
-    withheld_function_names: &HashSet<String>,
-) -> Result<(), ToolError> {
-    let lifecycle_name = match &frame.payload {
-        EventPayload::OutputItemAdded {
-            item_type: SSEItemType::FunctionCall,
-            name: Some(name),
-            ..
-        }
-        | EventPayload::FunctionCallArgsDone { name, .. } => Some(name.as_str()),
-        EventPayload::OutputItemDone {
-            item_type: SSEItemType::FunctionCall,
-            item,
-            ..
-        } => item.get("name").and_then(Value::as_str),
-        _ => None,
-    };
-    let terminal_has_withheld = frame.event_type == SSEEventType::ResponseCompleted
-        && frame
-            .wire
-            .rest
-            .get("response")
-            .and_then(|response| response.get("output"))
-            .and_then(Value::as_array)
-            .is_some_and(|output| {
-                output.iter().any(|item| {
-                    item.get("type").and_then(Value::as_str) == Some("function_call")
-                        && item
-                            .get("name")
-                            .and_then(Value::as_str)
-                            .is_some_and(|name| withheld_function_names.contains(name))
-                })
-            });
-    if terminal_has_withheld || lifecycle_name.is_some_and(|name| withheld_function_names.contains(name)) {
-        return Err(invalid_upstream_withheld_function_call());
-    }
-    Ok(())
-}
-
-fn validate_terminal_output(frame: &EventFrame, completed: bool) -> Result<(), ToolError> {
-    let Some(output) = frame
-        .wire
-        .rest
-        .get("response")
-        .and_then(|response| response.get("output"))
-        .and_then(Value::as_array)
-    else {
-        return Ok(());
-    };
-    for item in output {
-        match item.get("type").and_then(Value::as_str) {
-            Some("tool_search_call") => {
-                let call = ToolSearchCall::from_blocking_output(item.clone())?;
-                serialize_stream_arguments(&call.arguments)?;
-                if completed && call.status != ToolSearchStatus::Completed {
-                    return Err(invalid_upstream_search_call());
-                }
-            }
-            Some("function_call") if item.get("name").and_then(Value::as_str) == Some(TOOL_SEARCH_NAME) => {
-                let call = strict_function_call(item)?;
-                if call.arguments.len() > MAX_STREAM_FUNCTION_BYTES {
-                    return Err(invalid_upstream_search_call());
-                }
-                if completed && call.status != MessageStatus::Completed {
-                    return Err(invalid_upstream_search_call());
-                }
-            }
-            _ => {}
-        }
-    }
-    Ok(())
 }
 
 pub(crate) fn validate_blocking_response(
@@ -1220,7 +850,7 @@ pub(crate) fn validate_blocking_response(
         }
         match item.get("type").and_then(Value::as_str) {
             Some("tool_search_call") => {
-                let call = ToolSearchCall::from_blocking_output(item.clone())?;
+                let call = strict_native_call(item.clone())?;
                 if !discard_unfinished && call.status != ToolSearchStatus::Completed {
                     return Err(invalid_upstream_search_call());
                 }
@@ -2110,10 +1740,6 @@ mod tests {
         param
     }
 
-    fn sse_line(value: &Value) -> String {
-        format!("data: {value}")
-    }
-
     #[test]
     fn handler_validates_and_normalizes_exactly_one_function() {
         let param = param(json!({
@@ -2160,6 +1786,68 @@ mod tests {
                 "strict": true
             }])
         );
+    }
+
+    #[test]
+    fn synthetic_public_call_construction_is_validated_in_tool_layer() {
+        let valid = FunctionToolCall {
+            id: "fc_search".to_owned(),
+            call_id: "call_search".to_owned(),
+            name: TOOL_SEARCH_NAME.to_owned(),
+            namespace: None,
+            arguments: r#"{"query":"weather"}"#.to_owned(),
+            status: MessageStatus::Completed,
+        };
+        let started = started_public_call(&valid).expect("valid started call");
+        assert_eq!(started.id, "tsc_search");
+        assert_eq!(started.status, ToolSearchStatus::InProgress);
+        let completed = completed_public_call(&valid).expect("valid completed call");
+        assert_eq!(completed.arguments["query"], "weather");
+
+        for invalid in [
+            FunctionToolCall {
+                name: "ordinary".to_owned(),
+                ..valid.clone()
+            },
+            FunctionToolCall {
+                namespace: Some("catalog".to_owned()),
+                ..valid.clone()
+            },
+            FunctionToolCall {
+                arguments: "[]".to_owned(),
+                ..valid.clone()
+            },
+            FunctionToolCall {
+                status: MessageStatus::InProgress,
+                ..valid.clone()
+            },
+        ] {
+            assert!(completed_public_call(&invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn terminal_projection_rejects_or_discards_unfinished_calls() {
+        let synthetic = FunctionToolCall {
+            id: "fc_search".to_owned(),
+            call_id: "call_search".to_owned(),
+            name: TOOL_SEARCH_NAME.to_owned(),
+            namespace: None,
+            arguments: String::new(),
+            status: MessageStatus::InProgress,
+        };
+        assert!(project_synthetic_call(&synthetic, false, true).is_err());
+        assert!(project_synthetic_call(&synthetic, true, true).unwrap().is_none());
+
+        let native = ToolSearchCall {
+            id: "tsc_search".to_owned(),
+            call_id: "call_search".to_owned(),
+            execution: crate::types::tools::ToolSearchExecution::Client,
+            arguments: Map::new(),
+            status: ToolSearchStatus::Incomplete,
+        };
+        assert!(project_native_call(&native, false).is_err());
+        assert!(project_native_call(&native, true).unwrap().is_none());
     }
 
     #[test]
@@ -2287,51 +1975,6 @@ mod tests {
         ToolRegistry::default()
             .validate_blocking_response(&ordinary)
             .expect("inactive ordinary function keeps generic compatibility defaults");
-    }
-
-    #[test]
-    fn stream_rejects_oversized_native_done_arguments() {
-        let mut stream = ToolSearchStreamState::default();
-        let line = sse_line(&json!({
-            "type": "response.output_item.done",
-            "output_index": 0,
-            "item": {
-                "type": "tool_search_call",
-                "id": "provider-native-id",
-                "call_id": "call_search",
-                "execution": "client",
-                "status": "completed",
-                "arguments": {"query": "x".repeat(MAX_STREAM_FUNCTION_BYTES)}
-            }
-        }));
-
-        assert!(matches!(
-            stream.prepare_line(&line, false, &HashSet::new()),
-            Err(ToolError::InvalidUpstreamToolSearch)
-        ));
-    }
-
-    #[test]
-    fn stream_rejects_oversized_synthetic_done_arguments() {
-        let mut stream = ToolSearchStreamState::default();
-        let arguments = format!("{{\"query\":\"{}\"}}", "x".repeat(MAX_STREAM_FUNCTION_BYTES));
-        let line = sse_line(&json!({
-            "type": "response.output_item.done",
-            "output_index": 0,
-            "item": {
-                "type": "function_call",
-                "id": "fc_search",
-                "call_id": "call_search",
-                "name": "tool_search",
-                "status": "completed",
-                "arguments": arguments
-            }
-        }));
-
-        assert!(matches!(
-            stream.prepare_line(&line, true, &HashSet::new()),
-            Err(ToolError::InvalidUpstreamToolSearch)
-        ));
     }
 
     #[test]

@@ -12,18 +12,17 @@ use super::function::insert_function_entry;
 use super::mcp::handler::{McpToolMap, McpToolRef};
 use super::mcp::registry::insert_discovered_mcp_entry;
 use super::tool_search::{
-    TOOL_SEARCH_NAME, ToolSearchStreamState, ensure_request_prepared, insert_tool_search_entry,
-    validate_blocking_response,
+    TOOL_SEARCH_NAME, ensure_request_prepared, insert_tool_search_entry, validate_blocking_response,
 };
 use super::web_search::insert_web_search_entry;
 use super::{CodexNamespaceHandler, GatewayExecutor, McpHandler, NamespaceMap, ToolError, ToolOutput, ToolSearchState};
 use crate::events::WireEvent;
 
-use crate::types::event::{MessageStatus, ResponseStatus};
+use crate::types::event::ResponseStatus;
 use crate::types::io::OutputItem;
 use crate::types::io::output::{FunctionToolCall, McpListTools};
 use crate::types::request_response::RequestPayload;
-use crate::types::tools::{CodeInterpreterToolParam, FileSearchToolParam, ResponsesTool, ToolSearchStatus};
+use crate::types::tools::{CodeInterpreterToolParam, FileSearchToolParam, ResponsesTool};
 use crate::utils::common::{serialize_to_value, serialize_to_value_or_custom_default};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -176,9 +175,6 @@ pub struct ToolRegistry {
     /// Prepared public/private tool-search projection for this request.
     tool_search: Option<Box<ToolSearchState>>,
 
-    /// Per-round response adaptation for synthetic and native search calls.
-    tool_search_stream: Box<ToolSearchStreamState>,
-
     /// Built once from the declared tools, so final payload and streaming event
     /// restoration don't rebuild it on every call.
     namespace_map: Option<NamespaceMap>,
@@ -301,7 +297,6 @@ impl ToolRegistry {
         Ok(Self {
             entries,
             tool_search: None,
-            tool_search_stream: Box::default(),
             namespace_map,
             custom_tool_map,
             mcp_tool_map,
@@ -387,75 +382,35 @@ impl ToolRegistry {
         ensure_request_prepared(request, self.tool_search.is_some())
     }
 
-    pub(crate) fn begin_stream_response(&mut self) {
-        self.tool_search_stream.reset();
-    }
-
-    pub(crate) fn prepare_stream_line(&mut self, line: &str) -> Result<Option<String>, ToolError> {
-        let empty = HashSet::new();
-        let state = self.tool_search.as_deref();
-        self.tool_search_stream.prepare_line(
-            line,
-            state.is_some_and(ToolSearchState::is_active),
-            state.map_or(&empty, ToolSearchState::withheld_function_names),
-        )
-    }
-
-    pub(crate) fn translate_stream_frames(
-        &mut self,
-        frames: Vec<crate::events::EventFrame>,
-    ) -> Result<Vec<crate::events::EventFrame>, ToolError> {
-        self.tool_search_stream.translate_frames(frames)
-    }
-
-    pub(crate) fn finish_stream_response(&self) -> Result<(), ToolError> {
-        self.tool_search_stream.finish()
-    }
-
     pub(crate) fn normalize_response_output(
         &self,
         output: &mut Vec<OutputItem>,
         status: ResponseStatus,
+        unfinished_stream_item_ids: &HashSet<String>,
     ) -> Result<(), ToolError> {
         let discard_unfinished = matches!(status, ResponseStatus::Error | ResponseStatus::Incomplete);
         let mut normalized = Vec::with_capacity(output.len());
         for item in std::mem::take(output) {
             match item {
                 OutputItem::FunctionCall(call)
-                    if discard_unfinished && self.tool_search_stream.unfinished_item_ids().contains(&call.id) => {}
-                OutputItem::FunctionCall(call)
-                    if self
-                        .tool_search
-                        .as_ref()
-                        .is_some_and(|state| state.withheld_function_names().contains(&call.name)) =>
-                {
-                    return Err(super::tool_search::invalid_upstream_withheld_function_call());
-                }
-                OutputItem::FunctionCall(call)
-                    if call.name == TOOL_SEARCH_NAME
-                        && (self.tool_search_stream.canonical_call(&call.id).is_some()
-                            || (self.tool_search.as_deref().is_some_and(ToolSearchState::is_active)
-                                && self
-                                    .entries
-                                    .get(TOOL_SEARCH_NAME)
-                                    .is_none_or(|entry| entry.tool_type == ToolType::ToolSearch))) =>
-                {
-                    if call.status != MessageStatus::Completed {
-                        if discard_unfinished {
-                            continue;
+                    if discard_unfinished && unfinished_stream_item_ids.contains(&call.id) => {}
+                OutputItem::FunctionCall(call) => {
+                    super::tool_search::ensure_function_is_available(self.is_withheld_function(&call.name))?;
+                    if self.tool_type(&call.name) == ToolType::ToolSearch {
+                        if let Some(public) = super::tool_search::project_synthetic_call(
+                            &call,
+                            discard_unfinished,
+                            unfinished_stream_item_ids.contains(&call.id),
+                        )? {
+                            normalized.push(OutputItem::ToolSearchCall(public));
                         }
-                        return Err(super::tool_search::invalid_upstream_search_call());
+                    } else {
+                        normalized.push(OutputItem::FunctionCall(call));
                     }
-                    let public = self
-                        .tool_search_stream
-                        .canonical_call(&call.id)
-                        .cloned()
-                        .map_or_else(|| crate::types::io::ToolSearchCall::try_from(&call), Ok)?;
-                    normalized.push(OutputItem::ToolSearchCall(public));
                 }
-                OutputItem::ToolSearchCall(call) if call.status != ToolSearchStatus::Completed => {
-                    if !discard_unfinished {
-                        return Err(super::tool_search::invalid_upstream_search_call());
+                OutputItem::ToolSearchCall(call) => {
+                    if let Some(public) = super::tool_search::project_native_call(&call, discard_unfinished)? {
+                        normalized.push(OutputItem::ToolSearchCall(public));
                     }
                 }
                 item => normalized.push(item),
@@ -492,18 +447,45 @@ impl ToolRegistry {
         self.entries.get(tool_name)
     }
 
-    pub(crate) fn tool_type_map(&self) -> HashMap<String, ToolType> {
-        let mut tool_types = self
-            .entries
-            .iter()
-            .map(|(name, entry)| (name.clone(), entry.tool_type))
-            .collect::<HashMap<_, _>>();
-        if self.tool_search.as_deref().is_some_and(ToolSearchState::is_active) {
-            tool_types
-                .entry(TOOL_SEARCH_NAME.to_owned())
-                .or_insert(ToolType::ToolSearch);
+    pub(crate) fn tool_type(&self, name: &str) -> ToolType {
+        if name == TOOL_SEARCH_NAME && self.tool_search.as_deref().is_some_and(ToolSearchState::is_active) {
+            return ToolType::ToolSearch;
         }
-        tool_types
+        self.entries
+            .get(name)
+            .map_or(ToolType::Function, |entry| entry.tool_type)
+    }
+
+    pub(crate) fn is_withheld_function(&self, name: &str) -> bool {
+        self.tool_search
+            .as_deref()
+            .is_some_and(|state| state.withheld_function_names().contains(name))
+    }
+
+    pub(crate) fn tool_search_is_active(&self) -> bool {
+        self.tool_type(TOOL_SEARCH_NAME) == ToolType::ToolSearch
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_tool_types(tool_types: HashMap<String, ToolType>) -> Self {
+        let entries = tool_types
+            .into_iter()
+            .map(|(name, tool_type)| {
+                (
+                    name,
+                    ToolEntry {
+                        tool_type,
+                        config: Value::Null,
+                        server_label: None,
+                        handler: None,
+                    },
+                )
+            })
+            .collect();
+        Self {
+            entries,
+            ..Self::default()
+        }
     }
 
     #[must_use]
@@ -620,6 +602,7 @@ mod tests {
     use super::*;
     use crate::tool::executors::GatewayExecutorRegistration;
     use crate::tool::mcp::{McpDiscoveredHandler, McpHandler};
+    use crate::tool::tool_search;
     use crate::types::event::MessageStatus;
     use crate::types::tools::McpDiscoveredToolParam;
     use crate::utils::common::serialize_to_value;
@@ -716,7 +699,7 @@ mod tests {
             "tool search has no gateway handler"
         );
 
-        let output = OutputItem::ToolSearchCall(crate::types::io::ToolSearchCall::try_from(&call).unwrap());
+        let output = OutputItem::ToolSearchCall(tool_search::completed_public_call(&call).unwrap());
         assert_eq!(
             serialize_to_value(&output).unwrap(),
             serde_json::json!({
@@ -750,15 +733,15 @@ mod tests {
             "status": "completed"
         }))
         .unwrap();
-        assert_eq!(registry.tool_type_map().get("tool_search"), Some(&ToolType::ToolSearch));
-        assert!(crate::types::io::ToolSearchCall::try_from(&valid).is_ok());
+        assert_eq!(registry.tool_type("tool_search"), ToolType::ToolSearch);
+        assert!(tool_search::completed_public_call(&valid).is_ok());
 
         let malformed: FunctionToolCall = serde_json::from_value(serde_json::json!({
             "type": "function_call", "id": "fc_search", "call_id": "call_search",
             "name": "tool_search", "namespace": null, "arguments": "{}", "status": "in_progress"
         }))
         .unwrap();
-        assert!(crate::types::io::ToolSearchCall::try_from(&malformed).is_err());
+        assert!(tool_search::completed_public_call(&malformed).is_err());
     }
 
     #[tokio::test]
@@ -772,7 +755,7 @@ mod tests {
         let registry = ToolRegistry::build_with_handlers(&mut tools, &mut GatewayExecutors::default())
             .await
             .unwrap();
-        assert_eq!(registry.tool_type_map().get("tool_search"), Some(&ToolType::Function));
+        assert_eq!(registry.tool_type("tool_search"), ToolType::Function);
     }
 
     #[tokio::test]

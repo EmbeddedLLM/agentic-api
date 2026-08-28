@@ -53,7 +53,7 @@ pub(super) async fn fetch_blocking_payload(
         ctx.original_request.instructions.as_deref(),
     );
     let status = payload.status.parse().unwrap_or_default();
-    registry.normalize_response_output(&mut payload.output, status)?;
+    registry.normalize_response_output(&mut payload.output, status, &std::collections::HashSet::new())?;
     ctx.inject_ids(&mut payload);
 
     Ok(payload)
@@ -81,26 +81,14 @@ pub(super) async fn fetch_stream_payload(
         auth.map(str::to_owned),
         exec_ctx.streaming_timeout,
     ));
-    let tool_types = registry.tool_type_map();
     let mut acc = ResponseAccumulator::new(ctx.response_id.clone(), ctx.conversation_id.clone());
-    let mut function_sse = FunctionSseTranslator::new(tool_types);
-    registry.begin_stream_response();
+    let mut function_sse = FunctionSseTranslator::new(registry);
     let mut defer_from_output_index = None;
     let mut deferred_events = Vec::new();
     let mut deferred_bytes = 0;
     while let Some(line_result) = line_stream.next().await {
         let line = line_result?;
-        let adapted_line = registry.prepare_stream_line(&line)?;
-        let line = adapted_line.as_deref().unwrap_or(&line);
-        if stream.is_none() {
-            if let Some(frame) = acc.process_sse_line(line) {
-                log_upstream_failure(&frame, &ctx.response_id);
-            }
-            continue;
-        }
-        if let Some(translation) = acc.process_sse_line_with_translator(line, &mut function_sse)? {
-            let mut translation = translation;
-            translation.frames = registry.translate_stream_frames(translation.frames)?;
+        if let Some(translation) = acc.process_sse_line_with_translator(&line, &mut function_sse)? {
             let previous_defer_from_output_index = defer_from_output_index;
             defer_from_output_index = translation.defer_from_output_index.map(u64::from);
             for frame in &translation.frames {
@@ -140,7 +128,7 @@ pub(super) async fn fetch_stream_payload(
             }
         }
     }
-    registry.finish_stream_response()?;
+    let function_sse_outcome = function_sse.finish()?;
     acc.finish_stream();
     let mut payload = acc.finalize(
         &ctx.enriched_request.model,
@@ -148,7 +136,11 @@ pub(super) async fn fetch_stream_payload(
         ctx.original_request.instructions.as_deref(),
     );
     let status = payload.status.parse().unwrap_or_default();
-    registry.normalize_response_output(&mut payload.output, status)?;
+    registry.normalize_response_output(
+        &mut payload.output,
+        status,
+        &function_sse_outcome.unfinished_tool_search_item_ids,
+    )?;
     ctx.inject_ids(&mut payload);
     Ok(StreamPayload {
         payload,
