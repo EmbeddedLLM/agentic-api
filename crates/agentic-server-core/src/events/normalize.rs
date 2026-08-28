@@ -51,8 +51,10 @@ fn extract_payload(event_type: SSEEventType, json: &Value) -> EventPayload {
         SSEEventType::CustomToolCallInputDelta => extract_custom_tool_call_input_delta(json),
         SSEEventType::CustomToolCallInputDone => extract_custom_tool_call_input_done(json),
 
-        SSEEventType::ReasoningTextDelta | SSEEventType::ReasoningSummaryTextDelta => extract_reasoning_delta(json),
-        SSEEventType::ReasoningTextDone | SSEEventType::ReasoningSummaryTextDone => extract_reasoning_done(json),
+        SSEEventType::ReasoningTextDelta => extract_reasoning_text_delta(json),
+        SSEEventType::ReasoningTextDone => extract_reasoning_text_done(json),
+        SSEEventType::ReasoningSummaryTextDelta => extract_reasoning_summary_text_delta(json),
+        SSEEventType::ReasoningSummaryTextDone => extract_reasoning_summary_text_done(json),
 
         SSEEventType::ContentPartAdded
         | SSEEventType::ContentPartDone
@@ -173,16 +175,38 @@ fn extract_custom_tool_call_input_done(json: &Value) -> EventPayload {
     }
 }
 
-fn extract_reasoning_delta(json: &Value) -> EventPayload {
-    EventPayload::ReasoningDelta {
+fn extract_reasoning_text_delta(json: &Value) -> EventPayload {
+    EventPayload::ReasoningTextDelta {
         delta: json_str(json, "delta"),
         item_id: json_str(json, "item_id"),
+        output_index: json_u32(json, "output_index"),
+        content_index: json_u32(json, "content_index"),
     }
 }
 
-fn extract_reasoning_done(json: &Value) -> EventPayload {
-    EventPayload::ReasoningDone {
+fn extract_reasoning_text_done(json: &Value) -> EventPayload {
+    EventPayload::ReasoningTextDone {
         text: json_str(json, "text"),
         item_id: json_str(json, "item_id"),
+        output_index: json_u32(json, "output_index"),
+        content_index: json_u32(json, "content_index"),
+    }
+}
+
+fn extract_reasoning_summary_text_delta(json: &Value) -> EventPayload {
+    EventPayload::ReasoningSummaryTextDelta {
+        delta: json_str(json, "delta"),
+        item_id: json_str(json, "item_id"),
+        output_index: json_u32(json, "output_index"),
+        summary_index: json_u32(json, "summary_index"),
+    }
+}
+
+fn extract_reasoning_summary_text_done(json: &Value) -> EventPayload {
+    EventPayload::ReasoningSummaryTextDone {
+        text: json_str(json, "text"),
+        item_id: json_str(json, "item_id"),
+        output_index: json_u32(json, "output_index"),
+        summary_index: json_u32(json, "summary_index"),
     }
 }
