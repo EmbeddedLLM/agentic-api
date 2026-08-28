@@ -270,7 +270,7 @@ impl CatalogEntry {
 ///
 /// The state deliberately has no `Serialize` implementation and its `Debug`
 /// output contains counts only.
-pub struct ToolSearchState {
+pub(crate) struct ToolSearchState {
     activity: ToolSearchActivity,
     has_completed_search: bool,
     public_effective_tools: Option<Vec<ResponsesTool>>,
@@ -334,7 +334,8 @@ impl ToolSearchState {
     /// Returns [`ToolError::Config`] for an invalid public declaration,
     /// call/output ordering or linkage error, duplicate/conflicting definition,
     /// or normalized-name collision.
-    pub fn build(request: &RequestPayload) -> Result<Self, ToolError> {
+    #[cfg(test)]
+    pub(crate) fn build(request: &RequestPayload) -> Result<Self, ToolError> {
         Self::build_with_loaded_tools(request, &[], false)
     }
 
@@ -346,8 +347,9 @@ impl ToolSearchState {
     ///
     /// # Errors
     ///
-    /// Returns [`ToolError::Config`] under the same conditions as [`Self::build`].
-    pub fn build_with_loaded_tools(
+    /// Returns [`ToolError::Config`] for invalid declarations, history,
+    /// definitions, or normalized-name collisions.
+    pub(crate) fn build_with_loaded_tools(
         request: &RequestPayload,
         restored_loaded_tools: &[ResponsesTool],
         restore_only_declared: bool,
@@ -443,12 +445,13 @@ impl ToolSearchState {
     }
 
     #[must_use]
-    pub const fn is_active(&self) -> bool {
+    pub(crate) const fn is_active(&self) -> bool {
         matches!(self.activity, ToolSearchActivity::Active)
     }
 
     #[must_use]
-    pub fn public_effective_tools(&self) -> Option<&[ResponsesTool]> {
+    #[cfg(test)]
+    pub(crate) fn public_effective_tools(&self) -> Option<&[ResponsesTool]> {
         self.public_effective_tools.as_deref()
     }
 
@@ -470,13 +473,15 @@ impl ToolSearchState {
     /// This remains separate from `public_effective_tools`: an initially
     /// deferred definition stays deferred publicly even after becoming loaded.
     #[must_use]
-    pub fn loaded_public_tools(&self) -> &[ResponsesTool] {
+    #[cfg(test)]
+    pub(crate) fn loaded_public_tools(&self) -> &[ResponsesTool] {
         &self.loaded_public_tools
     }
 
     /// Private tool-search declaration used by request-scoped registry and upstream normalization.
     #[must_use]
-    pub const fn synthetic_tool_search(&self) -> Option<&ToolSearchToolParam> {
+    #[cfg(test)]
+    pub(crate) const fn synthetic_tool_search(&self) -> Option<&ToolSearchToolParam> {
         self.synthetic_tool_search.as_ref()
     }
 
@@ -493,7 +498,7 @@ impl ToolSearchState {
     ///
     /// Returns [`ToolError::Config`] when the effective tool choice conflicts
     /// with the prepared private tool set.
-    pub fn prepare_inference_request(&mut self, request: &mut RequestPayload) -> Result<(), ToolError> {
+    pub(crate) fn prepare_inference_request(&mut self, request: &mut RequestPayload) -> Result<(), ToolError> {
         validate_effective_tool_choice(request.tool_choice.as_ref(), &self.withheld_function_names)?;
         let input = self.private_upstream_input.take().ok_or_else(|| {
             ToolError::Config("tool-search private inference input has already been consumed".to_owned())
@@ -552,7 +557,6 @@ fn request_contains_tool_search_state(request: &RequestPayload, input: &Response
             .as_deref()
             .is_some_and(|tools| tools.iter().any(tool_activates_tool_search))
 }
-
 
 pub(crate) fn request_has_tool_search_state(request: &RequestPayload) -> bool {
     request_contains_tool_search_state(request, &request.input)

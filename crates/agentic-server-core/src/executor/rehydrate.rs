@@ -248,7 +248,7 @@ mod tests {
         assert!(
             registry
                 .tool_search_state()
-                .is_some_and(crate::tool::ToolSearchState::is_active)
+                .is_some_and(crate::tool::tool_search::ToolSearchState::is_active)
         );
         let upstream = ctx
             .enriched_request
