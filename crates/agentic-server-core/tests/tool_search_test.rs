@@ -1,6 +1,11 @@
+mod support;
+
+use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::fmt::Write as _;
+use std::fs;
 use std::future::Future;
+use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1161,4 +1166,187 @@ async fn dynamic_namespace_forward_references_fail_before_inference() {
         assert_eq!(error.http_status(), http::StatusCode::BAD_REQUEST);
     }
     assert!(requests.lock().await.is_empty(), "inference must not run");
+}
+
+fn visit_recorded_values(value: &Value, visitor: &mut impl FnMut(&serde_json::Map<String, Value>)) {
+    match value {
+        Value::Object(object) => {
+            visitor(object);
+            for child in object.values() {
+                visit_recorded_values(child, visitor);
+            }
+        }
+        Value::Array(array) => {
+            for child in array {
+                visit_recorded_values(child, visitor);
+            }
+        }
+        Value::String(text) => {
+            if matches!(text.trim().as_bytes().first(), Some(b'{' | b'['))
+                && let Ok(decoded) = serde_json::from_str::<Value>(text)
+            {
+                visit_recorded_values(&decoded, visitor);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
+    }
+}
+
+fn validate_gateway_cassette_has_no_private_search_projection(raw: &Value) -> Result<(), String> {
+    let mut public_search_call_ids = HashSet::new();
+    let mut search_item_ids = HashSet::new();
+    visit_recorded_values(raw, &mut |object| {
+        let item_type = object.get("type").and_then(Value::as_str);
+        if item_type == Some("tool_search_call") {
+            if let Some(call_id) = object.get("call_id").and_then(Value::as_str) {
+                public_search_call_ids.insert(call_id.to_owned());
+            }
+            if let Some(item_id) = object.get("id").and_then(Value::as_str) {
+                search_item_ids.insert(item_id.to_owned());
+            }
+        } else if item_type == Some("function_call")
+            && object.get("name").and_then(Value::as_str) == Some("tool_search")
+            && let Some(item_id) = object.get("id").and_then(Value::as_str)
+        {
+            search_item_ids.insert(item_id.to_owned());
+        }
+    });
+
+    let mut violation = None;
+    visit_recorded_values(raw, &mut |object| {
+        let item_type = object.get("type").and_then(Value::as_str);
+        let name = object.get("name").and_then(Value::as_str);
+        if matches!(item_type, Some("function" | "function_call")) && name == Some("tool_search") {
+            violation.get_or_insert_with(|| {
+                format!("public gateway cassette leaked the private synthetic search projection: {object:?}")
+            });
+        } else if item_type == Some("function_call_output") {
+            let call_id = object.get("call_id").and_then(Value::as_str);
+            if call_id.is_some_and(|call_id| public_search_call_ids.contains(call_id)) {
+                violation.get_or_insert_with(|| {
+                    format!("public gateway cassette leaked a normalized search function output: {object:?}")
+                });
+            }
+        } else if matches!(
+            item_type,
+            Some("response.function_call_arguments.delta" | "response.function_call_arguments.done")
+        ) {
+            let item_id = object.get("item_id").and_then(Value::as_str);
+            if item_id.is_some_and(|item_id| search_item_ids.contains(item_id)) {
+                violation.get_or_insert_with(|| {
+                    format!("public gateway cassette leaked normalized search argument events: {object:?}")
+                });
+            }
+        }
+    });
+    violation.map_or(Ok(()), Err)
+}
+
+#[test]
+fn provider_parity_matrix_is_exact_and_gateway_has_no_private_search_leaks() {
+    const FLOW_CASSETTES: [(&str, bool); 7] = [
+        ("tool-search-openai-reference-gpt-5.6-nonstreaming.yaml", false),
+        ("tool-search-openai-reference-gpt-5.6-streaming.yaml", false),
+        (
+            "tool-search-direct-vllm-Qwen-Qwen3.6-35B-A3B-FP8-nonstreaming.yaml",
+            false,
+        ),
+        ("tool-search-direct-vllm-Qwen-Qwen3.6-35B-A3B-FP8-streaming.yaml", false),
+        ("tool-search-gateway-Qwen-Qwen3.6-35B-A3B-FP8-nonstreaming.yaml", true),
+        ("tool-search-gateway-Qwen-Qwen3.6-35B-A3B-FP8-streaming.yaml", true),
+        ("tool-search-gateway-Qwen-Qwen3.6-35B-A3B-FP8-websocket.yaml", true),
+    ];
+
+    let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/cassettes/tool_search");
+    let expected_names = FLOW_CASSETTES
+        .iter()
+        .map(|(filename, _)| (*filename).to_owned())
+        .collect::<HashSet<_>>();
+    let actual_names = fs::read_dir(&directory)
+        .expect("tool-search cassette directory")
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let path = entry.path();
+            if path.extension().and_then(|extension| extension.to_str()) != Some("yaml") {
+                return None;
+            }
+            let cassette = support::load_cassette(path.to_str().expect("cassette path"));
+            (cassette.turns.len() == 4).then(|| {
+                path.file_name()
+                    .and_then(|filename| filename.to_str())
+                    .expect("cassette filename")
+                    .to_owned()
+            })
+        })
+        .collect::<HashSet<_>>();
+    assert_eq!(
+        actual_names, expected_names,
+        "the final seven-cassette flow matrix must be exact"
+    );
+
+    for (filename, gateway) in FLOW_CASSETTES {
+        let path = directory.join(filename);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            assert_eq!(
+                fs::metadata(&path).expect("cassette metadata").permissions().mode() & 0o111,
+                0,
+                "checked-in cassette must not be executable: {filename}"
+            );
+        }
+        if gateway {
+            let raw =
+                serde_yaml::from_str::<Value>(&fs::read_to_string(&path).expect("gateway cassette should be readable"))
+                    .expect("gateway cassette YAML");
+            let raw_turns = raw["turns"].as_array().expect("raw gateway cassette turns");
+            let cassette = support::load_cassette(path.to_str().expect("gateway cassette path"));
+            let mut decoded_surfaces = Vec::new();
+            for (raw_turn, turn) in raw_turns.iter().zip(&cassette.turns) {
+                decoded_surfaces.push(raw_turn["request"]["body"].clone());
+                if let Some(body) = &turn.response.body {
+                    decoded_surfaces.push(body.clone());
+                }
+                if turn.response.sse.is_some() {
+                    decoded_surfaces.extend(support::recorded_named_sse_events(turn));
+                }
+                if let Some(websocket) = raw_turn["response"]["websocket"].as_array() {
+                    decoded_surfaces.extend(websocket.iter().cloned());
+                }
+            }
+            validate_gateway_cassette_has_no_private_search_projection(&Value::Array(decoded_surfaces))
+                .unwrap_or_else(|error| panic!("{error}"));
+        }
+    }
+}
+
+#[test]
+fn provider_parity_non_leak_detector_rejects_nested_private_shapes() {
+    let cases = [
+        json!({"response": {"tools": [{"type": "function", "name": "tool_search"}]}}),
+        json!({"response": {"output": [{
+            "type": "function_call", "id": "fc_private", "call_id": "call_search", "name": "tool_search"
+        }]}}),
+        json!({
+            "request": {"input": [{
+                "type": "tool_search_call", "id": "tsc_public", "call_id": "call_search"
+            }, {
+                "type": "function_call_output", "call_id": "call_search", "output": "{}"
+            }]}
+        }),
+        json!([{
+            "type": "response.output_item.added",
+            "item": {"type": "tool_search_call", "id": "tsc_public", "call_id": "call_search"}
+        }, {
+            "type": "response.function_call_arguments.delta", "item_id": "tsc_public", "delta": "{}"
+        }]),
+        json!([r#"{"type":"function_call","id":"fc_ws","call_id":"call_ws","name":"tool_search"}"#]),
+    ];
+
+    for case in cases {
+        assert!(
+            validate_gateway_cassette_has_no_private_search_projection(&case).is_err(),
+            "private nested shape should be rejected: {case}"
+        );
+    }
 }

@@ -14,9 +14,6 @@ pub mod registry;
 pub mod tool_search;
 pub mod web_search;
 
-#[cfg(test)]
-mod tool_search_state_tests;
-
 pub use codex::{CodexNamespaceHandler, NamespaceMap, model_visible_namespace_member_name};
 pub use custom::CustomHandler;
 pub use executors::{GatewayExecutorRegistration, GatewayExecutors};
@@ -24,5 +21,5 @@ pub use function::FunctionHandler;
 pub use handler::{GatewayExecutor, ToolError, ToolHandler, ToolOutput};
 pub use mcp::{McpClient, McpClientPool, McpDiscoveredHandler, McpError, McpHandler, McpOperation, McpServerEntry};
 pub use registry::{GatewayDispatchResult, ToolEntry, ToolRegistry, ToolType};
-pub use tool_search::ToolSearchHandler;
+pub use tool_search::{ToolSearchHandler, ToolSearchState};
 pub use web_search::WebSearchHandler;

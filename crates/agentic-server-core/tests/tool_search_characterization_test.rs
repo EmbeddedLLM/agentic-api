@@ -1,12 +1,12 @@
 mod support;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 
 use agentic_core::RequestPayload;
-use agentic_core::tool::model_visible_namespace_member_name;
+use agentic_core::tool::{ToolSearchState, model_visible_namespace_member_name};
 use serde_json::Value;
 
 #[derive(Clone, Copy)]
@@ -678,10 +678,33 @@ fn fixture_json(directory: &Path, filename: &str) -> Value {
     .unwrap_or_else(|error| panic!("{filename} should be valid JSON: {error}"))
 }
 
+fn lowered_fixture_tools(tools: &Value, input: &Value) -> Value {
+    let mut request: RequestPayload = serde_json::from_value(serde_json::json!({
+        "model": "fixture-model",
+        "input": input,
+        "tools": tools,
+        "store": false,
+        "stream": false,
+        "parallel_tool_calls": false
+    }))
+    .expect("fixture should deserialize as a public request");
+    let mut state = ToolSearchState::build(&request).expect("fixture should build tool-search state");
+    state
+        .prepare_inference_request(&mut request)
+        .expect("fixture should prepare private inference state");
+    let upstream = request
+        .to_upstream_request(false)
+        .expect("fixture should lower into an upstream request");
+    serde_json::to_value(upstream).expect("upstream fixture should serialize")["tools"].clone()
+}
+
 #[test]
-fn mixed_catalog_tool_choice_fixtures_match_public_types() {
+fn mixed_catalog_fixtures_match_private_tool_search_lowering() {
     let directory = tool_search_cassette_directory();
     let public_tools = fixture_json(&directory, "openai_tools.json");
+    let returned_tools = fixture_json(&directory, "returned_tools.json");
+    let expected_initial = fixture_json(&directory, "vllm_initial_tools.json");
+    let expected_loaded = fixture_json(&directory, "vllm_tools_after_search.json");
     let openai_tool_choices = fixture_json(&directory, "openai_tool_choice_sequence.json");
     let gateway_tool_choices = fixture_json(&directory, "gateway_tool_choice_sequence.json");
 
@@ -699,6 +722,34 @@ fn mixed_catalog_tool_choice_fixtures_match_public_types() {
         }))
         .expect("every public tool-choice fixture should match the typed request model");
     }
+
+    assert_eq!(
+        lowered_fixture_tools(&public_tools, &serde_json::json!("find weather and timezone tools")),
+        expected_initial
+    );
+    assert_eq!(
+        lowered_fixture_tools(
+            &public_tools,
+            &serde_json::json!([
+                {
+                    "type": "tool_search_call",
+                    "id": "tsc_fixture",
+                    "call_id": "call_fixture",
+                    "execution": "client",
+                    "status": "completed",
+                    "arguments": {"query": "weather and timezone"}
+                },
+                {
+                    "type": "tool_search_output",
+                    "call_id": "call_fixture",
+                    "execution": "client",
+                    "status": "completed",
+                    "tools": returned_tools
+                }
+            ])
+        ),
+        expected_loaded
+    );
 }
 
 fn public_semantic_fixture(returned_tools: &Value) -> (Vec<Value>, Vec<Value>) {
@@ -1418,80 +1469,6 @@ const PROVIDER_PARITY_CASSETTES: [&str; 7] = [
     GATEWAY_WEBSOCKET_CASSETTE,
 ];
 
-fn visit_recorded_values(value: &Value, visitor: &mut impl FnMut(&serde_json::Map<String, Value>)) {
-    match value {
-        Value::Object(object) => {
-            visitor(object);
-            for child in object.values() {
-                visit_recorded_values(child, visitor);
-            }
-        }
-        Value::Array(array) => {
-            for child in array {
-                visit_recorded_values(child, visitor);
-            }
-        }
-        Value::String(text) => {
-            if matches!(text.trim().as_bytes().first(), Some(b'{' | b'['))
-                && let Ok(decoded) = serde_json::from_str::<Value>(text)
-            {
-                visit_recorded_values(&decoded, visitor);
-            }
-        }
-        Value::Null | Value::Bool(_) | Value::Number(_) => {}
-    }
-}
-
-fn validate_gateway_cassette_has_no_private_search_projection(raw: &Value) -> Result<(), String> {
-    let mut public_search_call_ids = HashSet::new();
-    let mut search_item_ids = HashSet::new();
-    visit_recorded_values(raw, &mut |object| {
-        let item_type = object.get("type").and_then(Value::as_str);
-        if item_type == Some("tool_search_call") {
-            if let Some(call_id) = object.get("call_id").and_then(Value::as_str) {
-                public_search_call_ids.insert(call_id.to_owned());
-            }
-            if let Some(item_id) = object.get("id").and_then(Value::as_str) {
-                search_item_ids.insert(item_id.to_owned());
-            }
-        } else if item_type == Some("function_call")
-            && object.get("name").and_then(Value::as_str) == Some("tool_search")
-            && let Some(item_id) = object.get("id").and_then(Value::as_str)
-        {
-            search_item_ids.insert(item_id.to_owned());
-        }
-    });
-
-    let mut violation = None;
-    visit_recorded_values(raw, &mut |object| {
-        let item_type = object.get("type").and_then(Value::as_str);
-        let name = object.get("name").and_then(Value::as_str);
-        if matches!(item_type, Some("function" | "function_call")) && name == Some("tool_search") {
-            violation.get_or_insert_with(|| {
-                format!("public gateway cassette leaked the private synthetic search projection: {object:?}")
-            });
-        } else if item_type == Some("function_call_output") {
-            let call_id = object.get("call_id").and_then(Value::as_str);
-            if call_id.is_some_and(|call_id| public_search_call_ids.contains(call_id)) {
-                violation.get_or_insert_with(|| {
-                    format!("public gateway cassette leaked a normalized search function output: {object:?}")
-                });
-            }
-        } else if matches!(
-            item_type,
-            Some("response.function_call_arguments.delta" | "response.function_call_arguments.done")
-        ) {
-            let item_id = object.get("item_id").and_then(Value::as_str);
-            if item_id.is_some_and(|item_id| search_item_ids.contains(item_id)) {
-                violation.get_or_insert_with(|| {
-                    format!("public gateway cassette leaked normalized search argument events: {object:?}")
-                });
-            }
-        }
-    });
-    violation.map_or(Ok(()), Err)
-}
-
 fn provider_projection(filename: &str) -> Projection {
     if filename.contains("openai-reference") || filename.contains("gateway") {
         Projection::Public
@@ -1688,26 +1665,6 @@ fn normalize_provider_cassette(directory: &Path, filename: &str) -> SemanticFlow
     let raw_document = serde_yaml::from_str::<Value>(&raw_text).expect("characterization YAML should be valid");
     let cassette = support::load_cassette(path.to_str().expect("cassette path should be UTF-8"));
     assert_eq!(cassette.turns.len(), 4, "{filename} should contain four turns");
-    if filename.contains("gateway") {
-        let raw_turns = raw_document["turns"]
-            .as_array()
-            .expect("raw gateway cassette should contain turns");
-        let mut decoded_surfaces = Vec::new();
-        for (raw_turn, turn) in raw_turns.iter().zip(&cassette.turns) {
-            decoded_surfaces.push(raw_turn["request"]["body"].clone());
-            if let Some(body) = &turn.response.body {
-                decoded_surfaces.push(body.clone());
-            }
-            if turn.response.sse.is_some() {
-                decoded_surfaces.extend(support::recorded_named_sse_events(turn));
-            }
-            if let Some(websocket) = raw_turn["response"]["websocket"].as_array() {
-                decoded_surfaces.extend(websocket.iter().cloned());
-            }
-        }
-        validate_gateway_cassette_has_no_private_search_projection(&Value::Array(decoded_surfaces))
-            .unwrap_or_else(|error| panic!("{filename}: {error}"));
-    }
     let responses = cassette.turns.iter().map(terminal_response).collect::<Vec<_>>();
     let inputs = cassette.turns[1..]
         .iter()
@@ -1721,32 +1678,6 @@ fn normalize_provider_cassette(directory: &Path, filename: &str) -> SemanticFlow
 #[test]
 fn provider_parity_recorder_generated_matrix_has_one_semantic_flow() {
     let directory = tool_search_cassette_directory();
-    let expected_names = PROVIDER_PARITY_CASSETTES
-        .iter()
-        .map(|filename| (*filename).to_owned())
-        .collect::<HashSet<_>>();
-    let actual_names = fs::read_dir(&directory)
-        .expect("tool-search cassette directory")
-        .filter_map(Result::ok)
-        .filter_map(|entry| {
-            let path = entry.path();
-            if path.extension().and_then(|extension| extension.to_str()) != Some("yaml") {
-                return None;
-            }
-            let cassette = support::load_cassette(path.to_str().expect("cassette path should be UTF-8"));
-            (cassette.turns.len() == 4).then(|| {
-                path.file_name()
-                    .and_then(|filename| filename.to_str())
-                    .expect("cassette filename should be UTF-8")
-                    .to_owned()
-            })
-        })
-        .collect::<HashSet<_>>();
-    assert_eq!(
-        actual_names, expected_names,
-        "the final seven-cassette flow matrix must be exact"
-    );
-
     let expected_tools = serde_json::from_str::<Value>(
         &fs::read_to_string(directory.join("returned_tools.json")).expect("returned tool fixture should be readable"),
     )
@@ -1777,36 +1708,5 @@ fn provider_parity_recorder_generated_matrix_has_one_semantic_flow() {
         } else {
             reference = Some(semantic);
         }
-    }
-}
-
-#[test]
-fn provider_parity_non_leak_detector_rejects_nested_private_shapes() {
-    let cases = [
-        serde_json::json!({"response": {"tools": [{"type": "function", "name": "tool_search"}]}}),
-        serde_json::json!({"response": {"output": [{
-            "type": "function_call", "id": "fc_private", "call_id": "call_search", "name": "tool_search"
-        }]}}),
-        serde_json::json!({
-            "request": {"input": [{
-                "type": "tool_search_call", "id": "tsc_public", "call_id": "call_search"
-            }, {
-                "type": "function_call_output", "call_id": "call_search", "output": "{}"
-            }]}
-        }),
-        serde_json::json!([{
-            "type": "response.output_item.added",
-            "item": {"type": "tool_search_call", "id": "tsc_public", "call_id": "call_search"}
-        }, {
-            "type": "response.function_call_arguments.delta", "item_id": "tsc_public", "delta": "{}"
-        }]),
-        serde_json::json!([r#"{"type":"function_call","id":"fc_ws","call_id":"call_ws","name":"tool_search"}"#]),
-    ];
-
-    for case in cases {
-        assert!(
-            validate_gateway_cassette_has_no_private_search_projection(&case).is_err(),
-            "private nested shape should be rejected: {case}"
-        );
     }
 }

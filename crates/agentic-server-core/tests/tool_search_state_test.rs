@@ -1,9 +1,6 @@
-use super::model_visible_namespace_member_name;
-use super::tool_search::ToolSearchState;
-use crate::{InputItem, RequestPayload, ResponsesInput};
+use agentic_core::tool::{ToolSearchState, model_visible_namespace_member_name};
+use agentic_core::{InputItem, RequestPayload, ResponsesInput};
 use serde_json::{Value, json};
-use std::fs;
-use std::path::Path;
 
 fn request(tools: Value, input: Value) -> RequestPayload {
     let mut value = json!({
@@ -64,7 +61,7 @@ fn search_output(id: &str, tools: Vec<Value>) -> Value {
     value
 }
 
-fn tool_values(tools: Option<&[crate::ResponsesTool]>) -> Value {
+fn tool_values(tools: Option<&[agentic_core::ResponsesTool]>) -> Value {
     serde_json::to_value(tools).expect("prepared tools serialize")
 }
 
@@ -90,57 +87,6 @@ fn synthetic_description(state: &ToolSearchState) -> &str {
         .synthetic_tool_search()
         .and_then(|function| function.description.as_deref())
         .expect("active tool search has a synthetic description")
-}
-
-fn fixture_json(filename: &str) -> Value {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/cassettes/tool_search")
-        .join(filename);
-    serde_json::from_str(&fs::read_to_string(path).expect("tool-search fixture should be readable"))
-        .expect("tool-search fixture should be valid JSON")
-}
-
-fn lowered_fixture_tools(tools: Value, input: Value) -> Value {
-    let public = request(tools, input);
-    let mut state = ToolSearchState::build(&public).expect("fixture should build tool-search state");
-    let private = private_request(&mut state, &public);
-    let upstream = private
-        .to_upstream_request(false)
-        .expect("fixture should lower into an upstream request");
-    serde_json::to_value(upstream).expect("upstream fixture should serialize")["tools"].clone()
-}
-
-#[test]
-fn mixed_catalog_fixtures_match_private_tool_search_lowering() {
-    let public_tools = fixture_json("openai_tools.json");
-    let returned_tools = fixture_json("returned_tools.json");
-    assert_eq!(
-        lowered_fixture_tools(public_tools.clone(), json!("find weather and timezone tools")),
-        fixture_json("vllm_initial_tools.json")
-    );
-    assert_eq!(
-        lowered_fixture_tools(
-            public_tools,
-            json!([
-                {
-                    "type": "tool_search_call",
-                    "id": "tsc_fixture",
-                    "call_id": "call_fixture",
-                    "execution": "client",
-                    "status": "completed",
-                    "arguments": {"query": "weather and timezone"}
-                },
-                {
-                    "type": "tool_search_output",
-                    "call_id": "call_fixture",
-                    "execution": "client",
-                    "status": "completed",
-                    "tools": returned_tools
-                }
-            ]),
-        ),
-        fixture_json("vllm_tools_after_search.json")
-    );
 }
 
 #[test]
@@ -1234,7 +1180,7 @@ fn replay_restores_loaded_deferred_tool_after_compaction_removed_search_pair() {
             "encrypted_content": "The weather tool was loaded earlier."
         }]),
     );
-    let restored: Vec<crate::types::tools::ResponsesTool> = serde_json::from_value(json!([{
+    let restored: Vec<agentic_core::types::tools::ResponsesTool> = serde_json::from_value(json!([{
         "type": "function",
         "name": "get_weather",
         "description": "Get weather",
@@ -1253,7 +1199,9 @@ fn replay_restores_loaded_deferred_tool_after_compaction_removed_search_pair() {
     let loaded = private
         .iter()
         .find_map(|tool| match tool {
-            crate::types::tools::ResponsesTool::Function(function) if function.name.as_str() == "get_weather" => {
+            agentic_core::types::tools::ResponsesTool::Function(function)
+                if function.name.as_str() == "get_weather" =>
+            {
                 Some(function)
             }
             _ => None,
@@ -1295,7 +1243,7 @@ fn compacted_replay_does_not_reload_definition_omitted_by_explicit_tools() {
             }
         ]),
     );
-    let restored: Vec<crate::types::tools::ResponsesTool> = serde_json::from_value(json!([{
+    let restored: Vec<agentic_core::types::tools::ResponsesTool> = serde_json::from_value(json!([{
         "type": "function",
         "name": "get_weather",
         "description": "Get weather",
@@ -1311,13 +1259,13 @@ fn compacted_replay_does_not_reload_definition_omitted_by_explicit_tools() {
         .public_effective_tools()
         .unwrap()
         .iter()
-        .all(|tool| !matches!(tool, crate::types::tools::ResponsesTool::Function(function) if function.name.as_str() == "get_weather")));
+        .all(|tool| !matches!(tool, agentic_core::types::tools::ResponsesTool::Function(function) if function.name.as_str() == "get_weather")));
     assert!(private_request(&mut state, &request)
         .tools
         .as_deref()
         .expect("private tools")
         .iter()
-        .all(|tool| !matches!(tool, crate::types::tools::ResponsesTool::Function(function) if function.name.as_str() == "get_weather")));
+        .all(|tool| !matches!(tool, agentic_core::types::tools::ResponsesTool::Function(function) if function.name.as_str() == "get_weather")));
 }
 
 #[test]
@@ -1341,7 +1289,7 @@ fn replayed_loaded_marker_rejects_explicit_cross_kind_identity_collision() {
             "encrypted_content": "A function with this name was loaded earlier."
         }]),
     );
-    let restored: Vec<crate::types::tools::ResponsesTool> = serde_json::from_value(json!([{
+    let restored: Vec<agentic_core::types::tools::ResponsesTool> = serde_json::from_value(json!([{
         "type": "function",
         "name": "shared_identity",
         "description": "Original function",

@@ -12,11 +12,11 @@ use super::function::insert_function_entry;
 use super::mcp::handler::{McpToolMap, McpToolRef};
 use super::mcp::registry::insert_discovered_mcp_entry;
 use super::tool_search::{
-    TOOL_SEARCH_NAME, ToolSearchState, ToolSearchStreamState, ensure_request_prepared, insert_tool_search_entry,
+    TOOL_SEARCH_NAME, ToolSearchStreamState, ensure_request_prepared, insert_tool_search_entry,
     validate_blocking_response,
 };
 use super::web_search::insert_web_search_entry;
-use super::{CodexNamespaceHandler, GatewayExecutor, McpHandler, NamespaceMap, ToolError, ToolOutput};
+use super::{CodexNamespaceHandler, GatewayExecutor, McpHandler, NamespaceMap, ToolError, ToolOutput, ToolSearchState};
 use crate::events::WireEvent;
 
 use crate::types::event::{MessageStatus, ResponseStatus};
@@ -319,7 +319,7 @@ impl ToolRegistry {
     ) -> Result<Self, ToolError> {
         let state = super::ToolSearchHandler::prepare_request(request, restored_loaded_tools, restore_only_declared)?;
         let mut registry = Self::default();
-        registry.install_tool_search_state(state.map(Box::new));
+        registry.install_tool_search_state(state.map(Box::new), false)?;
         Ok(registry)
     }
 
@@ -334,12 +334,22 @@ impl ToolRegistry {
             Some(tools) => Self::build_with_handlers(tools, executors).await?,
             None => Self::default(),
         };
-        registry.install_tool_search_state(self.tool_search.take());
+        registry.install_tool_search_state(self.tool_search.take(), true)?;
         Ok(registry)
     }
 
-    fn install_tool_search_state(&mut self, state: Option<Box<ToolSearchState>>) {
-        self.tool_search = state;
+    fn install_tool_search_state(
+        &mut self,
+        state: Option<Box<ToolSearchState>>,
+        validate_private_routes: bool,
+    ) -> Result<(), ToolError> {
+        if let Some(state) = state {
+            if validate_private_routes {
+                self.validate_tool_search_state(&state)?;
+            }
+            self.tool_search = Some(state);
+        }
+        Ok(())
     }
 
     /// Public declarations to expose in response metadata. `Some([])` is
@@ -520,6 +530,34 @@ impl ToolRegistry {
         &self.mcp_list_tools_items
     }
 
+    /// Validate the private dispatch table against prepared tool-search state.
+    fn validate_tool_search_state(&self, state: &ToolSearchState) -> Result<(), ToolError> {
+        if !state.is_active() {
+            return Ok(());
+        }
+        if self
+            .entries
+            .keys()
+            .any(|name| state.withheld_function_names().contains(name))
+        {
+            return Err(ToolError::Config(
+                "a loaded tool collides with a withheld function name".to_owned(),
+            ));
+        }
+        let Some(_) = state.synthetic_tool_search() else {
+            return Ok(());
+        };
+        let entry = self.entries.get(TOOL_SEARCH_NAME).ok_or_else(|| {
+            ToolError::Config("prepared tool-search declaration is missing from the private registry".to_owned())
+        })?;
+        if entry.tool_type != ToolType::ToolSearch || entry.tool_type.is_gateway_owned() || entry.handler.is_some() {
+            return Err(ToolError::Config(
+                "prepared tool-search declaration has invalid private registry ownership".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
     pub fn restore_final_payload_output(&self, output: &mut [OutputItem]) {
         CodexNamespaceHandler.restore_output_items(output, self.namespace_map.as_ref());
     }
@@ -657,7 +695,9 @@ mod tests {
             .await
             .expect("typed tool-search declaration builds normally");
 
-        registry.install_tool_search_state(Some(Box::new(state)));
+        registry
+            .install_tool_search_state(Some(Box::new(state)), true)
+            .expect("prepared tool-search entry is already classified");
         let entry = registry.lookup("tool_search").expect("tool-search entry");
         assert_eq!(entry.tool_type, ToolType::ToolSearch);
         assert!(!entry.tool_type.is_gateway_owned());
@@ -700,7 +740,9 @@ mod tests {
             .await
             .expect("loaded function registry");
         assert!(registry.lookup("tool_search").is_none());
-        registry.install_tool_search_state(Some(Box::new(state)));
+        registry
+            .install_tool_search_state(Some(Box::new(state)), true)
+            .expect("enable replay translation");
 
         let valid: FunctionToolCall = serde_json::from_value(serde_json::json!({
             "type": "function_call", "id": "fc_search", "call_id": "call_search",
@@ -762,7 +804,9 @@ mod tests {
         let mut registry = ToolRegistry::build_with_handlers(&mut tools, &mut GatewayExecutors::default())
             .await
             .expect("private registry");
-        registry.install_tool_search_state(Some(Box::new(state)));
+        registry
+            .install_tool_search_state(Some(Box::new(state)), true)
+            .expect("state application");
 
         assert!(
             !registry
