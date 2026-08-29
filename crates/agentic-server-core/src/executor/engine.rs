@@ -25,7 +25,7 @@ use crate::events::EventFrame;
 use crate::executor::error::ExecutorResult;
 use crate::executor::inference::DONE_MARKER;
 use crate::executor::persist::persist_if_needed;
-use crate::executor::rehydrate::rehydrate_conversation;
+use crate::executor::rehydrate::{prepare_reasoning_for_vllm, rehydrate_conversation, validate_reasoning_for_vllm};
 use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::executor::upstream::{emit_deferred_stream_events, fetch_blocking_payload, fetch_stream_payload};
 use crate::tool::{ToolRegistry, mcp};
@@ -116,6 +116,13 @@ async fn run_until_gateway_tools_complete(
     run_gateway_tool_loop(ctx, exec_ctx, auth, stream_upstream, stream).await
 }
 
+fn prepare_initial_reasoning_for_vllm(input: &mut ResponsesInput, round: usize, compacted: bool) -> ExecutorResult<()> {
+    if round == 0 && !compacted {
+        return prepare_reasoning_for_vllm(input);
+    }
+    Ok(())
+}
+
 async fn run_gateway_tool_loop(
     mut ctx: RequestContext,
     exec_ctx: &ExecutionContext,
@@ -137,6 +144,7 @@ async fn run_gateway_tool_loop(
 
     for round in 0..MAX_GATEWAY_TOOL_ROUNDS {
         let compaction_usage = maybe_compact_context(&mut ctx, exec_ctx, auth).await?;
+        prepare_initial_reasoning_for_vllm(&mut ctx.enriched_request.input, round, compaction_usage.is_some())?;
         accumulate_usage(&mut combined_usage, compaction_usage);
         let output_offset = combined_output.len();
         let (mut payload, deferred_stream_events): (ResponsePayload, Vec<_>) = if stream_upstream {
@@ -563,6 +571,9 @@ impl ExecuteRequest {
             "executor received responses request"
         );
         let ctx = rehydrate_conversation(self.payload, &self.exec_ctx).await?;
+        if !ctx.enriched_request.input.has_compaction_trigger() {
+            validate_reasoning_for_vllm(&ctx.enriched_request.input)?;
+        }
         if ctx.original_request.stream {
             Ok(Either::Right(run_stream(ctx, self.exec_ctx, self.client_auth)))
         } else {
