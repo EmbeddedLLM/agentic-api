@@ -73,7 +73,11 @@ fn oidc_config_from_values(
 }
 
 #[derive(Parser)]
-#[command(name = "agentic-server", about = "Stateful API gateway for vLLM Responses API")]
+#[command(
+    name = "agentic-server",
+    about = "Stateful API gateway for vLLM Responses API",
+    version
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
