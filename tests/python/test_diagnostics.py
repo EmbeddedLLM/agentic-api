@@ -89,6 +89,42 @@ def test_local_doctor_reports_missing_vllm_installation(
     assert "file:///path/to/agentic_api-PLATFORM.whl" in output
 
 
+@pytest.mark.parametrize(
+    ("rust_binary_details", "expected_message"),
+    [
+        (
+            ("not found", False, "error: agentic-server not found"),
+            "The packaged Rust gateway executable is missing or not executable.",
+        ),
+        (
+            ("/venv/bin/agentic-server", True, "error: version probe failed"),
+            "The packaged Rust gateway executable could not report its version.",
+        ),
+    ],
+)
+def test_local_doctor_requires_a_healthy_packaged_gateway(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    rust_binary_details: tuple[str, bool, str],
+    expected_message: str,
+) -> None:
+    vllm_binary = tmp_path / "vllm"
+    vllm_binary.write_text("")
+    vllm_binary.chmod(0o755)
+
+    monkeypatch.setattr("agentic_api.diagnostics._rust_binary_details", lambda: rust_binary_details)
+    monkeypatch.setattr("agentic_api.diagnostics.metadata_version", _metadata_version_with_supported_vllm)
+    monkeypatch.setattr("agentic_api.diagnostics.find_active_environment_executable", lambda name: vllm_binary)
+
+    exit_code = diagnostics.doctor("local")
+    output = capsys.readouterr().out
+
+    assert exit_code == 1
+    assert "Local mode health: unavailable" in output
+    assert f"Local mode details: {expected_message}" in output
+
+
 def test_local_doctor_explains_linux_only_extra_on_unsupported_platform(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:

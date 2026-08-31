@@ -54,11 +54,15 @@ def collect_doctor_report() -> DoctorReport:
         vllm_executable_path = str(find_active_environment_executable("vllm"))
     except FileNotFoundError:
         vllm_executable_path = "not found"
-    local_ok, local_message = _local_health(
+    local_runtime_ok, local_message = _local_health(
         installed_vllm_version,
         vllm_executable_path,
         platform_name=platform.system(),
     )
+    remote_ok = rust_binary_executable and not rust_binary_version.startswith("error:")
+    remote_message = _remote_health_message(rust_binary_executable, rust_binary_version)
+    if local_runtime_ok and not remote_ok:
+        local_message = remote_message
 
     return DoctorReport(
         python_version=platform.python_version(),
@@ -70,10 +74,10 @@ def collect_doctor_report() -> DoctorReport:
         supported_vllm_version=SUPPORTED_VLLM_VERSION,
         installed_vllm_version=installed_vllm_version,
         vllm_executable_path=vllm_executable_path,
-        local_ok=local_ok,
-        remote_ok=rust_binary_executable and not rust_binary_version.startswith("error:"),
+        local_ok=local_runtime_ok and remote_ok,
+        remote_ok=remote_ok,
         local_message=local_message,
-        remote_message=_remote_health_message(rust_binary_executable, rust_binary_version),
+        remote_message=remote_message,
     )
 
 
