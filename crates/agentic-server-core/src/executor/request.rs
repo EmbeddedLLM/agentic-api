@@ -99,7 +99,7 @@ impl ExecutionContext {
             gateway_executors,
             messages_gateway_tools: messages_gateway_tools_from_env(),
             llm_base_url,
-            streaming_timeout: Duration::from_secs(30),
+            streaming_timeout: streaming_timeout_from_env(),
             storage_pool: None,
         }
     }
@@ -170,10 +170,17 @@ impl ExecutionContext {
                 .map(GatewayToolMap::from_env_str)
                 .unwrap_or_default(),
             llm_base_url: cfg.llm_api_base.clone(),
-            streaming_timeout: Duration::from_secs(30),
+            streaming_timeout: streaming_timeout_from_env(),
             storage_pool: Some(pool),
         })
     }
+}
+
+fn streaming_timeout_from_env() -> Duration {
+    std::env::var("STREAMING_CHUNK_TIMEOUT_S")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map_or(Duration::from_secs(600), Duration::from_secs)
 }
 
 fn database_open_error(database_backend: DatabaseBackend, error: &sqlx::Error) -> Error {

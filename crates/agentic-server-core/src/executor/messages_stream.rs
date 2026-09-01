@@ -37,7 +37,7 @@ use crate::executor::messages_loop::{
 };
 /// vLLM streaming chunk timeout (per line). Generous — the loop's own budget is
 /// the round cap, not this.
-const CHUNK_TIMEOUT: Duration = Duration::from_secs(120);
+const CHUNK_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// Drive the streaming Messages-native loop, yielding Anthropic SSE lines for
 /// the client. Owns the multi-round → single-message accumulation.
