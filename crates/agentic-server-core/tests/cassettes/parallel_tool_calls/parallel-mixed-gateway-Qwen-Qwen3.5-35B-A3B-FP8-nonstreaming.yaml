@@ -43,42 +43,53 @@ turns:
   response:
     body:
       conversation_id: null
-      created_at: 1787817589
+      created_at: 1788257381
       error: null
-      id: resp_01a0423b-761a-7de2-9dda-f59ce8cfb860
+      id: resp_01a05c72-25cf-74f1-a923-76de9d59a9b7
       incomplete_details: null
       instructions: null
       model: Qwen/Qwen3.5-35B-A3B-FP8
       object: response
       output:
       - content:
-        - text: 'The user wants me to do three tasks in parallel in a single turn:
+        - text: 'The user wants me to do three things in parallel in a single turn:
 
             1. Call get_weather for "Tokyo"
 
-            2. Call set_temperature_unit with "fahrenheit"
+            2. Call set_temperature_unit to set the unit to "fahrenheit"
 
             3. Search the web for "Tokyo weather today"
 
 
-            I can use multiple tool calls in parallel. Let me make all three calls
-            now.
+            I can use the web_search function for the third item, get_weather for
+            the first, and set_temperature_unit for the second. Let me make these
+            three calls in parallel.
+
+
+            For set_temperature_unit, the input should be "fahrenheit" as plain text
+            according to the description.
+
+
+            For get_weather, the city parameter should be "Tokyo".
+
+
+            For web_search, the query should be "Tokyo weather today".
 
             '
           type: reasoning_text
         encrypted_content: null
-        id: rs_83c80e0117ea3486
+        id: rs_a36d41d75e0f3573
         status: null
         summary: []
         type: reasoning
       - arguments: '{"city": "Tokyo"}'
-        call_id: chatcmpl-tool-aef4fb79e54dcbef
-        id: fc_b4a7aefcc07205a9
+        call_id: chatcmpl-tool-b43577f763b96804
+        id: fc_b95acd1cd53501a7
         name: get_weather
         status: completed
         type: function_call
-      - call_id: chatcmpl-tool-8d012ccc3ffaf382
-        id: ctc_96f3a7c0c9e73acc
+      - call_id: chatcmpl-tool-a717cb0e37bb56a9
+        id: ctc_bcffe761b9af01cf
         input: fahrenheit
         name: set_temperature_unit
         status: completed
@@ -107,22 +118,22 @@ turns:
             url: https://www.timeanddate.com/weather/japan/tokyo/ext
           - title: Tokyo, JP Weather Forecast, Conditions, and Maps – Yahoo Weather
             url: https://weather.yahoo.com/jp/tokyo-prefecture/tokyo/
-          - title: Tokyo, 13, JP 14 Days Weather - The Weather Network
-            url: https://www.theweathernetwork.com/en/city/jp/tokyo/tokyo/14-days
+          - title: Japan Weather Forecast | NHK WORLD-JAPAN News
+            url: https://www3.nhk.or.jp/nhkworld/news/weather/
           type: search
-        id: ws_85db965b56d59a82
+        id: ws_9592b419b8a63a35
         status: completed
         type: web_search_call
       previous_response_id: null
       status: completed
       usage:
-        input_tokens: 879
+        input_tokens: 893
         input_tokens_details:
           cached_tokens: 0
-        output_tokens: 155
+        output_tokens: 228
         output_tokens_details:
           reasoning_tokens: 0
-        total_tokens: 1034
+        total_tokens: 1121
     headers:
       content-type: application/json
     status_code: 200
@@ -130,10 +141,10 @@ turns:
   request:
     body:
       input:
-      - call_id: chatcmpl-tool-aef4fb79e54dcbef
+      - call_id: chatcmpl-tool-b43577f763b96804
         output: '{"city": "Tokyo", "temperature_c": 22, "condition": "Clear"}'
         type: function_call_output
-      - call_id: chatcmpl-tool-8d012ccc3ffaf382
+      - call_id: chatcmpl-tool-a717cb0e37bb56a9
         output: '{"status": "ok", "unit": "fahrenheit"}'
         type: custom_tool_call_output
       - content: Now report Tokyo's current temperature using the unit I just told
@@ -143,7 +154,7 @@ turns:
       max_output_tokens: 2048
       model: Qwen/Qwen3.5-35B-A3B-FP8
       parallel_tool_calls: true
-      previous_response_id: resp_01a0423b-761a-7de2-9dda-f59ce8cfb860
+      previous_response_id: resp_01a05c72-25cf-74f1-a923-76de9d59a9b7
       store: true
       stream: false
       tool_choice: auto
@@ -177,42 +188,40 @@ turns:
   response:
     body:
       conversation_id: null
-      created_at: 1787817591
+      created_at: 1788257383
       error: null
-      id: resp_01a0423b-7b5c-7aa3-86bb-415984805e1b
+      id: resp_01a05c72-2cdc-7e30-9799-ed38e34d8354
       incomplete_details: null
       instructions: null
       model: Qwen/Qwen3.5-35B-A3B-FP8
       object: response
       output:
       - content:
-        - text: 'The user just set their temperature unit preference to fahrenheit,
-            and now wants me to report Tokyo''s current temperature in that unit.
-            From the get_weather tool call, I can see that Tokyo''s current temperature
-            is 22°C (Celsius). I need to convert this to Fahrenheit.
+        - text: 'The user asked me to call three tools in parallel: (1) get_weather
+            for Tokyo, (2) set_temperature_unit to fahrenheit, and (3) web search
+            for "Tokyo weather today". I''ve now received results from all three.
+            The get_weather tool returned 22°C in Tokyo with clear conditions. The
+            set_temperature_unit returned success for fahrenheit. The web search returned
+            various weather sources for Tokyo.
 
 
-            The conversion formula is: F = (C × 9/5) + 32
+            Now the user is asking me to report Tokyo''s current temperature using
+            the unit they just told me to prefer (fahrenheit). The get_weather result
+            shows 22°C, so I need to convert this to fahrenheit: 22°C × 9/5 + 32 =
+            71.6°F (or approximately 72°F).
 
 
-            So for 22°C:
-
-            F = (22 × 9/5) + 32
-
-            F = (22 × 1.8) + 32
-
-            F = 39.6 + 32
-
-            F = 71.6°F
+            Let me convert 22°C to Fahrenheit properly: F = (C × 9/5) + 32 = (22 ×
+            1.8) + 32 = 39.6 + 32 = 71.6°F
 
 
-            So Tokyo''s current temperature is approximately 72°F (or 71.6°F if I
-            want to be more precise).
+            So I should report that Tokyo''s current temperature is approximately
+            72°F (or 71.6°F).
 
             '
           type: reasoning_text
         encrypted_content: null
-        id: rs_87b128d4ea1f33a0
+        id: rs_b596cf7142590aba
         status: null
         summary: []
         type: reasoning
@@ -221,23 +230,23 @@ turns:
           text: '
 
 
-            Based on the weather data, Tokyo''s current temperature is approximately
-            **72°F** (71.6°F to be precise), with clear conditions.'
+            Based on the weather data, Tokyo''s current temperature is **72°F** (22°C).
+            The weather condition is clear.'
           type: output_text
-        id: msg_85fb5c1465a64a5f
+        id: msg_ac7c4e463ce06ab0
         role: assistant
         status: completed
         type: message
-      previous_response_id: resp_01a0423b-761a-7de2-9dda-f59ce8cfb860
+      previous_response_id: resp_01a05c72-25cf-74f1-a923-76de9d59a9b7
       status: completed
       usage:
-        input_tokens: 4098
+        input_tokens: 3546
         input_tokens_details:
           cached_tokens: 0
-        output_tokens: 202
+        output_tokens: 273
         output_tokens_details:
           reasoning_tokens: 0
-        total_tokens: 4300
+        total_tokens: 3819
     headers:
       content-type: application/json
     status_code: 200

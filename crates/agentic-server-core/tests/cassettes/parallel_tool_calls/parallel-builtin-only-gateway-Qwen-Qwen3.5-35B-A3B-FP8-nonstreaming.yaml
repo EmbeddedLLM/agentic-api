@@ -32,15 +32,15 @@ turns:
   response:
     body:
       conversation_id: null
-      created_at: 1787834162
+      created_at: 1788257238
       error: null
-      id: resp_01a04338-4154-7d31-857b-58f1902e197e
+      id: resp_01a05c6f-e243-7660-abfa-3c3a85d5b4ee
       incomplete_details: null
       instructions: null
       model: Qwen/Qwen3.5-35B-A3B-FP8
       object: response
       output:
-      - id: mcpl_01a04338-4782-7f51-bbff-e96b2656eeb7
+      - id: mcpl_01a05c6f-e700-7482-9773-5ab445e019e7
         server_label: gitmcp_tiktoken
         tools:
         - annotations:
@@ -60,22 +60,18 @@ turns:
           name: search_tiktoken_documentation
         type: mcp_list_tools
       - content:
-        - text: 'The user wants me to make two separate web_search calls in parallel,
-            each with two queries batched together. They want both calls issued now,
-            not waiting for one to finish before starting the other.
+        - text: 'The user wants me to make two parallel web_search calls, each with
+            batched queries. They want me to do both calls in the same turn without
+            waiting. Let me set up:
 
 
-            Let me structure this properly:
+            First call: "potato nutrition facts" and "tomato nutrition facts"
+
+            Second call: "cucumber nutrition facts" and "carrot nutrition facts"
 
 
-            1. First call: Batch "potato nutrition facts" and "tomato nutrition facts"
-
-            2. Second call: Batch "cucumber nutrition facts" and "carrot nutrition
-            facts"
-
-
-            I need to use the web_search function with the "queries" parameter (plural)
-            to batch multiple queries together in parallel.
+            I''ll use the web_search function with the queries parameter to make parallel
+            searches within a single call, and I need to make two separate calls.
 
 
             Let me make both calls now.
@@ -83,7 +79,7 @@ turns:
             '
           type: reasoning_text
         encrypted_content: null
-        id: rs_be155de4326b3b78
+        id: rs_943cad6ad9265340
         status: null
         summary: []
         type: reasoning
@@ -101,10 +97,10 @@ turns:
             url: https://www.healthline.com/nutrition/foods/potatoes
           - title: Potato Facts
             url: https://www.idahopotatomuseum.com/potato-facts/
-          - title: Potato Nutrition & Facts
-            url: https://alsum.com/products/potato-nutrition-facts/
           - title: Nutritional Value - National Potato Council
             url: https://www.nationalpotatocouncil.org/benefits-of-potatoes/nutritional-value/
+          - title: Potato Nutrition & Facts
+            url: https://alsum.com/products/potato-nutrition-facts/
           - title: Nutrition - Side Delights
             url: https://www.sidedelights.com/potatoes/nutrition/
           - title: Are Potatoes Healthy? • The Nutrition Source
@@ -136,7 +132,7 @@ turns:
           - title: 1 Oz Of Tomatoes Nutrition Facts - Eat This Much
             url: https://www.eatthismuch.com/calories/tomatoes-2498?a=0.11812500000000001%3A5
           type: search
-        id: ws_98a8abf8a87525ab
+        id: ws_989167b9b5de72db
         status: completed
         type: web_search_call
       - action:
@@ -167,64 +163,61 @@ turns:
             url: https://www.verywellfit.com/cucumber-nutrition-facts-calories-and-health-benefits-4118563
           - title: Cucumber Nutritional Information
             url: https://ingenaes.illinois.edu/wp-content/uploads/ING-Info-Sheet-2018_05-Cucumber-nutritional-value-Kowalewska.pdf
-          - title: Nutrition Facts - URMC.Rochester.edu
-            url: https://www.urmc.rochester.edu/encyclopedia/content?contenttypeid=76&contentid=11124-3
           - title: 'Carrots 101: Nutrition Facts and Health Benefits'
             url: https://www.healthline.com/nutrition/foods/carrots
-          - title: Carrots | SNAP-Ed
+          - title: Carrots - SNAP-Ed Connection - USDA
             url: https://snaped.fns.usda.gov/resources/nutrition-education-materials/seasonal-produce-guide/carrots
-          - title: 'Carrots: Health Benefits, Nutrition Facts, and Risks'
-            url: https://www.webmd.com/food-recipes/benefits-carrots
-          - title: Carrots - Nutritional information | Wilcox
-            url: https://www.wilcoxgoodness.co.nz/helpful-info/nutritional-information/carrots
-          - title: Carrots, raw, 1 large (7-1/4" to 8-1/2" long) | University Hospitals
-            url: https://www.uhhospitals.org/health-information/health-and-wellness-library/article/nutritionfacts-v1/carrots-raw-1-large-7-14-to-8-12-long
-          - title: Baby Carrots Nutrition Facts and Health Benefits
-            url: https://www.verywellfit.com/baby-carrot-nutrition-facts-and-health-benefits-5071650
+          - title: Nutrition Facts - URMC.Rochester.edu
+            url: https://www.urmc.rochester.edu/encyclopedia/content?contenttypeid=76&contentid=11124-3
           - title: Carrot Nutrition Facts 0g Fat 25 calories 0.5g Protein 1.5g Fiber
               ...
             url: https://cdn.agclassroom.org/media/uploads/LP875/Carrot_nutrition_facts.pdf
-          - title: Baby Carrots Nutrition Facts - Eat This Much
-            url: https://www.eatthismuch.com/calories/baby-carrots-2569
           - title: Nutrition Facts for Raw Carrots
             url: https://tools.myfooddata.com/nutrition-facts/170393/wt4
+          - title: 'Carrot Nutrition Facts: Calories and Health Benefits'
+            url: https://www.verywellfit.com/calories-in-carrots-3495643
+          - title: 'Carrots: Health Benefits, Nutrition Facts, and Risks'
+            url: https://www.webmd.com/food-recipes/benefits-carrots
+          - title: Baby Carrots Nutrition Facts and Health Benefits
+            url: https://www.verywellfit.com/baby-carrot-nutrition-facts-and-health-benefits-5071650
+          - title: Carrots, raw, 1 large (7-1/4" to 8-1/2" long) | University Hospitals
+            url: https://www.uhhospitals.org/health-information/health-and-wellness-library/article/nutritionfacts-v1/carrots-raw-1-large-7-14-to-8-12-long
+          - title: Carrots, raw nutrition facts and analysis.
+            url: https://www.nutritionvalue.org/Carrots%2C_raw_nutritional_value.html
           type: search
-        id: ws_940083815464e4f3
+        id: ws_8654906c36cc538f
         status: completed
         type: web_search_call
       - content:
-        - text: 'I have the results from both parallel web search calls. Let me summarize
-            each of the four results in one sentence:
+        - text: 'Great, I''ve received results from both web_search calls. Now I need
+            to summarize each of the four results in one sentence:
 
 
-            1. **Potato nutrition facts**: A medium-sized (5.3oz) skin-on potato contains
-            110 calories with no fat, cholesterol, or sodium, while providing 30%
-            of the daily value for vitamin C, 15% for potassium, and notable amounts
-            of fiber, vitamin B6, and protein.
+            1. Potato nutrition facts - Based on the results, potatoes are low in
+            calories (110 per medium potato), naturally fat-free and cholesterol-free,
+            and rich in vitamin C, potassium, vitamin B6, and fiber.
 
 
-            2. **Tomato nutrition facts**: Tomatoes are low in calories (about 22
-            calories per tomato) while being rich in vitamin C (19% of daily value),
-            potassium (comparable to a banana), and the antioxidant lycopene which
-            may reduce cancer and heart disease risk.
+            2. Tomato nutrition facts - Tomatoes are low-calorie (23 calories per
+            tomato), rich in vitamin C, potassium, fiber, and the antioxidant lycopene
+            which is linked to reduced risk of heart disease and cancer.
 
 
-            3. **Cucumber nutrition facts**: Cucumber is approximately 95-96% water,
-            making it highly hydrating, with one large cucumber containing only about
-            34 calories while providing modest amounts of vitamins K and C, and potassium.
+            3. Cucumber nutrition facts - Cucumbers are about 95-96% water, very low
+            in calories (8 calories per half cup sliced), and contain vitamin K, vitamin
+            C, potassium, and some fiber.
 
 
-            4. **Carrot nutrition facts**: One medium raw carrot contains about 25
-            calories and is exceptionally rich in vitamin A (through beta-carotene),
-            also providing fiber, vitamin K, and potassium while being naturally fat-free.
+            4. Carrot nutrition facts - Carrots are low-calorie (25 calories per medium
+            carrot), high in vitamin A (beta-carotene), vitamin K, fiber, and potassium.
 
 
-            Now I''ll present these summaries clearly.
+            Let me formulate these summaries concisely in one sentence each.
 
             '
           type: reasoning_text
         encrypted_content: null
-        id: rs_80609f3ae6519600
+        id: rs_9be2f2a04f369bf6
         status: null
         summary: []
         type: reasoning
@@ -233,46 +226,47 @@ turns:
           text: '
 
 
-            Both parallel web searches completed successfully. Here are the one-sentence
-            summaries for each:
+            Both web search calls completed successfully! Here''s a summary of each
+            of the four nutrition fact results in one sentence:
 
 
-            **1. Potato nutrition facts:** A medium-sized (5.3oz) skin-on potato contains
-            110 calories with no fat, cholesterol, or sodium, while providing 30%
-            of the daily value for vitamin C, 15% for potassium, and notable amounts
-            of fiber, vitamin B6, and 3g of protein.
+            **Potato nutrition facts:** A medium-sized potato contains approximately
+            110 calories, is naturally fat-free and cholesterol-free, and provides
+            significant amounts of vitamin C (30% DV), potassium, vitamin B6, fiber,
+            and about 3 grams of protein per serving.
 
 
-            **2. Tomato nutrition facts:** Tomatoes are low in calories (about 22
-            calories per tomato) while being rich in vitamin C (19% of daily value),
-            potassium comparable to a banana, and the cancer-fighting antioxidant
-            lycopene linked to reduced heart disease risk.
+            **Tomato nutrition facts:** Tomatoes are low in calories (about 23 per
+            tomato), rich in vitamin C and potassium, and are the major dietary source
+            of lycopene—an antioxidant linked to reduced risk of heart disease and
+            certain cancers.
 
 
-            **3. Cucumber nutrition facts:** Cucumber is approximately 95-96% water,
-            making it highly hydrating, with one large cucumber containing only about
-            34 calories while providing modest amounts of vitamins K and C, and potassium.
+            **Cucumber nutrition facts:** Cucumbers are approximately 95-96% water,
+            very low in calories (8 calories per half cup sliced), and provide vitamin
+            K, vitamin C, potassium, and modest fiber while being particularly effective
+            for hydration.
 
 
-            **4. Carrot nutrition facts:** One medium raw carrot contains about 25
-            calories and is exceptionally rich in vitamin A (through beta-carotene),
-            also providing fiber, vitamin K, and potassium while being naturally fat-free
-            and cholesterol-free.'
+            **Carrot nutrition facts:** A medium carrot contains about 25 calories
+            and is an excellent source of vitamin A (as beta-carotene), vitamin K,
+            fiber, and potassium, with research suggesting benefits for heart health
+            and cancer prevention due to its carotenoid content.'
           type: output_text
-        id: msg_8e69cc2a76b53048
+        id: msg_8f2ea98302c77e35
         role: assistant
         status: completed
         type: message
       previous_response_id: null
       status: completed
       usage:
-        input_tokens: 14575
+        input_tokens: 14818
         input_tokens_details:
           cached_tokens: 0
-        output_tokens: 719
+        output_tokens: 656
         output_tokens_details:
           reasoning_tokens: 0
-        total_tokens: 15294
+        total_tokens: 15474
     headers:
       content-type: application/json
     status_code: 200
@@ -286,7 +280,7 @@ turns:
       max_output_tokens: 2048
       model: Qwen/Qwen3.5-35B-A3B-FP8
       parallel_tool_calls: true
-      previous_response_id: resp_01a04338-4154-7d31-857b-58f1902e197e
+      previous_response_id: resp_01a05c6f-e243-7660-abfa-3c3a85d5b4ee
       store: true
       stream: false
       tool_choice: auto
@@ -308,35 +302,31 @@ turns:
   response:
     body:
       conversation_id: null
-      created_at: 1787834170
+      created_at: 1788257244
       error: null
-      id: resp_01a04338-5ead-7121-9de7-513cce0fd745
+      id: resp_01a05c6f-fca5-7613-864a-65e0f3b08f27
       incomplete_details: null
       instructions: null
       model: Qwen/Qwen3.5-35B-A3B-FP8
       object: response
       output:
       - content:
-        - text: 'The user wants me to make two parallel web_search calls using the
-            gitmcp_tiktoken__search_tiktoken_documentation tool for two different
-            queries about "encoding" and "tokenizer". They want both calls issued
-            in parallel without waiting for one to finish before starting the other,
-            then summarize each result in one sentence.
-
-
-            Let me make both calls now.
+        - text: 'The user wants me to make two parallel gitmcp_tiktoken__search_tiktoken_documentation
+            calls with different queries, then summarize each result in one sentence.
+            I need to make both calls now without waiting for one to finish before
+            starting the other.
 
             '
           type: reasoning_text
         encrypted_content: null
-        id: rs_9c5ba3694b2d95c6
+        id: rs_87eb91b6a5f4e292
         status: null
         summary: []
         type: reasoning
       - approval_request_id: null
         arguments: '{"query": "encoding"}'
         error: null
-        id: mcp_a8e0ca0a734fd5f9
+        id: mcp_ba93d4a339d30140
         name: search_tiktoken_documentation
         output: "### Search Results for: \"encoding\"\n\nNo relevant documentation\
           \ found for your query. It's either being indexed or the search query did\
@@ -412,7 +402,7 @@ turns:
       - approval_request_id: null
         arguments: '{"query": "tokenizer"}'
         error: null
-        id: mcp_b19aa90f418844b9
+        id: mcp_82846ea18a83aa00
         name: search_tiktoken_documentation
         output: "### Search Results for: \"tokenizer\"\n\nNo relevant documentation\
           \ found for your query. It's either being indexed or the search query did\
@@ -486,14 +476,15 @@ turns:
         status: completed
         type: mcp_call
       - content:
-        - text: 'Both searches returned the same fallback documentation about tiktoken
-            since there was no specific match for "encoding" or "tokenizer" in the
-            documentation. Now I need to summarize each result in one sentence.
+        - text: 'Both searches returned the same result - no relevant documentation
+            was found for either query, and the fallback showed the main tiktoken
+            README documentation. I need to summarize each result in one sentence
+            as requested.
 
             '
           type: reasoning_text
         encrypted_content: null
-        id: rs_9b01bdb06a1198f5
+        id: rs_a8a0e16080ed5a26
         status: null
         summary: []
         type: reasoning
@@ -502,32 +493,36 @@ turns:
           text: '
 
 
-            **1. Encoding query result:** Both searches returned the same fallback
-            documentation explaining that `tiktoken` is a fast BPE tokeniser for OpenAI''s
-            models, with a 3-6x performance advantage over comparable open source
-            tokenisers and detailed instructions on creating custom encodings.
+            Both searches returned the same fallback documentation since no specific
+            documentation was indexed for those queries. Here''s a one-sentence summary
+            of each result:
 
 
-            **2. Tokenizer query result:** The query returned identical fallback documentation
-            to the encoding search, containing installation instructions, usage examples
-            showing how to get encodings for specific models, and a comprehensive
-            explanation of Byte Pair Encoding (BPE) mechanics including how it converts
-            text to tokens reversibly and compresses text efficiently.'
+            **"encoding" search:** The search found no indexed documentation matching
+            "encoding" but fell back to displaying the main tiktoken README which
+            describes tiktoken as a fast BPE tokenizer for OpenAI''s models and explains
+            how to install and use it.
+
+
+            **"tokenizer" search:** The search also found no indexed documentation
+            matching "tokenizer" but displayed the same fallback README documentation
+            explaining that tiktoken is a Byte Pair Encoding tokenizer that converts
+            text to tokens reversibly and efficiently for language models.'
           type: output_text
-        id: msg_bb5682d0072a4f11
+        id: msg_a18b0eadbe8972cb
         role: assistant
         status: completed
         type: message
-      previous_response_id: resp_01a04338-4154-7d31-857b-58f1902e197e
+      previous_response_id: resp_01a05c6f-e243-7660-abfa-3c3a85d5b4ee
       status: completed
       usage:
-        input_tokens: 30858
+        input_tokens: 31299
         input_tokens_details:
           cached_tokens: 0
-        output_tokens: 318
+        output_tokens: 303
         output_tokens_details:
           reasoning_tokens: 0
-        total_tokens: 31176
+        total_tokens: 31602
     headers:
       content-type: application/json
     status_code: 200
@@ -541,7 +536,7 @@ turns:
       max_output_tokens: 2048
       model: Qwen/Qwen3.5-35B-A3B-FP8
       parallel_tool_calls: true
-      previous_response_id: resp_01a04338-5ead-7121-9de7-513cce0fd745
+      previous_response_id: resp_01a05c6f-fca5-7613-864a-65e0f3b08f27
       store: true
       stream: false
       tool_choice: auto
@@ -563,29 +558,28 @@ turns:
   response:
     body:
       conversation_id: null
-      created_at: 1787834179
+      created_at: 1788257251
       error: null
-      id: resp_01a04338-7df9-7500-8004-b2b8685c8462
+      id: resp_01a05c70-1433-7721-8142-bb0e3aa87f14
       incomplete_details: null
       instructions: null
       model: Qwen/Qwen3.5-35B-A3B-FP8
       object: response
       output:
       - content:
-        - text: 'The user wants me to:
+        - text: 'The user wants me to make two parallel calls in this single turn:
 
-            1. Call web_search for "latest vLLM release notes"
+            1. A web_search call with the exact query "latest vLLM release notes"
 
-            2. Call gitmcp_tiktoken__search_tiktoken_documentation with {"query":"encoding"}
+            2. A mcp__gitmcp_tiktoken__search_tiktoken_documentation call with {"query":"encoding"}
 
 
-            Both should be done in parallel in a single turn. I''ll issue both function
-            calls now.
+            Both should be made in parallel in the same turn. Let me do this now.
 
             '
           type: reasoning_text
         encrypted_content: null
-        id: rs_a55e84708190c33c
+        id: rs_881aa3b546c3c887
         status: null
         summary: []
         type: reasoning
@@ -602,26 +596,26 @@ turns:
             url: https://docs.vllm.ai/projects/ascend/en/latest/user_guide/release_notes.html
           - title: Release Notes — vllm-ascend
             url: https://docs.vllm.ai/projects/ascend/en/main/user_guide/release_notes.html
+          - title: Releases · vllm-project/vllm-omni
+            url: https://github.com/vllm-project/vllm-omni/releases
           - title: Previous vLLM Releases | vLLM
             url: https://vllm.ai/releases
           - title: Releases · vllm-project/vllm-ascend
             url: https://github.com/vllm-project/vllm-ascend/releases
-          - title: Releases · vllm-project/vllm-omni
-            url: https://github.com/vllm-project/vllm-omni/releases
           - title: Release Notes - vLLM Hardware Plugin for Intel® Gaudi®
             url: https://docs.vllm.ai/projects/gaudi/en/latest/release_notes.html
-          - title: RN-11517-001_v26.07 | August 2026 vLLM Release Notes
-            url: https://docs.nvidia.com/deeplearning/frameworks/pdf/vLLM-Release-Notes.pdf
-          - title: vllm-project/vllm v0.27.0 on GitHub
-            url: https://newreleases.io/project/github/vllm-project/vllm/release/v0.27.0
+          - title: vLLM Release 26.02 - NVIDIA Docs
+            url: https://docs.nvidia.com/deeplearning/frameworks/vllm-release-notes/rel-26-02.html
+          - title: vLLM release history | Freedom.Tech
+            url: https://freedom.tech/project/vllm/
           type: search
-        id: ws_9641fecc06b40df5
+        id: ws_a088dd38d0816251
         status: completed
         type: web_search_call
       - approval_request_id: null
         arguments: '{"query": "encoding"}'
         error: null
-        id: mcp_88b46610619c2d88
+        id: mcp_a8069f14c5ff464d
         name: search_tiktoken_documentation
         output: "### Search Results for: \"encoding\"\n\nNo relevant documentation\
           \ found for your query. It's either being indexed or the search query did\
@@ -695,24 +689,13 @@ turns:
         status: completed
         type: mcp_call
       - content:
-        - text: 'Both parallel calls completed. Now I need to summarize each result
-            in one sentence.
-
-
-            1. Web search for "latest vLLM release notes": The search found that the
-            latest vLLM version is v0.27.0 with 411 commits from 212 contributors
-            (61 new), featuring XPU optimizations including QK Norm + RoPE fusion
-            pass, FP8 support, and other improvements.
-
-
-            2. GitMCP tiktoken search for "encoding": The search returned fallback
-            documentation explaining that tiktoken is a fast BPE tokeniser for OpenAI''s
-            models, with 3-6x performance advantage over comparable open source tokenisers.
+        - text: 'Both calls completed successfully in parallel. Let me summarize each
+            result in one sentence as requested.
 
             '
           type: reasoning_text
         encrypted_content: null
-        id: rs_8047b768207eb6a9
+        id: rs_bd66fa592b7665ec
         status: null
         summary: []
         type: reasoning
@@ -721,32 +704,34 @@ turns:
           text: '
 
 
-            **1. Web search for latest vLLM release notes:** The latest vLLM release
-            is v0.27.0 with 411 commits from 212 contributors, featuring XPU optimizations
-            including QK Norm + RoPE fusion pass, FP8 o_proj support, DeepSeek-V4
-            kernel paths, and CPU improvements for Arm, Power, and s390x architectures.
+            **"latest vLLM release notes" web search:** The search found that vLLM
+            version 0.26.0 was released with 411 commits from 212 contributors, featuring
+            Inkling model support, DeepSeek-V4 performance optimizations, fp32 generation
+            heads, flexible attention backends, and mature KV offloading with tiered
+            storage as the current latest release.
 
 
-            **2. GitMCP tiktoken encoding documentation:** The search returned fallback
-            documentation explaining that tiktoken is a fast BPE tokeniser for OpenAI''s
-            models, offering 3-6x performance improvement over comparable open source
-            tokenisers with detailed examples of how to get encodings for specific
-            models and extend tiktoken with custom encodings.'
+            **"encoding" tiktoken documentation search:** The search found no indexed
+            documentation matching "encoding" but displayed fallback README content
+            explaining that tiktoken is a fast BPE tokenizer for OpenAI models that
+            converts text to tokens reversibly and explains that Byte Pair Encoding
+            is lossless, works on arbitrary text, compresses text efficiently, and
+            helps models generalize by recognizing common subwords.'
           type: output_text
-        id: msg_bcfeec5bc5a406b5
+        id: msg_8a47829948473717
         role: assistant
         status: completed
         type: message
-      previous_response_id: resp_01a04338-5ead-7121-9de7-513cce0fd745
+      previous_response_id: resp_01a05c6f-fca5-7613-864a-65e0f3b08f27
       status: completed
       usage:
-        input_tokens: 39846
+        input_tokens: 40295
         input_tokens_details:
           cached_tokens: 0
-        output_tokens: 430
+        output_tokens: 330
         output_tokens_details:
           reasoning_tokens: 0
-        total_tokens: 40276
+        total_tokens: 40625
     headers:
       content-type: application/json
     status_code: 200

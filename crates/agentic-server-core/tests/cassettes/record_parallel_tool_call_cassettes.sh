@@ -224,22 +224,22 @@ record_provider_suite() {
       "$BASE_DIR/tools-builtin-only.json" "$stream_flag" \
       "$BASE_DIR/parallel-builtin-only-${output_suffix}-${model_slug}-${stream_label}.yaml"
 
-    # bold "parallel-mixed ($stream_label)"
-    # record_case "$endpoint_flag" "$endpoint" "$model" 2 \
-    #   "$(printf '%s\n%s' "$MIXED_TURN1_PROMPT" "$MIXED_TURN2_PROMPT")" \
-    #   "$BASE_DIR/tools-mixed.json" "$stream_flag" \
-    #   "$BASE_DIR/parallel-mixed-${output_suffix}-${model_slug}-${stream_label}.yaml"
+    bold "parallel-mixed ($stream_label)"
+    record_case "$endpoint_flag" "$endpoint" "$model" 2 \
+      "$(printf '%s\n%s' "$MIXED_TURN1_PROMPT" "$MIXED_TURN2_PROMPT")" \
+      "$BASE_DIR/tools-mixed.json" "$stream_flag" \
+      "$BASE_DIR/parallel-mixed-${output_suffix}-${model_slug}-${stream_label}.yaml"
 
-    # bold "parallel-client ($stream_label)"
-    # record_case "$endpoint_flag" "$endpoint" "$model" 4 \
-    #   "$(printf '%s\n%s\n%s\n%s' "$CLIENT_TURN1_PROMPT" "$CLIENT_TURN2_PROMPT" "$CLIENT_TURN3_PROMPT" "$CLIENT_TURN4_PROMPT")" \
-    #   "$BASE_DIR/tools-client-only.json" "$stream_flag" \
-    #   "$BASE_DIR/parallel-client-${output_suffix}-${model_slug}-${stream_label}.yaml"
+    bold "parallel-client ($stream_label)"
+    record_case "$endpoint_flag" "$endpoint" "$model" 4 \
+      "$(printf '%s\n%s\n%s\n%s' "$CLIENT_TURN1_PROMPT" "$CLIENT_TURN2_PROMPT" "$CLIENT_TURN3_PROMPT" "$CLIENT_TURN4_PROMPT")" \
+      "$BASE_DIR/tools-client-only.json" "$stream_flag" \
+      "$BASE_DIR/parallel-client-${output_suffix}-${model_slug}-${stream_label}.yaml"
 
-    # bold "parallel-failures ($stream_label)"
-    # record_failures_case "$endpoint_flag" "$endpoint" "$model" \
-    #   "$BASE_DIR/tools-mixed.json" "$stream_flag" \
-    #   "$BASE_DIR/parallel-failures-${output_suffix}-${model_slug}-${stream_label}.yaml"
+    bold "parallel-failures ($stream_label)"
+    record_failures_case "$endpoint_flag" "$endpoint" "$model" \
+      "$BASE_DIR/tools-mixed.json" "$stream_flag" \
+      "$BASE_DIR/parallel-failures-${output_suffix}-${model_slug}-${stream_label}.yaml"
   done
 }
 
