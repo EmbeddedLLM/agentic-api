@@ -1,8 +1,8 @@
 use std::num::NonZeroUsize;
 use std::time::Duration;
 
-use futures::StreamExt;
-use futures::stream as futures_stream;
+use futures::future::join_all;
+use tokio::sync::Semaphore;
 
 use crate::config::DEFAULT_MAX_CONCURRENT_GATEWAY_CALLS;
 use crate::events::SSEEventType;
@@ -210,15 +210,19 @@ impl GatewayScheduler {
             .count()
     }
 
-    /// Executes the planned calls with the existing bounded-concurrency policy
-    /// and records each tool's completed public lifecycle on the same slot.
+    /// Executes planned calls under the bounded-concurrency policy and records
+    /// each tool's completed public lifecycle on the same slot.
     pub(super) async fn execute(&mut self) -> ExecutorResult<Vec<GatewayCallResult>> {
-        let results = futures_stream::iter(self.calls.iter().cloned().map(|call| self.run_one(call)))
-            .buffered(self.policy.max_concurrent_calls.get())
-            .collect::<Vec<_>>()
-            .await
-            .into_iter()
-            .collect::<ExecutorResult<Vec<_>>>()?;
+        let execution_slots = Semaphore::new(self.policy.max_concurrent_calls.get());
+        let results = join_all(
+            self.calls
+                .iter()
+                .cloned()
+                .map(|call| self.run_one(call, &execution_slots)),
+        )
+        .await
+        .into_iter()
+        .collect::<ExecutorResult<Vec<_>>>()?;
 
         debug_assert_eq!(self.calls.len(), results.len());
         for (planned, result) in self.calls.iter_mut().zip(&results) {
@@ -228,7 +232,7 @@ impl GatewayScheduler {
         Ok(results)
     }
 
-    async fn run_one(&self, plan: GatewayCallPlan) -> ExecutorResult<GatewayCallResult> {
+    async fn run_one(&self, plan: GatewayCallPlan, execution_slots: &Semaphore) -> ExecutorResult<GatewayCallResult> {
         let GatewayCallPlan {
             item_index,
             call,
@@ -251,6 +255,7 @@ impl GatewayScheduler {
             Some(semaphore) => Some(semaphore.acquire().await.expect("semaphore is never closed")),
             None => None,
         };
+        let _execution_slot = execution_slots.acquire().await.expect("semaphore is never closed");
 
         let dispatched = if self.timeout.is_zero() {
             binding.execute(&call.call_id, &call.name, &call.arguments).await
@@ -620,7 +625,7 @@ mod tests {
     use crate::executor::accumulator::ResponseAccumulator;
     use crate::types::io::output::{FunctionToolCall, McpListTool, McpListTools};
     use crate::types::io::{CompactionItem, InputItem, McpCallStatus};
-    use tokio::sync::mpsc;
+    use tokio::sync::{Notify, mpsc};
 
     fn parse_named_sse_event(content: &str) -> Value {
         let body = content.strip_suffix("\n\n").expect("SSE event terminator");
@@ -638,10 +643,10 @@ mod tests {
 
     use serde_json::Value;
 
-    use super::{GatewayScheduler, GatewaySchedulerPolicy};
+    use super::{GatewayCallPlan, GatewayEventPlan, GatewayExecutionPlan, GatewayScheduler, GatewaySchedulerPolicy};
     use crate::tool::{
-        GatewayExecutor, GatewayExecutors, GatewayToolEventPlan, ToolError, ToolHandler, ToolOutput, ToolRegistry,
-        ToolType,
+        GatewayBinding, GatewayExecutor, GatewayExecutors, GatewayToolEventPlan, ToolError, ToolHandler, ToolOutput,
+        ToolRegistry, ToolType,
     };
     use crate::types::io::OutputItem;
     use crate::types::io::output::GatewayCallStatus;
@@ -981,6 +986,173 @@ mod tests {
         assert!(
             elapsed >= std::time::Duration::from_millis(180),
             "four exclusive 50ms calls took {elapsed:?}, expected close to 200ms"
+        );
+    }
+
+    struct SchedulingProbeExecutor {
+        blocked_call_id: &'static str,
+        observed_call_id: &'static str,
+        blocked_started: Arc<Notify>,
+        observed_started: Arc<Notify>,
+        release_blocked: Arc<Notify>,
+        supports_parallel_execution: bool,
+    }
+
+    impl ToolHandler for SchedulingProbeExecutor {
+        type ToolParams = WebSearchToolParam;
+
+        fn tool_type(&self) -> ToolType {
+            ToolType::WebSearch
+        }
+
+        fn validate(&self, _params: &WebSearchToolParam) -> Result<(), ToolError> {
+            Ok(())
+        }
+
+        fn normalize(&self, _params: &WebSearchToolParam) -> Vec<FunctionTool> {
+            Vec::new()
+        }
+    }
+
+    impl GatewayExecutor for SchedulingProbeExecutor {
+        type ExecutionParams = WebSearchToolParam;
+
+        fn execute(
+            &self,
+            call_id: &str,
+            _tool_name: &str,
+            _arguments: &str,
+            _params: &WebSearchToolParam,
+        ) -> Pin<Box<dyn Future<Output = Result<ToolOutput, ToolError>> + Send + '_>> {
+            let call_id = call_id.to_owned();
+            let blocked_started = Arc::clone(&self.blocked_started);
+            let observed_started = Arc::clone(&self.observed_started);
+            let release_blocked = Arc::clone(&self.release_blocked);
+            Box::pin(async move {
+                if call_id == self.blocked_call_id {
+                    blocked_started.notify_one();
+                    release_blocked.notified().await;
+                } else if call_id == self.observed_call_id {
+                    observed_started.notify_one();
+                }
+                Ok(ToolOutput {
+                    call_id,
+                    output: "completed".to_owned(),
+                })
+            })
+        }
+
+        fn supports_parallel_execution(&self) -> bool {
+            self.supports_parallel_execution
+        }
+    }
+
+    fn scheduler_test_params() -> WebSearchToolParam {
+        serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).expect("web_search tool param")
+    }
+
+    fn gateway_call_plan(item_index: usize, call_id: &str, name: &str, binding: GatewayBinding) -> GatewayCallPlan {
+        let mut call = web_search_call(call_id);
+        call.name = name.to_owned();
+        GatewayCallPlan {
+            item_index,
+            events: GatewayEventPlan {
+                output_index: u32::try_from(item_index).expect("test item index fits in u32"),
+                started_output: None,
+                completed_output: None,
+                arguments: Some(call.arguments.clone()),
+            },
+            call,
+            execution: GatewayExecutionPlan::Bound(binding),
+        }
+    }
+
+    #[tokio::test]
+    async fn gateway_scheduler_keeps_same_tool_waiter_outside_global_execution_window() {
+        let blocked_started = Arc::new(Notify::new());
+        let unrelated_started = Arc::new(Notify::new());
+        let release_blocked = Arc::new(Notify::new());
+        let executor = Arc::new(SchedulingProbeExecutor {
+            blocked_call_id: "call_a1",
+            observed_call_id: "call_b",
+            blocked_started: Arc::clone(&blocked_started),
+            observed_started: Arc::clone(&unrelated_started),
+            release_blocked: Arc::clone(&release_blocked),
+            supports_parallel_execution: false,
+        });
+        let binding_a = GatewayBinding::new(Arc::clone(&executor), scheduler_test_params());
+        let binding_b = GatewayBinding::new(executor, scheduler_test_params());
+        let calls = vec![
+            gateway_call_plan(0, "call_a1", "tool_a", binding_a.clone()),
+            gateway_call_plan(1, "call_a2", "tool_a", binding_a),
+            gateway_call_plan(2, "call_b", "tool_b", binding_b),
+        ];
+        let mut scheduler = GatewayScheduler {
+            calls,
+            policy: GatewaySchedulerPolicy::new(NonZeroUsize::new(2).expect("nonzero test limit")),
+            timeout: std::time::Duration::ZERO,
+        };
+
+        let execution = tokio::spawn(async move { scheduler.execute().await });
+        tokio::time::timeout(std::time::Duration::from_secs(1), blocked_started.notified())
+            .await
+            .expect("first same-tool call starts");
+        tokio::time::timeout(std::time::Duration::from_secs(1), unrelated_started.notified())
+            .await
+            .expect("unrelated call starts while the same-tool waiter remains queued");
+        release_blocked.notify_one();
+
+        let results = execution
+            .await
+            .expect("scheduler task joins")
+            .expect("scheduler succeeds");
+        assert_eq!(
+            results.iter().map(|result| result.item_index).collect::<Vec<_>>(),
+            vec![0, 1, 2]
+        );
+    }
+
+    #[tokio::test]
+    async fn gateway_scheduler_refills_execution_window_before_earlier_call_finishes() {
+        let blocked_started = Arc::new(Notify::new());
+        let refilled_call_started = Arc::new(Notify::new());
+        let release_blocked = Arc::new(Notify::new());
+        let executor = Arc::new(SchedulingProbeExecutor {
+            blocked_call_id: "call_a",
+            observed_call_id: "call_c",
+            blocked_started: Arc::clone(&blocked_started),
+            observed_started: Arc::clone(&refilled_call_started),
+            release_blocked: Arc::clone(&release_blocked),
+            supports_parallel_execution: true,
+        });
+        let binding = GatewayBinding::new(executor, scheduler_test_params());
+        let calls = vec![
+            gateway_call_plan(0, "call_a", "tool", binding.clone()),
+            gateway_call_plan(1, "call_b", "tool", binding.clone()),
+            gateway_call_plan(2, "call_c", "tool", binding),
+        ];
+        let mut scheduler = GatewayScheduler {
+            calls,
+            policy: GatewaySchedulerPolicy::new(NonZeroUsize::new(2).expect("nonzero test limit")),
+            timeout: std::time::Duration::ZERO,
+        };
+
+        let execution = tokio::spawn(async move { scheduler.execute().await });
+        tokio::time::timeout(std::time::Duration::from_secs(1), blocked_started.notified())
+            .await
+            .expect("first call starts");
+        tokio::time::timeout(std::time::Duration::from_secs(1), refilled_call_started.notified())
+            .await
+            .expect("third call refills the slot released by the completed second call");
+        release_blocked.notify_one();
+
+        let results = execution
+            .await
+            .expect("scheduler task joins")
+            .expect("scheduler succeeds");
+        assert_eq!(
+            results.iter().map(|result| result.item_index).collect::<Vec<_>>(),
+            vec![0, 1, 2]
         );
     }
 
