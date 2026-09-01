@@ -111,7 +111,7 @@ impl ExecutorError {
             Self::Storage(e) if e.is_not_found() => StatusCode::NOT_FOUND,
             Self::LLMRequest { status, .. } | Self::LLMTransport { status, .. } => *status,
             Self::ConversationLocked { .. }
-            | Self::Tool(ToolError::Config(_))
+            | Self::Tool(ToolError::Config(_) | ToolError::MissingOutput { .. })
             | Self::InvalidRequest(_)
             | Self::JsonError(_) => StatusCode::BAD_REQUEST,
             Self::Tool(ToolError::Execution(_)) | Self::CompactionFailed { .. } => StatusCode::BAD_GATEWAY,
@@ -125,7 +125,7 @@ impl ExecutorError {
     pub fn error_type(&self) -> &'static str {
         match self.client_visible_error() {
             Self::ConversationLocked { .. }
-            | Self::Tool(ToolError::Config(_))
+            | Self::Tool(ToolError::Config(_) | ToolError::MissingOutput { .. })
             | Self::InvalidRequest(_)
             | Self::ParseError(_)
             | Self::JsonError(_) => "invalid_request_error",
@@ -148,13 +148,37 @@ impl ExecutorError {
     /// Request parameter associated with the API error, when applicable.
     #[must_use]
     pub fn error_param(&self) -> Option<&'static str> {
-        matches!(self.client_visible_error(), Self::ConversationLocked { .. }).then_some("conversation")
+        match self.client_visible_error() {
+            Self::ConversationLocked { .. } => Some("conversation"),
+            Self::Tool(ToolError::MissingOutput { .. }) => Some("input"),
+            _ => None,
+        }
     }
 
     /// Client-safe message for the API error envelope.
     #[must_use]
     pub fn error_message(&self) -> String {
-        self.client_visible_error().to_string()
+        match self.client_visible_error() {
+            Self::Tool(error @ ToolError::MissingOutput { .. }) => error.to_string(),
+            other => other.to_string(),
+        }
+    }
+
+    /// Builds the OpenAI-compatible error object shared by HTTP and SSE.
+    pub(crate) fn response_error(&self) -> serde_json::Value {
+        let code = if matches!(self.client_visible_error(), Self::Tool(ToolError::MissingOutput { .. })) {
+            serde_json::Value::Null
+        } else {
+            serde_json::json!(self.error_code())
+        };
+        let mut error = serde_json::Map::new();
+        error.insert("message".to_owned(), serde_json::json!(self.error_message()));
+        error.insert("type".to_owned(), serde_json::json!(self.error_type()));
+        error.insert("code".to_owned(), code);
+        if let Some(param) = self.error_param() {
+            error.insert("param".to_owned(), serde_json::json!(param));
+        }
+        serde_json::Value::Object(error)
     }
 
     /// Serialise the error into the HTTP response body bytes.
@@ -165,18 +189,7 @@ impl ExecutorError {
     pub fn into_response_body(self) -> Vec<u8> {
         match self {
             Self::LLMRequest { body, .. } => body.into_bytes(),
-            other => {
-                let error_type = other.error_type();
-                let code = other.error_code();
-                let mut error = serde_json::Map::new();
-                error.insert("message".to_owned(), serde_json::json!(other.error_message()));
-                error.insert("type".to_owned(), serde_json::json!(error_type));
-                error.insert("code".to_owned(), serde_json::json!(code));
-                if let Some(param) = other.error_param() {
-                    error.insert("param".to_owned(), serde_json::json!(param));
-                }
-                serialize_to_vec_or_default(&serde_json::json!({ "error": error }))
-            }
+            other => serialize_to_vec_or_default(&serde_json::json!({ "error": other.response_error() })),
         }
     }
 }
@@ -267,5 +280,26 @@ mod tests {
         let value: serde_json::Value = serde_json::from_slice(&body).expect("valid error response JSON");
 
         assert!(!value["error"].as_object().expect("error object").contains_key("param"));
+    }
+
+    #[test]
+    fn missing_tool_output_matches_openai_error_envelope() {
+        let error = ExecutorError::Tool(ToolError::MissingOutput {
+            call_id: "call_test".to_owned(),
+        });
+
+        assert_eq!(error.http_status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&error.into_response_body())
+                .expect("valid error response JSON"),
+            serde_json::json!({
+                "error": {
+                    "message": "No tool output found for function call call_test.",
+                    "type": "invalid_request_error",
+                    "param": "input",
+                    "code": null
+                }
+            })
+        );
     }
 }

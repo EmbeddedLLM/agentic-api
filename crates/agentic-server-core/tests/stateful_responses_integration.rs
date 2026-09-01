@@ -487,11 +487,12 @@ async fn test_encrypted_only_persisted_reasoning_fails_before_upstream() {
     );
 
     for stream in [false, true] {
-        let result = execute(
-            make_request("continue", true, stream, Some(first.id.clone()), None),
-            Arc::clone(&fixture.exec_ctx),
-        )
-        .await;
+        let mut continuation = make_request("continue", true, stream, Some(first.id.clone()), None);
+        continuation.input = ResponsesInput::Items(vec![InputItem::FunctionCallOutput(FunctionToolResultMessage {
+            call_id: "call_prior".to_owned(),
+            output: "tool output".into(),
+        })]);
+        let result = execute(continuation, Arc::clone(&fixture.exec_ctx)).await;
         let Err(error) = result else {
             panic!("encrypted-only reasoning must be rejected before inference");
         };

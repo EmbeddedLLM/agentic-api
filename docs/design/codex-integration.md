@@ -133,11 +133,11 @@ Responses tool shapes and execution semantics, so it can be always on.
 
 | Shape | Behavior |
 |-------|----------|
-| `function` | Client-owned by default. Preserve declaration and return matching calls to the client unless configured as gateway-owned. |
+| `function` | Client-owned. Preserve the declaration and return matching calls to the client. |
 | `namespace` | Client-owned Codex grouping for function tools. Flatten members only for upstream requests, then restore returned calls. |
 | `custom` | Client-owned freeform tool. Preserve its opaque format and forward it natively. |
-| `web_search_preview` | Gateway-owned when configured; normalized to the gateway web-search function tool. |
-| `mcp` | Gateway-owned. Normalize MCP declarations to model-visible function tools, execute calls with request-scoped MCP handlers, and expose public `mcp_call` items. Streaming emits `response.output_item.added`, `response.mcp_call.in_progress`, `response.mcp_call_arguments.delta`/`.done`, `response.mcp_call.completed` or `.failed`, and `response.output_item.done`. |
+| `web_search_preview` | Gateway-owned and normalized to the web-search function tool. Without a usable provider, execution produces a failed tool result instead of changing ownership. |
+| `mcp` | Gateway-owned. Normalize discovered MCP tools to model-visible function tools, execute calls with request-scoped MCP bindings, and expose public `mcp_call` items. Streaming emits `response.output_item.added`, `response.mcp_call.in_progress`, `response.mcp_call_arguments.delta`/`.done`, `response.mcp_call.completed` or `.failed`, and `response.output_item.done`. |
 | `file_search`, `code_interpreter` | Accepted by the typed request parser but skipped during upstream normalization because no gateway handler is registered yet. |
 | Unknown tool | Recognized and skipped on the typed path; opaque fields are not preserved or executed. Eligible raw-proxy requests remain byte-transparent. |
 
@@ -166,6 +166,12 @@ prior context + assistant tool call + Codex tool output + new input
 On a turn that returns client-owned tool calls, storage keeps the assistant call item. On the next turn, Codex submits
 the matching tool output item, and `previous_response_id` rebuilds the full sequence while preserving effective tool
 metadata from the previous response unless the client explicitly overrides it.
+
+Gateway-owned web-search and MCP public output items are not reconstructed as model input during continuation. Their
+internal `function_call` and matching `function_call_output` records are persisted as the canonical model-visible pair.
+MCP list-tools output is different: it rehydrates as an internal `InputItem::McpListTools` record so the request-scoped
+registry can avoid repeating that server label's public discovery lifecycle. `ResponsesInput::model_input()` removes
+the record before the request is sent to vLLM.
 
 ---
 

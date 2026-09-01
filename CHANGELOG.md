@@ -4,6 +4,16 @@ All notable changes to Agentic API are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- Forwarded `parallel_tool_calls` as the model-generation preference for typed
+  Responses requests, including built-in-only and mixed tool declarations (#181).
+- Added bounded, configurable parallel execution for Responses gateway rounds,
+  preserving model call order and applying per-handler same-tool safety.
+- Preserved MCP list-tools records in continuation history for registry lifecycle
+  decisions while excluding them from model input, preventing repeated public
+  list-tools emission on later turns.
+
 ### Added
 
 - Documented running Agentic API in front of NVIDIA Dynamo and recorded Dynamo cassettes for stateful and

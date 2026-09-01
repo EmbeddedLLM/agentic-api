@@ -10,6 +10,7 @@ pub mod function;
 pub mod handler;
 pub mod mcp;
 pub mod normalize;
+pub mod ownership;
 pub mod registry;
 pub mod web_search;
 
@@ -17,7 +18,8 @@ pub use codex::{CodexNamespaceHandler, NamespaceMap, model_visible_namespace_mem
 pub use custom::CustomHandler;
 pub use executors::{GatewayExecutorRegistration, GatewayExecutors};
 pub use function::FunctionHandler;
-pub use handler::{GatewayExecutor, ToolError, ToolHandler, ToolOutput};
+pub use handler::{GatewayExecutor, GatewayToolEventPlan, ToolError, ToolHandler, ToolOutput};
 pub use mcp::{McpClient, McpClientPool, McpDiscoveredHandler, McpError, McpHandler, McpOperation, McpServerEntry};
+pub use ownership::{GatewayBinding, ToolOwnership};
 pub use registry::{GatewayDispatchResult, ToolEntry, ToolRegistry, ToolType};
 pub use web_search::WebSearchHandler;

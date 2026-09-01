@@ -1,24 +1,22 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::sync::Arc;
 
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use super::codex::insert_namespace_entries;
 use super::custom::{CustomHandler, CustomToolMap, insert_custom_entry};
 use super::executors::GatewayExecutors;
 use super::function::insert_function_entry;
-use super::mcp::handler::{McpToolMap, McpToolRef};
 use super::mcp::registry::insert_discovered_mcp_entry;
+use super::ownership::{GatewayBinding, ToolOwnership};
 use super::web_search::insert_web_search_entry;
-use super::{CodexNamespaceHandler, GatewayExecutor, McpHandler, NamespaceMap, ToolError, ToolOutput};
+use super::{CodexNamespaceHandler, McpHandler, NamespaceMap, ToolError, ToolOutput};
 use crate::events::WireEvent;
 
-use crate::types::io::OutputItem;
 use crate::types::io::output::{FunctionToolCall, McpListTools};
+use crate::types::io::{InputItem, OutputItem, ResponsesInput};
 use crate::types::tools::{CodeInterpreterToolParam, FileSearchToolParam, ResponsesTool};
-use crate::utils::common::serialize_to_value_or_custom_default;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -49,6 +47,10 @@ impl ToolType {
         }
     }
 
+    /// Whether this kind of tool is gateway-owned by design, independent of
+    /// any specific registry entry. Used before a `ToolEntry` exists (e.g.
+    /// classifying a raw declaration); once an entry exists, prefer
+    /// `ToolOwnership::is_gateway` on it directly.
     #[must_use]
     pub const fn is_gateway_owned(self) -> bool {
         !matches!(self, Self::Function | Self::Custom | Self::CodexNamespace)
@@ -59,21 +61,43 @@ impl ToolType {
 #[derive(Clone)]
 pub struct ToolEntry {
     pub tool_type: ToolType,
-    /// Full serialised tool param for the executor (used during dispatch).
-    pub config: Value,
     /// For MCP tools: which server this tool belongs to.
     pub server_label: Option<String>,
-    pub handler: Option<Arc<dyn GatewayExecutor>>,
+    pub ownership: ToolOwnership,
 }
 
 impl std::fmt::Debug for ToolEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ToolEntry")
             .field("tool_type", &self.tool_type)
-            .field("config", &self.config)
             .field("server_label", &self.server_label)
-            .field("handler", &self.handler.is_some())
+            .field("is_gateway", &self.ownership.is_gateway())
             .finish()
+    }
+}
+
+impl ToolEntry {
+    /// Builds a client-owned entry. `tool_type.is_gateway_owned()` is the
+    /// single source of truth for the ownership discriminant; this asserts
+    /// the caller picked the constructor matching its own tool type.
+    pub(crate) fn client(tool_type: ToolType, server_label: Option<String>) -> Self {
+        debug_assert!(!tool_type.is_gateway_owned());
+        Self {
+            tool_type,
+            server_label,
+            ownership: ToolOwnership::Client,
+        }
+    }
+
+    /// Builds a gateway-owned entry. `binding` is `None` for tool types that
+    /// are gateway-owned in principle but have no executor yet.
+    pub(crate) fn gateway(tool_type: ToolType, server_label: Option<String>, binding: Option<GatewayBinding>) -> Self {
+        debug_assert!(tool_type.is_gateway_owned());
+        Self {
+            tool_type,
+            server_label,
+            ownership: ToolOwnership::Gateway(binding),
+        }
     }
 }
 
@@ -108,51 +132,19 @@ pub struct GatewayDispatchResult {
 
 // TODO: move to a dedicated file_search module alongside its `ToolHandler`
 // once file_search execution is implemented.
-fn insert_file_search_entry(
-    entries: &mut HashMap<String, ToolEntry>,
-    p: &FileSearchToolParam,
-    handler: Option<Arc<dyn GatewayExecutor>>,
-) {
-    serialize_to_value_or_custom_default(
-        p,
-        "file_search tool config serialization failed",
-        |config| {
-            entries.insert(
-                "file_search".to_owned(),
-                ToolEntry {
-                    tool_type: ToolType::FileSearch,
-                    config,
-                    server_label: None,
-                    handler,
-                },
-            );
-        },
-        (),
+fn insert_file_search_entry(entries: &mut HashMap<String, ToolEntry>, _params: &FileSearchToolParam) {
+    entries.insert(
+        "file_search".to_owned(),
+        ToolEntry::gateway(ToolType::FileSearch, None, None),
     );
 }
 
 // TODO: move to a dedicated code_interpreter module alongside its `ToolHandler`
 // once code_interpreter execution is implemented.
-fn insert_code_interpreter_entry(
-    entries: &mut HashMap<String, ToolEntry>,
-    p: &CodeInterpreterToolParam,
-    handler: Option<Arc<dyn GatewayExecutor>>,
-) {
-    serialize_to_value_or_custom_default(
-        p,
-        "code_interpreter tool config serialization failed",
-        |config| {
-            entries.insert(
-                "code_interpreter".to_owned(),
-                ToolEntry {
-                    tool_type: ToolType::CodeInterpreter,
-                    config,
-                    server_label: None,
-                    handler,
-                },
-            );
-        },
-        (),
+fn insert_code_interpreter_entry(entries: &mut HashMap<String, ToolEntry>, _params: &CodeInterpreterToolParam) {
+    entries.insert(
+        "code_interpreter".to_owned(),
+        ToolEntry::gateway(ToolType::CodeInterpreter, None, None),
     );
 }
 
@@ -170,12 +162,10 @@ pub struct ToolRegistry {
     /// for response lifecycle metadata restoration.
     custom_tool_map: Option<CustomToolMap>,
 
-    /// Maps model-visible MCP function names back to their public server and
-    /// tool identities without reparsing executor configuration.
-    mcp_tool_map: McpToolMap,
-
-    /// Request-scoped MCP discovery output items retained in declaration order.
-    mcp_list_tools_items: Vec<McpListTools>,
+    /// MCP tool-list items grouped by server label. Current discovery is stored
+    /// first while building and rehydrated historical records are appended.
+    /// Insertion order preserves the MCP declaration order for public output.
+    mcp_list_tools_items: IndexMap<String, Vec<McpListTools>>,
 }
 
 impl ToolRegistry {
@@ -201,8 +191,7 @@ impl ToolRegistry {
         executors: &mut GatewayExecutors,
     ) -> Result<Self, ToolError> {
         let mut entries = HashMap::with_capacity(tools.len());
-        let mut mcp_tool_map = McpToolMap::default();
-        let mut mcp_list_tools_items = Vec::new();
+        let mut mcp_list_tools_items = IndexMap::<String, Vec<McpListTools>>::new();
         // Namespace members must be keyed by the same flat, model-visible name
         // the model will call, so resolve them first — the same pure pass used
         // to build the upstream request.
@@ -220,22 +209,25 @@ impl ToolRegistry {
                         // Config errors mean the declaration is invalid; the client can fix it.
                         Err(error @ ToolError::Config(_)) => return Err(error),
                         Err(error) => {
-                            mcp_list_tools_items.push(McpHandler::failed_list_tools_item(&p.server_label, &error));
+                            mcp_list_tools_items
+                                .entry(p.server_label.clone())
+                                .or_default()
+                                .push(McpHandler::failed_list_tools_item(&p.server_label, &error));
                             continue;
                         }
                     };
                     let handlers = tool_set.discovered_handlers;
-                    mcp_list_tools_items.push(tool_set.list_tools_item);
+                    mcp_list_tools_items
+                        .entry(p.server_label.clone())
+                        .or_default()
+                        .push(tool_set.list_tools_item);
                     if let ResponsesTool::Mcp(declaration) = &mut tools[index] {
                         declaration.discovered_tools = handlers.iter().map(|item| item.param.clone()).collect();
                     }
                     for discovered in handlers {
-                        let internal_name = discovered.param.internal_name.clone();
-                        let tool_ref = McpToolRef::from(&discovered.param);
                         insert_unique_tool_entries(&mut entries, |resolved| {
                             insert_discovered_mcp_entry(resolved, discovered);
                         })?;
-                        mcp_tool_map.record(internal_name, tool_ref);
                     }
                 }
                 ResponsesTool::WebSearch(p) => {
@@ -244,11 +236,11 @@ impl ToolRegistry {
                     })?;
                 }
                 ResponsesTool::FileSearch(p) => {
-                    insert_unique_tool_entries(&mut entries, |resolved| insert_file_search_entry(resolved, p, None))?;
+                    insert_unique_tool_entries(&mut entries, |resolved| insert_file_search_entry(resolved, p))?;
                 }
                 ResponsesTool::CodeInterpreter(p) => {
                     insert_unique_tool_entries(&mut entries, |resolved| {
-                        insert_code_interpreter_entry(resolved, p, None);
+                        insert_code_interpreter_entry(resolved, p);
                     })?;
                 }
                 ResponsesTool::Namespace(p) => {
@@ -270,7 +262,6 @@ impl ToolRegistry {
             entries,
             namespace_map,
             custom_tool_map,
-            mcp_tool_map,
             mcp_list_tools_items,
         })
     }
@@ -299,16 +290,43 @@ impl ToolRegistry {
 
     #[must_use]
     pub fn contains_mcp_server_label(&self, server_label: &str) -> bool {
-        self.mcp_tool_map.contains_server_label(server_label)
+        self.entries
+            .values()
+            .any(|entry| entry.tool_type == ToolType::Mcp && entry.server_label.as_deref() == Some(server_label))
     }
 
-    pub(crate) fn mcp_tool_ref(&self, internal_name: &str) -> Option<&McpToolRef> {
-        self.mcp_tool_map.tool_ref(internal_name)
+    pub(crate) fn cache_listed_mcp_tools(&mut self, input: &ResponsesInput) {
+        if let ResponsesInput::Items(items) = input {
+            for item in items {
+                let InputItem::McpListTools(list_tools) = item else {
+                    continue;
+                };
+                // Only a currently declared MCP server can emit discovery in
+                // this request. Ignore history for labels absent from the
+                // current registry instead of turning it into a new candidate.
+                if let Some(items) = self.mcp_list_tools_items.get_mut(&list_tools.server_label) {
+                    items.push(list_tools.clone());
+                }
+            }
+        }
     }
 
-    #[must_use]
-    pub(crate) fn mcp_list_tools_items(&self) -> &[McpListTools] {
-        &self.mcp_list_tools_items
+    /// Current discovery items without an equivalent successful historical
+    /// lifecycle. Failed or changed discovery remains visible to the client.
+    pub(crate) fn mcp_list_tool_items(&self) -> impl Iterator<Item = &McpListTools> {
+        self.mcp_list_tools_items.values().filter_map(|items| {
+            let (current, history) = items.split_first()?;
+            let already_emitted = current.error.is_none()
+                && history
+                    .iter()
+                    .any(|previous| previous.error.is_none() && previous.tools == current.tools);
+            (!already_emitted).then_some(current)
+        })
+    }
+
+    /// Marks the current request's discovery lifecycle as consumed.
+    pub(crate) fn clear_mcp_list_tool_items(&mut self) {
+        self.mcp_list_tools_items.clear();
     }
 
     pub fn restore_final_payload_output(&self, output: &mut [OutputItem]) {
@@ -325,19 +343,20 @@ impl ToolRegistry {
     pub fn gateway_owned<'a>(&self, calls: &'a [FunctionToolCall]) -> Vec<&'a FunctionToolCall> {
         calls
             .iter()
-            .filter(|c| {
-                self.entries
-                    .get(&c.name)
-                    .is_some_and(|e| e.tool_type.is_gateway_owned())
-            })
+            .filter(|c| self.entries.get(&c.name).is_some_and(|e| e.ownership.is_gateway()))
             .collect()
     }
 
     #[must_use]
     pub fn is_gateway_owned_name(&self, name: &str) -> bool {
+        self.entries.get(name).is_some_and(|entry| entry.ownership.is_gateway())
+    }
+
+    #[must_use]
+    pub fn is_client_custom_name(&self, name: &str) -> bool {
         self.entries
             .get(name)
-            .is_some_and(|entry| entry.tool_type.is_gateway_owned())
+            .is_some_and(|entry| entry.tool_type == ToolType::Custom)
     }
 
     /// Returns the subset of `calls` whose names map to client-owned tools
@@ -346,34 +365,32 @@ impl ToolRegistry {
     pub fn client_owned<'a>(&self, calls: &'a [FunctionToolCall]) -> Vec<&'a FunctionToolCall> {
         calls
             .iter()
-            .filter(|c| {
-                self.entries
-                    .get(&c.name)
-                    .is_none_or(|e| !e.tool_type.is_gateway_owned())
-            })
+            .filter(|c| self.entries.get(&c.name).is_none_or(|e| !e.ownership.is_gateway()))
             .collect()
     }
 
     pub async fn dispatch(&self, call: &FunctionToolCall) -> Option<GatewayDispatchResult> {
         let entry = self.entries.get(&call.name)?;
-        let handler = entry.handler.clone()?;
+        let ToolOwnership::Gateway(Some(binding)) = &entry.ownership else {
+            return None;
+        };
         let tool_type = entry.tool_type;
-        let config = entry.config.clone();
         Some(GatewayDispatchResult {
             tool_type,
-            output: handler
-                .execute(&call.call_id, &call.name, &call.arguments, &config)
-                .await,
+            output: binding.execute(&call.call_id, &call.name, &call.arguments).await,
         })
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::tool::executors::GatewayExecutorRegistration;
     use crate::tool::mcp::{McpDiscoveredHandler, McpHandler};
     use crate::types::event::MessageStatus;
+    use crate::types::io::output::McpListTool;
     use crate::types::tools::McpDiscoveredToolParam;
 
     fn declaration(server_label: &str) -> ResponsesTool {
@@ -458,7 +475,7 @@ mod tests {
     }
 
     fn assert_mcp_list_tools_metadata(registry: &ToolRegistry) {
-        let [list_tools] = registry.mcp_list_tools_items() else {
+        let [list_tools] = registry.mcp_list_tools_items["counter"].as_slice() else {
             panic!("expected one MCP list-tools item");
         };
         assert!(list_tools.id.starts_with("mcpl_"));
@@ -476,6 +493,113 @@ mod tests {
         assert_eq!(
             list_tools.tools[0].annotations,
             Some(serde_json::json!({"read_only": false}))
+        );
+    }
+
+    #[test]
+    fn ignores_mcp_list_history_for_servers_absent_from_current_registry() {
+        let mut registry = ToolRegistry::default();
+        let input = ResponsesInput::Items(vec![
+            InputItem::McpListTools(McpListTools::new("mcpl_1", "counter", Vec::new())),
+            InputItem::McpListTools(McpListTools::new("mcpl_2", "search", Vec::new())),
+        ]);
+
+        registry.cache_listed_mcp_tools(&input);
+
+        assert_eq!(registry.mcp_list_tool_items().count(), 0);
+        assert!(registry.mcp_list_tools_items.is_empty());
+    }
+
+    #[test]
+    fn mcp_list_tools_map_suppresses_equivalent_successful_history_and_clears_after_emission() {
+        let mut registry = ToolRegistry::default();
+        registry.mcp_list_tools_items.insert(
+            "counter".to_owned(),
+            vec![
+                McpListTools::new("mcpl_current", "counter", Vec::new()),
+                McpListTools::new("mcpl_prior", "counter", Vec::new()),
+            ],
+        );
+        registry.mcp_list_tools_items.insert(
+            "search".to_owned(),
+            vec![McpListTools::new("mcpl_search_current", "search", Vec::new())],
+        );
+
+        let current = registry.mcp_list_tool_items().collect::<Vec<_>>();
+
+        assert_eq!(
+            current.iter().map(|item| item.id.as_str()).collect::<Vec<_>>(),
+            ["mcpl_search_current"]
+        );
+        assert_eq!(registry.mcp_list_tools_items["counter"].len(), 2);
+
+        registry.clear_mcp_list_tool_items();
+
+        assert_eq!(registry.mcp_list_tool_items().count(), 0);
+        assert!(registry.mcp_list_tools_items.is_empty());
+    }
+
+    fn listed_tool(name: &str) -> McpListTool {
+        McpListTool::new(
+            name,
+            Some(format!("{name} description")),
+            serde_json::json!({"type": "object"}),
+            Some(serde_json::json!({"read_only": true})),
+        )
+    }
+
+    fn visible_discovery_ids(current: McpListTools, history: Vec<McpListTools>) -> Vec<String> {
+        let mut items = vec![current];
+        items.extend(history);
+        let mut registry = ToolRegistry::default();
+        registry.mcp_list_tools_items.insert("server".to_owned(), items);
+        registry.mcp_list_tool_items().map(|item| item.id.clone()).collect()
+    }
+
+    #[test]
+    fn mcp_list_tools_map_keeps_failed_or_changed_current_discovery_visible() {
+        let current_success = McpListTools::new("mcpl_current", "server", vec![listed_tool("current")]);
+        let mut previous_failure = McpListTools::new("mcpl_failed", "server", vec![listed_tool("current")]);
+        previous_failure.error = Some("discovery failed".to_owned());
+        assert_eq!(
+            visible_discovery_ids(current_success, vec![previous_failure]),
+            ["mcpl_current"]
+        );
+
+        let current_changed = McpListTools::new("mcpl_changed", "server", vec![listed_tool("new")]);
+        let previous_success = McpListTools::new("mcpl_previous", "server", vec![listed_tool("old")]);
+        assert_eq!(
+            visible_discovery_ids(current_changed, vec![previous_success]),
+            ["mcpl_changed"]
+        );
+
+        let mut current_failure = McpListTools::new("mcpl_current_failed", "server", Vec::new());
+        current_failure.error = Some("current discovery failed".to_owned());
+        let previous_empty_success = McpListTools::new("mcpl_previous_success", "server", Vec::new());
+        assert_eq!(
+            visible_discovery_ids(current_failure, vec![previous_empty_success]),
+            ["mcpl_current_failed"]
+        );
+    }
+
+    #[test]
+    fn mcp_list_tool_items_preserve_server_declaration_order() {
+        let mut registry = ToolRegistry::default();
+        registry.mcp_list_tools_items.insert(
+            "second-alphabetically".to_owned(),
+            vec![McpListTools::new("mcpl_first", "second-alphabetically", Vec::new())],
+        );
+        registry.mcp_list_tools_items.insert(
+            "first-alphabetically".to_owned(),
+            vec![McpListTools::new("mcpl_second", "first-alphabetically", Vec::new())],
+        );
+
+        assert_eq!(
+            registry
+                .mcp_list_tool_items()
+                .map(|item| item.server_label.as_str())
+                .collect::<Vec<_>>(),
+            ["second-alphabetically", "first-alphabetically"]
         );
     }
 
@@ -525,26 +649,12 @@ mod tests {
                 server_label,
                 "unexpected server label for '{name}'"
             );
-            assert_eq!(entry.handler.is_some(), has_handler, "unexpected handler for '{name}'");
+            assert_eq!(
+                matches!(entry.ownership, ToolOwnership::Gateway(Some(_))),
+                has_handler,
+                "unexpected handler for '{name}'"
+            );
         }
-        assert_eq!(registry.lookup("freeform").unwrap().config["name"], "freeform");
-        assert_eq!(registry.lookup("echo").unwrap().config["name"], "echo");
-        assert_eq!(
-            registry.lookup("mcp__counter__increment").unwrap().config["tool_name"],
-            "increment"
-        );
-        assert_eq!(
-            registry.lookup("web_search").unwrap().config["search_context_size"],
-            "low"
-        );
-        assert_eq!(
-            registry.lookup("file_search").unwrap().config["vector_store_ids"][0],
-            "vs_test"
-        );
-        assert_eq!(
-            registry.lookup("agentic_ns__mcp__shell__run").unwrap().config["tools"][0]["name"],
-            "agentic_ns__mcp__shell__run"
-        );
         for name in [
             "mcp__counter__increment",
             "mcp__counter__get_value",
@@ -590,7 +700,7 @@ mod tests {
             .await
             .expect("discovery failures should become response metadata");
 
-        let [list_tools] = registry.mcp_list_tools_items() else {
+        let [list_tools] = registry.mcp_list_tools_items["unreachable"].as_slice() else {
             panic!("expected one MCP list-tools item");
         };
         assert_eq!(list_tools.server_label, "unreachable");

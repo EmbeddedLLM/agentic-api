@@ -14,11 +14,10 @@ use tracing::debug;
 
 use super::compaction::{compact_items, maybe_compact_context};
 use super::gateway::{
-    GatewayCallResult, LoopDecision, append_gateway_calls_to_new_input, append_output_items_to_input,
-    append_tool_outputs, classify_round, compaction_event_plans, complete_gateway_event_plans,
-    emit_gateway_completed_events, emit_gateway_start_events, emit_response_start_events,
-    execute_and_emit_output_calls, execute_output_calls, gateway_event_plans, has_client_owned_calls,
-    is_client_custom_call, is_gateway_owned_call, public_output_items,
+    GatewayCallResult, GatewayScheduler, GatewaySchedulerPolicy, append_gateway_calls_to_new_input,
+    append_output_items_to_input, append_tool_outputs, compaction_event_plans, emit_gateway_completed_events,
+    emit_gateway_start_events, emit_response_start_events, execute_and_emit_output_calls, has_client_owned_calls,
+    public_output_items,
 };
 use super::gateway_accumulator::{GatewayStreamAccumulator, StreamEvent, error_sse_chunk};
 use crate::events::EventFrame;
@@ -36,6 +35,50 @@ use crate::utils::common::utcnow_str;
 pub use crate::executor::inference::BoxStream;
 
 const MAX_GATEWAY_TOOL_ROUNDS: usize = 10;
+
+/// Outcome of inspecting one inference round's output, deciding whether the
+/// gateway tool loop should run another round, stop, or surface a partial result.
+#[derive(Debug)]
+#[non_exhaustive]
+enum LoopDecision {
+    /// Gateway-owned calls were resolved this round; loop again with their
+    /// outputs appended to the conversation.
+    Continue,
+    /// No gateway work remains — the turn is final and the loop terminates.
+    Done,
+    /// One or more calls are client-owned (`function`, `custom`, or Codex
+    /// `namespace` tools); hand the turn back to the caller to execute.
+    RequiresClientAction,
+    /// The round cap was hit before the model stopped requesting tools. The
+    /// response is returned with `status: "incomplete"` rather than as an error.
+    Incomplete(String),
+}
+
+/// Classify one turn's output into a [`LoopDecision`].
+///
+/// Order matters: client-owned calls take precedence (they must be handed back
+/// even when gateway calls are also present in the same turn), then a
+/// no-gateway-work turn is `Done`. Otherwise gateway tools ran — the loop would
+/// continue, unless this was the last permitted round, in which case the budget
+/// is exhausted and the turn is `Incomplete`.
+///
+/// `round` is zero-based; `max_rounds` is the total budget.
+fn classify_round(
+    has_client_owned_calls: bool,
+    gateway_results: &[GatewayCallResult],
+    round: usize,
+    max_rounds: usize,
+) -> LoopDecision {
+    if has_client_owned_calls {
+        LoopDecision::RequiresClientAction
+    } else if gateway_results.is_empty() {
+        LoopDecision::Done
+    } else if round + 1 >= max_rounds {
+        LoopDecision::Incomplete(format!("gateway tool execution exceeded {max_rounds} rounds"))
+    } else {
+        LoopDecision::Continue
+    }
+}
 
 fn add_usage(total: ResponseUsage, usage: ResponseUsage) -> ResponseUsage {
     ResponseUsage {
@@ -116,6 +159,16 @@ async fn run_until_gateway_tools_complete(
     run_gateway_tool_loop(ctx, exec_ctx, auth, stream_upstream, stream).await
 }
 
+async fn build_tool_registry(ctx: &mut RequestContext, exec_ctx: &ExecutionContext) -> ExecutorResult<ToolRegistry> {
+    let mut executors = exec_ctx.gateway_executors.request_scoped();
+    let mut registry: ToolRegistry = match ctx.enriched_request.tools.as_mut() {
+        Some(tools) => ToolRegistry::build_with_handlers(tools, &mut executors).await?,
+        None => ToolRegistry::default(),
+    };
+    registry.cache_listed_mcp_tools(&ctx.enriched_request.input);
+    Ok(registry)
+}
+
 fn prepare_initial_reasoning_for_vllm(input: &mut ResponsesInput, round: usize, compacted: bool) -> ExecutorResult<()> {
     if round == 0 && !compacted {
         return prepare_reasoning_for_vllm(input);
@@ -130,14 +183,9 @@ async fn run_gateway_tool_loop(
     stream_upstream: bool,
     mut stream: Option<(&mut GatewayStreamAccumulator, &mpsc::UnboundedSender<StreamEvent>)>,
 ) -> ExecutorResult<(ResponsePayload, RequestContext)> {
-    let mut executors = exec_ctx.gateway_executors.request_scoped();
-    let registry: ToolRegistry = match ctx.enriched_request.tools.as_mut() {
-        Some(tools) => ToolRegistry::build_with_handlers(tools, &mut executors).await?,
-        None => ToolRegistry::default(),
-    };
+    let mut registry = build_tool_registry(&mut ctx, exec_ctx).await?;
     let mut combined_output: Vec<OutputItem> = registry
-        .mcp_list_tools_items()
-        .iter()
+        .mcp_list_tool_items()
         .map(mcp::handler::list_tools_output_item)
         .collect();
     let mut combined_usage = None;
@@ -159,6 +207,9 @@ async fn run_gateway_tool_loop(
                 output_offset,
             )
             .await?;
+            if round == 0 {
+                registry.clear_mcp_list_tool_items();
+            }
             (stream_payload.payload, stream_payload.deferred_events)
         } else {
             (fetch_blocking_payload(&ctx, exec_ctx, auth).await?, Vec::new())
@@ -184,6 +235,7 @@ async fn run_gateway_tool_loop(
             output_offset,
             deferred_stream_events,
             &ctx,
+            exec_ctx.gateway_scheduler_policy,
             stream
                 .as_mut()
                 .map(|(accumulator, sender)| (&mut **accumulator, *sender)),
@@ -193,8 +245,8 @@ async fn run_gateway_tool_loop(
         combined_output.extend(public_output);
 
         match classify_round(has_client_owned, &gateway_results, round, MAX_GATEWAY_TOOL_ROUNDS) {
-            // Client-owned calls (plain function or Codex namespace tools) are
-            // handed back to the caller. Gateway calls in the same turn are
+            // Client-owned calls (function, custom, or Codex namespace tools)
+            // are handed back to the caller. Gateway calls in the same round are
             // still recorded so the returned conversation is complete.
             LoopDecision::RequiresClientAction => {
                 append_gateway_calls_to_new_input(&mut ctx, &current_output, &registry);
@@ -284,10 +336,11 @@ async fn execute_and_emit_round_output_calls(
     output_offset: usize,
     deferred_events: Vec<EventFrame>,
     ctx: &RequestContext,
+    policy: GatewaySchedulerPolicy,
     stream: Option<(&mut GatewayStreamAccumulator, &mpsc::UnboundedSender<StreamEvent>)>,
 ) -> ExecutorResult<Vec<GatewayCallResult>> {
     match (deferred_events.is_empty(), stream) {
-        (true, stream) => execute_and_emit_output_calls(output_items, registry, output_offset, stream).await,
+        (true, stream) => execute_and_emit_output_calls(output_items, registry, output_offset, policy, stream).await,
         (false, Some((stream_accumulator, stream_sender))) => {
             execute_and_emit_ordered_output_calls(
                 output_items,
@@ -295,12 +348,12 @@ async fn execute_and_emit_round_output_calls(
                 output_offset,
                 deferred_events,
                 ctx,
-                stream_accumulator,
-                stream_sender,
+                policy,
+                (stream_accumulator, stream_sender),
             )
             .await
         }
-        (false, None) => execute_and_emit_output_calls(output_items, registry, output_offset, None).await,
+        (false, None) => execute_and_emit_output_calls(output_items, registry, output_offset, policy, None).await,
     }
 }
 
@@ -310,9 +363,10 @@ async fn execute_and_emit_ordered_output_calls(
     output_offset: usize,
     deferred_events: Vec<EventFrame>,
     ctx: &RequestContext,
-    stream_accumulator: &mut GatewayStreamAccumulator,
-    stream_sender: &mpsc::UnboundedSender<StreamEvent>,
+    policy: GatewaySchedulerPolicy,
+    stream: (&mut GatewayStreamAccumulator, &mpsc::UnboundedSender<StreamEvent>),
 ) -> ExecutorResult<Vec<GatewayCallResult>> {
+    let (stream_accumulator, stream_sender) = stream;
     let mut events_by_output = Vec::with_capacity(output_items.len());
     events_by_output.resize_with(output_items.len(), Vec::new);
     let mut remaining_events = Vec::new();
@@ -329,51 +383,36 @@ async fn execute_and_emit_ordered_output_calls(
         events_by_output[output_index].push(frame);
     }
 
-    let mut event_plans = gateway_event_plans(output_items, registry, output_offset);
-    let first_gateway_index = output_items
-        .iter()
-        .position(|item| matches!(item, OutputItem::FunctionCall(call) if is_gateway_owned_call(call, registry)));
-    let first_gateway_run_end = first_gateway_index
-        .filter(|start| {
-            !output_items[..*start]
-                .iter()
-                .any(|item| matches!(item, OutputItem::FunctionCall(call) if is_client_custom_call(call, registry)))
-        })
-        .map_or(0, |start| {
-            output_items[start..]
-                .iter()
-                .take_while(
-                    |item| matches!(item, OutputItem::FunctionCall(call) if is_gateway_owned_call(call, registry)),
-                )
-                .count()
-                .saturating_add(start)
-        });
-    let first_gateway_run_len = first_gateway_run_end.saturating_sub(first_gateway_index.unwrap_or(0));
-    emit_gateway_start_events(&event_plans[..first_gateway_run_len], stream_accumulator, stream_sender)?;
+    let mut scheduler = GatewayScheduler::plan(output_items, registry, output_offset, policy);
+    let initial_event_run_len = scheduler.initial_event_run_len(output_items, registry);
+    emit_gateway_start_events(
+        scheduler.event_plans().take(initial_event_run_len),
+        stream_accumulator,
+        stream_sender,
+    )?;
 
-    let gateway_results = execute_output_calls(output_items, registry).await?;
-    complete_gateway_event_plans(&mut event_plans, &gateway_results);
-    let mut gateway_index = 0;
-    for (index, item) in output_items.iter().enumerate() {
-        if matches!(item, OutputItem::FunctionCall(call) if is_gateway_owned_call(call, registry)) {
-            let plan = &event_plans[gateway_index..=gateway_index];
-            let result = &gateway_results[gateway_index..=gateway_index];
-            if index >= first_gateway_run_end {
-                emit_gateway_start_events(plan, stream_accumulator, stream_sender)?;
+    let gateway_results = scheduler.execute().await?;
+    for (index, output_events) in events_by_output.iter_mut().enumerate() {
+        if let Some(call_index) = scheduler.call_index_for_item(index) {
+            let plan = scheduler
+                .event_plan(call_index)
+                .expect("scheduled call index always has an event plan");
+            let result = std::slice::from_ref(&gateway_results[call_index]);
+            if call_index >= initial_event_run_len {
+                emit_gateway_start_events(std::iter::once(plan), stream_accumulator, stream_sender)?;
             }
-            emit_gateway_completed_events(result, plan, stream_accumulator, stream_sender)?;
+            emit_gateway_completed_events(result, std::iter::once(plan), stream_accumulator, stream_sender)?;
             emit_deferred_stream_events(
-                std::mem::take(&mut events_by_output[index]),
+                std::mem::take(output_events),
                 ctx,
                 registry,
                 stream_accumulator,
                 stream_sender,
                 output_offset,
             )?;
-            gateway_index += 1;
         } else {
             emit_deferred_stream_events(
-                std::mem::take(&mut events_by_output[index]),
+                std::mem::take(output_events),
                 ctx,
                 registry,
                 stream_accumulator,
@@ -602,6 +641,8 @@ mod tests {
     use super::*;
     use crate::executor::modes::{ConversationHandler, ResponseHandler};
     use crate::storage::{ConversationStore, InOutItem, ResponseStore, create_pool_with_schema};
+    use crate::tool::{GatewayExecutorRegistration, McpDiscoveredHandler, McpHandler};
+    use crate::types::tools::McpDiscoveredToolParam;
     use futures::StreamExt;
     use std::sync::Arc;
     use tokio::sync::Mutex;
@@ -653,6 +694,33 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind mock inference server");
+        let address = listener.local_addr().expect("mock server address");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.ok();
+        });
+        let exec_ctx = ExecutionContext::new(
+            ConversationHandler::new(ConversationStore::disabled()),
+            ResponseHandler::new(ResponseStore::disabled()),
+            Arc::new(reqwest::Client::new()),
+            format!("http://{address}"),
+        );
+        (exec_ctx, server)
+    }
+
+    async fn streaming_execution_context() -> (ExecutionContext, tokio::task::JoinHandle<()>) {
+        const UPSTREAM_SSE: &str = concat!(
+            "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_upstream\",\"status\":\"in_progress\"}}\n\n",
+            "data: {\"type\":\"response.in_progress\",\"response\":{\"id\":\"resp_upstream\",\"status\":\"in_progress\"}}\n\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_upstream\",\"status\":\"completed\",\"usage\":null}}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let app = axum::Router::new().route(
+            "/v1/responses",
+            axum::routing::post(|| async { ([(axum::http::header::CONTENT_TYPE, "text/event-stream")], UPSTREAM_SSE) }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind streaming mock inference server");
         let address = listener.local_addr().expect("mock server address");
         let server = tokio::spawn(async move {
             axum::serve(listener, app).await.ok();
@@ -748,6 +816,130 @@ mod tests {
         assert_eq!(serialized[0]["content"], "remember banana");
         assert_eq!(serialized[1]["role"], "assistant");
         assert_eq!(serialized[1]["content"][0]["text"], "durable summary");
+        server.abort();
+    }
+
+    async fn streaming_response(
+        payload: RequestPayload,
+        exec_ctx: Arc<ExecutionContext>,
+    ) -> (ResponsePayload, Vec<serde_json::Value>) {
+        match ExecuteRequest::new(payload, exec_ctx)
+            .run()
+            .await
+            .expect("request succeeds")
+        {
+            Either::Left(_) => panic!("streaming request must return a stream"),
+            Either::Right(stream) => {
+                let events = stream
+                    .collect::<Vec<_>>()
+                    .await
+                    .into_iter()
+                    .flat_map(|chunk| {
+                        chunk
+                            .lines()
+                            .filter_map(|line| line.strip_prefix("data: "))
+                            .filter_map(|data| serde_json::from_str::<serde_json::Value>(data).ok())
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>();
+                let response = events
+                    .iter()
+                    .find_map(|event| {
+                        (event["type"] == "response.completed")
+                            .then(|| serde_json::from_value(event["response"].clone()).ok())
+                            .flatten()
+                    })
+                    .expect("stream contains a completed response");
+                (response, events)
+            }
+        }
+    }
+
+    fn mcp_list_tools_lifecycle_event_count(events: &[serde_json::Value]) -> usize {
+        events
+            .iter()
+            .filter(|event| {
+                event["type"]
+                    .as_str()
+                    .is_some_and(|event_type| event_type.starts_with("response.mcp_list_tools."))
+                    || event["item"]["type"] == "mcp_list_tools"
+            })
+            .count()
+    }
+
+    #[tokio::test]
+    async fn streaming_previous_response_continuation_emits_mcp_list_tools_only_once() {
+        let (mut exec_ctx, server) = streaming_execution_context().await;
+        let pool = create_pool_with_schema(Some("sqlite::memory:"))
+            .await
+            .expect("create response store");
+        exec_ctx.resp_handler = ResponseHandler::new(ResponseStore::new(pool));
+        exec_ctx.gateway_executors.insert(GatewayExecutorRegistration::Mcp {
+            server_label: "counter".to_owned(),
+            handlers: vec![McpDiscoveredHandler {
+                param: McpDiscoveredToolParam {
+                    server_label: "counter".to_owned(),
+                    tool_name: "read".to_owned(),
+                    internal_name: "mcp__counter__read".to_owned(),
+                    tool: serde_json::from_value(serde_json::json!({
+                        "name": "read",
+                        "description": "Read the counter",
+                        "inputSchema": {"type": "object"}
+                    }))
+                    .expect("valid MCP tool"),
+                },
+                handler: Arc::new(McpHandler::discovered_tool_spec_only()),
+            }],
+        });
+        let exec_ctx = Arc::new(exec_ctx);
+
+        let first_request: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test-model",
+            "stream": true,
+            "store": true,
+            "input": "first turn",
+            "tools": [{
+                "type": "mcp",
+                "server_label": "counter",
+                "allowed_tools": ["read"],
+                "require_approval": "never"
+            }]
+        }))
+        .expect("valid first request");
+        let (first_response, first_events) = streaming_response(first_request, Arc::clone(&exec_ctx)).await;
+        assert_eq!(
+            first_response
+                .output
+                .iter()
+                .filter(|item| matches!(item, OutputItem::McpListTools(_)))
+                .count(),
+            1
+        );
+        assert_eq!(mcp_list_tools_lifecycle_event_count(&first_events), 4);
+
+        let second_request: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test-model",
+            "stream": true,
+            "store": true,
+            "input": "second turn",
+            "previous_response_id": first_response.id,
+            "tools": [{
+                "type": "mcp",
+                "server_label": "counter",
+                "allowed_tools": ["read"],
+                "require_approval": "never"
+            }]
+        }))
+        .expect("valid continuation request");
+        let (second_response, second_events) = streaming_response(second_request, exec_ctx).await;
+        assert!(
+            second_response
+                .output
+                .iter()
+                .all(|item| !matches!(item, OutputItem::McpListTools(_)))
+        );
+        assert_eq!(mcp_list_tools_lifecycle_event_count(&second_events), 0);
+
         server.abort();
     }
 

@@ -34,6 +34,7 @@ Usage:
 
 import base64
 import hashlib
+import importlib.util
 import json
 import logging
 import os
@@ -44,6 +45,7 @@ import struct
 import sys
 import threading
 import time
+import types
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncGenerator
@@ -252,9 +254,10 @@ async def proxy_request(request: Request, path: str) -> Response:
 # ── proxy lifecycle ───────────────────────────────────────────────────────────
 
 
-def _start_proxy(output_file: Path, target_host: str, port: int) -> uvicorn.Server:
+def _start_proxy(output_file: Path, target_host: str, port: int, append: bool = False) -> uvicorn.Server:
     output_file.parent.mkdir(parents=True, exist_ok=True)
-    output_file.write_text("", encoding="utf-8")
+    if not append or not output_file.exists():
+        output_file.write_text("", encoding="utf-8")
     proxy_app.state.output_file = output_file
     proxy_app.state.target_host = target_host
 
@@ -302,6 +305,14 @@ def _send_streaming(client: httpx.Client, body: dict, proxy_url: str) -> dict | 
     with client.stream(
         "POST", f"{proxy_url}/v1/responses", json=body, timeout=300
     ) as resp:
+        if resp.status_code != 200:
+            # Drain the body fully before raising: the recording proxy is an
+            # async generator that only finishes writing this turn once its
+            # response is fully consumed. Raising immediately (before reading)
+            # aborts the connection and can tear the proxy's generator down
+            # before it appends the turn, silently losing this turn's error
+            # response from the cassette entirely.
+            resp.read()
         resp.raise_for_status()
         for line in resp.iter_lines():
             if not line:
@@ -658,11 +669,15 @@ def _parse_reasoning(raw: str | None) -> dict | None:
     return value
 
 
-def _inject_tools(body: dict, tools: list | None, tool_choice: Any) -> None:
+def _inject_tools(
+    body: dict, tools: list | None, tool_choice: Any, parallel_tool_calls: bool | None = None
+) -> None:
     if tools is not None:
         body["tools"] = tools
     if tool_choice is not None:
         body["tool_choice"] = tool_choice
+    if parallel_tool_calls is not None:
+        body["parallel_tool_calls"] = parallel_tool_calls
 
 
 def _extract_tool_calls(response_data: dict | None) -> list[dict]:
@@ -679,14 +694,26 @@ def _extract_tool_calls(response_data: dict | None) -> list[dict]:
 
 def _build_tool_output_input(
     tool_calls: list[dict],
-    tool_outputs: dict[str, str],
+    tool_outputs: "dict[str, str] | types.ModuleType",
     user_prompt: str | None,
 ) -> list[dict]:
     """Build tool output items followed by an optional user message.
 
     Args:
         tool_calls: function_call or custom_tool_call items from the previous response.
-        tool_outputs: mapping of tool name -> fake JSON output string.
+        tool_outputs: either
+            - a dict mapping tool name -> fake JSON output string (loaded from a
+              --tool-outputs *.json* file), matched by name only; or
+            - a Python module (loaded from a --tool-outputs *.py* file) whose
+              functions are named after each tool. Each pending call invokes the
+              matching function with its actual parsed `arguments` as keyword
+              arguments -- naturally handling whatever argument types the model
+              used (string, number, ...) -- and the JSON-serialized return value
+              becomes the output. A function returning `None` omits that call's
+              output item entirely, which is how a cassette deliberately tests a
+              provider's behavior when the client leaves one specific pending
+              call unresolved (e.g. one of two parallel calls to the same tool
+              with different arguments) while resolving its sibling(s).
         user_prompt: the next user message (None for tool-output-only turns).
 
     Returns:
@@ -696,9 +723,22 @@ def _build_tool_output_input(
     for call in tool_calls:
         call_id = call.get("call_id", "")
         name = call.get("name", "")
-        output = tool_outputs.get(
-            name, json.dumps({"result": f"mock output for {name}"})
-        )
+        if isinstance(tool_outputs, types.ModuleType):
+            fn = getattr(tool_outputs, name, None)
+            if fn is None:
+                continue
+            try:
+                kwargs = json.loads(call.get("arguments") or "{}")
+            except json.JSONDecodeError:
+                kwargs = {}
+            result = fn(**kwargs)
+            if result is None:
+                continue
+            output = result if isinstance(result, str) else json.dumps(result)
+        else:
+            if name not in tool_outputs:
+                continue
+            output = tool_outputs[name]
         input_items.append(
             {
                 "type": (
@@ -942,6 +982,7 @@ def run_responses(
     max_output_tokens: int | None = None,
     reasoning: dict | None = None,
     preset_input: str | list | None = None,
+    parallel_tool_calls: bool | None = None,
 ) -> None:
     response_ids: dict[int, str] = {}
     responses: dict[int, dict] = {}
@@ -992,7 +1033,7 @@ def run_responses(
             body["reasoning"] = reasoning
         if previous_response_id and store:
             body["previous_response_id"] = previous_response_id
-        _inject_tools(body, tools, tool_choice)
+        _inject_tools(body, tools, tool_choice, parallel_tool_calls)
         response_data = _send(
             client,
             body,
@@ -1043,7 +1084,7 @@ def run_responses(
             body["max_output_tokens"] = max_output_tokens
         if reasoning is not None:
             body["reasoning"] = reasoning
-        _inject_tools(body, tools, tool_choice)
+        _inject_tools(body, tools, tool_choice, parallel_tool_calls)
         _send(
             client,
             body,
@@ -1154,14 +1195,22 @@ def run_responses(
     help='tool_choice value: "auto", "none", "required", or JSON e.g. \'{"type":"function","name":"foo"}\'.',
 )
 @click.option(
+    "--parallel-tool-calls",
+    "parallel_tool_calls_raw",
+    type=click.Choice(["true", "false"]),
+    default=None,
+    help="parallel_tool_calls value to send on Responses requests (omit to use the API default).",
+)
+@click.option(
     "--tool-outputs",
     "tool_outputs_file",
     metavar="FILE",
     default=None,
     type=click.Path(exists=True),
-    help="Path to a JSON file mapping tool names to fake output strings. "
-    "When provided, matching function_call_output or custom_tool_call_output items are injected "
-    "between turns (required for OpenAI Responses API).",
+    help="Path to a *.json file mapping tool names to fake output strings, or a *.py file defining "
+    "one function per tool name (called with the model's actual parsed arguments; returning None "
+    "omits that call's output). When provided, matching function_call_output or "
+    "custom_tool_call_output items are injected between turns (required for OpenAI Responses API).",
 )
 @click.option(
     "--input-file",
@@ -1182,6 +1231,14 @@ def run_responses(
     show_default=True,
     help="max_output_tokens for Responses requests. Use 0 to omit the field.",
 )
+@click.option(
+    "--append",
+    is_flag=True,
+    default=False,
+    help="Append turns to an existing --output file instead of truncating it first. Lets multiple "
+    "independent invocations (e.g. separate conversation branches that each end in a provider error) "
+    "accumulate into one cassette. HTTP --mode responses only.",
+)
 def main(
     turns: int,
     output: str,
@@ -1198,10 +1255,12 @@ def main(
     gateway_url: str | None,
     tools_file: str | None,
     tool_choice_raw: str | None,
+    parallel_tool_calls_raw: str | None,
     tool_outputs_file: str | None,
     input_file: str | None,
     reasoning_raw: str | None,
     max_output_tokens: int,
+    append: bool,
 ) -> None:
     """Interactive multi-turn cassette recorder (proxy embedded)."""
     if branch_turn_number and not branch_from:
@@ -1252,13 +1311,26 @@ def main(
         else:
             tool_choice = stripped
 
-    tool_outputs: dict[str, str] | None = None
+    parallel_tool_calls: bool | None = None
+    if parallel_tool_calls_raw is not None:
+        parallel_tool_calls = parallel_tool_calls_raw == "true"
+
+    tool_outputs: "dict[str, str] | types.ModuleType | None" = None
     if tool_outputs_file:
-        with open(tool_outputs_file, encoding="utf-8") as f:
-            tool_outputs = json.load(f)
-        if not isinstance(tool_outputs, dict):
-            raise click.UsageError("--tool-outputs file must contain a JSON object (name -> output string).")
-        click.echo(f"Tool outputs: {list(tool_outputs.keys())}")
+        if tool_outputs_file.endswith(".py"):
+            spec = importlib.util.spec_from_file_location("cassette_tool_outputs", tool_outputs_file)
+            if spec is None or spec.loader is None:
+                raise click.UsageError(f"--tool-outputs could not load Python module: {tool_outputs_file}")
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            tool_outputs = module
+            click.echo(f"Tool outputs: python functions from {tool_outputs_file}")
+        else:
+            with open(tool_outputs_file, encoding="utf-8") as f:
+                tool_outputs = json.load(f)
+            if not isinstance(tool_outputs, dict):
+                raise click.UsageError("--tool-outputs JSON file must contain an object (name -> output string).")
+            click.echo(f"Tool outputs: {list(tool_outputs.keys())}")
 
     if gateway_url:
         target = gateway_url.rstrip("/")
@@ -1315,10 +1387,11 @@ def main(
                 response_max_output_tokens,
                 reasoning,
                 preset_input,
+                parallel_tool_calls,
             )
     else:
         click.echo(f"Proxy:   {proxy_url}  (requests go through here for recording)")
-        server = _start_proxy(output_file, target, proxy_port)
+        server = _start_proxy(output_file, target, proxy_port, append=append)
         click.echo(f"Proxy ready on {proxy_url}\n")
 
         try:
@@ -1348,6 +1421,7 @@ def main(
                         response_max_output_tokens,
                         reasoning,
                         preset_input,
+                        parallel_tool_calls,
                     )
                 elif mode == "messages":
                     run_messages(

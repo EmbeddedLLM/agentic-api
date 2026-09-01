@@ -3,12 +3,13 @@ use std::time::Duration;
 
 use crate::config::{Config, default_database_url};
 use crate::error::Error;
+use crate::executor::gateway::GatewaySchedulerPolicy;
 use crate::executor::modes::{ConversationHandler, ResponseHandler};
 use crate::storage::backend::redact_database_urls;
 use crate::storage::{
     ConversationStore, ConversationVersion, DatabaseBackend, ResponseStore, create_pool_with_schema_and_configs,
 };
-use crate::tool::{GatewayExecutor, GatewayExecutors};
+use crate::tool::{GatewayExecutorRegistration, GatewayExecutors};
 use crate::types::io::InputItem;
 use crate::types::messages::GatewayToolMap;
 use crate::types::request_response::{RequestPayload, ResponsePayload};
@@ -69,6 +70,8 @@ pub struct ExecutionContext {
     /// Sourced from the `STREAMING_CHUNK_TIMEOUT_S` environment variable, defaulting to
     /// [`DEFAULT_STREAMING_TIMEOUT`] when unset or unparseable.
     pub streaming_timeout: Duration,
+    /// Bounded-concurrency policy applied to gateway-owned calls in each round.
+    pub(crate) gateway_scheduler_policy: GatewaySchedulerPolicy,
     storage_pool: Option<Arc<crate::storage::DbPool>>,
 }
 
@@ -101,12 +104,13 @@ impl ExecutionContext {
             messages_gateway_tools: messages_gateway_tools_from_env(),
             llm_base_url,
             streaming_timeout: streaming_timeout_from_env(),
+            gateway_scheduler_policy: GatewaySchedulerPolicy::default(),
             storage_pool: None,
         }
     }
 
     #[must_use]
-    pub fn with_gateway_executor(mut self, executor: Arc<dyn GatewayExecutor>) -> Self {
+    pub fn with_gateway_executor(mut self, executor: impl Into<GatewayExecutorRegistration>) -> Self {
         self.gateway_executors.insert(executor);
         self
     }
@@ -158,7 +162,6 @@ impl ExecutionContext {
         let client = Arc::new(reqwest::Client::new());
         let gateway_executors = GatewayExecutors::from_config(Arc::clone(&client), &cfg.tools)
             .map_err(|error| Error::Config(format!("failed to validate configured MCP server policies: {error}")))?;
-
         Ok(Self {
             conv_handler,
             resp_handler,
@@ -172,6 +175,7 @@ impl ExecutionContext {
                 .unwrap_or_default(),
             llm_base_url: cfg.llm_api_base.clone(),
             streaming_timeout: streaming_timeout_from_env(),
+            gateway_scheduler_policy: GatewaySchedulerPolicy::new(cfg.tools.max_concurrent_gateway_calls),
             storage_pool: Some(pool),
         })
     }

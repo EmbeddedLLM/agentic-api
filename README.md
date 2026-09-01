@@ -222,6 +222,12 @@ api_key_env = "YOU_API_KEY"
 [mcp]
 allowed_hosts = ["mcp.example.com"]
 
+[tools]
+# Upper bound for gateway-owned calls within one Responses round and for
+# provider requests inside a batched web-search call.
+# Must be greater than zero.
+max_concurrent_gateway_calls = 5
+
 [mcp_servers.counter]
 url = "https://mcp.example.com/mcp"
 allowed_tools = ["tool_1_name", "tool_2_name"]
@@ -229,9 +235,10 @@ require_approval = "never"
 ```
 
 `api_key_env` names the process environment variable containing the web-search credential; it does not contain the
-credential itself. `YOU_API_BASE_URL` and `AGENTIC_MCP_ALLOWED_HOSTS` can override their typed file settings. The MCP
-allowlist is used only for request-declared remote MCP URLs; configured `[mcp_servers]` entries are trusted operator
-configuration.
+credential itself. `YOU_API_BASE_URL`, `AGENTIC_MCP_ALLOWED_HOSTS`, and
+`AGENTIC_MAX_CONCURRENT_GATEWAY_CALLS` can override their typed file settings. The concurrency value is a sliding-window
+upper bound; handlers may further serialize calls to the same tool name. The MCP allowlist is used only for
+request-declared remote MCP URLs; configured `[mcp_servers]` entries are trusted operator configuration.
 
 With that file in place, inject only the secret when starting the server:
 

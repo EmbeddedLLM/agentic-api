@@ -271,7 +271,7 @@ pub struct WebSearchActionSearch {
     #[serde(skip, default = "default_web_search_action_search_type")]
     pub type_: String,
     pub query: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub queries: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sources: Vec<WebSearchSource>,
@@ -282,12 +282,16 @@ fn default_web_search_action_search_type() -> String {
 }
 
 impl WebSearchActionSearch {
+    /// # Panics
+    ///
+    /// Panics if `queries` is empty.
     #[must_use]
-    pub fn new(query: impl Into<String>, sources: Vec<WebSearchSource>) -> Self {
+    pub fn new(queries: Vec<String>, sources: Vec<WebSearchSource>) -> Self {
+        let query = queries.first().expect("queries must have at least one entry").clone();
         Self {
             type_: default_web_search_action_search_type(),
-            query: query.into(),
-            queries: Vec::new(),
+            query,
+            queries,
             sources,
         }
     }
@@ -345,13 +349,13 @@ impl WebSearchCall {
     pub fn new(
         id: impl Into<String>,
         status: WebSearchCallStatus,
-        query: impl Into<String>,
+        queries: Vec<String>,
         sources: Vec<WebSearchSource>,
     ) -> Self {
         Self {
             id: id.into(),
             status,
-            action: WebSearchAction::Search(WebSearchActionSearch::new(query, sources)),
+            action: WebSearchAction::Search(WebSearchActionSearch::new(queries, sources)),
         }
     }
 }
@@ -432,7 +436,7 @@ impl McpCall {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct McpListTool {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -812,7 +816,7 @@ impl OutputItem {
         match self {
             Self::FunctionCall(call) => registry
                 .lookup(&call.name)
-                .is_none_or(|entry| !entry.tool_type.is_gateway_owned()),
+                .is_none_or(|entry| !entry.ownership.is_gateway()),
             Self::CustomToolCall(_) => true,
             Self::Message(_)
             | Self::WebSearchCall(_)
@@ -824,6 +828,10 @@ impl OutputItem {
         }
     }
 
+    /// Shapes a stored output item as continuation input.
+    /// Gateway-owned public tool output is omitted because its model-facing
+    /// function call and result are persisted separately as input items. MCP
+    /// list metadata is retained here and removed by `ResponsesInput::model_input`.
     #[must_use]
     pub fn to_input_item(&self) -> Option<InputItem> {
         match self {
@@ -831,8 +839,9 @@ impl OutputItem {
             Self::Reasoning(reasoning) => Some(InputItem::Reasoning(reasoning.clone())),
             Self::FunctionCall(call) => Some(InputItem::FunctionCall(InputFunctionToolCall::from(call.clone()))),
             Self::CustomToolCall(call) => Some(InputItem::FunctionCall(call.clone().into())),
+            Self::McpListTools(list_tools) => Some(InputItem::McpListTools(list_tools.clone())),
             Self::Compaction(item) => Some(InputItem::Compaction(item.clone())),
-            Self::WebSearchCall(_) | Self::McpCall(_) | Self::McpListTools(_) | Self::Unknown => None,
+            Self::WebSearchCall(_) | Self::McpCall(_) | Self::Unknown => None,
         }
     }
 }
@@ -888,6 +897,28 @@ mod tests {
         };
         assert_eq!(call.name, "apply_patch");
         assert_eq!(call.arguments, r#"{"input":"*** Begin Patch\n*** End Patch"}"#);
+    }
+
+    #[test]
+    fn gateway_public_tool_outputs_are_not_replayed_as_model_input() {
+        let web_search = OutputItem::WebSearchCall(WebSearchCall::new(
+            "ws_1",
+            WebSearchCallStatus::Completed,
+            vec!["rust async".to_owned()],
+            Vec::new(),
+        ));
+        let mcp = OutputItem::McpCall(McpCall::new(
+            "mcp_1",
+            "counter",
+            "increment",
+            "{}",
+            McpCallStatus::Completed,
+            Some("1".to_owned()),
+            None,
+        ));
+
+        assert!(web_search.to_input_item().is_none());
+        assert!(mcp.to_input_item().is_none());
     }
 
     #[test]
