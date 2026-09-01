@@ -298,10 +298,17 @@ call inference, run the tool loop, persist. `agentic-server` never reaches past 
   conversation store or the response store depending on which ID the request carries,
   and builds the enriched `RequestContext`. Rehydration retains internal
   `InputItem::McpListTools` records so `ToolRegistry` can suppress repeated MCP
-  discovery lifecycle output. `pending_calls.rs` scans the complete continuation
-  history and rejects a new turn when a prior client-owned call has no matching tool
-  output; gateway-owned calls are resolved and recorded within their originating
-  round.
+  discovery lifecycle output. After stored history and the new request input are
+  combined, `pending_calls.rs` validates the complete continuation's function/custom
+  call sequence. Every call and call output must have a non-empty `call_id`; call IDs
+  must be unique across the sequence; and each output must resolve exactly one
+  currently pending call of the same item kind. An output without a pending call, a
+  second output for an already resolved call, or a function/custom kind mismatch is an
+  invalid request rather than evidence that the call was resolved. Valid unresolved
+  calls remain ordered by their original emission, and the first unresolved
+  client-executed call produces the existing missing-output error. Gateway-executed
+  built-in tool calls are resolved and recorded within their originating round, so
+  they do not remain pending at this boundary.
 - **`upstream.rs`** — `fetch_blocking_payload`/`fetch_stream_payload`: builds the
   `UpstreamRequest` (via `to_upstream_request`, see above) and drives one round of
   upstream inference, running the accumulator and `FunctionSseTranslator` over the

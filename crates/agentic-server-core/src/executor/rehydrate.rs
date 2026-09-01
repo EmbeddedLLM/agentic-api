@@ -72,7 +72,7 @@ async fn from_response(ctx: &mut RequestContext, exec_ctx: &ExecutionContext) ->
     let mut items = InOutItem::into_input_items(history);
     items.reserve(ctx.new_input_items.len());
     items.extend(ctx.new_input_items.iter().cloned());
-    if let Some(pending) = pending_calls(&items).into_iter().next() {
+    if let Some(pending) = pending_calls(&items)?.into_iter().next() {
         return Err(ExecutorError::Tool(ToolError::MissingOutput {
             call_id: pending.call_id,
         }));
@@ -113,7 +113,7 @@ async fn from_conversation(ctx: &mut RequestContext, exec_ctx: &ExecutionContext
     let mut items = InOutItem::into_input_items(snapshot.items);
     items.reserve(ctx.new_input_items.len());
     items.extend(ctx.new_input_items.iter().cloned());
-    if let Some(pending) = pending_calls(&items).into_iter().next() {
+    if let Some(pending) = pending_calls(&items)?.into_iter().next() {
         return Err(ExecutorError::Tool(ToolError::MissingOutput {
             call_id: pending.call_id,
         }));
