@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
@@ -137,6 +138,24 @@ fn parse_env_u32_value(name: &str, value: Result<String, std::env::VarError>, de
     }
 }
 
+fn parse_env_nonzero_usize(name: &str, default: NonZeroUsize) -> Result<NonZeroUsize, Error> {
+    parse_env_nonzero_usize_value(name, std::env::var(name), default)
+}
+
+fn parse_env_nonzero_usize_value(
+    name: &str,
+    value: Result<String, std::env::VarError>,
+    default: NonZeroUsize,
+) -> Result<NonZeroUsize, Error> {
+    match value {
+        Ok(value) => value
+            .parse::<NonZeroUsize>()
+            .map_err(|error| Error::Config(format!("{name} must be a positive integer: {error}"))),
+        Err(std::env::VarError::NotPresent) => Ok(default),
+        Err(error) => Err(Error::Config(format!("failed to read {name}: {error}"))),
+    }
+}
+
 fn parse_env_duration(name: &str, default_seconds: u64) -> Result<Duration, Error> {
     parse_env_duration_value(name, std::env::var(name), default_seconds)
 }
@@ -248,8 +267,8 @@ fn build_config(llm_api_base: String, common: &CommonArgs, file: &FileConfig) ->
     let max_concurrent_gateway_calls_default = file
         .tools
         .max_concurrent_gateway_calls
-        .unwrap_or_else(|| u32::try_from(DEFAULT_MAX_CONCURRENT_GATEWAY_CALLS).unwrap_or(u32::MAX));
-    let max_concurrent_gateway_calls = parse_env_u32(
+        .unwrap_or(DEFAULT_MAX_CONCURRENT_GATEWAY_CALLS);
+    let max_concurrent_gateway_calls = parse_env_nonzero_usize(
         "AGENTIC_MAX_CONCURRENT_GATEWAY_CALLS",
         max_concurrent_gateway_calls_default,
     )?;
@@ -270,7 +289,7 @@ fn build_config(llm_api_base: String, common: &CommonArgs, file: &FileConfig) ->
             mcp_servers: file.mcp_servers.clone(),
             mcp_allowed_hosts,
             messages_gateway_tool_aliases: file.messages_gateway.tool_aliases.clone(),
-            max_concurrent_gateway_calls: max_concurrent_gateway_calls as usize,
+            max_concurrent_gateway_calls,
         },
     })
 }
@@ -288,7 +307,7 @@ fn generated_file_config(llm_api_base: String) -> FileConfig {
         },
         tools: ToolsFileConfig {
             max_concurrent_gateway_calls: environment_value("AGENTIC_MAX_CONCURRENT_GATEWAY_CALLS")
-                .and_then(|value| value.parse().ok()),
+                .and_then(|value| value.parse::<NonZeroUsize>().ok()),
         },
         messages_gateway: MessagesGatewayFileConfig {
             tool_aliases: environment_value("MESSAGES_GATEWAY_TOOL_ALIASES"),
@@ -386,7 +405,8 @@ mod tests {
 
     use super::{
         Cli, Commands, database_configs_from_env, oidc_config_from_values, parse_env_duration_value,
-        parse_env_optional_duration_value, parse_env_temp_store_value, parse_env_u32_value, parse_env_u64_value,
+        parse_env_nonzero_usize_value, parse_env_optional_duration_value, parse_env_temp_store_value,
+        parse_env_u32_value, parse_env_u64_value,
     };
     use agentic_core::config::{
         DEFAULT_POSTGRES_ACQUIRE_TIMEOUT_SECONDS, DEFAULT_POSTGRES_IDLE_TIMEOUT_SECONDS,
@@ -544,6 +564,30 @@ mod tests {
             SqliteTempStore::Memory
         );
         assert!(parse_env_temp_store_value(Ok("invalid".to_owned())).is_err());
+    }
+
+    #[test]
+    fn gateway_concurrency_env_parser_requires_a_nonzero_value() {
+        let default = agentic_core::config::DEFAULT_MAX_CONCURRENT_GATEWAY_CALLS;
+        assert_eq!(
+            parse_env_nonzero_usize_value(
+                "AGENTIC_MAX_CONCURRENT_GATEWAY_CALLS",
+                Err(std::env::VarError::NotPresent),
+                default,
+            )
+            .expect("default value"),
+            default
+        );
+        assert_eq!(
+            parse_env_nonzero_usize_value("AGENTIC_MAX_CONCURRENT_GATEWAY_CALLS", Ok("3".to_owned()), default,)
+                .expect("positive value")
+                .get(),
+            3
+        );
+        assert!(
+            parse_env_nonzero_usize_value("AGENTIC_MAX_CONCURRENT_GATEWAY_CALLS", Ok("0".to_owned()), default,)
+                .is_err()
+        );
     }
 
     #[test]

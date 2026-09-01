@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use crate::config::{Config, default_database_url};
 use crate::error::Error;
-use crate::executor::gateway::set_max_concurrent_gateway_calls;
+use crate::executor::gateway::GatewaySchedulerPolicy;
 use crate::executor::modes::{ConversationHandler, ResponseHandler};
 use crate::storage::backend::redact_database_urls;
 use crate::storage::{
@@ -69,6 +69,8 @@ pub struct ExecutionContext {
     /// Maximum wait time for the next SSE chunk.  `Duration::ZERO` disables the timeout.
     /// Sourced from [`Config::streaming_chunk_timeout_s`](crate::config::Config::streaming_chunk_timeout_s).
     pub streaming_timeout: Duration,
+    /// Bounded-concurrency policy applied to gateway-owned calls in each round.
+    pub(crate) gateway_scheduler_policy: GatewaySchedulerPolicy,
     storage_pool: Option<Arc<crate::storage::DbPool>>,
 }
 
@@ -101,6 +103,7 @@ impl ExecutionContext {
             messages_gateway_tools: messages_gateway_tools_from_env(),
             llm_base_url,
             streaming_timeout: Duration::from_secs(30),
+            gateway_scheduler_policy: GatewaySchedulerPolicy::default(),
             storage_pool: None,
         }
     }
@@ -158,8 +161,6 @@ impl ExecutionContext {
         let client = Arc::new(reqwest::Client::new());
         let gateway_executors = GatewayExecutors::from_config(Arc::clone(&client), &cfg.tools)
             .map_err(|error| Error::Config(format!("failed to validate configured MCP server policies: {error}")))?;
-        set_max_concurrent_gateway_calls(cfg.tools.max_concurrent_gateway_calls);
-
         Ok(Self {
             conv_handler,
             resp_handler,
@@ -173,6 +174,7 @@ impl ExecutionContext {
                 .unwrap_or_default(),
             llm_base_url: cfg.llm_api_base.clone(),
             streaming_timeout: Duration::from_secs(30),
+            gateway_scheduler_policy: GatewaySchedulerPolicy::new(cfg.tools.max_concurrent_gateway_calls),
             storage_pool: Some(pool),
         })
     }

@@ -14,9 +14,10 @@ use tracing::debug;
 
 use super::compaction::{compact_items, maybe_compact_context};
 use super::gateway::{
-    GatewayCallResult, GatewayScheduler, append_gateway_calls_to_new_input, append_output_items_to_input,
-    append_tool_outputs, compaction_event_plans, emit_gateway_completed_events, emit_gateway_start_events,
-    emit_response_start_events, execute_and_emit_output_calls, has_client_owned_calls, public_output_items,
+    GatewayCallResult, GatewayScheduler, GatewaySchedulerPolicy, append_gateway_calls_to_new_input,
+    append_output_items_to_input, append_tool_outputs, compaction_event_plans, emit_gateway_completed_events,
+    emit_gateway_start_events, emit_response_start_events, execute_and_emit_output_calls, has_client_owned_calls,
+    public_output_items,
 };
 use super::gateway_accumulator::{GatewayStreamAccumulator, StreamEvent, error_sse_chunk};
 use crate::events::EventFrame;
@@ -226,6 +227,7 @@ async fn run_gateway_tool_loop(
             output_offset,
             deferred_stream_events,
             &ctx,
+            exec_ctx.gateway_scheduler_policy,
             stream
                 .as_mut()
                 .map(|(accumulator, sender)| (&mut **accumulator, *sender)),
@@ -326,10 +328,11 @@ async fn execute_and_emit_round_output_calls(
     output_offset: usize,
     deferred_events: Vec<EventFrame>,
     ctx: &RequestContext,
+    policy: GatewaySchedulerPolicy,
     stream: Option<(&mut GatewayStreamAccumulator, &mpsc::UnboundedSender<StreamEvent>)>,
 ) -> ExecutorResult<Vec<GatewayCallResult>> {
     match (deferred_events.is_empty(), stream) {
-        (true, stream) => execute_and_emit_output_calls(output_items, registry, output_offset, stream).await,
+        (true, stream) => execute_and_emit_output_calls(output_items, registry, output_offset, policy, stream).await,
         (false, Some((stream_accumulator, stream_sender))) => {
             execute_and_emit_ordered_output_calls(
                 output_items,
@@ -337,12 +340,12 @@ async fn execute_and_emit_round_output_calls(
                 output_offset,
                 deferred_events,
                 ctx,
-                stream_accumulator,
-                stream_sender,
+                policy,
+                (stream_accumulator, stream_sender),
             )
             .await
         }
-        (false, None) => execute_and_emit_output_calls(output_items, registry, output_offset, None).await,
+        (false, None) => execute_and_emit_output_calls(output_items, registry, output_offset, policy, None).await,
     }
 }
 
@@ -352,9 +355,10 @@ async fn execute_and_emit_ordered_output_calls(
     output_offset: usize,
     deferred_events: Vec<EventFrame>,
     ctx: &RequestContext,
-    stream_accumulator: &mut GatewayStreamAccumulator,
-    stream_sender: &mpsc::UnboundedSender<StreamEvent>,
+    policy: GatewaySchedulerPolicy,
+    stream: (&mut GatewayStreamAccumulator, &mpsc::UnboundedSender<StreamEvent>),
 ) -> ExecutorResult<Vec<GatewayCallResult>> {
+    let (stream_accumulator, stream_sender) = stream;
     let mut events_by_output = Vec::with_capacity(output_items.len());
     events_by_output.resize_with(output_items.len(), Vec::new);
     let mut remaining_events = Vec::new();
@@ -371,7 +375,7 @@ async fn execute_and_emit_ordered_output_calls(
         events_by_output[output_index].push(frame);
     }
 
-    let mut scheduler = GatewayScheduler::plan(output_items, registry, output_offset);
+    let mut scheduler = GatewayScheduler::plan(output_items, registry, output_offset, policy);
     let initial_event_run_len = scheduler.initial_event_run_len(output_items, registry);
     emit_gateway_start_events(
         scheduler.event_plans().take(initial_event_run_len),

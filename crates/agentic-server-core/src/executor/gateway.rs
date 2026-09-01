@@ -1,4 +1,4 @@
-use std::sync::OnceLock;
+use std::num::NonZeroUsize;
 use std::time::Duration;
 
 use futures::StreamExt;
@@ -15,31 +15,26 @@ use crate::types::io::{InputItem, OutputItem, ResponsesInput};
 use crate::types::request_response::ResponsePayload;
 use crate::utils::common::{serialize_to_string, serialize_to_value};
 
-/// Upper bound on gateway tool calls executing at once within a round. A sliding window:
-/// as one call finishes, the next is admitted, so a round with N calls never
-/// runs more than this many concurrently but still drains all N. Bounds
-/// outbound fan-out without a hard per-round count cap.
-/// Per-tool self-exclusion may reduce actual concurrency below this limit.
+/// Request-independent execution policy owned by one [`ExecutionContext`].
 ///
-/// The call count is bounded upstream by the model's output size — there is no
-/// unbounded in-memory materialisation from the model emitting arbitrarily many
-/// tool calls. The window + per-call timeout bound outbound HTTP and latency.
-///
-/// Resolved once from [`Config::tools.max_concurrent_gateway_calls`](crate::config::ToolRuntimeConfig::max_concurrent_gateway_calls)
-/// via [`set_max_concurrent_gateway_calls`] when `ExecutionContext` is built from
-/// config; falls back to [`DEFAULT_MAX_CONCURRENT_GATEWAY_CALLS`] otherwise (e.g.
-/// in tests that construct `ExecutionContext::new` directly).
-static MAX_CONCURRENT_GATEWAY_CALLS: OnceLock<usize> = OnceLock::new();
-
-/// Sets the process-wide gateway concurrency limit. Called once, from
-/// `ExecutionContext::from_config`. Subsequent calls are no-ops: the value is
-/// fixed for the lifetime of the process.
-pub fn set_max_concurrent_gateway_calls(value: usize) {
-    let _ = MAX_CONCURRENT_GATEWAY_CALLS.set(value);
+/// The nonzero type makes `.buffered(0)` unrepresentable. Distinct execution
+/// contexts retain their own limits instead of sharing process-global state.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct GatewaySchedulerPolicy {
+    max_concurrent_calls: NonZeroUsize,
 }
 
-fn max_concurrent_gateway_calls() -> usize {
-    *MAX_CONCURRENT_GATEWAY_CALLS.get_or_init(|| DEFAULT_MAX_CONCURRENT_GATEWAY_CALLS)
+impl GatewaySchedulerPolicy {
+    #[must_use]
+    pub(crate) const fn new(max_concurrent_calls: NonZeroUsize) -> Self {
+        Self { max_concurrent_calls }
+    }
+}
+
+impl Default for GatewaySchedulerPolicy {
+    fn default() -> Self {
+        Self::new(DEFAULT_MAX_CONCURRENT_GATEWAY_CALLS)
+    }
 }
 
 /// Per-call wall-clock budget. A tool exceeding this yields an error output fed
@@ -109,18 +104,25 @@ struct GatewayCallPlan {
 /// assigns protocol positions and emits the resulting events.
 pub(super) struct GatewayScheduler {
     calls: Vec<GatewayCallPlan>,
+    policy: GatewaySchedulerPolicy,
     timeout: Duration,
 }
 
 impl GatewayScheduler {
-    pub(super) fn plan(output_items: &[OutputItem], registry: &ToolRegistry, output_offset: usize) -> Self {
-        Self::plan_with_timeout(output_items, registry, output_offset, GATEWAY_TOOL_TIMEOUT)
+    pub(super) fn plan(
+        output_items: &[OutputItem],
+        registry: &ToolRegistry,
+        output_offset: usize,
+        policy: GatewaySchedulerPolicy,
+    ) -> Self {
+        Self::plan_with_timeout(output_items, registry, output_offset, policy, GATEWAY_TOOL_TIMEOUT)
     }
 
     fn plan_with_timeout(
         output_items: &[OutputItem],
         registry: &ToolRegistry,
         output_offset: usize,
+        policy: GatewaySchedulerPolicy,
         timeout: Duration,
     ) -> Self {
         let calls = output_items
@@ -156,7 +158,7 @@ impl GatewayScheduler {
                 })
             })
             .collect();
-        Self { calls, timeout }
+        Self { calls, policy, timeout }
     }
 
     #[cfg(test)]
@@ -166,7 +168,13 @@ impl GatewayScheduler {
         output_offset: usize,
         timeout: Duration,
     ) -> Self {
-        Self::plan_with_timeout(output_items, registry, output_offset, timeout)
+        Self::plan_with_timeout(
+            output_items,
+            registry,
+            output_offset,
+            GatewaySchedulerPolicy::default(),
+            timeout,
+        )
     }
 
     pub(super) fn event_plans(&self) -> impl Iterator<Item = &GatewayEventPlan> {
@@ -206,7 +214,7 @@ impl GatewayScheduler {
     /// and records each tool's completed public lifecycle on the same slot.
     pub(super) async fn execute(&mut self) -> ExecutorResult<Vec<GatewayCallResult>> {
         let results = futures_stream::iter(self.calls.iter().cloned().map(|call| self.run_one(call)))
-            .buffered(max_concurrent_gateway_calls())
+            .buffered(self.policy.max_concurrent_calls.get())
             .collect::<Vec<_>>()
             .await
             .into_iter()
@@ -533,12 +541,13 @@ pub(super) async fn execute_and_emit_output_calls(
     output_items: &[OutputItem],
     registry: &ToolRegistry,
     output_offset: usize,
+    policy: GatewaySchedulerPolicy,
     mut stream: Option<(
         &mut GatewayStreamAccumulator,
         &tokio::sync::mpsc::UnboundedSender<StreamEvent>,
     )>,
 ) -> ExecutorResult<Vec<GatewayCallResult>> {
-    let mut scheduler = GatewayScheduler::plan(output_items, registry, output_offset);
+    let mut scheduler = GatewayScheduler::plan(output_items, registry, output_offset, policy);
     if let Some((stream_accumulator, stream_sender)) = stream.as_mut() {
         emit_gateway_start_events(scheduler.event_plans(), stream_accumulator, stream_sender)?;
     }
@@ -623,12 +632,13 @@ mod tests {
         event
     }
 
+    use std::num::NonZeroUsize;
     use std::pin::Pin;
     use std::sync::Arc;
 
     use serde_json::Value;
 
-    use super::GatewayScheduler;
+    use super::{GatewayScheduler, GatewaySchedulerPolicy};
     use crate::tool::{
         GatewayExecutor, GatewayExecutors, GatewayToolEventPlan, ToolError, ToolHandler, ToolOutput, ToolRegistry,
         ToolType,
@@ -801,7 +811,7 @@ mod tests {
             OutputItem::FunctionCall(file_search_call),
             OutputItem::FunctionCall(search_call),
         ];
-        let mut scheduler = GatewayScheduler::plan(&output_items, &registry, 7);
+        let mut scheduler = GatewayScheduler::plan(&output_items, &registry, 7, GatewaySchedulerPolicy::default());
 
         {
             let plans = scheduler.event_plans().collect::<Vec<_>>();
@@ -858,7 +868,7 @@ mod tests {
             .collect();
 
         let started = std::time::Instant::now();
-        let mut scheduler = GatewayScheduler::plan(&output_items, &registry, 0);
+        let mut scheduler = GatewayScheduler::plan(&output_items, &registry, 0, GatewaySchedulerPolicy::default());
         let results = scheduler.execute().await.expect("all calls execute");
         let elapsed = started.elapsed();
 
@@ -873,6 +883,34 @@ mod tests {
         assert_eq!(
             results.iter().map(|result| result.item_index).collect::<Vec<_>>(),
             vec![0, 1, 2, 3]
+        );
+    }
+
+    #[tokio::test]
+    async fn gateway_scheduler_policy_bounds_parallel_safe_calls() {
+        let web_search: ResponsesTool =
+            serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).expect("web_search tool param");
+        let mut executors = GatewayExecutors::default();
+        executors.insert(Arc::new(SlowExecutor));
+        let mut tools = [web_search];
+        let registry = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
+            .await
+            .expect("registry builds");
+        let output_items = ["call_a", "call_b", "call_c", "call_d"]
+            .into_iter()
+            .map(|call_id| OutputItem::FunctionCall(web_search_call(call_id)))
+            .collect::<Vec<_>>();
+        let policy = GatewaySchedulerPolicy::new(NonZeroUsize::MIN);
+
+        let started = std::time::Instant::now();
+        let mut scheduler = GatewayScheduler::plan(&output_items, &registry, 0, policy);
+        let results = scheduler.execute().await.expect("all calls execute");
+        let elapsed = started.elapsed();
+
+        assert_eq!(results.len(), 4);
+        assert!(
+            elapsed >= std::time::Duration::from_millis(180),
+            "a one-call scheduler window completed four 50ms calls in {elapsed:?}"
         );
     }
 
@@ -933,7 +971,7 @@ mod tests {
             .collect();
 
         let started = std::time::Instant::now();
-        let mut scheduler = GatewayScheduler::plan(&output_items, &registry, 0);
+        let mut scheduler = GatewayScheduler::plan(&output_items, &registry, 0, GatewaySchedulerPolicy::default());
         let results = scheduler.execute().await.expect("all calls execute");
         let elapsed = started.elapsed();
 

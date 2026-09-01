@@ -446,8 +446,8 @@ from this doc's original sketch — each is annotated inline above.
   (`public_output_items`) and once for streaming (`emit_gateway_*_events`). A
   `GatewayAccumulator` stage (Raw → Gateway → Public, mirroring
   `ResponseAccumulator`) would classify once and let both paths consume it.
-- **Per-tool-type execution config.** The process-wide concurrency window is
-  configurable through `tools.max_concurrent_gateway_calls`, while
+- **Per-tool-type execution config.** The `ExecutionContext`-owned concurrency
+  window is configurable through `tools.max_concurrent_gateway_calls`, while
   `GATEWAY_TOOL_TIMEOUT` remains a shared 60-second per-call constant. Tool types
   with materially different latency profiles may eventually need individual
   timeout policies.

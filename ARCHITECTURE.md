@@ -406,8 +406,11 @@ As noted above, the round-by-round loop itself is `engine.rs::run_gateway_tool_l
   than omitted from a parallel vector. `GatewayScheduler::execute` then returns one
   ordered `GatewayCallResult` per slot. A `futures::stream::buffered` sliding window
   bounds fan-out using `tools.max_concurrent_gateway_calls` (default `5`, configurable
-  through `AGENTIC_MAX_CONCURRENT_GATEWAY_CALLS`); completion may occur out of order,
-  but the collected result order always matches model call order.
+  through `AGENTIC_MAX_CONCURRENT_GATEWAY_CALLS`). The setting is a nonzero value
+  carried by the owning `ExecutionContext` into each scheduler, so independent
+  contexts do not share process-global policy and `.buffered(0)` is unrepresentable.
+  Completion may occur out of order, but the collected result order always matches
+  model call order.
 - Every call has an independent 60-second timeout. Timeout, execution, and tool-config
   failures become failed tool outputs that can be fed back to the model instead of
   failing the whole response. A tool registered as gateway-owned without an

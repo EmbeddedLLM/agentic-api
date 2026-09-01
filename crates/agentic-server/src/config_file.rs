@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::io::Write;
+use std::num::NonZeroUsize;
 use std::path::Path;
 
 use agentic_core::McpServerEntry;
@@ -39,7 +40,7 @@ impl McpFileConfig {
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct ToolsFileConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_concurrent_gateway_calls: Option<u32>,
+    pub max_concurrent_gateway_calls: Option<NonZeroUsize>,
 }
 
 impl ToolsFileConfig {
@@ -320,6 +321,40 @@ mod tests {
 
         let error = FileConfig::load(home.path()).expect_err("unknown field must fail");
         assert!(error.to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn rejects_zero_gateway_concurrency() {
+        let home = tempdir().expect("temp home");
+        fs::write(
+            home.path().join("config.toml"),
+            "[tools]\nmax_concurrent_gateway_calls = 0\n",
+        )
+        .expect("write config");
+
+        let error = FileConfig::load(home.path()).expect_err("zero concurrency must fail");
+        assert!(error.to_string().contains("max_concurrent_gateway_calls"));
+    }
+
+    #[test]
+    fn accepts_positive_gateway_concurrency() {
+        let home = tempdir().expect("temp home");
+        fs::write(
+            home.path().join("config.toml"),
+            "[tools]\nmax_concurrent_gateway_calls = 3\n",
+        )
+        .expect("write config");
+
+        let config = FileConfig::load(home.path())
+            .expect("positive concurrency must parse")
+            .expect("existing config");
+        assert_eq!(
+            config
+                .tools
+                .max_concurrent_gateway_calls
+                .map(std::num::NonZeroUsize::get),
+            Some(3)
+        );
     }
 
     #[test]

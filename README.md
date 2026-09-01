@@ -188,6 +188,7 @@ allowed_hosts = ["mcp.example.com"]
 
 [tools]
 # Upper bound for gateway-owned calls running at once within one Responses round.
+# Must be greater than zero.
 max_concurrent_gateway_calls = 5
 
 [mcp_servers.counter]
