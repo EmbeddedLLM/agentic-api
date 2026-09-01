@@ -411,6 +411,12 @@ As noted above, the round-by-round loop itself is `engine.rs::run_gateway_tool_l
   contexts do not share process-global policy and `.buffered(0)` is unrepresentable.
   Completion may occur out of order, but the collected result order always matches
   model call order.
+- A normalized `web_search` function call may batch at most five queries. The JSON
+  Schema advertises the ceiling and the handler enforces it again because normalized
+  web search currently uses non-strict arguments. Provider searches acquire a shared
+  handler semaphore initialized from `tools.max_concurrent_gateway_calls`, preventing
+  batched calls from multiplying the configured outbound concurrency. Results remain
+  collected in query order for the public `web_search_call.action.queries` projection.
 - Every call has an independent 60-second timeout. Timeout, execution, and tool-config
   failures become failed tool outputs that can be fed back to the model instead of
   failing the whole response. A tool registered as gateway-owned without an

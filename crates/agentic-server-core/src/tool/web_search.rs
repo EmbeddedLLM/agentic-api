@@ -1,20 +1,25 @@
 use std::collections::HashMap;
 use std::future::Future;
+use std::num::NonZeroUsize;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use futures::{StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tokio::sync::Semaphore;
 
 use super::handler::{GatewayExecutor, GatewayToolEventPlan, ToolError, ToolHandler, ToolOutput};
 use super::ownership::GatewayBinding;
 use super::registry::{ToolEntry, ToolType};
+use crate::config::DEFAULT_MAX_CONCURRENT_GATEWAY_CALLS;
 use crate::types::io::output::{FunctionToolCall, WebSearchCall, WebSearchCallStatus, WebSearchSource};
 use crate::types::io::{FunctionTool, OutputItem};
 use crate::types::tools::{WebSearchContextSize, WebSearchToolParam};
 
 const YOU_API_KEY: &str = "YOU_API_KEY";
 const YOU_API_BASE_URL: &str = "YOU_API_BASE_URL";
+const MAX_WEB_SEARCH_QUERIES: usize = 5;
 
 pub(crate) type WebSearchExecutor =
     dyn GatewayExecutor<ToolParams = WebSearchToolParam, ExecutionParams = WebSearchToolParam>;
@@ -52,6 +57,8 @@ pub(crate) fn web_search_function_tool() -> FunctionTool {
                 "queries": {
                     "type": "array",
                     "items": {"type": "string"},
+                    "minItems": 1,
+                    "maxItems": MAX_WEB_SEARCH_QUERIES,
                     "description": "Multiple independent search queries to run in parallel, instead of a single query."
                 },
                 "count": {
@@ -115,6 +122,8 @@ pub(crate) fn started_output_item(call: &FunctionToolCall) -> OutputItem {
 #[derive(Debug, Clone)]
 pub struct WebSearchHandler {
     provider: Option<Arc<dyn WebSearchProvider>>,
+    max_concurrent_queries: NonZeroUsize,
+    query_permits: Arc<Semaphore>,
 }
 
 impl WebSearchHandler {
@@ -124,35 +133,56 @@ impl WebSearchHandler {
             client,
             std::env::var(YOU_API_KEY).ok(),
             std::env::var(YOU_API_BASE_URL).ok(),
+            DEFAULT_MAX_CONCURRENT_GATEWAY_CALLS,
         )
     }
 
     #[must_use]
-    pub fn from_values(client: Arc<reqwest::Client>, api_key: Option<String>, base_url: Option<String>) -> Self {
-        Self {
-            provider: Some(Arc::new(YouSearchProvider::from_values(client, api_key, base_url))),
-        }
+    pub fn from_values(
+        client: Arc<reqwest::Client>,
+        api_key: Option<String>,
+        base_url: Option<String>,
+        max_concurrent_queries: NonZeroUsize,
+    ) -> Self {
+        Self::with_provider_and_query_concurrency(
+            Arc::new(YouSearchProvider::from_values(client, api_key, base_url)),
+            max_concurrent_queries,
+        )
     }
 
     #[must_use]
     pub fn with_api_key(client: Arc<reqwest::Client>, api_key: String, base_url: &str) -> Self {
-        Self {
-            provider: Some(Arc::new(YouSearchProvider::with_api_key(client, api_key, base_url))),
-        }
+        Self::with_provider_and_query_concurrency(
+            Arc::new(YouSearchProvider::with_api_key(client, api_key, base_url)),
+            DEFAULT_MAX_CONCURRENT_GATEWAY_CALLS,
+        )
     }
 
     /// Builds a handler usable only for shaping placeholder/error output
     /// (`ToolHandler::normalize`, `GatewayExecutor::started_output`/`public_output`)
     /// when no real provider is configured — `execute()` always fails.
     #[must_use]
-    pub const fn spec_only() -> Self {
-        Self { provider: None }
+    pub fn spec_only() -> Self {
+        Self {
+            provider: None,
+            max_concurrent_queries: DEFAULT_MAX_CONCURRENT_GATEWAY_CALLS,
+            query_permits: Arc::new(Semaphore::new(DEFAULT_MAX_CONCURRENT_GATEWAY_CALLS.get())),
+        }
     }
 
     #[cfg(test)]
     fn with_provider(provider: Arc<dyn WebSearchProvider>) -> Self {
+        Self::with_provider_and_query_concurrency(provider, DEFAULT_MAX_CONCURRENT_GATEWAY_CALLS)
+    }
+
+    fn with_provider_and_query_concurrency(
+        provider: Arc<dyn WebSearchProvider>,
+        max_concurrent_queries: NonZeroUsize,
+    ) -> Self {
         Self {
             provider: Some(provider),
+            max_concurrent_queries,
+            query_permits: Arc::new(Semaphore::new(max_concurrent_queries.get())),
         }
     }
 
@@ -168,8 +198,22 @@ impl WebSearchHandler {
             .ok_or_else(|| ToolError::Config("web_search spec-only handler cannot execute tools".to_owned()))?;
         let args = WebSearchArguments::from_json(arguments)?;
         let queries = args.all_queries();
-        let responses =
-            futures::future::try_join_all(queries.iter().map(|query| provider.search(query, &args, params))).await?;
+        let args_ref = &args;
+        let responses = futures::stream::iter(queries.iter().cloned())
+            .map(|query| {
+                let provider = Arc::clone(provider);
+                let query_permits = Arc::clone(&self.query_permits);
+                async move {
+                    let _permit = query_permits
+                        .acquire_owned()
+                        .await
+                        .map_err(|error| ToolError::Execution(format!("web_search query scheduler closed: {error}")))?;
+                    provider.search(&query, args_ref, params).await
+                }
+            })
+            .buffered(self.max_concurrent_queries.get())
+            .try_collect::<Vec<_>>()
+            .await?;
 
         let mut web = Vec::new();
         let mut news = Vec::new();
@@ -373,10 +417,16 @@ impl WebSearchArguments {
     fn from_json(arguments: &str) -> Result<Self, ToolError> {
         let args = serde_json::from_str::<Self>(arguments)
             .map_err(|e| ToolError::Config(format!("web_search arguments must be valid JSON: {e}")))?;
-        if args.all_queries().is_empty() {
+        let query_count = args.all_queries().len();
+        if query_count == 0 {
             return Err(ToolError::Config(
                 "web_search requires a non-empty query or queries".to_owned(),
             ));
+        }
+        if query_count > MAX_WEB_SEARCH_QUERIES {
+            return Err(ToolError::Config(format!(
+                "web_search accepts at most {MAX_WEB_SEARCH_QUERIES} queries per call"
+            )));
         }
         Ok(args)
     }
@@ -605,6 +655,9 @@ fn clean_vec(values: Option<&[String]>) -> Option<Vec<String>> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
     use super::*;
 
     #[derive(Debug)]
@@ -632,6 +685,38 @@ mod tests {
                 })
             })
         }
+    }
+
+    #[derive(Debug, Default)]
+    struct ConcurrencyTrackingProvider {
+        active: AtomicUsize,
+        max_active: AtomicUsize,
+    }
+
+    impl WebSearchProvider for ConcurrencyTrackingProvider {
+        fn search<'a>(
+            &'a self,
+            _query: &'a str,
+            _args: &'a WebSearchArguments,
+            _config: &'a WebSearchToolParam,
+        ) -> Pin<Box<dyn Future<Output = Result<WebSearchProviderResponse, ToolError>> + Send + 'a>> {
+            Box::pin(async move {
+                let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+                self.max_active.fetch_max(active, Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                self.active.fetch_sub(1, Ordering::SeqCst);
+                Ok(WebSearchProviderResponse {
+                    results: serde_json::json!({"web": [], "news": []}),
+                    metadata: serde_json::json!({"provider": "tracking"}),
+                })
+            })
+        }
+    }
+
+    #[test]
+    fn web_search_schema_caps_batched_queries() {
+        let parameters = web_search_function_tool().parameters.expect("web_search parameters");
+        assert_eq!(parameters["properties"]["queries"]["maxItems"], MAX_WEB_SEARCH_QUERIES);
     }
 
     #[tokio::test]
@@ -671,5 +756,44 @@ mod tests {
         assert_eq!(body["queries"], serde_json::json!(["potato", "tomato"]));
         assert_eq!(body["results"]["web"].as_array().unwrap().len(), 2);
         assert_eq!(body["metadata"].as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn web_search_handler_rejects_oversized_query_batches() {
+        let handler = WebSearchHandler::with_provider(Arc::new(MockSearchProvider));
+        let error = handler
+            .execute(
+                "call_search",
+                "web_search",
+                r#"{"queries":["one","two","three","four","five","six"]}"#,
+                &WebSearchToolParam::default(),
+            )
+            .await
+            .expect_err("oversized query batch must fail");
+
+        assert_eq!(
+            error.to_string(),
+            format!("invalid tool config: web_search accepts at most {MAX_WEB_SEARCH_QUERIES} queries per call")
+        );
+    }
+
+    #[tokio::test]
+    async fn web_search_handler_shares_query_concurrency_across_calls() {
+        let provider = Arc::new(ConcurrencyTrackingProvider::default());
+        let handler = WebSearchHandler::with_provider_and_query_concurrency(
+            provider.clone(),
+            NonZeroUsize::new(2).expect("nonzero test limit"),
+        );
+        let params = WebSearchToolParam::default();
+        let arguments = r#"{"queries":["one","two","three","four","five"]}"#;
+
+        let (first, second) = tokio::join!(
+            handler.execute("call_one", "web_search", arguments, &params),
+            handler.execute("call_two", "web_search", arguments, &params),
+        );
+
+        first.expect("first batched call");
+        second.expect("second batched call");
+        assert_eq!(provider.max_active.load(Ordering::SeqCst), 2);
     }
 }

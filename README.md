@@ -187,7 +187,8 @@ api_key_env = "YOU_API_KEY"
 allowed_hosts = ["mcp.example.com"]
 
 [tools]
-# Upper bound for gateway-owned calls running at once within one Responses round.
+# Upper bound for gateway-owned calls within one Responses round and for
+# provider requests inside a batched web-search call.
 # Must be greater than zero.
 max_concurrent_gateway_calls = 5
 

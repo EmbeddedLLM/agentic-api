@@ -98,9 +98,11 @@ pub struct ToolRuntimeConfig {
     pub mcp_allowed_hosts: Vec<String>,
     pub messages_gateway_tool_aliases: Option<String>,
     /// Upper bound on gateway-owned tool calls executing concurrently within one
-    /// round. A sliding window admits another call as one finishes. Individual
-    /// handlers may further serialize calls to the same tool name. The nonzero
-    /// type prevents constructing a scheduler window that can never be polled.
+    /// round. A sliding window admits another call as one finishes. Handlers with
+    /// nested outbound work also use this value as their provider-level concurrency
+    /// ceiling; individual handlers may further serialize calls to the same tool
+    /// name. The nonzero type prevents constructing a scheduler window that can
+    /// never be polled.
     pub max_concurrent_gateway_calls: NonZeroUsize,
 }
 

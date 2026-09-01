@@ -88,6 +88,7 @@ impl GatewayExecutors {
                 client,
                 config.web_search.api_key.clone(),
                 config.web_search.base_url.clone(),
+                config.max_concurrent_gateway_calls,
             ))),
         };
         if config.mcp_servers.is_empty() {
