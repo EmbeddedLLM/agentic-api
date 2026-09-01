@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
 use super::codex::insert_namespace_entries;
@@ -163,7 +164,8 @@ pub struct ToolRegistry {
 
     /// MCP tool-list items grouped by server label. Current discovery is stored
     /// first while building and rehydrated historical records are appended.
-    mcp_list_tools_items: HashMap<String, Vec<McpListTools>>,
+    /// Insertion order preserves the MCP declaration order for public output.
+    mcp_list_tools_items: IndexMap<String, Vec<McpListTools>>,
 }
 
 impl ToolRegistry {
@@ -189,7 +191,7 @@ impl ToolRegistry {
         executors: &mut GatewayExecutors,
     ) -> Result<Self, ToolError> {
         let mut entries = HashMap::with_capacity(tools.len());
-        let mut mcp_list_tools_items = HashMap::<String, Vec<McpListTools>>::new();
+        let mut mcp_list_tools_items = IndexMap::<String, Vec<McpListTools>>::new();
         // Namespace members must be keyed by the same flat, model-visible name
         // the model will call, so resolve them first — the same pure pass used
         // to build the upstream request.
@@ -531,6 +533,27 @@ mod tests {
 
         assert_eq!(registry.mcp_list_tool_items().count(), 0);
         assert!(registry.mcp_list_tools_items.is_empty());
+    }
+
+    #[test]
+    fn mcp_list_tool_items_preserve_server_declaration_order() {
+        let mut registry = ToolRegistry::default();
+        registry.mcp_list_tools_items.insert(
+            "second-alphabetically".to_owned(),
+            vec![McpListTools::new("mcpl_first", "second-alphabetically", Vec::new())],
+        );
+        registry.mcp_list_tools_items.insert(
+            "first-alphabetically".to_owned(),
+            vec![McpListTools::new("mcpl_second", "first-alphabetically", Vec::new())],
+        );
+
+        assert_eq!(
+            registry
+                .mcp_list_tool_items()
+                .map(|item| item.server_label.as_str())
+                .collect::<Vec<_>>(),
+            ["second-alphabetically", "first-alphabetically"]
+        );
     }
 
     #[tokio::test]
