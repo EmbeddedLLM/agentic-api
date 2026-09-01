@@ -311,14 +311,17 @@ impl ToolRegistry {
         }
     }
 
-    /// Current discovery items whose server label has no rehydrated list-tools
-    /// history. A vector of length greater than one contains the current item
-    /// followed by at least one historical item and is therefore suppressed.
+    /// Current discovery items without an equivalent successful historical
+    /// lifecycle. Failed or changed discovery remains visible to the client.
     pub(crate) fn mcp_list_tool_items(&self) -> impl Iterator<Item = &McpListTools> {
-        self.mcp_list_tools_items
-            .values()
-            .filter(|items| items.len() == 1)
-            .filter_map(|items| items.first())
+        self.mcp_list_tools_items.values().filter_map(|items| {
+            let (current, history) = items.split_first()?;
+            let already_emitted = current.error.is_none()
+                && history
+                    .iter()
+                    .any(|previous| previous.error.is_none() && previous.tools == current.tools);
+            (!already_emitted).then_some(current)
+        })
     }
 
     /// Marks the current request's discovery lifecycle as consumed.
@@ -387,6 +390,7 @@ mod tests {
     use crate::tool::executors::GatewayExecutorRegistration;
     use crate::tool::mcp::{McpDiscoveredHandler, McpHandler};
     use crate::types::event::MessageStatus;
+    use crate::types::io::output::McpListTool;
     use crate::types::tools::McpDiscoveredToolParam;
 
     fn declaration(server_label: &str) -> ResponsesTool {
@@ -507,7 +511,7 @@ mod tests {
     }
 
     #[test]
-    fn mcp_list_tools_map_excludes_labels_with_history_and_clears_after_emission() {
+    fn mcp_list_tools_map_suppresses_equivalent_successful_history_and_clears_after_emission() {
         let mut registry = ToolRegistry::default();
         registry.mcp_list_tools_items.insert(
             "counter".to_owned(),
@@ -533,6 +537,49 @@ mod tests {
 
         assert_eq!(registry.mcp_list_tool_items().count(), 0);
         assert!(registry.mcp_list_tools_items.is_empty());
+    }
+
+    fn listed_tool(name: &str) -> McpListTool {
+        McpListTool::new(
+            name,
+            Some(format!("{name} description")),
+            serde_json::json!({"type": "object"}),
+            Some(serde_json::json!({"read_only": true})),
+        )
+    }
+
+    fn visible_discovery_ids(current: McpListTools, history: Vec<McpListTools>) -> Vec<String> {
+        let mut items = vec![current];
+        items.extend(history);
+        let mut registry = ToolRegistry::default();
+        registry.mcp_list_tools_items.insert("server".to_owned(), items);
+        registry.mcp_list_tool_items().map(|item| item.id.clone()).collect()
+    }
+
+    #[test]
+    fn mcp_list_tools_map_keeps_failed_or_changed_current_discovery_visible() {
+        let current_success = McpListTools::new("mcpl_current", "server", vec![listed_tool("current")]);
+        let mut previous_failure = McpListTools::new("mcpl_failed", "server", vec![listed_tool("current")]);
+        previous_failure.error = Some("discovery failed".to_owned());
+        assert_eq!(
+            visible_discovery_ids(current_success, vec![previous_failure]),
+            ["mcpl_current"]
+        );
+
+        let current_changed = McpListTools::new("mcpl_changed", "server", vec![listed_tool("new")]);
+        let previous_success = McpListTools::new("mcpl_previous", "server", vec![listed_tool("old")]);
+        assert_eq!(
+            visible_discovery_ids(current_changed, vec![previous_success]),
+            ["mcpl_changed"]
+        );
+
+        let mut current_failure = McpListTools::new("mcpl_current_failed", "server", Vec::new());
+        current_failure.error = Some("current discovery failed".to_owned());
+        let previous_empty_success = McpListTools::new("mcpl_previous_success", "server", Vec::new());
+        assert_eq!(
+            visible_discovery_ids(current_failure, vec![previous_empty_success]),
+            ["mcpl_current_failed"]
+        );
     }
 
     #[test]
