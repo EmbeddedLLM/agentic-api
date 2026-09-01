@@ -11,6 +11,21 @@ use super::tools::ResponsesTool;
 use crate::tool::{CodexNamespaceHandler, CustomHandler, ToolError};
 use crate::utils::common::serialize_to_string;
 
+/// Standard Responses API reasoning generation settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReasoningConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generate_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RequestPayload {
     pub model: String,
@@ -26,6 +41,8 @@ pub struct RequestPayload {
     #[serde(default = "default_true")]
     pub store: bool,
     pub include: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<Box<ReasoningConfig>>,
     pub temperature: Option<f64>,
     pub top_p: Option<f64>,
     pub max_output_tokens: Option<u32>,
@@ -62,6 +79,8 @@ pub struct UpstreamRequest<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include: Option<&'a Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<&'a ReasoningConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_p: Option<f64>,
@@ -73,6 +92,7 @@ pub struct UpstreamRequest<'a> {
     pub metadata: Option<&'a Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parallel_tool_calls: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_salt: Option<&'a str>,
 }
 
@@ -155,6 +175,7 @@ impl RequestPayload {
             tools,
             tool_choice: Some(tool_choice),
             include: self.include.as_ref(),
+            reasoning: self.reasoning.as_deref(),
             temperature: self.temperature,
             top_p: self.top_p,
             max_output_tokens: self.max_output_tokens,
@@ -329,7 +350,18 @@ mod tests {
     }
 
     #[test]
-    fn request_payload_forwards_cache_salt_upstream() {
+    fn request_payload_omits_absent_and_forwards_present_cache_salt_upstream() {
+        let payload: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test-model",
+            "input": "hello"
+        }))
+        .expect("request should deserialize");
+
+        let upstream = serde_json::to_value(payload.to_upstream_request(false).expect("request should normalize"))
+            .expect("upstream request should serialize");
+
+        assert!(upstream.get("cache_salt").is_none());
+
         let payload: RequestPayload = serde_json::from_value(serde_json::json!({
             "model": "test-model",
             "input": "hello",
@@ -341,6 +373,72 @@ mod tests {
             .expect("upstream request should serialize");
 
         assert_eq!(upstream["cache_salt"], "tenant-a");
+    }
+
+    #[test]
+    fn request_payload_forwards_reasoning_configuration_upstream() {
+        let reasoning = serde_json::json!({
+            "context": "all_turns",
+            "effort": "high",
+            "generate_summary": "concise",
+            "mode": "pro",
+            "summary": "detailed"
+        });
+        let payload: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test-model",
+            "input": "hello",
+            "reasoning": reasoning
+        }))
+        .expect("request should deserialize");
+
+        for stream in [false, true] {
+            let upstream = serde_json::to_value(payload.to_upstream_request(stream).expect("request should normalize"))
+                .expect("upstream request should serialize");
+
+            assert_eq!(upstream["reasoning"], reasoning);
+            assert_eq!(upstream["stream"], stream);
+        }
+    }
+
+    #[test]
+    fn request_payload_handles_reasoning_boundaries() {
+        for reasoning in [serde_json::json!({}), serde_json::json!({"effort": "minimal"})] {
+            let payload: RequestPayload = serde_json::from_value(serde_json::json!({
+                "model": "test-model",
+                "input": "hello",
+                "reasoning": reasoning
+            }))
+            .expect("valid reasoning object should deserialize");
+            let upstream = serde_json::to_value(payload.to_upstream_request(false).expect("request should normalize"))
+                .expect("upstream request should serialize");
+
+            assert_eq!(upstream["reasoning"], reasoning);
+        }
+
+        for reasoning in [
+            serde_json::Value::Null,
+            serde_json::json!("high"),
+            serde_json::json!({"effort": 3}),
+        ] {
+            let parsed = serde_json::from_value::<RequestPayload>(serde_json::json!({
+                "model": "test-model",
+                "input": "hello",
+                "reasoning": reasoning
+            }));
+
+            if reasoning.is_null() {
+                let upstream = serde_json::to_value(
+                    parsed
+                        .expect("null should be treated as absent")
+                        .to_upstream_request(false)
+                        .expect("request should normalize"),
+                )
+                .expect("upstream request should serialize");
+                assert!(upstream.get("reasoning").is_none());
+            } else {
+                assert!(parsed.is_err(), "non-object reasoning configuration should be rejected");
+            }
+        }
     }
 
     #[test]

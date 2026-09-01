@@ -314,6 +314,7 @@ mod tests {
             stream: true,
             store: false,
             include: None,
+            reasoning: None,
             temperature: None,
             top_p: None,
             max_output_tokens: None,

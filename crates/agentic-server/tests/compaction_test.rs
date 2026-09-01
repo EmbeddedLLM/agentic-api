@@ -326,6 +326,7 @@ async fn automatic_compaction_runs_above_threshold_and_accumulates_usage() {
             "input": [{"role": "user", "content": "x".repeat(200)}],
             "store": false,
             "stream": false,
+            "reasoning": {"effort": "high"},
             "context_management": [{"type": "compaction", "compact_threshold": 10}]
         }))
         .send()
@@ -346,6 +347,7 @@ async fn automatic_compaction_runs_above_threshold_and_accumulates_usage() {
     assert_eq!(requests[1]["input"][0]["role"], "user");
     assert_eq!(requests[1]["input"][1]["role"], "assistant");
     assert_eq!(requests[1]["input"][1]["content"][0]["text"], "automatic summary");
+    assert_eq!(requests[1]["reasoning"], serde_json::json!({"effort": "high"}));
 }
 
 #[tokio::test]

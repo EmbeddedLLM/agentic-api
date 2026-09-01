@@ -1058,6 +1058,9 @@ async fn execute_runs_web_search_and_sends_tool_output_back_to_model() {
         stream: false,
         store: true,
         include: None,
+        reasoning: Some(Box::new(
+            serde_json::from_value(serde_json::json!({"effort": "high"})).unwrap(),
+        )),
         temperature: None,
         top_p: None,
         max_output_tokens: Some(1024),
@@ -1080,6 +1083,8 @@ async fn execute_runs_web_search_and_sends_tool_output_back_to_model() {
     assert_eq!(request_bodies.len(), 2);
     assert_eq!(request_bodies[0]["tools"][0]["name"], "web_search");
     assert_eq!(request_bodies[0]["max_output_tokens"], 1024);
+    assert_eq!(request_bodies[0]["reasoning"], serde_json::json!({"effort": "high"}));
+    assert_eq!(request_bodies[1]["reasoning"], serde_json::json!({"effort": "high"}));
     let second_input = request_bodies[1]["input"]
         .as_array()
         .expect("second request input array");
@@ -1144,6 +1149,7 @@ async fn execute_relaxes_forced_tool_choice_after_web_search_result() {
         stream: false,
         store: true,
         include: None,
+        reasoning: None,
         temperature: None,
         top_p: None,
         max_output_tokens: Some(1024),
@@ -1194,6 +1200,7 @@ async fn execute_returns_mixed_client_tool_calls_without_followup_model_request(
         stream: false,
         store: true,
         include: None,
+        reasoning: None,
         temperature: None,
         top_p: None,
         max_output_tokens: Some(1024),
@@ -1243,6 +1250,7 @@ async fn execute_returns_mixed_client_tool_calls_without_followup_model_request(
         stream: false,
         store: true,
         include: None,
+        reasoning: None,
         temperature: None,
         top_p: None,
         max_output_tokens: Some(1024),
@@ -1263,12 +1271,8 @@ async fn execute_returns_mixed_client_tool_calls_without_followup_model_request(
         .iter()
         .find(|item| item["type"] == "function_call_output" && item["call_id"] == "call_search")
         .expect("continuation includes persisted web_search output");
-    assert!(
-        tool_output["output"]
-            .as_str()
-            .unwrap()
-            .contains("https://example.com/rust")
-    );
+    let tool_output = tool_output["output"].as_str().unwrap();
+    assert!(tool_output.contains("https://example.com/rust"));
 }
 
 #[tokio::test]
@@ -1315,6 +1319,7 @@ async fn execute_accumulates_usage_across_web_search_model_rounds() {
         stream: false,
         store: true,
         include: None,
+        reasoning: None,
         temperature: None,
         top_p: None,
         max_output_tokens: Some(1024),
@@ -1360,6 +1365,7 @@ async fn stream_emits_web_search_lifecycle_events_before_final_payload() {
         stream: true,
         store: true,
         include: None,
+        reasoning: None,
         temperature: None,
         top_p: None,
         max_output_tokens: Some(1024),
@@ -1480,6 +1486,7 @@ async fn multi_round_stream_has_single_lifecycle_and_monotonic_public_sequence()
         stream: true,
         store: true,
         include: None,
+        reasoning: None,
         temperature: None,
         top_p: None,
         max_output_tokens: Some(1024),
@@ -1555,6 +1562,7 @@ async fn stream_hides_web_search_function_events_when_name_arrives_on_done() {
         stream: true,
         store: true,
         include: None,
+        reasoning: None,
         temperature: None,
         top_p: None,
         max_output_tokens: Some(1024),
@@ -1619,6 +1627,7 @@ async fn stream_orders_gateway_lifecycle_before_later_client_function_events() {
         stream: true,
         store: true,
         include: None,
+        reasoning: None,
         temperature: None,
         top_p: None,
         max_output_tokens: Some(1024),
@@ -1702,6 +1711,7 @@ async fn execute_runs_multiple_web_search_calls_concurrently() {
         stream: false,
         store: true,
         include: None,
+        reasoning: None,
         temperature: None,
         top_p: None,
         max_output_tokens: Some(1024),
@@ -1752,6 +1762,7 @@ async fn execute_feeds_web_search_execution_errors_back_to_model() {
         stream: false,
         store: true,
         include: None,
+        reasoning: None,
         temperature: None,
         top_p: None,
         max_output_tokens: Some(1024),
@@ -1804,6 +1815,7 @@ async fn execute_returns_incomplete_after_max_gateway_tool_rounds() {
         stream: false,
         store: true,
         include: None,
+        reasoning: None,
         temperature: None,
         top_p: None,
         max_output_tokens: Some(1024),
@@ -1856,6 +1868,7 @@ async fn execute_feeds_invalid_web_search_arguments_back_to_model() {
         stream: false,
         store: true,
         include: None,
+        reasoning: None,
         temperature: None,
         top_p: None,
         max_output_tokens: Some(1024),
@@ -1915,6 +1928,7 @@ async fn execute_runs_large_gateway_fanout_without_hard_cap() {
         stream: false,
         store: true,
         include: None,
+        reasoning: None,
         temperature: None,
         top_p: None,
         max_output_tokens: Some(1024),
@@ -1982,6 +1996,7 @@ async fn stream_error_events_escape_error_messages() {
         stream: true,
         store: true,
         include: None,
+        reasoning: None,
         temperature: None,
         top_p: None,
         max_output_tokens: Some(1024),
@@ -2056,6 +2071,7 @@ async fn incomplete_turn_persists_a_consistent_conversation_for_continuation() {
         stream: false,
         store: true,
         include: None,
+        reasoning: None,
         temperature: None,
         top_p: None,
         max_output_tokens: Some(1024),
@@ -2084,6 +2100,7 @@ async fn incomplete_turn_persists_a_consistent_conversation_for_continuation() {
         stream: false,
         store: true,
         include: None,
+        reasoning: None,
         temperature: None,
         top_p: None,
         max_output_tokens: Some(1024),
@@ -2156,6 +2173,7 @@ async fn stream_returns_incomplete_after_max_gateway_tool_rounds() {
         stream: true,
         store: true,
         include: None,
+        reasoning: None,
         temperature: None,
         top_p: None,
         max_output_tokens: Some(1024),

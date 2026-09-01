@@ -838,6 +838,7 @@ async fn test_websocket_first_turn_forwards_incremental_events_and_final_payload
             "type": "response.create",
             "model": "test-model",
             "input": [{"type": "message", "role": "user", "content": "hi"}],
+            "reasoning": {"effort": "high"},
             "store": true,
             "stream": true
         }),
@@ -868,6 +869,7 @@ async fn test_websocket_first_turn_forwards_incremental_events_and_final_payload
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0]["stream"], true);
     assert_eq!(requests[0]["input"][0]["content"], "hi");
+    assert_eq!(requests[0]["reasoning"], json!({"effort": "high"}));
     assert!(requests[0].get("type").is_none());
 }
 
