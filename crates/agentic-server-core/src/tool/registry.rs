@@ -1,9 +1,7 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use super::codex::insert_namespace_entries;
 use super::custom::{CustomHandler, CustomToolMap, insert_custom_entry};
@@ -12,13 +10,12 @@ use super::function::insert_function_entry;
 use super::mcp::registry::insert_discovered_mcp_entry;
 use super::ownership::{GatewayBinding, ToolOwnership};
 use super::web_search::insert_web_search_entry;
-use super::{CodexNamespaceHandler, GatewayExecutor, McpHandler, NamespaceMap, ToolError, ToolOutput};
+use super::{CodexNamespaceHandler, McpHandler, NamespaceMap, ToolError, ToolOutput};
 use crate::events::WireEvent;
 
 use crate::types::io::output::{FunctionToolCall, McpListTools};
 use crate::types::io::{InputItem, OutputItem, ResponsesInput};
 use crate::types::tools::{CodeInterpreterToolParam, FileSearchToolParam, ResponsesTool};
-use crate::utils::common::serialize_to_value_or_custom_default;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -63,8 +60,6 @@ impl ToolType {
 #[derive(Clone)]
 pub struct ToolEntry {
     pub tool_type: ToolType,
-    /// Full serialised tool param for the executor (used during dispatch).
-    pub config: Value,
     /// For MCP tools: which server this tool belongs to.
     pub server_label: Option<String>,
     pub ownership: ToolOwnership,
@@ -74,7 +69,6 @@ impl std::fmt::Debug for ToolEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ToolEntry")
             .field("tool_type", &self.tool_type)
-            .field("config", &self.config)
             .field("server_label", &self.server_label)
             .field("is_gateway", &self.ownership.is_gateway())
             .finish()
@@ -85,30 +79,23 @@ impl ToolEntry {
     /// Builds a client-owned entry. `tool_type.is_gateway_owned()` is the
     /// single source of truth for the ownership discriminant; this asserts
     /// the caller picked the constructor matching its own tool type.
-    pub(crate) fn client(tool_type: ToolType, config: Value, server_label: Option<String>) -> Self {
+    pub(crate) fn client(tool_type: ToolType, server_label: Option<String>) -> Self {
         debug_assert!(!tool_type.is_gateway_owned());
         Self {
             tool_type,
-            config,
             server_label,
             ownership: ToolOwnership::Client,
         }
     }
 
-    /// Builds a gateway-owned entry. `handler` is `None` for tool types that
+    /// Builds a gateway-owned entry. `binding` is `None` for tool types that
     /// are gateway-owned in principle but have no executor yet.
-    pub(crate) fn gateway(
-        tool_type: ToolType,
-        config: Value,
-        server_label: Option<String>,
-        handler: Option<GatewayBinding>,
-    ) -> Self {
+    pub(crate) fn gateway(tool_type: ToolType, server_label: Option<String>, binding: Option<GatewayBinding>) -> Self {
         debug_assert!(tool_type.is_gateway_owned());
         Self {
             tool_type,
-            config,
             server_label,
-            ownership: ToolOwnership::Gateway(handler),
+            ownership: ToolOwnership::Gateway(binding),
         }
     }
 }
@@ -144,46 +131,19 @@ pub struct GatewayDispatchResult {
 
 // TODO: move to a dedicated file_search module alongside its `ToolHandler`
 // once file_search execution is implemented.
-fn insert_file_search_entry(
-    entries: &mut HashMap<String, ToolEntry>,
-    p: &FileSearchToolParam,
-    handler: Option<Arc<dyn GatewayExecutor>>,
-) {
-    serialize_to_value_or_custom_default(
-        p,
-        "file_search tool config serialization failed",
-        |config| {
-            entries.insert(
-                "file_search".to_owned(),
-                ToolEntry::gateway(ToolType::FileSearch, config, None, handler.map(GatewayBinding::new)),
-            );
-        },
-        (),
+fn insert_file_search_entry(entries: &mut HashMap<String, ToolEntry>, _params: &FileSearchToolParam) {
+    entries.insert(
+        "file_search".to_owned(),
+        ToolEntry::gateway(ToolType::FileSearch, None, None),
     );
 }
 
 // TODO: move to a dedicated code_interpreter module alongside its `ToolHandler`
 // once code_interpreter execution is implemented.
-fn insert_code_interpreter_entry(
-    entries: &mut HashMap<String, ToolEntry>,
-    p: &CodeInterpreterToolParam,
-    handler: Option<Arc<dyn GatewayExecutor>>,
-) {
-    serialize_to_value_or_custom_default(
-        p,
-        "code_interpreter tool config serialization failed",
-        |config| {
-            entries.insert(
-                "code_interpreter".to_owned(),
-                ToolEntry::gateway(
-                    ToolType::CodeInterpreter,
-                    config,
-                    None,
-                    handler.map(GatewayBinding::new),
-                ),
-            );
-        },
-        (),
+fn insert_code_interpreter_entry(entries: &mut HashMap<String, ToolEntry>, _params: &CodeInterpreterToolParam) {
+    entries.insert(
+        "code_interpreter".to_owned(),
+        ToolEntry::gateway(ToolType::CodeInterpreter, None, None),
     );
 }
 
@@ -274,11 +234,11 @@ impl ToolRegistry {
                     })?;
                 }
                 ResponsesTool::FileSearch(p) => {
-                    insert_unique_tool_entries(&mut entries, |resolved| insert_file_search_entry(resolved, p, None))?;
+                    insert_unique_tool_entries(&mut entries, |resolved| insert_file_search_entry(resolved, p))?;
                 }
                 ResponsesTool::CodeInterpreter(p) => {
                     insert_unique_tool_entries(&mut entries, |resolved| {
-                        insert_code_interpreter_entry(resolved, p, None);
+                        insert_code_interpreter_entry(resolved, p);
                     })?;
                 }
                 ResponsesTool::Namespace(p) => {
@@ -410,19 +370,17 @@ impl ToolRegistry {
             return None;
         };
         let tool_type = entry.tool_type;
-        let config = entry.config.clone();
         Some(GatewayDispatchResult {
             tool_type,
-            output: binding
-                .handler
-                .execute(&call.call_id, &call.name, &call.arguments, &config)
-                .await,
+            output: binding.execute(&call.call_id, &call.name, &call.arguments).await,
         })
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::tool::executors::GatewayExecutorRegistration;
     use crate::tool::mcp::{McpDiscoveredHandler, McpHandler};
@@ -627,24 +585,6 @@ mod tests {
                 "unexpected handler for '{name}'"
             );
         }
-        assert_eq!(registry.lookup("freeform").unwrap().config["name"], "freeform");
-        assert_eq!(registry.lookup("echo").unwrap().config["name"], "echo");
-        assert_eq!(
-            registry.lookup("mcp__counter__increment").unwrap().config["tool_name"],
-            "increment"
-        );
-        assert_eq!(
-            registry.lookup("web_search").unwrap().config["search_context_size"],
-            "low"
-        );
-        assert_eq!(
-            registry.lookup("file_search").unwrap().config["vector_store_ids"][0],
-            "vs_test"
-        );
-        assert_eq!(
-            registry.lookup("agentic_ns__mcp__shell__run").unwrap().config["tools"][0]["name"],
-            "agentic_ns__mcp__shell__run"
-        );
         for name in [
             "mcp__counter__increment",
             "mcp__counter__get_value",

@@ -77,8 +77,8 @@ build ToolRegistry + discover MCP tools
 │                       │               │
 │                       │               └─ client-owned calls stay unresolved
 │                       ▼
-│             GatewayRound executes gateway calls
-│             with bounded fan-out and ordered results
+│             GatewayScheduler plans and executes calls
+│             with bounded fan-out and ordered results/events
 │                       │
 │                       ▼
 │                  classify_round
@@ -400,12 +400,14 @@ It also buffers function-call events that arrive before the call's name is known
 
 As noted above, the round-by-round loop itself is `engine.rs::run_gateway_tool_loop`.
 `gateway.rs` supplies what that loop calls each round:
-- `GatewayRound::execute` extracts every gateway-owned function call, dispatches them
-  through the request-scoped `ToolRegistry`, and returns one ordered
-  `GatewayCallResult` per call. A `futures::stream::buffered` sliding window bounds
-  fan-out using `tools.max_concurrent_gateway_calls` (default `5`, configurable through
-  `AGENTIC_MAX_CONCURRENT_GATEWAY_CALLS`); completion may occur out of order, but the
-  collected result order always matches model call order.
+- `GatewayScheduler::plan` creates one slot per gateway-owned function call. Each slot
+  owns the original item index, public output index, typed `GatewayBinding`, and
+  lifecycle projection; a missing executor is represented by an explicit slot rather
+  than omitted from a parallel vector. `GatewayScheduler::execute` then returns one
+  ordered `GatewayCallResult` per slot. A `futures::stream::buffered` sliding window
+  bounds fan-out using `tools.max_concurrent_gateway_calls` (default `5`, configurable
+  through `AGENTIC_MAX_CONCURRENT_GATEWAY_CALLS`); completion may occur out of order,
+  but the collected result order always matches model call order.
 - Every call has an independent 60-second timeout. Timeout, execution, and tool-config
   failures become failed tool outputs that can be fed back to the model instead of
   failing the whole response. A tool registered as gateway-owned without an
@@ -416,13 +418,13 @@ As noted above, the round-by-round loop itself is `engine.rs::run_gateway_tool_l
   semaphore. The semaphore serializes only simultaneous calls to the **same
   model-visible tool name**. It never blocks different tools from running concurrently.
   MCP and web search opt into same-tool parallel execution.
-- `gateway_event_plans`, `emit_gateway_start_events`, and
-  `emit_gateway_completed_events` synthesize the OpenAI lifecycle for gateway-owned
-  web search/MCP calls. The ordinary path emits all planned start events, executes the
-  round concurrently, then emits ordered completed/failed events.
+- Each scheduler slot retains its `GatewayEventPlan`; `emit_gateway_start_events` and
+  `emit_gateway_completed_events` synthesize the OpenAI lifecycle for gateway-executed
+  web search/MCP calls from those same slots. The ordinary path emits all planned start
+  events, executes the round concurrently, then emits ordered completed/failed events.
 - Streaming may receive client-visible output interleaved with gateway calls. In that
   case `engine.rs::execute_and_emit_ordered_output_calls` temporarily groups deferred
-  upstream frames by `output_index`, executes the same `GatewayRound` concurrently,
+  upstream frames by `output_index`, executes the same `GatewayScheduler` concurrently,
   and then interleaves synthetic gateway lifecycle events with released upstream
   frames in original output order. Concurrency and wire ordering are therefore
   separate concerns.
@@ -520,30 +522,49 @@ the behavioral layer — routing, handler traits, normalization, and execution.
 - **`handler.rs`** — the two traits every tool type reasons about:
   ```rust
   pub trait ToolHandler: Send + Sync {
+      type ToolParams: Send + Sync;
+
       fn tool_type(&self) -> ToolType;
-      fn validate(&self, param: &Value) -> Result<(), ToolError>;
-      fn normalize(&self, param: &Value) -> Vec<FunctionTool>;
+      fn validate(&self, params: &Self::ToolParams) -> Result<(), ToolError>;
+      fn normalize(&self, params: &Self::ToolParams) -> Vec<FunctionTool>;
   }
 
   pub trait GatewayExecutor: ToolHandler + 'static {
-      fn execute(&self, call_id: &str, tool_name: &str, arguments: &str, config: &Value)
+      type ExecutionParams: Clone + Send + Sync + 'static;
+
+      fn execute(
+          &self,
+          call_id: &str,
+          tool_name: &str,
+          arguments: &str,
+          params: &Self::ExecutionParams,
+      )
           -> Pin<Box<dyn Future<Output = Result<ToolOutput, ToolError>> + Send + '_>>;
       fn supports_parallel_execution(&self) -> bool;
-      fn started_output(&self, call: &FunctionToolCall) -> Option<OutputItem>;
+      fn plan_gateway_events(
+          &self,
+          call: &FunctionToolCall,
+          params: &Self::ExecutionParams,
+      ) -> GatewayToolEventPlan;
       fn public_output(
           &self,
           call: &FunctionToolCall,
           output: &ToolOutput,
           status: GatewayCallStatus,
+          params: &Self::ExecutionParams,
       ) -> Option<OutputItem>;
   }
   ```
   `GatewayExecutor` requires `ToolHandler`: every executable gateway handler supports
-  validation and normalization, but not every `ToolHandler` is gateway-executable.
-  Gateway-owned registry types may also lack an executor entirely. The trait owns
-  three runtime hooks: `supports_parallel_execution()` controls same-tool
-  self-exclusion, `started_output()` creates the public in-progress placeholder, and
-  `public_output()` shapes the completed/failed client-visible item.
+  typed validation and normalization, but not every `ToolHandler` is gateway-executable.
+  `ToolParams` describes the public declaration; `ExecutionParams` describes one
+  model-visible executable entry. They intentionally differ for MCP: an
+  `McpToolParam` declares a server, while an `McpDiscoveredToolParam` identifies one
+  tool returned by that server. Gateway-owned registry types may also lack an executor
+  entirely. The trait owns three runtime hooks: `supports_parallel_execution()`
+  controls same-tool self-exclusion, `plan_gateway_events()` creates the typed public
+  lifecycle projection, and `public_output()` shapes the completed/failed
+  client-visible item.
   - **Client-owned** tools implement only `ToolHandler`: see `function.rs`
     (`FunctionHandler`), `custom.rs` (`CustomHandler`), `codex.rs`
     (`CodexNamespaceHandler`). Their calls are returned for the client to resolve — the
@@ -553,11 +574,15 @@ the behavioral layer — routing, handler traits, normalization, and execution.
     by `mcp/client.rs`'s MCP protocol client and `mcp/pool.rs`'s connection pool).
 - **`ownership.rs`** — `ToolOwnership::Client` versus
   `ToolOwnership::Gateway(Option<GatewayBinding>)`. A `GatewayBinding` combines the
-  resolved executor with the optional same-tool semaphore derived from its parallel
-  safety declaration. Keeping ownership explicit avoids inferring execution policy
-  from whether a handler happens to be present.
+  resolved executor, its typed `ExecutionParams`, and the optional same-tool semaphore
+  derived from its parallel-safety declaration. A generic adapter checks the
+  executor/parameter pair at construction and erases only that valid bound pair for
+  heterogeneous registry storage. The scheduler therefore never handles untyped JSON
+  configuration or downcasts. Keeping ownership explicit avoids inferring execution
+  policy from whether a handler happens to be present.
 - **`registry.rs`** — `ToolRegistry`, a request-scoped map from model-visible tool name
-  to `ToolEntry { tool_type, config, server_label, ownership }`. Its constructor,
+  to `ToolEntry { tool_type, server_label, ownership }`. Executable parameters live in
+  the typed `GatewayBinding`, not as a serialized `Value` on every entry. Its constructor,
   ```rust
   pub async fn build_with_handlers(
       tools: &mut [ResponsesTool],
@@ -569,8 +594,9 @@ the behavioral layer — routing, handler traits, normalization, and execution.
   members, inserts one entry per declared/discovered tool, and for `Mcp`/`WebSearch`
   pulls the actual executor from `GatewayExecutors` (discovering live MCP tools via
   `tools/list` in the process). `ToolRegistry::dispatch(call)` is the per-call routing
-  method the Messages loop uses; the Responses `GatewayRound` resolves the same entry
-  directly so it can apply the binding's self-exclusion and lifecycle hooks.
+  method the Messages loop uses; the Responses `GatewayScheduler` resolves the same
+  binding into one call plan so execution, self-exclusion, item position, and lifecycle
+  hooks cannot drift apart.
 
   MCP discovery history is also request-scoped registry state:
   `mcp_list_tools_items: HashMap<String, Vec<McpListTools>>` groups records by
@@ -586,16 +612,17 @@ the behavioral layer — routing, handler traits, normalization, and execution.
   connection setup**: MCP servers (connects and caches `McpClient`s keyed by server
   URL, falling back to connecting a fresh request-declared server) and the shared
   `WebSearchHandler`. As of today it only has slots for `ToolType::Mcp` and
-  `ToolType::WebSearch` — `insert()` logs and no-ops for any other type. Client-owned
+  `ToolType::WebSearch`; `GatewayExecutorRegistration` has typed variants for those
+  supported slots. Client-owned
   tools (`function`, `custom`, `namespace`) never touch this file; their registry
   entries are inserted with `ToolOwnership::Client` and no `GatewayExecutors`
   involvement.
 
 **To add a new tool type:**
-1. Implement `ToolHandler` (validate + normalize) for it. If it's client-executed,
+1. Implement `ToolHandler`, including its typed `ToolParams`, for it. If it's client-executed,
    stop there — see `function.rs`/`custom.rs` for the pattern.
-2. If it's gateway-executed, also implement `GatewayExecutor::execute` — see
-   `web_search.rs`/`mcp/handler.rs`.
+2. If it's gateway-executed, also declare typed `GatewayExecutor::ExecutionParams`
+   and implement `execute` — see `web_search.rs`/`mcp/handler.rs`.
 3. Wire it into `tool/normalize.rs`'s `validate`/`to_function_tools` match arms.
 4. Wire it into `tool/registry.rs`'s `build_with_handlers` (an `insert_*_entry` call).
 5. If it needs lazy per-request connection setup, add a slot to `GatewayExecutors` in
@@ -616,7 +643,7 @@ router, reusing the same core logic in-process.
 | Add a new HTTP or WebSocket route | `agentic-server/src/handler/{http,websocket}/`, wire it in `app.rs`'s `build_router_with_auth` |
 | Support a new upstream SSE event | `events/types.rs` → `events/normalize.rs` → `executor/accumulator.rs` (+ `gateway.rs`/`function_sse.rs` if it's gateway-synthesized) |
 | Add a new tool type | `tool/handler.rs` impl(s) → `tool/normalize.rs` → `tool/registry.rs` → `tool/executors.rs` if it needs lazy connection setup |
-| Change gateway-round concurrency or lifecycle ordering | `executor/gateway.rs` (`GatewayRound`/event plans) + `executor/engine.rs` (round decision/ordered streaming) + `tool/ownership.rs` (same-tool safety) |
+| Change gateway-round concurrency or lifecycle ordering | `executor/gateway.rs` (`GatewayScheduler`/event plans) + `executor/engine.rs` (round decision/ordered streaming) + `tool/ownership.rs` (typed binding and same-tool safety) |
 | Change continuation history visibility | `storage/types/item.rs::into_input_items` → `types/io/output.rs::to_input_item` (preservation) → `types/io/input.rs::model_input` (upstream visibility) |
 | Add a CRUD operation beyond persist/rehydrate | `executor/modes/conversation.rs` or `modes/response.rs`, backed by `storage/conversation.rs` / `storage/response.rs` |
 | Change how output items are assembled from a stream | `executor/accumulator.rs` — respect the `TryFrom`/`ApplyDone` pattern, don't add new public methods |

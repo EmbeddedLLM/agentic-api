@@ -14,10 +14,9 @@ use tracing::debug;
 
 use super::compaction::{compact_items, maybe_compact_context};
 use super::gateway::{
-    GatewayCallResult, GatewayRound, append_gateway_calls_to_new_input, append_output_items_to_input,
-    append_tool_outputs, compaction_event_plans, complete_gateway_event_plans, emit_gateway_completed_events,
-    emit_gateway_start_events, emit_response_start_events, execute_and_emit_output_calls, gateway_event_plans,
-    has_client_owned_calls, public_output_items,
+    GatewayCallResult, GatewayScheduler, append_gateway_calls_to_new_input, append_output_items_to_input,
+    append_tool_outputs, compaction_event_plans, emit_gateway_completed_events, emit_gateway_start_events,
+    emit_response_start_events, execute_and_emit_output_calls, has_client_owned_calls, public_output_items,
 };
 use super::gateway_accumulator::{GatewayStreamAccumulator, StreamEvent, error_sse_chunk};
 use crate::events::EventFrame;
@@ -372,51 +371,36 @@ async fn execute_and_emit_ordered_output_calls(
         events_by_output[output_index].push(frame);
     }
 
-    let mut event_plans = gateway_event_plans(output_items, registry, output_offset);
-    let first_gateway_index = output_items
-        .iter()
-        .position(|item| matches!(item, OutputItem::FunctionCall(call) if registry.is_gateway_owned_name(&call.name)));
-    let first_gateway_run_end = first_gateway_index
-        .filter(|start| {
-            !output_items[..*start].iter().any(
-                |item| matches!(item, OutputItem::FunctionCall(call) if registry.is_client_custom_name(&call.name)),
-            )
-        })
-        .map_or(0, |start| {
-            output_items[start..]
-                .iter()
-                .take_while(
-                    |item| matches!(item, OutputItem::FunctionCall(call) if registry.is_gateway_owned_name(&call.name)),
-                )
-                .count()
-                .saturating_add(start)
-        });
-    let first_gateway_run_len = first_gateway_run_end.saturating_sub(first_gateway_index.unwrap_or(0));
-    emit_gateway_start_events(&event_plans[..first_gateway_run_len], stream_accumulator, stream_sender)?;
+    let mut scheduler = GatewayScheduler::plan(output_items, registry, output_offset);
+    let initial_event_run_len = scheduler.initial_event_run_len(output_items, registry);
+    emit_gateway_start_events(
+        scheduler.event_plans().take(initial_event_run_len),
+        stream_accumulator,
+        stream_sender,
+    )?;
 
-    let gateway_results = GatewayRound::new().execute(output_items, registry).await?;
-    complete_gateway_event_plans(&mut event_plans, &gateway_results);
-    let mut gateway_index = 0;
-    for (index, item) in output_items.iter().enumerate() {
-        if matches!(item, OutputItem::FunctionCall(call) if registry.is_gateway_owned_name(&call.name)) {
-            let plan = &event_plans[gateway_index..=gateway_index];
-            let result = &gateway_results[gateway_index..=gateway_index];
-            if index >= first_gateway_run_end {
-                emit_gateway_start_events(plan, stream_accumulator, stream_sender)?;
+    let gateway_results = scheduler.execute().await?;
+    for (index, output_events) in events_by_output.iter_mut().enumerate() {
+        if let Some(call_index) = scheduler.call_index_for_item(index) {
+            let plan = scheduler
+                .event_plan(call_index)
+                .expect("scheduled call index always has an event plan");
+            let result = std::slice::from_ref(&gateway_results[call_index]);
+            if call_index >= initial_event_run_len {
+                emit_gateway_start_events(std::iter::once(plan), stream_accumulator, stream_sender)?;
             }
-            emit_gateway_completed_events(result, plan, stream_accumulator, stream_sender)?;
+            emit_gateway_completed_events(result, std::iter::once(plan), stream_accumulator, stream_sender)?;
             emit_deferred_stream_events(
-                std::mem::take(&mut events_by_output[index]),
+                std::mem::take(output_events),
                 ctx,
                 registry,
                 stream_accumulator,
                 stream_sender,
                 output_offset,
             )?;
-            gateway_index += 1;
         } else {
             emit_deferred_stream_events(
-                std::mem::take(&mut events_by_output[index]),
+                std::mem::take(output_events),
                 ctx,
                 registry,
                 stream_accumulator,

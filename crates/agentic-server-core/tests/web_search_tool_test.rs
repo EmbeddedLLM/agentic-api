@@ -11,7 +11,7 @@ use agentic_core::types::io::{
     FunctionToolResultMessage, InputItem, OutputItem, ResponsesInput, ToolCallOutput, ToolChoice,
 };
 use agentic_core::types::request_response::RequestPayload;
-use agentic_core::types::tools::ResponsesTool;
+use agentic_core::types::tools::{ResponsesTool, WebSearchToolParam};
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::routing::{get, post};
@@ -421,7 +421,7 @@ async fn web_search_handler_gets_query_params_from_you_and_formats_results() {
             "call_search",
             "web_search",
             r#"{"query":"rust async","count":2,"exclude_domains":["example.com","example.org"]}"#,
-            &serde_json::json!({"type":"web_search_preview"}),
+            &WebSearchToolParam::default(),
         )
         .await
         .unwrap();
@@ -451,7 +451,7 @@ async fn web_search_handler_requires_base_url() {
             "call_search",
             "web_search",
             r#"{"query":"rust async"}"#,
-            &serde_json::json!({"type":"web_search_preview"}),
+            &WebSearchToolParam::default(),
         )
         .await
         .unwrap_err();
@@ -1290,16 +1290,17 @@ async fn web_search_rejects_incompatible_domain_filters_before_calling_you() {
     let (base_url, mut captured, _handle) = spawn_mock_you().await;
     let handler =
         WebSearchHandler::with_api_key(Arc::new(reqwest::Client::new()), "secret-you-key".to_owned(), &base_url);
+    let params = serde_json::from_value::<WebSearchToolParam>(serde_json::json!({
+        "filters": {"allowed_domains": ["rust-lang.org"]}
+    }))
+    .expect("web search params");
 
     let err = handler
         .execute(
             "call_search",
             "web_search",
             r#"{"query":"rust async","exclude_domains":["example.com"]}"#,
-            &serde_json::json!({
-                "type": "web_search_preview",
-                "filters": {"allowed_domains": ["rust-lang.org"]}
-            }),
+            &params,
         )
         .await
         .expect_err("allowed_domains and exclude_domains should be rejected");

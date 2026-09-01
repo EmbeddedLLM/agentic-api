@@ -50,7 +50,7 @@ graph TD
 
     subgraph "Execution Phase (per iteration)"
         ROUTE["Route by ToolOwnership<br>registry lookup per call"]
-        EXEC_GW["GatewayRound<br>bounded concurrent execution"]
+        EXEC_GW["GatewayScheduler<br>planned bounded execution"]
         PASS["Return unresolved call<br>function / custom / namespace"]
         LOOP["Inject Results<br>re-enter inference"]
     end
@@ -182,7 +182,6 @@ unknown declarations. The `web_search` aliases accept the dated OpenAI variants.
 ```rust
 pub struct ToolEntry {
     pub tool_type: ToolType,
-    pub config: Value,                 // serialised server-level tool param
     pub server_label: Option<String>,  // MCP: which server this tool belongs to
     pub ownership: ToolOwnership,
 }
@@ -205,9 +204,11 @@ impl ToolRegistry {
 ```
 
 > **Drift from proposal:** ownership is explicit on every entry. A gateway entry
-> contains `Gateway(Option<GatewayBinding>)`; the binding combines its executor
-> and same-tool concurrency policy, while `None` represents a gateway-owned type
-> without an implementation. Responses resolves bindings inside `GatewayRound`;
+> contains `Gateway(Option<GatewayBinding>)`; the binding combines its executor,
+> statically matched execution parameters, and same-tool concurrency policy. The
+> typed pair is erased only after binding so the heterogeneous registry needs no
+> `serde_json::Value` config or downcast. `None` represents a gateway-owned type
+> without an implementation. Responses resolves bindings inside `GatewayScheduler`;
 > `ToolRegistry::dispatch` remains the per-call path used by Messages. The registry
 > also caches MCP list-tools history for lifecycle suppression.
 
@@ -264,7 +265,7 @@ graph LR
         LOOP["run_until_gateway_tools_complete<br/>loops until Done / RequiresClientAction / Incomplete"]
     end
     subgraph ROUND["Responses round execution (executor/gateway.rs, #181)"]
-        EXEC["GatewayRound::execute<br/>bounded fan-out + ordered results"]
+        EXEC["GatewayScheduler<br/>one plan per call + ordered results"]
     end
     subgraph L1["Request-scoped routing (tool/registry.rs + tool/ownership.rs)"]
         DISP["ToolEntry::ownership<br/>Client or Gateway(binding)"]
@@ -284,15 +285,16 @@ graph LR
 - **Routing (`ToolRegistry` + `ToolOwnership`):** maps each model-visible name
   to client ownership or an optional gateway binding. It also retains effective
   declaration metadata and MCP list-tools history for the request.
-- **Round execution (`GatewayRound`):** resolves all gateway-owned calls, executes
-  them through the configured sliding window and per-binding same-tool policy,
-  and collects results in model call order.
+- **Round execution (`GatewayScheduler`):** plans one slot per gateway-owned call,
+  keeping the item index, typed binding, and lifecycle projection together; it then
+  executes those slots through the configured sliding window and per-binding
+  same-tool policy and collects results in model call order.
 - **Multi-round orchestration (`classify_round` + the loop):** decides whether
   the turn continues, is done, hands back to the client, or exhausts the round
   budget, then re-infers when gateway results require another round.
 
 `ToolRegistry::dispatch` is still used by the Messages path; Responses resolves
-the same binding directly so `GatewayRound` can apply concurrency, timeout, and
+the same binding directly so `GatewayScheduler` can apply concurrency, timeout, and
 public-lifecycle hooks together.
 
 ---
@@ -308,30 +310,39 @@ types.
 ```rust
 // Every tool type implements this — parse/validate/normalize only.
 pub trait ToolHandler: Send + Sync {
+    type ToolParams: Send + Sync;
+
     fn tool_type(&self) -> ToolType;
-    fn validate(&self, param: &Value) -> Result<(), ToolError>;
-    fn normalize(&self, param: &Value) -> Vec<FunctionTool>;
+    fn validate(&self, params: &Self::ToolParams) -> Result<(), ToolError>;
+    fn normalize(&self, params: &Self::ToolParams) -> Vec<FunctionTool>;
 }
 
 // Only gateway-executed tool types implement this — it *requires* ToolHandler.
-// Handlers are stored as `Arc<dyn GatewayExecutor>`, so the async method is
-// written as `Pin<Box<dyn Future>>` (dyn-compatible) rather than `async fn`.
+// A concrete executor is paired with its ExecutionParams first. An internal
+// object-safe adapter then erases that valid pair for heterogeneous storage.
 pub trait GatewayExecutor: ToolHandler + 'static {
+    type ExecutionParams: Clone + Send + Sync + 'static;
+
     fn execute(
         &self,
         call_id: &str,
         tool_name: &str,
         arguments: &str,
-        config: &Value,
+        params: &Self::ExecutionParams,
     ) -> Pin<Box<dyn Future<Output = Result<ToolOutput, ToolError>> + Send + '_>>;
 
     fn supports_parallel_execution(&self) -> bool { false }
-    fn started_output(&self, call: &FunctionToolCall) -> Option<OutputItem> { None }
+    fn plan_gateway_events(
+        &self,
+        call: &FunctionToolCall,
+        params: &Self::ExecutionParams,
+    ) -> GatewayToolEventPlan;
     fn public_output(
         &self,
         call: &FunctionToolCall,
         output: &ToolOutput,
         status: GatewayCallStatus,
+        params: &Self::ExecutionParams,
     ) -> Option<OutputItem> { None }
 }
 ```
@@ -428,7 +439,7 @@ from this doc's original sketch — each is annotated inline above.
 ## Future Work
 
 - **Layering ADR.** Record the relationship between request-scoped ownership,
-  Responses `GatewayRound`, the Messages per-call dispatch path, and multi-round
+  Responses `GatewayScheduler`, the Messages per-call dispatch path, and multi-round
   `LoopDecision`, so later APIs reuse the same primitives instead of forking.
 - **`GatewayAccumulator` (streaming).** Today the "hide gateway-owned calls,
   emit the synthetic public frame" logic exists twice — once for blocking
@@ -455,8 +466,8 @@ from this doc's original sketch — each is annotated inline above.
 | D4 | Mixed turns resolved by `classify_round` precedence, not a `ContinuePartial` variant | The proposal added `ContinuePartial` for turns with both gateway and client calls. As built, `classify_round` gives client-owned calls precedence: gateway calls still execute and their outputs are recorded, and the internal decision returns `RequiresClientAction` in one round. Fewer variants, no payloads on the decision, same behavior. |
 | D5 | MCP transport | The proposal called for a stateless client (fresh connection per request). The shipped MCP integration pools clients and discovered handlers for configured servers rather than reconnecting on every call. |
 | D6 | `ResponsesTool` uses `#[serde(tag = "type")]` | Wire-compatible with existing `{"type":"function",...}` — no client migration needed. |
-| D7 | `ToolHandler` split into `ToolHandler` + `GatewayExecutor` | `execute()` only applies to gateway-owned types; keeping it on the shared trait would force `function`/`custom`/Codex namespace handlers to implement a method they can never honor. The `GatewayExecutor: ToolHandler` supertrait keeps the contract honest and is `dyn`-stored as `Arc<dyn GatewayExecutor>`. |
-| D8 | Parallelism is bounded globally and constrained per tool name | `GatewayRound` uses a configurable sliding window. A handler's conservative default serializes calls to that same model-visible name, while different tools can still overlap; handlers such as MCP and web search explicitly opt into same-tool overlap. |
+| D7 | `ToolHandler` split into `ToolHandler` + `GatewayExecutor` with associated parameter types | `execute()` only applies to gateway-owned types. `ToolParams` types declaration validation/normalization; `ExecutionParams` types one executable registry entry. `GatewayBinding` pairs executor and parameters generically, then erases the checked pair for heterogeneous storage. |
+| D8 | Parallelism is bounded globally and constrained per tool name | `GatewayScheduler` uses a configurable sliding window. A handler's conservative default serializes calls to that same model-visible name, while different tools can still overlap; handlers such as MCP and web search explicitly opt into same-tool overlap. |
 
 ---
 

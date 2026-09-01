@@ -1,12 +1,72 @@
 //! Whether a tool is executed by the gateway itself or handed back to the client.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
-use super::handler::GatewayExecutor;
+use super::handler::{GatewayExecutor, GatewayToolEventPlan, ToolError, ToolOutput};
+use crate::types::io::OutputItem;
+use crate::types::io::output::{FunctionToolCall, GatewayCallStatus};
+
+/// Object-safe execution surface for a handler that has already been paired
+/// with the exact parameter type declared by its [`GatewayExecutor`]
+/// implementation.
+trait ErasedGatewayExecutor: Send + Sync {
+    fn execute(
+        &self,
+        call_id: &str,
+        tool_name: &str,
+        arguments: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<ToolOutput, ToolError>> + Send + '_>>;
+
+    fn plan_gateway_events(&self, call: &FunctionToolCall) -> GatewayToolEventPlan;
+
+    fn public_output(
+        &self,
+        call: &FunctionToolCall,
+        output: &ToolOutput,
+        status: GatewayCallStatus,
+    ) -> Option<OutputItem>;
+}
+
+struct TypedGatewayExecutor<E>
+where
+    E: GatewayExecutor + ?Sized,
+{
+    executor: Arc<E>,
+    params: E::ExecutionParams,
+}
+
+impl<E> ErasedGatewayExecutor for TypedGatewayExecutor<E>
+where
+    E: GatewayExecutor + ?Sized,
+{
+    fn execute(
+        &self,
+        call_id: &str,
+        tool_name: &str,
+        arguments: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<ToolOutput, ToolError>> + Send + '_>> {
+        self.executor.execute(call_id, tool_name, arguments, &self.params)
+    }
+
+    fn plan_gateway_events(&self, call: &FunctionToolCall) -> GatewayToolEventPlan {
+        self.executor.plan_gateway_events(call, &self.params)
+    }
+
+    fn public_output(
+        &self,
+        call: &FunctionToolCall,
+        output: &ToolOutput,
+        status: GatewayCallStatus,
+    ) -> Option<OutputItem> {
+        self.executor.public_output(call, output, status, &self.params)
+    }
+}
 
 /// A resolved gateway handler plus its per-tool-name concurrency policy.
 pub struct GatewayBinding {
-    pub handler: Arc<dyn GatewayExecutor>,
+    executor: Arc<dyn ErasedGatewayExecutor>,
     /// `Some` when this handler must not run concurrently with a second call
     /// to the SAME tool name (built from `!handler.supports_parallel_execution()`
     /// at registration time); `None` when it's safe to call itself concurrently.
@@ -17,7 +77,7 @@ pub struct GatewayBinding {
 impl Clone for GatewayBinding {
     fn clone(&self) -> Self {
         Self {
-            handler: Arc::clone(&self.handler),
+            executor: Arc::clone(&self.executor),
             self_exclusion: self.self_exclusion.clone(),
         }
     }
@@ -25,12 +85,40 @@ impl Clone for GatewayBinding {
 
 impl GatewayBinding {
     #[must_use]
-    pub fn new(handler: Arc<dyn GatewayExecutor>) -> Self {
-        let self_exclusion = (!handler.supports_parallel_execution()).then(|| Arc::new(tokio::sync::Semaphore::new(1)));
+    pub(crate) fn new<E>(executor: Arc<E>, params: E::ExecutionParams) -> Self
+    where
+        E: GatewayExecutor + ?Sized,
+    {
+        let self_exclusion =
+            (!executor.supports_parallel_execution()).then(|| Arc::new(tokio::sync::Semaphore::new(1)));
         Self {
-            handler,
+            executor: Arc::new(TypedGatewayExecutor { executor, params }),
             self_exclusion,
         }
+    }
+
+    pub(crate) fn execute(
+        &self,
+        call_id: &str,
+        tool_name: &str,
+        arguments: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<ToolOutput, ToolError>> + Send + '_>> {
+        self.executor.execute(call_id, tool_name, arguments)
+    }
+
+    #[must_use]
+    pub(crate) fn plan_gateway_events(&self, call: &FunctionToolCall) -> GatewayToolEventPlan {
+        self.executor.plan_gateway_events(call)
+    }
+
+    #[must_use]
+    pub(crate) fn public_output(
+        &self,
+        call: &FunctionToolCall,
+        output: &ToolOutput,
+        status: GatewayCallStatus,
+    ) -> Option<OutputItem> {
+        self.executor.public_output(call, output, status)
     }
 }
 

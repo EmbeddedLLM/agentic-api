@@ -3,18 +3,15 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use serde::Deserialize;
 use serde_json::Value;
 
-use crate::tool::{GatewayExecutor, ToolError, ToolHandler, ToolOutput, ToolType};
+use crate::tool::{GatewayExecutor, GatewayToolEventPlan, ToolError, ToolHandler, ToolOutput, ToolType};
 use crate::types::io::FunctionTool;
 use crate::types::io::output::{
     FunctionToolCall, GatewayCallStatus, McpCall, McpCallError, McpCallStatus, McpListTool, McpListTools, OutputItem,
 };
-use crate::types::tools::{McpDiscoveredToolParam, ResponsesTool};
-use crate::utils::common::{
-    deserialize_from_str, deserialize_from_str_opt, deserialize_from_value, serialize_to_string,
-};
+use crate::types::tools::{McpDiscoveredToolParam, McpToolParam, ResponsesTool};
+use crate::utils::common::{deserialize_from_str, deserialize_from_str_opt, serialize_to_string};
 use crate::utils::uuid7_str;
 
 use super::{McpClient, McpError};
@@ -72,21 +69,8 @@ pub(crate) fn started_list_tools_output_item(item: &McpListTools) -> OutputItem 
 ///
 /// A handler with no client is used only while normalizing the discovered tool
 /// metadata stored on `McpToolParam` into model-visible function tools.
-#[derive(Clone)]
-struct McpIdentity {
-    client: Arc<McpClient>,
-    server_label: String,
-    tool_name: String,
-}
-
 pub struct McpHandler {
-    identity: Option<McpIdentity>,
-}
-
-#[derive(Deserialize)]
-struct McpToolNormalizationParams {
-    #[serde(rename = "_agentic_discovered_tools", default)]
-    discovered_tools: Vec<McpDiscoveredToolParam>,
+    client: Option<Arc<McpClient>>,
 }
 
 #[derive(Clone)]
@@ -126,18 +110,12 @@ impl McpHandler {
 
     #[must_use]
     pub const fn discovered_tool_spec_only() -> Self {
-        Self { identity: None }
+        Self { client: None }
     }
 
     #[must_use]
-    pub fn tool_call(client: Arc<McpClient>, server_label: String, tool_name: String) -> Self {
-        Self {
-            identity: Some(McpIdentity {
-                client,
-                server_label,
-                tool_name,
-            }),
-        }
+    pub fn tool_call(client: Arc<McpClient>) -> Self {
+        Self { client: Some(client) }
     }
 
     /// Discovers and normalizes the tools exposed by one MCP server.
@@ -164,11 +142,7 @@ impl McpHandler {
                 continue;
             }
             let internal_name = internal_mcp_tool_name(server_label, &tool_name, &mut internal_names);
-            let handler = Arc::new(Self::tool_call(
-                Arc::clone(&client),
-                server_label.to_owned(),
-                tool_name.clone(),
-            ));
+            let handler = Arc::new(Self::tool_call(Arc::clone(&client)));
             discovered_handlers.push(McpDiscoveredHandler {
                 param: McpDiscoveredToolParam {
                     server_label: server_label.to_owned(),
@@ -217,7 +191,7 @@ impl McpHandler {
 
     /// Returns the spec-only MCP tool handler used during request normalization.
     #[must_use]
-    pub const fn spec_from_param(_param: &Value) -> Self {
+    pub const fn spec_from_param(_param: &McpToolParam) -> Self {
         Self::discovered_tool_spec_only()
     }
 }
@@ -244,54 +218,48 @@ fn mcp_list_tool(param: &McpDiscoveredToolParam) -> McpListTool {
 }
 
 impl ToolHandler for McpHandler {
+    type ToolParams = McpToolParam;
+
     fn tool_type(&self) -> ToolType {
         ToolType::Mcp
     }
 
-    fn validate(&self, _param: &Value) -> Result<(), ToolError> {
+    fn validate(&self, _params: &McpToolParam) -> Result<(), ToolError> {
         Ok(())
     }
 
-    fn normalize(&self, param: &Value) -> Vec<FunctionTool> {
-        match deserialize_from_value::<McpToolNormalizationParams>(param.clone()) {
-            Ok(params) => params
-                .discovered_tools
-                .iter()
-                .map(discovered_mcp_function_tool)
-                .collect(),
-            Err(error) => {
-                tracing::warn!(error = %error, "invalid MCP tool param");
-                Vec::new()
-            }
-        }
+    fn normalize(&self, params: &McpToolParam) -> Vec<FunctionTool> {
+        params
+            .discovered_tools
+            .iter()
+            .map(discovered_mcp_function_tool)
+            .collect()
     }
 }
 
 impl GatewayExecutor for McpHandler {
+    type ExecutionParams = McpDiscoveredToolParam;
+
     fn execute(
         &self,
         call_id: &str,
         _tool_name: &str,
         arguments: &str,
-        _config: &Value,
+        params: &McpDiscoveredToolParam,
     ) -> Pin<Box<dyn Future<Output = Result<ToolOutput, ToolError>> + Send + '_>> {
         let call_id = call_id.to_owned();
         let arguments = arguments.to_owned();
-        let identity = self.identity.clone();
+        let client = self.client.clone();
+        let server_label = params.server_label.clone();
+        let tool_name = params.tool_name.clone();
 
         Box::pin(async move {
-            let Some(identity) = &identity else {
+            let Some(client) = &client else {
                 return Err(ToolError::Config(
                     "MCP tool spec-only handler cannot execute tools".to_owned(),
                 ));
             };
-            let output = execute_tool_call(
-                &identity.client,
-                &identity.server_label,
-                &identity.tool_name,
-                &arguments,
-            )
-            .await?;
+            let output = execute_tool_call(client, &server_label, &tool_name, &arguments).await?;
 
             Ok(ToolOutput { call_id, output })
         })
@@ -301,9 +269,8 @@ impl GatewayExecutor for McpHandler {
         true
     }
 
-    fn started_output(&self, call: &FunctionToolCall) -> Option<OutputItem> {
-        let identity = self.identity.as_ref()?;
-        Some(started_output_item(call, &identity.server_label, &identity.tool_name))
+    fn plan_gateway_events(&self, call: &FunctionToolCall, params: &McpDiscoveredToolParam) -> GatewayToolEventPlan {
+        GatewayToolEventPlan::new(Some(started_output_item(call, &params.server_label, &params.tool_name)))
     }
 
     fn public_output(
@@ -311,14 +278,14 @@ impl GatewayExecutor for McpHandler {
         call: &FunctionToolCall,
         output: &ToolOutput,
         status: GatewayCallStatus,
+        params: &McpDiscoveredToolParam,
     ) -> Option<OutputItem> {
-        let identity = self.identity.as_ref()?;
         Some(output_item(
             call,
             output,
             status,
-            &identity.server_label,
-            &identity.tool_name,
+            &params.server_label,
+            &params.tool_name,
         ))
     }
 }
@@ -378,8 +345,6 @@ pub(crate) fn discovered_mcp_function_tool(param: &McpDiscoveredToolParam) -> Fu
     mcp_tool_to_function_tool(&param.internal_name, &param.tool)
 }
 
-#[cfg(test)]
-const INTERNAL_DISCOVERED_TOOLS_KEY: &str = "_agentic_discovered_tools";
 const INTERNAL_MCP_PREFIX: &str = "mcp__";
 const MAX_INTERNAL_TOOL_NAME_LEN: usize = 64;
 
@@ -484,10 +449,11 @@ mod tests {
 
     #[test]
     fn native_mcp_param_without_discovery_normalizes_to_no_functions() {
-        let param = serde_json::json!({
+        let param = serde_json::from_value::<McpToolParam>(serde_json::json!({
             "server_label": "counter",
             "server_url": "http://127.0.0.1:8000/mcp"
-        });
+        }))
+        .expect("MCP tool param");
 
         let handler = McpHandler::spec_from_param(&param);
 
@@ -497,11 +463,13 @@ mod tests {
     #[test]
     fn discovered_tool_normalizes_to_function_tool() {
         let handler = McpHandler::discovered_tool_spec_only();
-        let config = serde_json::json!({
-            (INTERNAL_DISCOVERED_TOOLS_KEY): [discovered_param()]
-        });
+        let mut params = serde_json::from_value::<McpToolParam>(serde_json::json!({
+            "server_label": "counter"
+        }))
+        .expect("MCP tool param");
+        params.discovered_tools.push(discovered_param());
 
-        let normalized = handler.normalize(&config);
+        let normalized = handler.normalize(&params);
 
         assert_eq!(normalized.len(), 1);
         assert_eq!(normalized[0].name, "mcp__counter__increment");

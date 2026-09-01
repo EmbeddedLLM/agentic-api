@@ -9,7 +9,7 @@ use crate::storage::backend::redact_database_urls;
 use crate::storage::{
     ConversationStore, ConversationVersion, DatabaseBackend, ResponseStore, create_pool_with_schema_and_configs,
 };
-use crate::tool::{GatewayExecutor, GatewayExecutors};
+use crate::tool::{GatewayExecutorRegistration, GatewayExecutors};
 use crate::types::io::InputItem;
 use crate::types::messages::GatewayToolMap;
 use crate::types::request_response::{RequestPayload, ResponsePayload};
@@ -106,7 +106,7 @@ impl ExecutionContext {
     }
 
     #[must_use]
-    pub fn with_gateway_executor(mut self, executor: Arc<dyn GatewayExecutor>) -> Self {
+    pub fn with_gateway_executor(mut self, executor: impl Into<GatewayExecutorRegistration>) -> Self {
         self.gateway_executors.insert(executor);
         self
     }

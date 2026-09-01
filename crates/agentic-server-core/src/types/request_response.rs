@@ -125,7 +125,7 @@ impl RequestPayload {
         // whether the model may emit parallel calls, not how the gateway
         // schedules calls after inference. Forward an explicit client value;
         // preserve this gateway's existing default of `false` when omitted.
-        // `GatewayRound` independently applies its bounded fan-out and each
+        // `GatewayScheduler` independently applies its bounded fan-out and each
         // handler's same-tool parallel-safety policy to whatever calls appear.
         let parallel_tool_calls = Some(self.parallel_tool_calls.unwrap_or(false));
 

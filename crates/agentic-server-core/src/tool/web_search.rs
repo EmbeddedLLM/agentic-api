@@ -6,33 +6,31 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::handler::{GatewayExecutor, GatewayToolEventPlan, ToolError, ToolHandler, ToolOutput};
+use super::ownership::GatewayBinding;
+use super::registry::{ToolEntry, ToolType};
 use crate::types::io::output::{FunctionToolCall, WebSearchCall, WebSearchCallStatus, WebSearchSource};
 use crate::types::io::{FunctionTool, OutputItem};
 use crate::types::tools::{WebSearchContextSize, WebSearchToolParam};
-use crate::utils::common::serialize_to_value_or_custom_default;
-
-use super::handler::{GatewayExecutor, ToolError, ToolHandler, ToolOutput};
-use super::ownership::GatewayBinding;
-use super::registry::{ToolEntry, ToolType};
 
 const YOU_API_KEY: &str = "YOU_API_KEY";
 const YOU_API_BASE_URL: &str = "YOU_API_BASE_URL";
 
+pub(crate) type WebSearchExecutor =
+    dyn GatewayExecutor<ToolParams = WebSearchToolParam, ExecutionParams = WebSearchToolParam>;
+
 pub(crate) fn insert_web_search_entry(
     entries: &mut HashMap<String, ToolEntry>,
-    p: &WebSearchToolParam,
-    handler: Arc<dyn GatewayExecutor>,
+    params: &WebSearchToolParam,
+    executor: Arc<WebSearchExecutor>,
 ) {
-    serialize_to_value_or_custom_default(
-        p,
-        "web_search tool config serialization failed",
-        |config| {
-            entries.insert(
-                "web_search".to_owned(),
-                ToolEntry::gateway(ToolType::WebSearch, config, None, Some(GatewayBinding::new(handler))),
-            );
-        },
-        (),
+    entries.insert(
+        "web_search".to_owned(),
+        ToolEntry::gateway(
+            ToolType::WebSearch,
+            None,
+            Some(GatewayBinding::new(executor, params.clone())),
+        ),
     );
 }
 
@@ -158,17 +156,20 @@ impl WebSearchHandler {
         }
     }
 
-    async fn execute_search(&self, call_id: &str, arguments: &str, config: &Value) -> Result<ToolOutput, ToolError> {
+    async fn execute_search(
+        &self,
+        call_id: &str,
+        arguments: &str,
+        params: &WebSearchToolParam,
+    ) -> Result<ToolOutput, ToolError> {
         let provider = self
             .provider
             .as_ref()
             .ok_or_else(|| ToolError::Config("web_search spec-only handler cannot execute tools".to_owned()))?;
         let args = WebSearchArguments::from_json(arguments)?;
-        let config = serde_json::from_value::<WebSearchToolParam>(config.clone())
-            .map_err(|e| ToolError::Config(format!("invalid web_search config: {e}")))?;
         let queries = args.all_queries();
         let responses =
-            futures::future::try_join_all(queries.iter().map(|query| provider.search(query, &args, &config))).await?;
+            futures::future::try_join_all(queries.iter().map(|query| provider.search(query, &args, params))).await?;
 
         let mut web = Vec::new();
         let mut news = Vec::new();
@@ -291,40 +292,42 @@ impl WebSearchProvider for YouSearchProvider {
 }
 
 impl ToolHandler for WebSearchHandler {
+    type ToolParams = WebSearchToolParam;
+
     fn tool_type(&self) -> ToolType {
         ToolType::WebSearch
     }
 
-    fn validate(&self, param: &Value) -> Result<(), ToolError> {
-        serde_json::from_value::<WebSearchToolParam>(param.clone())
-            .map(|_| ())
-            .map_err(|e| ToolError::Config(format!("invalid web_search config: {e}")))
+    fn validate(&self, _params: &WebSearchToolParam) -> Result<(), ToolError> {
+        Ok(())
     }
 
-    fn normalize(&self, _param: &Value) -> Vec<FunctionTool> {
+    fn normalize(&self, _params: &WebSearchToolParam) -> Vec<FunctionTool> {
         vec![web_search_function_tool()]
     }
 }
 
 impl GatewayExecutor for WebSearchHandler {
+    type ExecutionParams = WebSearchToolParam;
+
     fn execute(
         &self,
         call_id: &str,
         tool_name: &str,
         arguments: &str,
-        config: &Value,
+        params: &WebSearchToolParam,
     ) -> Pin<Box<dyn Future<Output = Result<ToolOutput, ToolError>> + Send + '_>> {
         let call_id = call_id.to_owned();
         let tool_name = tool_name.to_owned();
         let arguments = arguments.to_owned();
-        let config = config.clone();
+        let params = params.clone();
         Box::pin(async move {
             if tool_name != "web_search" {
                 return Err(ToolError::Config(format!(
                     "web_search handler cannot execute tool '{tool_name}'"
                 )));
             }
-            self.execute_search(&call_id, &arguments, &config).await
+            self.execute_search(&call_id, &arguments, &params).await
         })
     }
 
@@ -332,8 +335,8 @@ impl GatewayExecutor for WebSearchHandler {
         true
     }
 
-    fn started_output(&self, call: &FunctionToolCall) -> Option<OutputItem> {
-        Some(started_output_item(call))
+    fn plan_gateway_events(&self, call: &FunctionToolCall, _params: &WebSearchToolParam) -> GatewayToolEventPlan {
+        GatewayToolEventPlan::new(Some(started_output_item(call)))
     }
 
     fn public_output(
@@ -341,6 +344,7 @@ impl GatewayExecutor for WebSearchHandler {
         call: &FunctionToolCall,
         output: &ToolOutput,
         status: WebSearchCallStatus,
+        _params: &WebSearchToolParam,
     ) -> Option<OutputItem> {
         Some(output_item(call, output, status))
     }
@@ -638,7 +642,7 @@ mod tests {
                 "call_search",
                 "web_search",
                 r#"{"query":" potato "}"#,
-                &serde_json::json!({"type": "web_search_preview"}),
+                &WebSearchToolParam::default(),
             )
             .await
             .unwrap();
@@ -658,7 +662,7 @@ mod tests {
                 "call_search",
                 "web_search",
                 r#"{"queries":["potato","tomato"]}"#,
-                &serde_json::json!({"type": "web_search_preview"}),
+                &WebSearchToolParam::default(),
             )
             .await
             .unwrap();

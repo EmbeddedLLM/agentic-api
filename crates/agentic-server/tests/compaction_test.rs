@@ -15,6 +15,7 @@ use tokio::sync::Mutex;
 
 use agentic_core::tool::{GatewayExecutor, ToolError, ToolHandler, ToolOutput, ToolType};
 use agentic_core::types::io::FunctionTool;
+use agentic_core::types::tools::WebSearchToolParam;
 
 use common::{spawn_gateway, test_config, test_state};
 
@@ -24,15 +25,17 @@ struct TestWebSearchExecutor {
 }
 
 impl ToolHandler for TestWebSearchExecutor {
+    type ToolParams = WebSearchToolParam;
+
     fn tool_type(&self) -> ToolType {
         ToolType::WebSearch
     }
 
-    fn validate(&self, _param: &serde_json::Value) -> Result<(), ToolError> {
+    fn validate(&self, _params: &WebSearchToolParam) -> Result<(), ToolError> {
         Ok(())
     }
 
-    fn normalize(&self, _param: &serde_json::Value) -> Vec<FunctionTool> {
+    fn normalize(&self, _params: &WebSearchToolParam) -> Vec<FunctionTool> {
         vec![FunctionTool {
             type_: "function".to_owned(),
             name: "web_search".to_owned(),
@@ -48,12 +51,14 @@ impl ToolHandler for TestWebSearchExecutor {
 }
 
 impl GatewayExecutor for TestWebSearchExecutor {
+    type ExecutionParams = WebSearchToolParam;
+
     fn execute(
         &self,
         call_id: &str,
         _tool_name: &str,
         _arguments: &str,
-        _config: &serde_json::Value,
+        _params: &WebSearchToolParam,
     ) -> Pin<Box<dyn Future<Output = Result<ToolOutput, ToolError>> + Send + '_>> {
         self.calls.fetch_add(1, Ordering::Relaxed);
         let call_id = call_id.to_owned();
