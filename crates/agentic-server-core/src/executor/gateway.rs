@@ -696,7 +696,7 @@ mod tests {
         }
 
         fn plan_gateway_events(&self, call: &FunctionToolCall, _params: &WebSearchToolParam) -> GatewayToolEventPlan {
-            GatewayToolEventPlan::new(Some(crate::tool::web_search::started_output_item(call)))
+            GatewayToolEventPlan::new(crate::tool::web_search::started_output_item(call))
         }
 
         fn public_output(
@@ -706,7 +706,7 @@ mod tests {
             status: GatewayCallStatus,
             _params: &WebSearchToolParam,
         ) -> Option<OutputItem> {
-            Some(crate::tool::web_search::output_item(call, output, status))
+            crate::tool::web_search::output_item(call, output, status)
         }
     }
 

@@ -11,8 +11,8 @@ pub use input::{
 pub use output::{
     ApplyDone, CustomToolCall, FunctionToolCall, GatewayCallStatus, McpCall, McpCallError, McpCallStatus,
     McpToolExecutionError, McpToolExecutionErrorContent, OutputItem, OutputMessage, OutputTextContent, ReasoningOutput,
-    ReasoningTextContent, WebSearchAction, WebSearchActionFindInPage, WebSearchActionOpenPage, WebSearchActionSearch,
-    WebSearchCall, WebSearchCallStatus, WebSearchSource,
+    ReasoningTextContent, WebSearchAction, WebSearchActionError, WebSearchActionFindInPage, WebSearchActionOpenPage,
+    WebSearchActionSearch, WebSearchCall, WebSearchCallStatus, WebSearchSource,
 };
 pub use tools::{AllowedTool, AllowedToolsMode, FunctionTool, ToolChoice};
 pub(crate) use tools::{resolve_tool_choice, resolve_tools};

@@ -98,7 +98,11 @@ pub(crate) fn web_search_function_tool() -> FunctionTool {
 }
 
 #[must_use]
-pub(crate) fn output_item(call: &FunctionToolCall, output: &ToolOutput, status: WebSearchCallStatus) -> OutputItem {
+pub(crate) fn output_item(
+    call: &FunctionToolCall,
+    output: &ToolOutput,
+    status: WebSearchCallStatus,
+) -> Option<OutputItem> {
     let parsed_output = serde_json::from_str::<Value>(&output.output).ok();
     let queries = parsed_output
         .as_ref()
@@ -106,17 +110,21 @@ pub(crate) fn output_item(call: &FunctionToolCall, output: &ToolOutput, status: 
         .or_else(|| queries_from_arguments(&call.arguments))
         .unwrap_or_else(|| vec![String::new()]);
     let sources = parsed_output.as_ref().map(sources_from_output).unwrap_or_default();
-    OutputItem::WebSearchCall(WebSearchCall::new(call_output_id(call), status, queries, sources))
+    WebSearchCall::try_new(call_output_id(call), status, queries, sources)
+        .map(OutputItem::WebSearchCall)
+        .ok()
 }
 
 #[must_use]
-pub(crate) fn started_output_item(call: &FunctionToolCall) -> OutputItem {
-    OutputItem::WebSearchCall(WebSearchCall::new(
+pub(crate) fn started_output_item(call: &FunctionToolCall) -> Option<OutputItem> {
+    WebSearchCall::try_new(
         call_output_id(call),
         WebSearchCallStatus::InProgress,
         queries_from_arguments(&call.arguments).unwrap_or_else(|| vec![String::new()]),
         Vec::new(),
-    ))
+    )
+    .map(OutputItem::WebSearchCall)
+    .ok()
 }
 
 #[derive(Debug, Clone)]
@@ -380,7 +388,7 @@ impl GatewayExecutor for WebSearchHandler {
     }
 
     fn plan_gateway_events(&self, call: &FunctionToolCall, _params: &WebSearchToolParam) -> GatewayToolEventPlan {
-        GatewayToolEventPlan::new(Some(started_output_item(call)))
+        GatewayToolEventPlan::new(started_output_item(call))
     }
 
     fn public_output(
@@ -390,7 +398,7 @@ impl GatewayExecutor for WebSearchHandler {
         status: WebSearchCallStatus,
         _params: &WebSearchToolParam,
     ) -> Option<OutputItem> {
-        Some(output_item(call, output, status))
+        output_item(call, output, status)
     }
 }
 

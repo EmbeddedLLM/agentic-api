@@ -277,23 +277,31 @@ pub struct WebSearchActionSearch {
     pub sources: Vec<WebSearchSource>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum WebSearchActionError {
+    #[error("web search action requires at least one query")]
+    EmptyQueries,
+}
+
 fn default_web_search_action_search_type() -> String {
     "search".to_owned()
 }
 
 impl WebSearchActionSearch {
-    /// # Panics
+    /// Builds a search action from a non-empty query list.
     ///
-    /// Panics if `queries` is empty.
-    #[must_use]
-    pub fn new(queries: Vec<String>, sources: Vec<WebSearchSource>) -> Self {
-        let query = queries.first().expect("queries must have at least one entry").clone();
-        Self {
+    /// # Errors
+    ///
+    /// Returns [`WebSearchActionError::EmptyQueries`] if `queries` is empty.
+    pub fn try_new(queries: Vec<String>, sources: Vec<WebSearchSource>) -> Result<Self, WebSearchActionError> {
+        let query = queries.first().cloned().ok_or(WebSearchActionError::EmptyQueries)?;
+        Ok(Self {
             type_: default_web_search_action_search_type(),
             query,
             queries,
             sources,
-        }
+        })
     }
 }
 
@@ -345,18 +353,22 @@ pub struct WebSearchCall {
 }
 
 impl WebSearchCall {
-    #[must_use]
-    pub fn new(
+    /// Builds a web-search call from a non-empty query list.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WebSearchActionError::EmptyQueries`] if `queries` is empty.
+    pub fn try_new(
         id: impl Into<String>,
         status: WebSearchCallStatus,
         queries: Vec<String>,
         sources: Vec<WebSearchSource>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, WebSearchActionError> {
+        Ok(Self {
             id: id.into(),
             status,
-            action: WebSearchAction::Search(WebSearchActionSearch::new(queries, sources)),
-        }
+            action: WebSearchAction::Search(WebSearchActionSearch::try_new(queries, sources)?),
+        })
     }
 }
 
@@ -829,8 +841,8 @@ impl OutputItem {
     }
 
     /// Shapes a stored output item as continuation input.
-    /// Gateway-owned public tool output is omitted because its model-facing
-    /// function call and result are persisted separately as input items. MCP
+    /// Public output for gateway-executed built-in tools is omitted because the model-facing
+    /// function call and output are persisted separately as input items. MCP
     /// list metadata is retained here and removed by `ResponsesInput::model_input`.
     #[must_use]
     pub fn to_input_item(&self) -> Option<InputItem> {
@@ -900,13 +912,47 @@ mod tests {
     }
 
     #[test]
-    fn gateway_public_tool_outputs_are_not_replayed_as_model_input() {
-        let web_search = OutputItem::WebSearchCall(WebSearchCall::new(
+    fn web_search_call_rejects_empty_queries() {
+        let error = WebSearchCall::try_new("ws_1", WebSearchCallStatus::Completed, Vec::new(), Vec::new()).unwrap_err();
+
+        assert_eq!(error, WebSearchActionError::EmptyQueries);
+    }
+
+    #[test]
+    fn web_search_call_preserves_valid_search_action_wire_shape() {
+        let call = WebSearchCall::try_new(
             "ws_1",
             WebSearchCallStatus::Completed,
             vec!["rust async".to_owned()],
             Vec::new(),
-        ));
+        )
+        .unwrap();
+
+        assert_eq!(
+            serde_json::to_value(call).unwrap(),
+            serde_json::json!({
+                "id": "ws_1",
+                "status": "completed",
+                "action": {
+                    "type": "search",
+                    "query": "rust async",
+                    "queries": ["rust async"]
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn gateway_public_tool_outputs_are_not_replayed_as_model_input() {
+        let web_search = OutputItem::WebSearchCall(
+            WebSearchCall::try_new(
+                "ws_1",
+                WebSearchCallStatus::Completed,
+                vec!["rust async".to_owned()],
+                Vec::new(),
+            )
+            .unwrap(),
+        );
         let mcp = OutputItem::McpCall(McpCall::new(
             "mcp_1",
             "counter",

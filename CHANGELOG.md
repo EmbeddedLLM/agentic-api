@@ -13,6 +13,14 @@ All notable changes to Agentic API are documented here.
 - Preserved MCP list-tools records in continuation history for registry lifecycle
   decisions while excluding them from model input, preventing repeated public
   list-tools emission on later turns.
+- Clarified Codex tool execution roles by replacing ambiguous ownership language
+  with the preferred client-executed and gateway-executed terminology.
+
+### Fixed
+
+- Replaced `WebSearchActionSearch::new` and `WebSearchCall::new` with fallible
+  `try_new(...)` constructors; callers now handle `WebSearchActionError` for
+  empty query lists instead of risking a panic.
 
 ### Added
 
