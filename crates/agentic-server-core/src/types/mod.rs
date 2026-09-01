@@ -15,8 +15,8 @@ pub use io::{
     WebSearchSource,
 };
 pub use request_response::{
-    CompactRequest, CompactedResponse, ContextManagement, IncompleteDetails, RequestPayload, ResponsePayload,
-    UpstreamRequest, UpstreamTool,
+    CompactRequest, CompactedResponse, ContextManagement, IncompleteDetails, ReasoningConfig, RequestPayload,
+    ResponsePayload, UpstreamRequest, UpstreamTool,
 };
 pub use tools::{
     CodeInterpreterToolParam, CodexNamespaceMember, CodexNamespaceToolParam, CustomToolParam, EmptyToolNameError,

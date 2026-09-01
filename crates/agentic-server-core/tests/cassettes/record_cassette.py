@@ -657,6 +657,18 @@ def _load_response_input(path: str | None) -> str | list | None:
     return value
 
 
+def _parse_reasoning(raw: str | None) -> dict | None:
+    if raw is None:
+        return None
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise click.UsageError(f"--reasoning is not valid JSON: {error}") from error
+    if not isinstance(value, dict):
+        raise click.UsageError("--reasoning must contain a JSON object.")
+    return value
+
+
 def _inject_tools(
     body: dict, tools: list | None, tool_choice: Any, parallel_tool_calls: bool | None = None
 ) -> None:
@@ -968,6 +980,7 @@ def run_responses(
     tool_choice: Any = None,
     tool_outputs: dict[str, str] | None = None,
     max_output_tokens: int | None = None,
+    reasoning: dict | None = None,
     preset_input: str | list | None = None,
     parallel_tool_calls: bool | None = None,
 ) -> None:
@@ -1016,6 +1029,8 @@ def run_responses(
         body: dict = {"model": model, "input": input_value, "stream": stream, "store": store}
         if max_output_tokens is not None:
             body["max_output_tokens"] = max_output_tokens
+        if reasoning is not None:
+            body["reasoning"] = reasoning
         if previous_response_id and store:
             body["previous_response_id"] = previous_response_id
         _inject_tools(body, tools, tool_choice, parallel_tool_calls)
@@ -1067,6 +1082,8 @@ def run_responses(
         }
         if max_output_tokens is not None:
             body["max_output_tokens"] = max_output_tokens
+        if reasoning is not None:
+            body["reasoning"] = reasoning
         _inject_tools(body, tools, tool_choice, parallel_tool_calls)
         _send(
             client,
@@ -1201,6 +1218,13 @@ def run_responses(
     help="JSON file containing one Responses input value; requires HTTP --mode responses --turns 1.",
 )
 @click.option(
+    "--reasoning",
+    "reasoning_raw",
+    metavar="JSON",
+    default=None,
+    help='Responses reasoning settings as a JSON object, e.g. \'{"effort":"high","summary":"detailed"}\'.',
+)
+@click.option(
     "--max-output-tokens",
     type=int,
     default=1024,
@@ -1234,6 +1258,7 @@ def main(
     parallel_tool_calls_raw: str | None,
     tool_outputs_file: str | None,
     input_file: str | None,
+    reasoning_raw: str | None,
     max_output_tokens: int,
     append: bool,
 ) -> None:
@@ -1266,7 +1291,10 @@ def main(
         raise click.UsageError(
             "--input-file requires HTTP --mode responses --turns 1 without branches."
         )
+    if reasoning_raw is not None and mode != "responses":
+        raise click.UsageError("--reasoning is only supported with --mode responses.")
     preset_input = _load_response_input(input_file)
+    reasoning = _parse_reasoning(reasoning_raw)
 
     tools: list | None = None
     if tools_file:
@@ -1357,6 +1385,7 @@ def main(
                 tool_choice,
                 tool_outputs,
                 response_max_output_tokens,
+                reasoning,
                 preset_input,
                 parallel_tool_calls,
             )
@@ -1390,6 +1419,7 @@ def main(
                         tool_choice,
                         tool_outputs,
                         response_max_output_tokens,
+                        reasoning,
                         preset_input,
                         parallel_tool_calls,
                     )

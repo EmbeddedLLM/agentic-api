@@ -122,6 +122,7 @@ fn request(text: &str, tools: Option<Vec<ResponsesTool>>) -> RequestPayload {
         stream: false,
         store: true,
         include: None,
+        reasoning: None,
         temperature: None,
         top_p: None,
         max_output_tokens: Some(1024),

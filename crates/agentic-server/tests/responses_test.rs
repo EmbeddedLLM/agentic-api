@@ -459,6 +459,38 @@ async fn test_store_false_with_web_search_reaches_executor() {
 }
 
 #[tokio::test]
+async fn test_stateful_request_forwards_reasoning_configuration() {
+    let (llm_url, requests, _llm) = spawn_mock_vllm_json_capture().await;
+    let fixture = storage_backed_state(&llm_url).await;
+    let (gateway_url, _gateway) = spawn_gateway(fixture.state.clone()).await;
+    let reasoning = serde_json::json!({
+        "context": "all_turns",
+        "effort": "high",
+        "generate_summary": "concise",
+        "mode": "pro",
+        "summary": "detailed"
+    });
+
+    let response = reqwest::Client::new()
+        .post(format!("{gateway_url}/v1/responses"))
+        .json(&serde_json::json!({
+            "model": "test",
+            "input": "hi",
+            "reasoning": reasoning,
+            "store": true,
+            "stream": false
+        }))
+        .send()
+        .await
+        .expect("stateful response request");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let requests = requests.lock().await;
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0]["reasoning"], reasoning);
+}
+
+#[tokio::test]
 async fn test_gateway_normalization_preserves_parallel_tool_calls() {
     // Arrange
     let (llm_url, requests, _h1) = spawn_mock_vllm_json_capture().await;
