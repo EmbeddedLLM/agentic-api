@@ -314,6 +314,7 @@ mod tests {
             store: false,
             include: None,
             reasoning: None,
+            text: None,
             temperature: None,
             top_p: None,
             max_output_tokens: None,

@@ -18,6 +18,8 @@ All notable changes to Agentic API are documented here.
 
 ### Fixed
 
+- Forwarded Responses `text` generation settings, including structured output
+  formats and verbosity, through typed HTTP, WebSocket, and gateway-tool paths.
 - Replaced `WebSearchActionSearch::new` and `WebSearchCall::new` with fallible
   `try_new(...)` constructors; callers now handle `WebSearchActionError` for
   empty query lists instead of risking a panic.
