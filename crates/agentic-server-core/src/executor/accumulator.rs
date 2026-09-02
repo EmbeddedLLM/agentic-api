@@ -339,6 +339,11 @@ impl ResponseAccumulator {
         }
     }
 
+    /// Ask before `finish_stream`, which forces an unterminated stream to `completed`.
+    pub(crate) fn saw_terminal_frame(&self) -> bool {
+        self.status != ResponseStatus::InProgress
+    }
+
     pub(crate) fn finish_stream(&mut self) {
         self.finalize_all();
         if self.status == ResponseStatus::InProgress {

@@ -5,7 +5,7 @@
 
 use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::executor::modes::{ConversationHandler, ResponseHandler};
-use crate::executor::request::RequestContext;
+use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::types::event::ResponseStatus;
 use crate::types::io::OutputItem;
 use crate::types::request_response::ResponsePayload;
@@ -77,4 +77,48 @@ pub async fn persist_turn(
     } else {
         resp_handler.execute_turn(ctx, output_items).await
     }
+}
+
+/// Stores a decoded turn for a caller that ran inference itself. A failed turn is
+/// returned unstored, as the in-process flow does.
+///
+/// # Errors
+/// [`ExecutorError::InvalidRequest`] for an unusable id or unfinished response,
+/// [`ExecutorError::Conflict`] for an id already stored, or a storage error.
+pub async fn commit(
+    ctx: RequestContext,
+    payload: ResponsePayload,
+    exec_ctx: &ExecutionContext,
+) -> ExecutorResult<ResponsePayload> {
+    if ctx.response_id.is_empty() {
+        return Err(ExecutorError::InvalidRequest(
+            "context has no reserved response id".to_owned(),
+        ));
+    }
+
+    // Storing an unfinished turn would return an id that can never be continued.
+    if payload.status.parse::<ResponseStatus>().unwrap_or_default() == ResponseStatus::InProgress {
+        return Err(ExecutorError::InvalidRequest(format!(
+            "upstream response status '{}' is not terminal",
+            payload.status
+        )));
+    }
+
+    // A retry carries the same reserved id. Returning the caller's payload would
+    // report content storage does not hold, so refuse instead.
+    if exec_ctx.resp_handler.stored(&payload.id).await? {
+        return Err(ExecutorError::Conflict(format!(
+            "a turn is already stored under '{}'",
+            payload.id
+        )));
+    }
+
+    persist_if_needed(
+        payload.clone(),
+        ctx,
+        exec_ctx.conv_handler.clone(),
+        exec_ctx.resp_handler.clone(),
+    )
+    .await?;
+    Ok(payload)
 }

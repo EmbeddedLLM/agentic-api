@@ -174,6 +174,34 @@ where
 }
 
 impl RequestPayload {
+    /// Names the feature in this request that only the in-process executor
+    /// implements, if any — neither the passthrough proxy nor split execution
+    /// can serve it.
+    #[must_use]
+    pub fn in_process_feature(&self) -> Option<&'static str> {
+        if self.conversation_id.is_some() {
+            return Some("conversation_id");
+        }
+        if self
+            .tools
+            .as_ref()
+            .is_some_and(|tools| tools.iter().any(|tool| !matches!(tool, ResponsesTool::Function(_))))
+        {
+            return Some("gateway-owned tools");
+        }
+        if self.input.contains_compaction() || self.input.has_compaction_trigger() {
+            return Some("compaction input");
+        }
+        if self
+            .context_management
+            .as_ref()
+            .is_some_and(|entries| !entries.is_empty())
+        {
+            return Some("context_management");
+        }
+        None
+    }
+
     /// Construct an `UpstreamRequest` suitable for forwarding to vLLM.
     ///
     /// Codex `namespace` tools' members are first renamed to their flat,

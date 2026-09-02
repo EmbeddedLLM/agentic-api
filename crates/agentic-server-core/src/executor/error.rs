@@ -81,6 +81,10 @@ pub enum ExecutorError {
     #[error("invalid request: {0}")]
     InvalidRequest(String),
 
+    /// The request conflicts with state already stored.
+    #[error("conflict: {0}")]
+    Conflict(String),
+
     #[error("compaction summarization failed with status '{status}': {details}")]
     CompactionFailed { status: String, details: String },
 
@@ -114,6 +118,7 @@ impl ExecutorError {
             | Self::Tool(ToolError::Config(_) | ToolError::MissingOutput { .. })
             | Self::InvalidRequest(_)
             | Self::JsonError(_) => StatusCode::BAD_REQUEST,
+            Self::Conflict(_) => StatusCode::CONFLICT,
             Self::Tool(ToolError::Execution(_)) | Self::CompactionFailed { .. } => StatusCode::BAD_GATEWAY,
             Self::ParseError(_) => StatusCode::UNPROCESSABLE_ENTITY,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
