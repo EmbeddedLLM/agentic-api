@@ -4,6 +4,7 @@ use crate::executor::prepare::prepare_request_tools;
 use crate::executor::rehydrate::rehydrate_conversation;
 use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::executor::upstream::fetch_blocking_payload;
+use crate::tool::ToolSearchState;
 use crate::types::event::MessageStatus;
 use crate::types::io::input::latest_compaction_window;
 use crate::types::io::{
@@ -283,7 +284,9 @@ pub async fn compact_response(
     );
     payload.previous_response_id = request.previous_response_id;
     let ctx = rehydrate_conversation(payload, exec_ctx).await?;
-    let (mut ctx, registry) = prepare_request_tools(ctx, &exec_ctx.conv_handler, &exec_ctx.resp_handler).await?;
+    let (mut ctx, tool_search_state) =
+        prepare_request_tools(ctx, &exec_ctx.conv_handler, &exec_ctx.resp_handler).await?;
+    let tool_search_metadata = tool_search_state.map(ToolSearchState::into_public_metadata);
     let model = ctx.enriched_request.model.clone();
     let instructions = ctx.enriched_request.instructions.clone();
     let input = std::mem::replace(&mut ctx.enriched_request.input, ResponsesInput::Items(Vec::new()));
@@ -293,7 +296,7 @@ pub async fn compact_response(
     ctx.new_input_items.clone_from(&output);
     match persist_prepared_turn(
         ctx,
-        registry,
+        tool_search_metadata,
         Vec::new(),
         &exec_ctx.conv_handler,
         &exec_ctx.resp_handler,

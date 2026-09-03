@@ -13,7 +13,7 @@ use crate::executor::gateway::{
 use crate::executor::gateway_accumulator::{GatewayStreamAccumulator, StreamEvent, emit_sse_frame};
 use crate::executor::inference::{call_inference, fetch_response_json};
 use crate::executor::request::{ExecutionContext, RequestContext};
-use crate::tool::ToolRegistry;
+use crate::tool::{ToolRegistry, ToolSearchHandler};
 use crate::types::request_response::ResponsePayload;
 use crate::utils::common::serialize_to_string;
 
@@ -53,7 +53,12 @@ pub(super) async fn fetch_blocking_payload(
         ctx.original_request.instructions.as_deref(),
     );
     let status = payload.status.parse().unwrap_or_default();
-    registry.normalize_response_output(&mut payload.output, status, &std::collections::HashSet::new())?;
+    ToolSearchHandler::normalize_response_output(
+        registry,
+        &mut payload.output,
+        status,
+        &std::collections::HashSet::new(),
+    )?;
     ctx.inject_ids(&mut payload);
 
     Ok(payload)
@@ -136,7 +141,8 @@ pub(super) async fn fetch_stream_payload(
         ctx.original_request.instructions.as_deref(),
     );
     let status = payload.status.parse().unwrap_or_default();
-    registry.normalize_response_output(
+    ToolSearchHandler::normalize_response_output(
+        registry,
         &mut payload.output,
         status,
         &function_sse_outcome.unfinished_tool_search_item_ids,

@@ -1585,13 +1585,13 @@ mod tests {
             HashSet::from(["fc_search".to_owned()])
         );
         let mut payload = accumulator.finalize("test", None, None);
-        registry
-            .normalize_response_output(
-                &mut payload.output,
-                crate::types::event::ResponseStatus::Incomplete,
-                &outcome.unfinished_tool_search_item_ids,
-            )
-            .expect("unfinished synthetic call is discarded");
+        crate::tool::ToolSearchHandler::normalize_response_output(
+            &registry,
+            &mut payload.output,
+            crate::types::event::ResponseStatus::Incomplete,
+            &outcome.unfinished_tool_search_item_ids,
+        )
+        .expect("unfinished synthetic call is discarded");
         assert!(payload.output.is_empty());
     }
 
@@ -1642,13 +1642,13 @@ mod tests {
             };
             assert!(call.name.is_empty());
             assert_eq!(&call.id, internal_item_id);
-            registry
-                .normalize_response_output(
-                    &mut payload.output,
-                    response_status,
-                    &outcome.unfinished_tool_search_item_ids,
-                )
-                .expect("unfinished unnamed search candidate is discarded");
+            crate::tool::ToolSearchHandler::normalize_response_output(
+                &registry,
+                &mut payload.output,
+                response_status,
+                &outcome.unfinished_tool_search_item_ids,
+            )
+            .expect("unfinished unnamed search candidate is discarded");
             assert!(payload.output.is_empty());
         }
     }
@@ -1688,13 +1688,13 @@ mod tests {
             .expect("aborted native lifecycle may remain unfinished");
         assert!(outcome.unfinished_tool_search_item_ids.is_empty());
         let mut payload = accumulator.finalize("test", None, None);
-        registry
-            .normalize_response_output(
-                &mut payload.output,
-                crate::types::event::ResponseStatus::Error,
-                &outcome.unfinished_tool_search_item_ids,
-            )
-            .expect("unfinished native call is discarded");
+        crate::tool::ToolSearchHandler::normalize_response_output(
+            &registry,
+            &mut payload.output,
+            crate::types::event::ResponseStatus::Error,
+            &outcome.unfinished_tool_search_item_ids,
+        )
+        .expect("unfinished native call is discarded");
         assert!(payload.output.is_empty());
     }
 

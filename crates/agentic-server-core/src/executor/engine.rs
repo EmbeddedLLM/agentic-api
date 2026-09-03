@@ -29,7 +29,7 @@ use crate::executor::prepare::prepare_request_tools;
 use crate::executor::rehydrate::rehydrate_conversation;
 use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::executor::upstream::{emit_deferred_stream_events, fetch_blocking_payload, fetch_stream_payload};
-use crate::tool::{ToolRegistry, mcp::handler::list_tools_output_item};
+use crate::tool::{ToolRegistry, ToolSearchMetadata, ToolSearchState, mcp::handler::list_tools_output_item};
 use crate::types::io::{InputItem, OutputItem, ResponseUsage, ResponsesInput, ToolChoice};
 use crate::types::request_response::{IncompleteDetails, RequestPayload, ResponsePayload};
 use crate::utils::common::utcnow_str;
@@ -98,13 +98,14 @@ impl<T> Drop for AbortOnDrop<T> {
 
 async fn run_until_gateway_tools_complete(
     ctx: RequestContext,
-    registry: ToolRegistry,
+    tool_search_state: Option<ToolSearchState>,
     exec_ctx: &ExecutionContext,
     auth: Option<&str>,
     stream_upstream: bool,
     mut stream: Option<(&mut GatewayStreamAccumulator, &mpsc::UnboundedSender<StreamEvent>)>,
-) -> ExecutorResult<(ResponsePayload, RequestContext, ToolRegistry)> {
+) -> ExecutorResult<(ResponsePayload, RequestContext, Option<ToolSearchMetadata>)> {
     if ctx.original_request.input.has_compaction_trigger() {
+        let tool_search_metadata = tool_search_state.map(ToolSearchState::into_public_metadata);
         let (payload, ctx) = run_compaction_trigger(ctx, exec_ctx, auth).await?;
         if let Some((stream_accumulator, stream_sender)) = stream.as_mut() {
             emit_response_start_events(&payload, stream_accumulator, stream_sender)?;
@@ -112,24 +113,29 @@ async fn run_until_gateway_tools_complete(
             emit_gateway_start_events(&event_plans, stream_accumulator, stream_sender)?;
             emit_gateway_completed_events(&payload.output, &event_plans, stream_accumulator, stream_sender)?;
         }
-        return Ok((payload, ctx, registry));
+        return Ok((payload, ctx, tool_search_metadata));
     }
 
-    run_gateway_tool_loop(ctx, registry, exec_ctx, auth, stream_upstream, stream).await
+    run_gateway_tool_loop(ctx, tool_search_state, exec_ctx, auth, stream_upstream, stream).await
 }
 
 async fn run_gateway_tool_loop(
     mut ctx: RequestContext,
-    registry: ToolRegistry,
+    tool_search_state: Option<ToolSearchState>,
     exec_ctx: &ExecutionContext,
     auth: Option<&str>,
     stream_upstream: bool,
     mut stream: Option<(&mut GatewayStreamAccumulator, &mpsc::UnboundedSender<StreamEvent>)>,
-) -> ExecutorResult<(ResponsePayload, RequestContext, ToolRegistry)> {
+) -> ExecutorResult<(ResponsePayload, RequestContext, Option<ToolSearchMetadata>)> {
     let mut executors = exec_ctx.gateway_executors.request_scoped();
-    let mut registry = registry
-        .build_prepared_with_handlers(ctx.enriched_request.tools.as_mut(), &mut executors)
-        .await?;
+    let mut empty_tools = Vec::new();
+    let tools = ctx
+        .enriched_request
+        .tools
+        .as_deref_mut()
+        .unwrap_or(empty_tools.as_mut_slice());
+    let mut registry = ToolRegistry::build_with_handlers(tools, &mut executors).await?;
+    registry.install_tool_search_state(tool_search_state)?;
     let mut combined_output: Vec<_> = registry
         .mcp_list_tools_items()
         .iter()
@@ -166,7 +172,8 @@ async fn run_gateway_tool_loop(
         if matches!(payload.status.as_str(), "error" | "failed") {
             combined_output.extend(current_output);
             finalize_loop(&mut payload, combined_output, combined_usage, &ctx, &registry);
-            return Ok((payload, ctx, registry));
+            let tool_search_metadata = registry.take_tool_search_metadata();
+            return Ok((payload, ctx, tool_search_metadata));
         }
         log_custom_tool_calls(&current_output, &ctx.response_id);
         let has_client_owned = has_client_owned_calls(&current_output, &registry);
@@ -186,7 +193,8 @@ async fn run_gateway_tool_loop(
         if payload.status == "incomplete" {
             record_gateway_round_input(&mut ctx, &current_output, &registry, gateway_results);
             finalize_loop(&mut payload, combined_output, combined_usage, &ctx, &registry);
-            return Ok((payload, ctx, registry));
+            let tool_search_metadata = registry.take_tool_search_metadata();
+            return Ok((payload, ctx, tool_search_metadata));
         }
 
         match classify_round(has_client_owned, &gateway_results, round, MAX_GATEWAY_TOOL_ROUNDS) {
@@ -196,12 +204,14 @@ async fn run_gateway_tool_loop(
             LoopDecision::RequiresClientAction => {
                 record_gateway_round_input(&mut ctx, &current_output, &registry, gateway_results);
                 finalize_loop(&mut payload, combined_output, combined_usage, &ctx, &registry);
-                return Ok((payload, ctx, registry));
+                let tool_search_metadata = registry.take_tool_search_metadata();
+                return Ok((payload, ctx, tool_search_metadata));
             }
             // No gateway work remains — this turn is the final response.
             LoopDecision::Done => {
                 finalize_loop(&mut payload, combined_output, combined_usage, &ctx, &registry);
-                return Ok((payload, ctx, registry));
+                let tool_search_metadata = registry.take_tool_search_metadata();
+                return Ok((payload, ctx, tool_search_metadata));
             }
             // Budget exhausted while the model was still requesting gateway
             // tools: surface the accumulated work as a partial
@@ -213,7 +223,8 @@ async fn run_gateway_tool_loop(
                 finalize_loop(&mut payload, combined_output, combined_usage, &ctx, &registry);
                 "incomplete".clone_into(&mut payload.status);
                 payload.incomplete_details = Some(IncompleteDetails { reason: Some(reason) });
-                return Ok((payload, ctx, registry));
+                let tool_search_metadata = registry.take_tool_search_metadata();
+                return Ok((payload, ctx, tool_search_metadata));
             }
             // Gateway tools ran and rounds remain; feed outputs back and loop.
             LoopDecision::Continue => {
@@ -425,22 +436,23 @@ fn finalize_loop(
 
 async fn run_blocking(
     ctx: RequestContext,
-    registry: ToolRegistry,
+    tool_search_state: Option<ToolSearchState>,
     exec_ctx: &ExecutionContext,
     auth: Option<&str>,
 ) -> ExecutorResult<ResponsePayload> {
-    let (payload, ctx, registry) = run_until_gateway_tools_complete(ctx, registry, exec_ctx, auth, false, None).await?;
+    let (payload, ctx, tool_search_metadata) =
+        run_until_gateway_tools_complete(ctx, tool_search_state, exec_ctx, auth, false, None).await?;
 
     let ch = exec_ctx.conv_handler.clone();
     let rh = exec_ctx.resp_handler.clone();
-    persist_if_needed(payload.clone(), ctx, registry, ch, rh).await?;
+    persist_if_needed(payload.clone(), ctx, tool_search_metadata, ch, rh).await?;
 
     Ok(payload)
 }
 
 fn run_stream(
     ctx: RequestContext,
-    registry: ToolRegistry,
+    tool_search_state: Option<ToolSearchState>,
     exec_ctx: Arc<ExecutionContext>,
     auth: Option<String>,
 ) -> BoxStream {
@@ -454,7 +466,7 @@ fn run_stream(
             let mut stream_accumulator = stream_accumulator;
             let result = run_until_gateway_tools_complete(
                 ctx,
-                registry,
+                tool_search_state,
                 exec_ctx_for_run.as_ref(),
                 auth.as_deref(),
                 true,
@@ -492,7 +504,7 @@ fn run_stream(
                             }
                             yield DONE_MARKER.to_string();
                         }
-                        Ok((Ok((payload, ctx, registry)), mut stream_accumulator)) => {
+                        Ok((Ok((payload, ctx, tool_search_metadata)), mut stream_accumulator)) => {
                             while let Ok(event) = event_rx.try_recv() {
                                 yield consume_stream_event(event, &mut next_sequence_number);
                             }
@@ -504,7 +516,7 @@ fn run_stream(
                             let rh = exec_ctx.resp_handler.clone();
                             let mut terminal_accumulator = stream_accumulator.clone();
                             let terminal_chunk = terminal_accumulator.terminal_response_chunk(&payload);
-                            match persist_if_needed(payload, ctx, registry, ch, rh).await {
+                            match persist_if_needed(payload, ctx, tool_search_metadata, ch, rh).await {
                                 Ok(()) => match terminal_chunk {
                                     Ok(chunk) => yield chunk,
                                     Err(e) => yield stream_accumulator.executor_error_chunk(&e),
@@ -648,18 +660,18 @@ impl ExecuteRequest {
             "executor received responses request"
         );
         let ctx = rehydrate_conversation(self.payload, &self.exec_ctx).await?;
-        let (ctx, registry) =
+        let (ctx, tool_search_state) =
             prepare_request_tools(ctx, &self.exec_ctx.conv_handler, &self.exec_ctx.resp_handler).await?;
         if ctx.original_request.stream {
             Ok(Either::Right(run_stream(
                 ctx,
-                registry,
+                tool_search_state,
                 self.exec_ctx,
                 self.client_auth,
             )))
         } else {
             Ok(Either::Left(
-                run_blocking(ctx, registry, &self.exec_ctx, self.client_auth.as_deref()).await?,
+                run_blocking(ctx, tool_search_state, &self.exec_ctx, self.client_auth.as_deref()).await?,
             ))
         }
     }

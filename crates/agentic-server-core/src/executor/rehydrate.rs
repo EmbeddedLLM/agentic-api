@@ -240,14 +240,14 @@ mod tests {
                 if search.execution == crate::types::tools::ToolSearchExecution::Client
         ));
 
-        let (ctx, registry) =
+        let (ctx, tool_search_state) =
             crate::executor::prepare::prepare_request_tools(ctx, &exec_ctx.conv_handler, &exec_ctx.resp_handler)
                 .await
                 .expect("explicit handler preparation accepts the rehydrated request");
 
         assert!(
-            registry
-                .tool_search_state()
+            tool_search_state
+                .as_ref()
                 .is_some_and(crate::tool::ToolSearchState::is_active)
         );
         let upstream = ctx
@@ -361,13 +361,13 @@ mod tests {
         let ctx = rehydrate_conversation(continuation, &exec_ctx)
             .await
             .expect("stored public call rehydrates before new output");
-        let (ctx, registry) =
+        let (ctx, tool_search_state) =
             crate::executor::prepare::prepare_request_tools(ctx, &exec_ctx.conv_handler, &exec_ctx.resp_handler)
                 .await
                 .expect("stored continuation derives valid tool-search state");
 
-        let state = registry
-            .tool_search_state()
+        let state = tool_search_state
+            .as_ref()
             .expect("valid state was prepared after rehydration");
         assert!(state.is_active());
         assert_eq!(state.loaded_public_tools().len(), 1);

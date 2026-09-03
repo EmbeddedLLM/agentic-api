@@ -15,10 +15,12 @@ use super::tool_search::{
     TOOL_SEARCH_NAME, ensure_request_prepared, insert_tool_search_entry, validate_blocking_response,
 };
 use super::web_search::insert_web_search_entry;
-use super::{CodexNamespaceHandler, GatewayExecutor, McpHandler, NamespaceMap, ToolError, ToolOutput, ToolSearchState};
+use super::{
+    CodexNamespaceHandler, GatewayExecutor, McpHandler, NamespaceMap, ToolError, ToolOutput, ToolSearchMetadata,
+    ToolSearchState,
+};
 use crate::events::WireEvent;
 
-use crate::types::event::ResponseStatus;
 use crate::types::io::OutputItem;
 use crate::types::io::output::{FunctionToolCall, McpListTools};
 use crate::types::request_response::RequestPayload;
@@ -192,13 +194,6 @@ pub struct ToolRegistry {
 }
 
 impl ToolRegistry {
-    /// Whether a public request needs tool-search preparation and therefore
-    /// must use the executor rather than transparent upstream pass-through.
-    #[must_use]
-    pub fn request_has_tool_search_state(request: &RequestPayload) -> bool {
-        super::tool_search::request_has_tool_search_state(request)
-    }
-
     /// Build a registry from declared tools and attach gateway handlers for dispatchable tool types.
     ///
     /// # Errors
@@ -304,45 +299,10 @@ impl ToolRegistry {
         })
     }
 
-    /// Prepare the request's private inference projection, build the normal
-    /// dispatch table, and retain the public tool-search projection in this
-    /// request-scoped registry.
-    pub(crate) fn prepare_request(
-        request: &mut RequestPayload,
-        restored_loaded_tools: &[ResponsesTool],
-        restore_only_declared: bool,
-    ) -> Result<Self, ToolError> {
-        let state = super::ToolSearchHandler::prepare_request(request, restored_loaded_tools, restore_only_declared)?;
-        let mut registry = Self::default();
-        registry.install_tool_search_state(state.map(Box::new), false)?;
-        Ok(registry)
-    }
-
-    /// Build the normal dispatch table after generic request preparation has
-    /// had a chance to short-circuit (for example, explicit compaction).
-    pub(crate) async fn build_prepared_with_handlers(
-        mut self,
-        tools: Option<&mut Vec<ResponsesTool>>,
-        executors: &mut GatewayExecutors,
-    ) -> Result<Self, ToolError> {
-        let mut registry = match tools {
-            Some(tools) => Self::build_with_handlers(tools, executors).await?,
-            None => Self::default(),
-        };
-        registry.install_tool_search_state(self.tool_search.take(), true)?;
-        Ok(registry)
-    }
-
-    fn install_tool_search_state(
-        &mut self,
-        state: Option<Box<ToolSearchState>>,
-        validate_private_routes: bool,
-    ) -> Result<(), ToolError> {
+    pub(crate) fn install_tool_search_state(&mut self, state: Option<ToolSearchState>) -> Result<(), ToolError> {
         if let Some(state) = state {
-            if validate_private_routes {
-                self.validate_tool_search_state(&state)?;
-            }
-            self.tool_search = Some(state);
+            self.validate_tool_search_state(&state)?;
+            self.tool_search = Some(Box::new(state));
         }
         Ok(())
     }
@@ -360,11 +320,11 @@ impl ToolRegistry {
     }
 
     /// Move the public tool projection into response persistence metadata.
-    pub(crate) fn take_tool_search_metadata(&mut self) -> Option<(Option<Vec<ResponsesTool>>, Vec<ResponsesTool>)> {
+    pub(crate) fn take_tool_search_metadata(&mut self) -> Option<ToolSearchMetadata> {
         self.tool_search
-            .as_deref_mut()
+            .take()
             .filter(|state| state.is_active())
-            .map(ToolSearchState::take_public_metadata)
+            .map(|state| (*state).into_public_metadata())
     }
 
     pub(crate) fn validate_blocking_response(&self, body: &str) -> Result<(), ToolError> {
@@ -380,44 +340,6 @@ impl ToolRegistry {
     /// Ensure tool-search requests went through the request-scoped preparation seam.
     pub(crate) fn ensure_request_prepared(&self, request: &RequestPayload) -> Result<(), ToolError> {
         ensure_request_prepared(request, self.tool_search.is_some())
-    }
-
-    pub(crate) fn normalize_response_output(
-        &self,
-        output: &mut Vec<OutputItem>,
-        status: ResponseStatus,
-        unfinished_stream_item_ids: &HashSet<String>,
-    ) -> Result<(), ToolError> {
-        let discard_unfinished = matches!(status, ResponseStatus::Error | ResponseStatus::Incomplete);
-        let mut normalized = Vec::with_capacity(output.len());
-        for item in std::mem::take(output) {
-            match item {
-                OutputItem::FunctionCall(call)
-                    if discard_unfinished && unfinished_stream_item_ids.contains(&call.id) => {}
-                OutputItem::FunctionCall(call) => {
-                    super::tool_search::ensure_function_is_available(self.is_withheld_function(&call.name))?;
-                    if self.tool_type(&call.name) == ToolType::ToolSearch {
-                        if let Some(public) = super::tool_search::project_synthetic_call(
-                            &call,
-                            discard_unfinished,
-                            unfinished_stream_item_ids.contains(&call.id),
-                        )? {
-                            normalized.push(OutputItem::ToolSearchCall(public));
-                        }
-                    } else {
-                        normalized.push(OutputItem::FunctionCall(call));
-                    }
-                }
-                OutputItem::ToolSearchCall(call) => {
-                    if let Some(public) = super::tool_search::project_native_call(&call, discard_unfinished)? {
-                        normalized.push(OutputItem::ToolSearchCall(public));
-                    }
-                }
-                item => normalized.push(item),
-            }
-        }
-        *output = normalized;
-        Ok(())
     }
 
     pub(crate) fn restore_tool_search_response_tools(&self, wire: &mut WireEvent) -> Result<(), ToolError> {
@@ -679,7 +601,7 @@ mod tests {
             .expect("typed tool-search declaration builds normally");
 
         registry
-            .install_tool_search_state(Some(Box::new(state)), true)
+            .install_tool_search_state(Some(state))
             .expect("prepared tool-search entry is already classified");
         let entry = registry.lookup("tool_search").expect("tool-search entry");
         assert_eq!(entry.tool_type, ToolType::ToolSearch);
@@ -724,7 +646,7 @@ mod tests {
             .expect("loaded function registry");
         assert!(registry.lookup("tool_search").is_none());
         registry
-            .install_tool_search_state(Some(Box::new(state)), true)
+            .install_tool_search_state(Some(state))
             .expect("enable replay translation");
 
         let valid: FunctionToolCall = serde_json::from_value(serde_json::json!({
@@ -788,7 +710,7 @@ mod tests {
             .await
             .expect("private registry");
         registry
-            .install_tool_search_state(Some(Box::new(state)), true)
+            .install_tool_search_state(Some(state))
             .expect("state application");
 
         assert!(

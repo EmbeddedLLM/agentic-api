@@ -4,7 +4,7 @@ use crate::executor::error::ExecutorResult;
 use crate::executor::modes::{ConversationHandler, ResponseHandler};
 use crate::executor::rehydrate::apply_effective_settings;
 use crate::executor::request::RequestContext;
-use crate::tool::ToolRegistry;
+use crate::tool::{ToolSearchHandler, ToolSearchState};
 use crate::types::tools::ResponsesTool;
 
 /// Prepare the tool-search projection for a fully rehydrated public request.
@@ -16,12 +16,12 @@ pub(crate) async fn prepare_request_tools(
     mut ctx: RequestContext,
     conv_handler: &ConversationHandler,
     resp_handler: &ResponseHandler,
-) -> ExecutorResult<(RequestContext, ToolRegistry)> {
+) -> ExecutorResult<(RequestContext, Option<ToolSearchState>)> {
     let restored_loaded_tools = restored_loaded_tools(&mut ctx, conv_handler, resp_handler).await?;
     let restore_only_declared = ctx.original_request.tools.is_some();
-    let registry =
-        ToolRegistry::prepare_request(&mut ctx.enriched_request, &restored_loaded_tools, restore_only_declared)?;
-    Ok((ctx, registry))
+    let state =
+        ToolSearchHandler::prepare_request(&mut ctx.enriched_request, &restored_loaded_tools, restore_only_declared)?;
+    Ok((ctx, state))
 }
 
 async fn restored_loaded_tools(

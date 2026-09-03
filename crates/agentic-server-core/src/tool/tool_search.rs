@@ -7,8 +7,8 @@ use serde_json::{Map, Value};
 use crate::types::event::{MessageStatus, ResponseStatus};
 use crate::types::io::output::FunctionToolCall;
 use crate::types::io::{
-    FunctionTool, FunctionToolResultMessage, InputFunctionToolCall, InputItem, InputToolSearchCall, ResponsesInput,
-    ToolCallOutput, ToolChoice, ToolSearchCall, ToolSearchOutputMessage,
+    FunctionTool, FunctionToolResultMessage, InputFunctionToolCall, InputItem, InputToolSearchCall, OutputItem,
+    ResponsesInput, ToolCallOutput, ToolChoice, ToolSearchCall, ToolSearchOutputMessage,
 };
 use crate::types::request_response::RequestPayload;
 use crate::types::tools::{
@@ -22,7 +22,7 @@ use crate::utils::common::{
 
 use super::CodexNamespaceHandler;
 use super::handler::{ToolError, ToolHandler};
-use super::registry::{ToolEntry, ToolType};
+use super::registry::{ToolEntry, ToolRegistry, ToolType};
 
 pub(crate) const TOOL_SEARCH_NAME: &str = "tool_search";
 const DEFAULT_DESCRIPTION: &str = "Search the client tool catalog";
@@ -38,6 +38,14 @@ const DEFAULT_QUERY_DESCRIPTION: &str = "A concise description of the needed cap
 pub struct ToolSearchHandler;
 
 impl ToolSearchHandler {
+    /// Whether this request carries a tool-search declaration, deferred
+    /// definition, or replayed tool-search item and therefore needs the
+    /// executor's preparation path.
+    #[must_use]
+    pub fn request_has_state(request: &RequestPayload) -> bool {
+        request_contains_tool_search_state(request, &request.input)
+    }
+
     /// Prepare the private inference view from fully rehydrated public state.
     ///
     /// # Errors
@@ -56,6 +64,46 @@ impl ToolSearchHandler {
         }
         state.prepare_inference_request(request)?;
         Ok(Some(state))
+    }
+
+    /// Normalize native and synthetic upstream tool-search calls into the
+    /// canonical public output item.
+    pub(crate) fn normalize_response_output(
+        registry: &ToolRegistry,
+        output: &mut Vec<OutputItem>,
+        status: ResponseStatus,
+        unfinished_stream_item_ids: &HashSet<String>,
+    ) -> Result<(), ToolError> {
+        let discard_unfinished = matches!(status, ResponseStatus::Error | ResponseStatus::Incomplete);
+        let mut normalized = Vec::with_capacity(output.len());
+        for item in std::mem::take(output) {
+            match item {
+                OutputItem::FunctionCall(call)
+                    if discard_unfinished && unfinished_stream_item_ids.contains(&call.id) => {}
+                OutputItem::FunctionCall(call) => {
+                    ensure_function_is_available(registry.is_withheld_function(&call.name))?;
+                    if registry.tool_type(&call.name) == ToolType::ToolSearch {
+                        if let Some(public) = project_synthetic_call(
+                            &call,
+                            discard_unfinished,
+                            unfinished_stream_item_ids.contains(&call.id),
+                        )? {
+                            normalized.push(OutputItem::ToolSearchCall(public));
+                        }
+                    } else {
+                        normalized.push(OutputItem::FunctionCall(call));
+                    }
+                }
+                OutputItem::ToolSearchCall(call) => {
+                    if let Some(public) = project_native_call(&call, discard_unfinished)? {
+                        normalized.push(OutputItem::ToolSearchCall(public));
+                    }
+                }
+                item => normalized.push(item),
+            }
+        }
+        *output = normalized;
+        Ok(())
     }
 
     #[must_use]
@@ -281,6 +329,12 @@ pub struct ToolSearchState {
     unqualified_call_positions: HashMap<String, usize>,
 }
 
+/// Public tool-search state retained only for response persistence.
+pub(crate) struct ToolSearchMetadata {
+    pub(crate) effective_tools: Option<Vec<ResponsesTool>>,
+    pub(crate) loaded_tools: Vec<ResponsesTool>,
+}
+
 impl fmt::Debug for ToolSearchState {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -502,11 +556,11 @@ impl ToolSearchState {
         Ok(())
     }
 
-    pub(crate) fn take_public_metadata(&mut self) -> (Option<Vec<ResponsesTool>>, Vec<ResponsesTool>) {
-        (
-            self.public_effective_tools.take(),
-            std::mem::take(&mut self.loaded_public_tools),
-        )
+    pub(crate) fn into_public_metadata(mut self) -> ToolSearchMetadata {
+        ToolSearchMetadata {
+            effective_tools: self.public_effective_tools.take(),
+            loaded_tools: std::mem::take(&mut self.loaded_public_tools),
+        }
     }
 }
 
@@ -552,10 +606,6 @@ fn request_contains_tool_search_state(request: &RequestPayload, input: &Response
             .is_some_and(|tools| tools.iter().any(tool_activates_tool_search))
 }
 
-pub(crate) fn request_has_tool_search_state(request: &RequestPayload) -> bool {
-    request_contains_tool_search_state(request, &request.input)
-}
-
 fn input_contains_tool_search_state(input: &ResponsesInput) -> bool {
     matches!(
         input,
@@ -587,7 +637,7 @@ fn tool_has_deferred_definition(tool: &ResponsesTool) -> bool {
 }
 
 pub(crate) fn ensure_request_prepared(request: &RequestPayload, prepared: bool) -> Result<(), ToolError> {
-    if request_has_tool_search_state(request) && !prepared {
+    if ToolSearchHandler::request_has_state(request) && !prepared {
         return Err(ToolError::Config(
             "tool_search requests require prepared request-scoped state before upstream conversion".to_owned(),
         ));
@@ -1861,7 +1911,14 @@ mod tests {
         .expect("request shape");
 
         assert!(ToolRegistry::default().ensure_request_prepared(&request).is_err());
-        let registry = ToolRegistry::prepare_request(&mut request, &[], false).expect("tool-search preparation");
+        let state = ToolSearchHandler::prepare_request(&mut request, &[], false)
+            .expect("tool-search preparation")
+            .expect("active tool-search state");
+        let mut registry =
+            ToolRegistry::from_tool_types(HashMap::from([(TOOL_SEARCH_NAME.to_owned(), ToolType::ToolSearch)]));
+        registry
+            .install_tool_search_state(Some(state))
+            .expect("install prepared tool-search state");
         registry
             .ensure_request_prepared(&request)
             .expect("prepared request is ready for upstream conversion");
@@ -1890,7 +1947,14 @@ mod tests {
             "tools": [{"type": "tool_search", "execution": "client"}]
         }))
         .expect("request shape");
-        let registry = ToolRegistry::prepare_request(&mut request, &[], false).expect("tool-search preparation");
+        let state = ToolSearchHandler::prepare_request(&mut request, &[], false)
+            .expect("tool-search preparation")
+            .expect("active tool-search state");
+        let mut registry =
+            ToolRegistry::from_tool_types(HashMap::from([(TOOL_SEARCH_NAME.to_owned(), ToolType::ToolSearch)]));
+        registry
+            .install_tool_search_state(Some(state))
+            .expect("install prepared tool-search state");
         let native = json!({
             "type": "tool_search_call",
             "id": "tsc_1",
@@ -2002,8 +2066,15 @@ mod tests {
         }))
         .expect("request shape");
 
-        let prepared = ToolRegistry::prepare_request(&mut request, &[], false).expect("tool-search preparation");
-        let serialized = serde_json::to_value(prepared.tool_search_response_tools().expect("active public tools"))
+        let state = ToolSearchHandler::prepare_request(&mut request, &[], false)
+            .expect("tool-search preparation")
+            .expect("active tool-search state");
+        let mut registry =
+            ToolRegistry::from_tool_types(HashMap::from([(TOOL_SEARCH_NAME.to_owned(), ToolType::ToolSearch)]));
+        registry
+            .install_tool_search_state(Some(state))
+            .expect("install prepared tool-search state");
+        let serialized = serde_json::to_value(registry.tool_search_response_tools().expect("active public tools"))
             .expect("public tools serialize");
         let serialized = serialized.to_string();
 
