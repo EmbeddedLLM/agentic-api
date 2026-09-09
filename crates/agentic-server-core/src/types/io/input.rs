@@ -52,6 +52,8 @@ pub struct InputFileContent {
 pub enum InputContent {
     InputText(InputTextContent),
     InputImage(InputImageContent),
+    /// Preserved on the wire; support is validated after the routing decision.
+    InputFile(InputFileContent),
     /// Assistant output text in rehydrated history.
     OutputText(InputTextContent),
     /// Reasoning step text in rehydrated history.
@@ -201,6 +203,7 @@ mod openapi_schemas {
                             ObjectBuilder::new().schema_type(SchemaType::new(Type::String)),
                         ),
                 )
+                .item(tagged_ref("input_file", "InputFileContent"))
                 .item(tagged_text_variant("output_text"))
                 .item(tagged_text_variant("reasoning_text"))
                 .into()

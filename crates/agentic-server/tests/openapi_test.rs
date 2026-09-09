@@ -120,6 +120,33 @@ async fn error_envelopes_match_api_style() {
 }
 
 #[tokio::test]
+async fn input_file_wire_content_matches_the_published_schema() {
+    let spec = fetch_spec().await;
+    let schema = serde_json::json!({
+        "$ref": "#/components/schemas/InputContent",
+        "components": spec["components"],
+    });
+    let validator = jsonschema::validator_for(&schema).expect("valid input content schema");
+    let file = serde_json::json!({
+        "type": "input_file",
+        "file_id": "file_document",
+        "file_url": "https://example.invalid/document.pdf",
+        "file_data": "data:application/pdf;base64,JVBERi0=",
+        "filename": "document.pdf",
+        "detail": "auto",
+    });
+    assert!(
+        validator.is_valid(&file),
+        "the schema must describe the preserved file wire format"
+    );
+    for field in ["file_id", "file_url", "file_data", "filename", "detail"] {
+        let mut invalid = file.clone();
+        invalid[field] = serde_json::json!(123);
+        assert!(!validator.is_valid(&invalid), "{field} must remain a string");
+    }
+}
+
+#[tokio::test]
 async fn tagged_enum_discriminators_present() {
     let body = fetch_spec().await;
     let schemas = body["components"]["schemas"]
