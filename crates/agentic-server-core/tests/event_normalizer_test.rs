@@ -18,7 +18,7 @@ fn test_text_delta() {
     {
         assert_eq!(delta, "hello");
         assert_eq!(item_id, "msg_1");
-        assert_eq!(*output_index, 0);
+        assert_eq!(*output_index, Some(0));
         assert_eq!(*content_index, 0);
     } else {
         panic!("expected TextDelta payload");
@@ -41,7 +41,7 @@ fn test_function_call_args_delta() {
         assert_eq!(delta, r#"{"city":"#);
         assert_eq!(call_id.as_deref(), Some("call_abc"));
         assert_eq!(item_id, "fc_1");
-        assert_eq!(*output_index, 0);
+        assert_eq!(*output_index, Some(0));
     } else {
         panic!("expected FunctionCallArgsDelta payload");
     }
@@ -191,7 +191,7 @@ fn test_output_item_added_message() {
     {
         assert_eq!(item_id, "msg_1");
         assert_eq!(item_type, "message");
-        assert_eq!(*output_index, 0);
+        assert_eq!(*output_index, Some(0));
     } else {
         panic!("expected OutputItemAdded payload");
     }
@@ -213,7 +213,7 @@ fn test_output_item_added_function_call() {
     {
         assert_eq!(item_id, "fc_1");
         assert_eq!(item_type, "function_call");
-        assert_eq!(*output_index, 1);
+        assert_eq!(*output_index, Some(1));
         assert_eq!(name.as_deref(), Some("get_weather"));
         assert_eq!(namespace.as_deref(), Some("mcp__weather"));
         assert_eq!(call_id.as_deref(), Some("call_1"));
@@ -252,7 +252,7 @@ fn test_reasoning_delta() {
     {
         assert_eq!(delta, "Let me think");
         assert_eq!(item_id, "rs_1");
-        assert_eq!(*output_index, 2);
+        assert_eq!(*output_index, Some(2));
         assert_eq!(*summary_index, 1);
     } else {
         panic!("expected ReasoningSummaryTextDelta payload");
@@ -273,7 +273,7 @@ fn test_reasoning_done_reads_text_not_delta() {
     {
         assert_eq!(text, "Full reasoning summary here");
         assert_eq!(item_id, "rs_1");
-        assert_eq!(*output_index, 2);
+        assert_eq!(*output_index, Some(2));
         assert_eq!(*summary_index, 1);
     } else {
         panic!("expected ReasoningSummaryTextDone payload");
@@ -294,7 +294,7 @@ fn test_reasoning_text_delta() {
     {
         assert_eq!(delta, "The user asks");
         assert_eq!(item_id, "rs_1");
-        assert_eq!(*output_index, 0);
+        assert_eq!(*output_index, Some(0));
         assert_eq!(*content_index, 0);
     } else {
         panic!("expected ReasoningTextDelta payload");
@@ -315,7 +315,7 @@ fn test_reasoning_text_done() {
     {
         assert_eq!(text, "The user asks about math.");
         assert_eq!(item_id, "rs_1");
-        assert_eq!(*output_index, 0);
+        assert_eq!(*output_index, Some(0));
         assert_eq!(*content_index, 0);
     } else {
         panic!("expected ReasoningTextDone payload");
@@ -749,7 +749,7 @@ fn test_custom_tool_input_stream_events_are_typed() {
         EventPayload::CustomToolCallInputDelta {
             ref delta,
             ref item_id,
-            output_index: 2
+            output_index: Some(2)
         } if delta == "*** Begin" && item_id == "ctc_1"
     ));
 
@@ -763,7 +763,7 @@ fn test_custom_tool_input_stream_events_are_typed() {
         EventPayload::CustomToolCallInputDone {
             ref input,
             ref item_id,
-            output_index: 2
+            output_index: Some(2)
         } if input == "*** Begin Patch" && item_id == "ctc_1"
     ));
 }

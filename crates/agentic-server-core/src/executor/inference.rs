@@ -9,6 +9,7 @@ use std::time::Duration;
 use async_stream::stream;
 use futures::{Stream, StreamExt};
 
+use crate::events::{ClassifiedSseLine, SseLine};
 use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::executor::response_budget::MAX_EXECUTOR_RESPONSE_BYTES;
 use crate::proxy::processed_response_headers;
@@ -216,10 +217,10 @@ pub(super) fn response_lines(
                 }
             };
             for line in lines {
-                match line.as_str() {
-                    "data: [DONE]" => return,
-                    l if l.starts_with("data: ") => yield Ok(line),
-                    _ => {}
+                match SseLine::parse(&line) {
+                    ClassifiedSseLine::Done => return,
+                    ClassifiedSseLine::Data(_) => yield Ok(line),
+                    ClassifiedSseLine::Ignore => {}
                 }
             }
         }
@@ -238,6 +239,36 @@ mod tests {
     use futures::stream;
 
     use super::*;
+
+    #[tokio::test]
+    async fn response_lines_accepts_optional_space_and_stops_on_done() {
+        for data_prefix in ["data:", "data: "] {
+            for done_prefix in ["data:", "data: "] {
+                let expected = format!("{data_prefix}{{\"delta\":\"hello\"}}");
+                let chunks = [
+                    Bytes::from_static(b": heartbeat\r\nevent: response.output_text.delta\r\n"),
+                    Bytes::from(format!("{expected}\r")),
+                    Bytes::from(format!("\n\r\n{done_prefix}[DO")),
+                    Bytes::from_static(b"NE]\r\n\r\ndata: {\"unexpected\":true}\n\n"),
+                ];
+                let body = reqwest::Body::wrap_stream(
+                    stream::iter(chunks.into_iter().map(Ok::<_, Infallible>)).chain(stream::pending()),
+                );
+                let response = reqwest::Response::from(http::Response::new(body));
+                let lines = tokio::time::timeout(
+                    Duration::from_secs(1),
+                    response_lines(response, Duration::ZERO).collect::<Vec<_>>(),
+                )
+                .await
+                .expect("[DONE] must terminate without waiting for upstream EOF")
+                .into_iter()
+                .collect::<ExecutorResult<Vec<_>>>()
+                .expect("valid SSE transport");
+
+                assert_eq!(lines, vec![expected], "data={data_prefix:?}, done={done_prefix:?}");
+            }
+        }
+    }
 
     async fn oversized_body_server(status: StatusCode) -> (String, tokio::task::JoinHandle<()>) {
         let app = axum::Router::new().route(
