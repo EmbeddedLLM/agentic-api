@@ -1,11 +1,12 @@
 //! Response accumulation and parsing utilities.
 //!
 //! Handles both streaming (SSE) and non-streaming JSON response formats,
-//! accumulating chunks into a unified `ResponsePayload` structure.
+//! accumulating semantic events into a unified `ResponsePayload` structure.
 //!
-//! Streaming path uses a channel + `spawn_blocking` so that SSE JSON parsing
-//! runs on a blocking thread while the async task continues reading from the
-//! network — keeping the tokio executor thread free between chunk arrivals.
+//! The executor processes SSE lines inline through `AgentPipeline` and its
+//! round-scoped ingestion state. The separate [`ResponseAccumulator::from_stream`]
+//! convenience method uses a channel and `spawn_blocking` worker; that worker is
+//! not the executor's main streaming path.
 
 use std::collections::{HashMap, HashSet};
 use std::pin::Pin;

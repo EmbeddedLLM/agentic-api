@@ -9,7 +9,6 @@ use std::time::Duration;
 use async_stream::stream;
 use futures::{Stream, StreamExt};
 
-use crate::events::{ClassifiedSseLine, SseLine};
 use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::executor::response_budget::MAX_EXECUTOR_RESPONSE_BYTES;
 use crate::proxy::processed_response_headers;
@@ -191,7 +190,8 @@ pub fn call_inference(
     }
 }
 
-/// Convert a successful upstream response body into normalized SSE data lines.
+/// Convert a successful upstream response body into SSE data lines with a `data: ` prefix.
+/// The single space after the field colon is optional on the wire.
 pub(super) fn response_lines(
     resp: reqwest::Response,
     chunk_timeout: Duration,
@@ -216,12 +216,19 @@ pub(super) fn response_lines(
                     return;
                 }
             };
-            for line in lines {
-                match SseLine::parse(&line) {
-                    ClassifiedSseLine::Done => return,
-                    ClassifiedSseLine::Data(_) => yield Ok(line),
-                    ClassifiedSseLine::Ignore => {}
+            for mut line in lines {
+                let Some(data) = line.strip_prefix("data:") else {
+                    continue;
+                };
+                if data.strip_prefix(' ').unwrap_or(data) == "[DONE]" {
+                    return;
                 }
+                // Keep one transport spelling for Responses and Messages consumers,
+                // without trimming whitespace that belongs to the field value.
+                if !data.starts_with(' ') {
+                    line.insert("data:".len(), ' ');
+                }
+                yield Ok(line);
             }
         }
     }
@@ -240,34 +247,121 @@ mod tests {
 
     use super::*;
 
+    async fn read_sse_body(body: String, keep_open: bool) -> Vec<ExecutorResult<String>> {
+        let app = axum::Router::new().route(
+            "/v1/responses",
+            post(move || {
+                let body = body.clone();
+                async move {
+                    let chunks = async_stream::stream! {
+                        yield Ok::<_, Infallible>(Bytes::from(body));
+                        if keep_open {
+                            std::future::pending::<()>().await;
+                        }
+                    };
+                    Response::builder()
+                        .header("content-type", "text/event-stream")
+                        .body(Body::from_stream(chunks))
+                        .unwrap()
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/v1/responses", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let result = call_inference(
+            "{}".to_owned(),
+            url,
+            Arc::new(reqwest::Client::new()),
+            None,
+            Duration::from_secs(1),
+        )
+        .collect()
+        .await;
+        server.abort();
+        let _ = server.await;
+        result
+    }
+
     #[tokio::test]
-    async fn response_lines_accepts_optional_space_and_stops_on_done() {
-        for data_prefix in ["data:", "data: "] {
-            for done_prefix in ["data:", "data: "] {
-                let expected = format!("{data_prefix}{{\"delta\":\"hello\"}}");
-                let chunks = [
-                    Bytes::from_static(b": heartbeat\r\nevent: response.output_text.delta\r\n"),
-                    Bytes::from(format!("{expected}\r")),
-                    Bytes::from(format!("\n\r\n{done_prefix}[DO")),
-                    Bytes::from_static(b"NE]\r\n\r\ndata: {\"unexpected\":true}\n\n"),
-                ];
-                let body = reqwest::Body::wrap_stream(
-                    stream::iter(chunks.into_iter().map(Ok::<_, Infallible>)).chain(stream::pending()),
-                );
-                let response = reqwest::Response::from(http::Response::new(body));
-                let lines = tokio::time::timeout(
-                    Duration::from_secs(1),
-                    response_lines(response, Duration::ZERO).collect::<Vec<_>>(),
-                )
+    async fn sse_data_spacing_preserves_field_values() {
+        let lines = read_sse_body(
+            concat!(
+                ":comment\r\nevent: ignored\r\nid: 1\r\nretry: 1000\r\n",
+                "Data: ignored\r\ndatabase: ignored\r\n data: ignored\r\n",
+                "data:{\"delta\":\"雪 ☃: data: text\"}\r\n\r\n",
+                "data: {\"spaced\":true}\n\n",
+                "data:  {\"leading_space\":true}\n\n",
+                "data:\t{\"tab\":true}\n\n",
+                "data:\n\ndata: \n\ndata:{malformed}\n\n",
+                "data:  [DONE]\n\ndata:[DONE]extra\n\n",
+            )
+            .to_owned(),
+            false,
+        )
+        .await
+        .into_iter()
+        .collect::<ExecutorResult<Vec<_>>>()
+        .unwrap();
+        assert_eq!(
+            lines,
+            [
+                "data: {\"delta\":\"雪 ☃: data: text\"}",
+                "data: {\"spaced\":true}",
+                "data:  {\"leading_space\":true}",
+                "data: \t{\"tab\":true}",
+                "data: ",
+                "data: ",
+                "data: {malformed}",
+                "data:  [DONE]",
+                "data: [DONE]extra",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn sse_data_spacing_stops_at_both_done_markers() {
+        for separator in ["", " "] {
+            let body = format!("data: {{}}\n\ndata:{separator}[DONE]\r\n\r\ndata: ignored\n\n");
+            let lines = read_sse_body(body, true)
                 .await
-                .expect("[DONE] must terminate without waiting for upstream EOF")
                 .into_iter()
                 .collect::<ExecutorResult<Vec<_>>>()
-                .expect("valid SSE transport");
-
-                assert_eq!(lines, vec![expected], "data={data_prefix:?}, done={done_prefix:?}");
-            }
+                .expect("[DONE] must stop without waiting for upstream EOF or a chunk timeout");
+            assert_eq!(lines, ["data: {}"]);
         }
+    }
+
+    #[tokio::test]
+    async fn sse_data_spacing_preserves_line_limit() {
+        for separator in ["", " "] {
+            let prefix = format!("data:{separator}");
+            let line = format!("{prefix}{}", "x".repeat(MAX_SSE_LINE_BYTES - prefix.len()));
+            let accepted = read_sse_body(format!("{line}\n\n"), false).await;
+            assert_eq!(accepted.len(), 1);
+            assert_eq!(
+                accepted[0].as_ref().unwrap().len(),
+                MAX_SSE_LINE_BYTES + usize::from(separator.is_empty())
+            );
+
+            let rejected = read_sse_body(format!("{line}x\n\n"), false).await;
+            assert_eq!(rejected.len(), 1);
+            assert!(
+                rejected[0]
+                    .as_ref()
+                    .unwrap_err()
+                    .to_string()
+                    .contains("upstream SSE line exceeded")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn sse_data_spacing_preserves_chunk_timeout_without_done() {
+        let lines = read_sse_body("data:{}\n\n".to_owned(), true).await;
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].as_ref().unwrap(), "data: {}");
+        assert!(lines[1].as_ref().unwrap_err().to_string().contains("chunk timeout"));
     }
 
     async fn oversized_body_server(status: StatusCode) -> (String, tokio::task::JoinHandle<()>) {
