@@ -23,9 +23,9 @@ turns:
   response:
     body:
       conversation_id: null
-      created_at: 1786000586
+      created_at: 1789006065
       error: null
-      id: resp_019fd5ee-3629-7da2-9a7b-967fabf58090
+      id: resp_01a08912-2b0d-72f2-a88b-bb36de37b074
       incomplete_details: null
       instructions: null
       model: Qwen/Qwen3.5-35B-A3B-FP8
@@ -33,21 +33,21 @@ turns:
       output:
       - content:
         - text: 'The user is asking me to call the agentic_raw_echo tool exactly once
-            with the input "CUSTOM_CASSETTE_OK" as raw text input. This is a straightforward
-            instruction that I need to follow precisely.
+            with "CUSTOM_CASSETTE_OK" as the input. This is a specific instruction
+            that I need to follow.
 
 
-            Let me call the tool with the exact input required.
+            Let me make the function call with the exact input specified.
 
             '
           type: reasoning_text
         encrypted_content: null
-        id: rs_9d3733e6b171d1ea
+        id: rs_a4f94b87ce03b7e8
         status: null
         summary: []
         type: reasoning
-      - call_id: chatcmpl-tool-8379d2c3fec5bbea
-        id: ctc_ad7d734d9102780a
+      - call_id: chatcmpl-tool-b5b6fcca726a6692
+        id: ctc_ac6dcd948b5598d3
         input: CUSTOM_CASSETTE_OK
         name: agentic_raw_echo
         status: completed
@@ -58,10 +58,10 @@ turns:
         input_tokens: 379
         input_tokens_details:
           cached_tokens: 0
-        output_tokens: 91
+        output_tokens: 88
         output_tokens_details:
           reasoning_tokens: 0
-        total_tokens: 470
+        total_tokens: 467
     headers:
       content-type: application/json
     status_code: 200
@@ -69,7 +69,7 @@ turns:
   request:
     body:
       input:
-      - call_id: chatcmpl-tool-8379d2c3fec5bbea
+      - call_id: chatcmpl-tool-b5b6fcca726a6692
         output: CUSTOM_CASSETTE_OUTPUT_OK
         type: custom_tool_call_output
       - content: Use the custom tool output provided above. Do not call any tool again.
@@ -78,7 +78,7 @@ turns:
         type: message
       max_output_tokens: 2048
       model: Qwen/Qwen3.5-35B-A3B-FP8
-      previous_response_id: resp_019fd5ee-3629-7da2-9a7b-967fabf58090
+      previous_response_id: resp_01a08912-2b0d-72f2-a88b-bb36de37b074
       store: true
       stream: false
       tools:
@@ -96,23 +96,24 @@ turns:
   response:
     body:
       conversation_id: null
-      created_at: 1786000587
+      created_at: 1789006065
       error: null
-      id: resp_019fd5ee-38b6-7950-9375-fd928231e7af
+      id: resp_01a08912-2d83-7953-841a-3db7d6f9f322
       incomplete_details: null
       instructions: null
       model: Qwen/Qwen3.5-35B-A3B-FP8
       object: response
       output:
       - content:
-        - text: 'The user is asking me to use the custom tool output that was provided
-            and reply with exactly "CUSTOM_CASSETTE_OUTPUT_OK". I should not call
-            any tool again, just provide that exact text as my response.
+        - text: 'The user is asking me to use the custom tool output provided above
+            and reply with exactly "CUSTOM_CASSETTE_OUTPUT_OK". The tool has already
+            been called and returned that value. I need to simply output that exact
+            string.
 
             '
           type: reasoning_text
         encrypted_content: null
-        id: rs_b8dd35d3bbbcd331
+        id: rs_812d443ac9a58359
         status: null
         summary: []
         type: reasoning
@@ -123,20 +124,20 @@ turns:
 
             CUSTOM_CASSETTE_OUTPUT_OK'
           type: output_text
-        id: msg_b50e7c15961d8bf6
+        id: msg_ab50a90846bdb2d2
         role: assistant
         status: completed
         type: message
-      previous_response_id: resp_019fd5ee-3629-7da2-9a7b-967fabf58090
+      previous_response_id: resp_01a08912-2b0d-72f2-a88b-bb36de37b074
       status: completed
       usage:
         input_tokens: 463
         input_tokens_details:
           cached_tokens: 0
-        output_tokens: 55
+        output_tokens: 57
         output_tokens_details:
           reasoning_tokens: 0
-        total_tokens: 518
+        total_tokens: 520
     headers:
       content-type: application/json
     status_code: 200

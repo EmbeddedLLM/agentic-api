@@ -549,6 +549,16 @@ mod tests {
         .expect("MCP declaration")
     }
 
+    fn unreachable_declaration(server_label: &str) -> ResponsesTool {
+        serde_json::from_value(serde_json::json!({
+            "type": "mcp",
+            "server_label": server_label,
+            "server_url": "http://127.0.0.1:1/mcp",
+            "require_approval": "never"
+        }))
+        .expect("unreachable MCP declaration")
+    }
+
     fn discovered_handler(server_label: &str, tool_name: &str, internal_name: &str) -> McpDiscoveredHandler {
         discovered_handler_with_description(server_label, tool_name, internal_name, "Discovered test tool")
     }
@@ -880,7 +890,7 @@ mod tests {
 
     #[tokio::test]
     async fn build_with_handlers_retains_mcp_discovery_failure_output() {
-        let mut tools = vec![declaration("unreachable")];
+        let mut tools = vec![unreachable_declaration("unreachable")];
         let mut executors = GatewayExecutors::default();
 
         let registry = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
