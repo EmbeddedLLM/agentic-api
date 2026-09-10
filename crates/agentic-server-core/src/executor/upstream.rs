@@ -335,7 +335,9 @@ fn should_defer_stream_event(frame: &EventFrame, defer_from_output_index: Option
 
 async fn emit_stream_frame(frame: &mut EventFrame, emit_ctx: &mut StreamEmitContext<'_>) -> ExecutorResult<bool> {
     apply_context_response_ids(&mut frame.wire, emit_ctx.request);
-    emit_ctx.registry.restore_tool_search_response_tools(&mut frame.wire)?;
+    emit_ctx
+        .registry
+        .restore_response_tools(&mut frame.wire, &emit_ctx.request.enriched_request)?;
     emit_ctx.registry.restore_stream_event_wire(&mut frame.wire);
     let emitted = emit_ctx.accumulator.process_event(frame, emit_ctx.output_offset);
     if emitted {
@@ -399,7 +401,7 @@ async fn emit_mcp_discovery_lifecycle(
         .mcp_list_tool_items()
         .map(crate::tool::mcp::handler::list_tools_output_item)
         .collect::<Vec<_>>();
-    let public_output = public_output_items(&discovered_output, registry, &[]);
+    let public_output = public_output_items(&discovered_output, registry, &[])?;
     let event_plans = mcp_list_tools_event_plans(&public_output, 0);
 
     emit_gateway_start_events(&event_plans, stream_accumulator, stream_sender).await?;

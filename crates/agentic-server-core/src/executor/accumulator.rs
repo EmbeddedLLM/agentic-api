@@ -16,6 +16,7 @@ use indexmap::IndexMap;
 
 use futures::{Stream, StreamExt};
 
+use crate::events::types::ShellCommandUpdate;
 use crate::events::{
     EventFrame, EventPayload, SSEEventType, SSEItemType, ValidatedFrame, is_data_frame, normalize_sse_line,
     output_item_identity, validate_frame,
@@ -26,7 +27,7 @@ use crate::types::event::{MessageStatus, ResponseStatus};
 use crate::types::io::output::McpListTools;
 use crate::types::io::{
     ApplyDone, CompactionItem, CustomToolCall, FunctionToolCall, OutputItem, OutputMessage, OutputTextContent,
-    ReasoningOutput, ResponseUsage, ToolSearchCall,
+    ReasoningOutput, ResponseUsage, ShellCall, ToolSearchCall,
 };
 use crate::types::io::{McpCall, WebSearchCall};
 use crate::types::request_response::{IncompleteDetails, ResponsePayload};
@@ -37,15 +38,41 @@ use crate::utils::uuid7_str;
 /// accumulated text/arguments buffer.
 #[derive(Clone)]
 enum InFlight {
-    Message { item: OutputMessage, text: String },
-    Reasoning { item: ReasoningOutput },
-    FunctionCall { item: FunctionToolCall, arguments: String },
-    ToolSearchCall { item: ToolSearchCall },
-    CustomToolCall { item: CustomToolCall, input: String },
-    WebSearchCall { item: Option<WebSearchCall> },
-    McpCall { item: McpCall },
-    McpListTools { item: McpListTools },
-    Compaction { item: CompactionItem },
+    Message {
+        item: OutputMessage,
+        text: String,
+    },
+    Reasoning {
+        item: ReasoningOutput,
+    },
+    FunctionCall {
+        item: FunctionToolCall,
+        arguments: String,
+    },
+    ToolSearchCall {
+        item: ToolSearchCall,
+    },
+    CustomToolCall {
+        item: CustomToolCall,
+        input: String,
+    },
+    ShellCall {
+        item: ShellCall,
+        command_stream: Option<Vec<bool>>,
+        command: String,
+    },
+    WebSearchCall {
+        item: Option<WebSearchCall>,
+    },
+    McpCall {
+        item: McpCall,
+    },
+    McpListTools {
+        item: McpListTools,
+    },
+    Compaction {
+        item: CompactionItem,
+    },
 }
 
 impl std::fmt::Debug for InFlight {
@@ -56,6 +83,7 @@ impl std::fmt::Debug for InFlight {
             Self::FunctionCall { .. } => write!(f, "InFlight::FunctionCall {{ .. }}"),
             Self::ToolSearchCall { .. } => write!(f, "InFlight::ToolSearchCall {{ .. }}"),
             Self::CustomToolCall { .. } => write!(f, "InFlight::CustomToolCall {{ .. }}"),
+            Self::ShellCall { .. } => write!(f, "InFlight::ShellCall {{ .. }}"),
             Self::WebSearchCall { .. } => write!(f, "InFlight::WebSearchCall {{ .. }}"),
             Self::McpCall { .. } => write!(f, "InFlight::McpCall {{ .. }}"),
             Self::McpListTools { .. } => write!(f, "InFlight::McpListTools {{ .. }}"),
@@ -91,6 +119,7 @@ impl InFlight {
                 Some(OutputItem::CustomToolCall(item))
             }
             Self::WebSearchCall { item } => item.map(OutputItem::WebSearchCall),
+            Self::ShellCall { item, .. } => Some(OutputItem::ShellCall(item)),
             Self::McpCall { item } => Some(OutputItem::McpCall(item)),
             Self::McpListTools { item } => Some(OutputItem::McpListTools(item)),
             Self::Compaction { item } => Some(OutputItem::Compaction(item)),
@@ -716,6 +745,9 @@ impl ResponseAccumulator {
             (SSEEventType::FunctionCallArgumentsDelta | SSEEventType::FunctionCallArgumentsDone, _) => {
                 self.process_function_event(&frame.payload, event_name, output_index_is_explicit, strict)?;
             }
+            (_, payload @ EventPayload::ShellCallCommand { .. }) => {
+                self.process_shell_command(payload, event_name, output_index_is_explicit, resolve_policy)?;
+            }
             (SSEEventType::CustomToolCallInputDelta | SSEEventType::CustomToolCallInputDone, payload) => {
                 self.process_custom_tool_event(payload, event_name, output_index_is_explicit, resolve_policy)?;
             }
@@ -788,6 +820,71 @@ impl ResponseAccumulator {
         )? && let InFlight::Reasoning { item } = &mut entry.item
         {
             item.apply_done(payload, &mut String::new());
+        }
+        Ok(())
+    }
+
+    fn process_shell_command(
+        &mut self,
+        payload: &EventPayload,
+        event_name: &str,
+        output_index_is_explicit: bool,
+        resolve_policy: ResolvePolicy,
+    ) -> ExecutorResult<()> {
+        let EventPayload::ShellCallCommand {
+            item_id,
+            output_index,
+            command_index,
+            update,
+        } = payload
+        else {
+            return Ok(());
+        };
+        let Some(entry) = self.resolve_active(
+            *output_index,
+            item_id,
+            SSEItemType::ShellCall,
+            event_name,
+            output_index_is_explicit,
+            resolve_policy,
+        )?
+        else {
+            return Ok(());
+        };
+        let InFlight::ShellCall {
+            item,
+            command_stream,
+            command: buffer,
+        } = &mut entry.item
+        else {
+            return Ok(());
+        };
+        let done = command_stream.get_or_insert_with(Vec::new);
+        let index = *command_index as usize;
+        match update {
+            ShellCommandUpdate::Added(command) => {
+                if index != done.len() || item.action.commands.len() != done.len() || done.last() == Some(&false) {
+                    return Err(invalid_stream("shell command added out of order"));
+                }
+                item.action.commands.push(String::new());
+                buffer.clone_from(command);
+                done.push(false);
+            }
+            ShellCommandUpdate::Delta(delta) => {
+                if done.get(index) != Some(&false) {
+                    return Err(invalid_stream("shell command delta has no active command"));
+                }
+                buffer.push_str(delta);
+            }
+            ShellCommandUpdate::Done(command) => {
+                if done.get(index) != Some(&false) || *buffer != *command {
+                    return Err(invalid_stream(
+                        "shell command done is repeated or contradicts streamed command",
+                    ));
+                }
+                item.apply_done(payload, buffer);
+                done[index] = true;
+            }
         }
         Ok(())
     }
@@ -946,6 +1043,11 @@ impl ResponseAccumulator {
                 .ok()
                 .map(|item| InFlight::Compaction { item }),
             SSEItemType::WebSearchCall => None,
+            SSEItemType::ShellCall => ShellCall::try_from(payload).ok().map(|item| InFlight::ShellCall {
+                item,
+                command_stream: None,
+                command: String::new(),
+            }),
             SSEItemType::McpCall => McpCall::try_from(payload).ok().map(|item| InFlight::McpCall { item }),
             SSEItemType::McpListTools => McpListTools::try_from(payload)
                 .ok()
@@ -1027,6 +1129,21 @@ impl ResponseAccumulator {
             output_index_is_explicit,
             resolve_policy,
         )? {
+            if let InFlight::ShellCall {
+                item,
+                command_stream: Some(done),
+                ..
+            } = &entry.item
+            {
+                if done.iter().any(|complete| !complete)
+                    || !matches!(&parsed_done_item, Some(OutputItem::ShellCall(final_item))
+                        if final_item.action.commands == item.action.commands)
+                {
+                    return Err(invalid_stream(
+                        "shell item done has unfinished or contradictory commands",
+                    ));
+                }
+            }
             let mut candidate = entry.item.clone();
             apply_output_item_done(&mut candidate, payload, parsed_done_item.as_ref(), &entry.item_id);
             let candidate_done = candidate.clone().finalize();
@@ -1063,6 +1180,7 @@ impl ResponseAccumulator {
             | OutputItem::FunctionCall(_)
             | OutputItem::ToolSearchCall(_)
             | OutputItem::CustomToolCall(_)
+            | OutputItem::ShellCall(_)
             | OutputItem::WebSearchCall(_)
             | OutputItem::McpCall(_)
             | OutputItem::McpListTools(_)
@@ -1119,6 +1237,8 @@ impl ResponseAccumulator {
     }
 }
 
+// Keep each output-item completion in the same transition dispatcher.
+#[allow(clippy::too_many_lines)]
 fn apply_output_item_done(
     in_flight: &mut InFlight,
     payload: &EventPayload,
@@ -1206,6 +1326,7 @@ fn apply_output_item_done(
             }
             *item = Some(done);
         }
+        (InFlight::ShellCall { item, .. }, Some(OutputItem::ShellCall(done))) => item.clone_from(done),
         (InFlight::McpCall { item }, Some(OutputItem::McpCall(done))) => item.clone_from(done),
         (InFlight::McpListTools { item }, Some(OutputItem::McpListTools(done))) => item.clone_from(done),
         (InFlight::Compaction { item }, Some(OutputItem::Compaction(done))) => {
@@ -1216,6 +1337,7 @@ fn apply_output_item_done(
             *item = done;
         }
         (InFlight::Reasoning { item }, None) => item.apply_done(payload, &mut String::new()),
+        (InFlight::ShellCall { item, command, .. }, None) => item.apply_done(payload, command),
         (InFlight::FunctionCall { item, arguments }, None) => item.apply_done(payload, arguments),
         (InFlight::ToolSearchCall { item }, None) => item.apply_done(payload, &mut String::new()),
         (InFlight::CustomToolCall { item, input }, None) => item.apply_done(payload, input),
@@ -1231,6 +1353,7 @@ fn output_item_call_id(item: &OutputItem) -> Option<&str> {
         OutputItem::FunctionCall(call) => Some(&call.call_id),
         OutputItem::ToolSearchCall(call) => Some(&call.call_id),
         OutputItem::CustomToolCall(call) => Some(&call.call_id),
+        OutputItem::ShellCall(call) => Some(&call.call_id),
         _ => None,
     }
 }
@@ -1423,6 +1546,7 @@ mod tests {
         acc.process_event(&EventFrame {
             event_type: SSEEventType::OutputItemAdded,
             payload: EventPayload::OutputItemAdded {
+                shell_call: None,
                 item_id: "msg_1".into(),
                 item_type: "message".into(),
                 output_index: 0,
@@ -2276,6 +2400,7 @@ mod tests {
         acc.process_event(&EventFrame {
             event_type: SSEEventType::OutputItemAdded,
             payload: EventPayload::OutputItemAdded {
+                shell_call: None,
                 item_id: "fc_1".into(),
                 item_type: "function_call".into(),
                 output_index: 0,
@@ -2351,6 +2476,7 @@ mod tests {
         acc.process_event(&EventFrame {
             event_type: SSEEventType::OutputItemAdded,
             payload: EventPayload::OutputItemAdded {
+                shell_call: None,
                 item_id: "fc_1".into(),
                 item_type: "function_call".into(),
                 output_index: 0,
@@ -2400,6 +2526,7 @@ mod tests {
         acc.process_event(&EventFrame {
             event_type: SSEEventType::OutputItemAdded,
             payload: EventPayload::OutputItemAdded {
+                shell_call: None,
                 item_id: "fc_1".into(),
                 item_type: "function_call".into(),
                 output_index: 0,
@@ -2424,6 +2551,7 @@ mod tests {
         acc.process_event(&EventFrame {
             event_type: SSEEventType::OutputItemAdded,
             payload: EventPayload::OutputItemAdded {
+                shell_call: None,
                 item_id: "fc_2".into(),
                 item_type: "function_call".into(),
                 output_index: 1,
@@ -2467,6 +2595,7 @@ mod tests {
         acc.process_event(&EventFrame {
             event_type: SSEEventType::OutputItemAdded,
             payload: EventPayload::OutputItemAdded {
+                shell_call: None,
                 item_id: "msg_1".into(),
                 item_type: "message".into(),
                 output_index: 0,
@@ -2490,6 +2619,7 @@ mod tests {
         acc.process_event(&EventFrame {
             event_type: SSEEventType::OutputItemAdded,
             payload: EventPayload::OutputItemAdded {
+                shell_call: None,
                 item_id: "fc_1".into(),
                 item_type: "function_call".into(),
                 output_index: 1,
@@ -2533,6 +2663,7 @@ mod tests {
         acc.process_event(&EventFrame {
             event_type: SSEEventType::OutputItemAdded,
             payload: EventPayload::OutputItemAdded {
+                shell_call: None,
                 item_id: "fc_1".into(),
                 item_type: "function_call".into(),
                 output_index: 0,
@@ -2628,6 +2759,7 @@ mod tests {
         acc.process_event(&EventFrame {
             event_type: SSEEventType::OutputItemAdded,
             payload: EventPayload::OutputItemAdded {
+                shell_call: None,
                 item_id: String::new(),
                 item_type: "function_call".into(),
                 output_index: 0,
@@ -2685,6 +2817,7 @@ mod tests {
         acc.process_event(&EventFrame {
             event_type: SSEEventType::OutputItemAdded,
             payload: EventPayload::OutputItemAdded {
+                shell_call: None,
                 item_id: "fc_1".into(),
                 item_type: "function_call".into(),
                 output_index: 0,

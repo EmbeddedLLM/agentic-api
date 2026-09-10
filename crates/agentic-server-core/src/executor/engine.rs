@@ -267,7 +267,7 @@ async fn run_gateway_tool_loop(
                 .map(|(accumulator, sender)| (&mut **accumulator, *sender)),
         )
         .await?;
-        let public_output = public_output_items(&current_output, &registry, &gateway_results);
+        let public_output = public_output_items(&current_output, &registry, &gateway_results)?;
         combined_output.extend(public_output);
 
         // A terminal incomplete response may still contain completed gateway
@@ -527,7 +527,7 @@ fn finalize_loop(
     payload.output = combined_output;
     payload.usage = combined_usage;
     ctx.inject_ids(payload);
-    if let Some(tools) = registry.tool_search_response_tools() {
+    if let Some(tools) = registry.response_tools(ctx.enriched_request.tools.as_deref()) {
         payload.tools = Some(tools);
         payload.tool_choice = Some(ctx.enriched_request.tool_choice.clone().unwrap_or_default());
     }

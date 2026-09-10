@@ -12,6 +12,7 @@ use super::executors::GatewayExecutors;
 use super::function::insert_function_entry;
 use super::mcp::registry::insert_discovered_mcp_entry;
 use super::ownership::{GatewayBinding, ToolOwnership};
+use super::shell::insert_shell_entry;
 use super::tool_search::{
     TOOL_SEARCH_NAME, ensure_request_prepared, insert_tool_search_entry, validate_blocking_response,
 };
@@ -22,7 +23,7 @@ use super::{
 use crate::events::WireEvent;
 
 use crate::types::io::output::{FunctionToolCall, McpListTools};
-use crate::types::io::{InputItem, OutputItem, ResponsesInput};
+use crate::types::io::{InputItem, OutputItem, ResponsesInput, ToolChoice};
 use crate::types::request_response::RequestPayload;
 use crate::types::tools::{CodeInterpreterToolParam, FileSearchToolParam, ResponsesTool};
 use crate::utils::common::serialize_to_value;
@@ -37,6 +38,7 @@ pub enum ToolType {
     Function,
     ToolSearch,
     Custom,
+    Shell,
     CodexNamespace,
     Mcp,
     /// Internal routing discriminant. Serializes as `"web_search"`.
@@ -54,6 +56,7 @@ impl ToolType {
             Self::Function => "function tool",
             Self::ToolSearch => "tool search",
             Self::Custom => "custom tool",
+            Self::Shell => "shell tool",
             Self::CodexNamespace => "Codex namespace tool",
             Self::Mcp => "MCP tool",
             Self::WebSearch => "web search tool",
@@ -70,7 +73,7 @@ impl ToolType {
     pub const fn is_gateway_owned(self) -> bool {
         !matches!(
             self,
-            Self::Function | Self::ToolSearch | Self::Custom | Self::CodexNamespace
+            Self::Function | Self::ToolSearch | Self::Custom | Self::Shell | Self::CodexNamespace
         )
     }
 }
@@ -95,9 +98,7 @@ impl std::fmt::Debug for ToolEntry {
 }
 
 impl ToolEntry {
-    /// Builds a client-owned entry. `tool_type.is_gateway_owned()` is the
-    /// single source of truth for the ownership discriminant; this asserts
-    /// the caller picked the constructor matching its own tool type.
+    /// Builds a client-owned entry using the declaration-level ownership default.
     pub(crate) fn client(tool_type: ToolType, server_label: Option<String>) -> Self {
         debug_assert!(!tool_type.is_gateway_owned());
         Self {
@@ -320,6 +321,11 @@ impl ToolRegistry {
                         insert_code_interpreter_entry(resolved, p);
                     })?;
                 }
+                ResponsesTool::Shell(_) => {
+                    insert_unique_tool_entries(&mut entries, |resolved| {
+                        insert_shell_entry(resolved);
+                    })?;
+                }
                 ResponsesTool::Namespace(p) => {
                     insert_unique_tool_entries(&mut entries, |resolved| insert_namespace_entries(resolved, p))?;
                 }
@@ -353,11 +359,17 @@ impl ToolRegistry {
     }
 
     /// Public declarations to expose in response metadata. `Some([])` is
-    /// intentionally distinct from an inactive request.
+    /// intentionally distinct from an inactive request. Shell declarations are
+    /// also restored because their upstream function shape is private.
     #[must_use]
-    pub(crate) fn tool_search_response_tools(&self) -> Option<Vec<ResponsesTool>> {
-        let state = self.tool_search.as_deref().filter(|state| state.is_active())?;
-        let mut tools = state.public_response_tools();
+    pub(crate) fn response_tools(&self, request_tools: Option<&[ResponsesTool]>) -> Option<Vec<ResponsesTool>> {
+        let mut tools = if let Some(state) = self.tool_search.as_deref().filter(|state| state.is_active()) {
+            state.public_response_tools()
+        } else {
+            request_tools
+                .filter(|tools| tools.iter().any(|tool| matches!(tool, ResponsesTool::Shell(_))))?
+                .to_vec()
+        };
         for tool in &mut tools {
             tool.sanitize_for_persistence();
         }
@@ -387,20 +399,26 @@ impl ToolRegistry {
         ensure_request_prepared(request, self.tool_search.is_some())
     }
 
-    pub(crate) fn restore_tool_search_response_tools(&self, wire: &mut WireEvent) -> Result<(), ToolError> {
+    pub(crate) fn restore_response_tools(
+        &self,
+        wire: &mut WireEvent,
+        request: &RequestPayload,
+    ) -> Result<(), serde_json::Error> {
         let Some(response) = wire.rest.get_mut("response").and_then(Value::as_object_mut) else {
             return Ok(());
         };
-        if !response.contains_key("tools") {
-            return Ok(());
-        }
-        let Some(tools) = self.tool_search_response_tools() else {
+        let Some(tools) = self.response_tools(request.tools.as_deref()) else {
             return Ok(());
         };
-        response.insert(
-            "tools".to_owned(),
-            serialize_to_value(&tools).map_err(|_| super::tool_search::invalid_upstream_search_call())?,
-        );
+        if response.contains_key("tools") {
+            response.insert("tools".to_owned(), serialize_to_value(&tools)?);
+        }
+        if response.contains_key("tool_choice") {
+            response.insert(
+                "tool_choice".to_owned(),
+                serialize_to_value(request.tool_choice.as_ref().unwrap_or(&ToolChoice::Auto))?,
+            );
+        }
         Ok(())
     }
 
@@ -554,6 +572,13 @@ impl ToolRegistry {
         self.entries
             .get(name)
             .is_some_and(|entry| entry.tool_type == ToolType::Custom)
+    }
+
+    #[must_use]
+    pub fn is_client_shell_name(&self, name: &str) -> bool {
+        self.entries
+            .get(name)
+            .is_some_and(|entry| entry.tool_type == ToolType::Shell && !entry.ownership.is_gateway())
     }
 
     /// Returns the subset of `calls` whose names map to client-owned tools
