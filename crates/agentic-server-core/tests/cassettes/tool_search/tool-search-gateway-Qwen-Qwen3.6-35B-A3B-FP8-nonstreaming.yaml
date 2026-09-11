@@ -125,62 +125,44 @@ turns:
   response:
     body:
       conversation_id: null
-      created_at: 1789006624
+      created_at: 1789101329
       error: null
-      id: resp_01a0891a-aba4-7fe1-a009-92bf62431b4e
+      id: resp_01a08ebf-c0c0-74d3-9492-6d298cb61922
       incomplete_details: null
       instructions: null
       model: Qwen/Qwen3.6-35B-A3B-FP8
       object: response
       output:
       - content:
-        - text: 'The user wants me to call `tool_search` exactly once.
-
-            The description of the tool search should help find "a current-weather
-            function" and "a travel time-zone function".
-
-            Looking at the available tools in the description: `get_weather`, `get_exchange_rate`,
-            `search_hotels`, `travel`.
-
-            The user specifically asks to find functions matching "current-weather"
-            and "travel time-zone".
-
-            I will construct a query string that mentions both requirements.
-
-
-            Query: "current weather and travel time zone tools"
-
-            Then I will execute the tool call.
-
-            The constraint "Do not call any other tool yet" confirms I should only
-            output the tool call now.
-
-
-            Let''s verify the exact wording in the prompt.
-
-            "First call tool_search exactly once to find both a current-weather function
-            and a travel time-zone function."
-
-
-            Parameters for tool_search:
-
-            query: "current-weather function and travel time-zone function"
-
-
-            Ready to call.
-
-            '
+        - text: "The user wants me to call `tool_search` exactly once.\nThe description\
+            \ of the tool search should request capabilities for:\n1. A current-weather\
+            \ function.\n2. A travel time-zone function.\n\nLooking at the available\
+            \ catalog entries:\n- `get_weather`: Get the current weather for a city.\n\
+            - `get_exchange_rate`: Get the exchange rate between two currencies.\n\
+            - `search_hotels`: Search for hotels in a city.\n- `travel`: Travel location\
+            \ tools.\n\nThe user specifically asks for a \"current-weather function\"\
+            \ and a \"travel time-zone function\".\nI need to construct a query that\
+            \ mentions both requirements.\n\nQuery construction: \"current weather\
+            \ and travel time zone\"\n\nLet's call `tool_search` with this query.\n\
+            Then I must stop and not call any other tool yet.\nThe instructions say\
+            \ \"First call tool_search exactly once... Do not call any other tool\
+            \ yet.\"\n\nSo I will generate the tool_call for `tool_search`.\nParameters:\
+            \ query=\"current weather and travel time zone\"\nDone. \nProceeding.\
+            \ \nWait, let's double check the exact wording. \"current-weather function\
+            \ and a travel time-zone function\". I will use a query that captures\
+            \ both.\n\"current weather and travel time zone tools\" seems appropriate.\n\
+            Executing. \nOutput matches the tool format.\n"
           type: reasoning_text
         encrypted_content: null
-        id: rs_be2490a42ffe13e6
+        id: rs_975fd5a8f30df874
         status: null
         summary: []
         type: reasoning
       - arguments:
-          query: current-weather function and travel time-zone function
-        call_id: chatcmpl-tool-a5d00976660115f4
+          query: current weather and travel time zone functions
+        call_id: chatcmpl-tool-90731a5baf0f16d1
         execution: client
-        id: tsc_9a23d6cfd1e51e2e
+        id: tsc_96472a15f5c7faec
         status: completed
         type: tool_search_call
       previous_response_id: null
@@ -292,10 +274,10 @@ turns:
         input_tokens: 394
         input_tokens_details:
           cached_tokens: 0
-        output_tokens: 235
+        output_tokens: 314
         output_tokens_details:
           reasoning_tokens: 0
-        total_tokens: 629
+        total_tokens: 708
     headers:
       content-type: application/json
     status_code: 200
@@ -308,56 +290,38 @@ turns:
         role: user
         type: message
       - content:
-        - text: 'The user wants me to call `tool_search` exactly once.
-
-            The description of the tool search should help find "a current-weather
-            function" and "a travel time-zone function".
-
-            Looking at the available tools in the description: `get_weather`, `get_exchange_rate`,
-            `search_hotels`, `travel`.
-
-            The user specifically asks to find functions matching "current-weather"
-            and "travel time-zone".
-
-            I will construct a query string that mentions both requirements.
-
-
-            Query: "current weather and travel time zone tools"
-
-            Then I will execute the tool call.
-
-            The constraint "Do not call any other tool yet" confirms I should only
-            output the tool call now.
-
-
-            Let''s verify the exact wording in the prompt.
-
-            "First call tool_search exactly once to find both a current-weather function
-            and a travel time-zone function."
-
-
-            Parameters for tool_search:
-
-            query: "current-weather function and travel time-zone function"
-
-
-            Ready to call.
-
-            '
+        - text: "The user wants me to call `tool_search` exactly once.\nThe description\
+            \ of the tool search should request capabilities for:\n1. A current-weather\
+            \ function.\n2. A travel time-zone function.\n\nLooking at the available\
+            \ catalog entries:\n- `get_weather`: Get the current weather for a city.\n\
+            - `get_exchange_rate`: Get the exchange rate between two currencies.\n\
+            - `search_hotels`: Search for hotels in a city.\n- `travel`: Travel location\
+            \ tools.\n\nThe user specifically asks for a \"current-weather function\"\
+            \ and a \"travel time-zone function\".\nI need to construct a query that\
+            \ mentions both requirements.\n\nQuery construction: \"current weather\
+            \ and travel time zone\"\n\nLet's call `tool_search` with this query.\n\
+            Then I must stop and not call any other tool yet.\nThe instructions say\
+            \ \"First call tool_search exactly once... Do not call any other tool\
+            \ yet.\"\n\nSo I will generate the tool_call for `tool_search`.\nParameters:\
+            \ query=\"current weather and travel time zone\"\nDone. \nProceeding.\
+            \ \nWait, let's double check the exact wording. \"current-weather function\
+            \ and a travel time-zone function\". I will use a query that captures\
+            \ both.\n\"current weather and travel time zone tools\" seems appropriate.\n\
+            Executing. \nOutput matches the tool format.\n"
           type: reasoning_text
         encrypted_content: null
-        id: rs_be2490a42ffe13e6
+        id: rs_975fd5a8f30df874
         status: null
         summary: []
         type: reasoning
       - arguments:
-          query: current-weather function and travel time-zone function
-        call_id: chatcmpl-tool-a5d00976660115f4
+          query: current weather and travel time zone functions
+        call_id: chatcmpl-tool-90731a5baf0f16d1
         execution: client
-        id: tsc_9a23d6cfd1e51e2e
+        id: tsc_96472a15f5c7faec
         status: completed
         type: tool_search_call
-      - call_id: chatcmpl-tool-a5d00976660115f4
+      - call_id: chatcmpl-tool-90731a5baf0f16d1
         execution: client
         status: completed
         tools:
@@ -414,38 +378,38 @@ turns:
   response:
     body:
       conversation_id: null
-      created_at: 1789006625
+      created_at: 1789101330
       error: null
-      id: resp_01a0891a-b785-72c1-8781-7735f8f8cf33
+      id: resp_01a08ebf-cd58-76a3-acdb-714589de75fd
       incomplete_details: null
       instructions: null
       model: Qwen/Qwen3.6-35B-A3B-FP8
       object: response
       output:
       - content:
-        - text: 'The user wants me to call `get_weather` exactly once with the city
+        - text: 'The user wants me to call the `get_weather` function with the city
             "Paris".
 
-            The previous step already found the tool.
+            I need to make sure I only call `get_weather` once and no other tools.
 
-            I will execute `get_weather(city="Paris")`.
+            The `get_weather` function requires a `city` parameter.
 
-            No other tools should be called.
+            I will call `get_weather(city="Paris")`.
 
-            Checking parameters: `city` is required and is "Paris".
+            The previous step found the tools, now I am executing one of them as requested.
 
-            Proceeding.
+            I will output the function call.
 
             '
           type: reasoning_text
         encrypted_content: null
-        id: rs_919ccb4e9229db5a
+        id: rs_b1defb0798f375c1
         status: null
         summary: []
         type: reasoning
       - arguments: '{"city": "Paris"}'
-        call_id: chatcmpl-tool-86f8f27d75589f74
-        id: fc_8c925b045a1b9a4e
+        call_id: chatcmpl-tool-83cf89dfae5f0c44
+        id: fc_8f2f38d1541ee7f7
         name: get_weather
         status: completed
         type: function_call
@@ -484,13 +448,13 @@ turns:
           type: function
         type: namespace
       usage:
-        input_tokens: 576
+        input_tokens: 574
         input_tokens_details:
           cached_tokens: 0
-        output_tokens: 93
+        output_tokens: 117
         output_tokens_details:
           reasoning_tokens: 0
-        total_tokens: 669
+        total_tokens: 691
     headers:
       content-type: application/json
     status_code: 200
@@ -503,56 +467,38 @@ turns:
         role: user
         type: message
       - content:
-        - text: 'The user wants me to call `tool_search` exactly once.
-
-            The description of the tool search should help find "a current-weather
-            function" and "a travel time-zone function".
-
-            Looking at the available tools in the description: `get_weather`, `get_exchange_rate`,
-            `search_hotels`, `travel`.
-
-            The user specifically asks to find functions matching "current-weather"
-            and "travel time-zone".
-
-            I will construct a query string that mentions both requirements.
-
-
-            Query: "current weather and travel time zone tools"
-
-            Then I will execute the tool call.
-
-            The constraint "Do not call any other tool yet" confirms I should only
-            output the tool call now.
-
-
-            Let''s verify the exact wording in the prompt.
-
-            "First call tool_search exactly once to find both a current-weather function
-            and a travel time-zone function."
-
-
-            Parameters for tool_search:
-
-            query: "current-weather function and travel time-zone function"
-
-
-            Ready to call.
-
-            '
+        - text: "The user wants me to call `tool_search` exactly once.\nThe description\
+            \ of the tool search should request capabilities for:\n1. A current-weather\
+            \ function.\n2. A travel time-zone function.\n\nLooking at the available\
+            \ catalog entries:\n- `get_weather`: Get the current weather for a city.\n\
+            - `get_exchange_rate`: Get the exchange rate between two currencies.\n\
+            - `search_hotels`: Search for hotels in a city.\n- `travel`: Travel location\
+            \ tools.\n\nThe user specifically asks for a \"current-weather function\"\
+            \ and a \"travel time-zone function\".\nI need to construct a query that\
+            \ mentions both requirements.\n\nQuery construction: \"current weather\
+            \ and travel time zone\"\n\nLet's call `tool_search` with this query.\n\
+            Then I must stop and not call any other tool yet.\nThe instructions say\
+            \ \"First call tool_search exactly once... Do not call any other tool\
+            \ yet.\"\n\nSo I will generate the tool_call for `tool_search`.\nParameters:\
+            \ query=\"current weather and travel time zone\"\nDone. \nProceeding.\
+            \ \nWait, let's double check the exact wording. \"current-weather function\
+            \ and a travel time-zone function\". I will use a query that captures\
+            \ both.\n\"current weather and travel time zone tools\" seems appropriate.\n\
+            Executing. \nOutput matches the tool format.\n"
           type: reasoning_text
         encrypted_content: null
-        id: rs_be2490a42ffe13e6
+        id: rs_975fd5a8f30df874
         status: null
         summary: []
         type: reasoning
       - arguments:
-          query: current-weather function and travel time-zone function
-        call_id: chatcmpl-tool-a5d00976660115f4
+          query: current weather and travel time zone functions
+        call_id: chatcmpl-tool-90731a5baf0f16d1
         execution: client
-        id: tsc_9a23d6cfd1e51e2e
+        id: tsc_96472a15f5c7faec
         status: completed
         type: tool_search_call
-      - call_id: chatcmpl-tool-a5d00976660115f4
+      - call_id: chatcmpl-tool-90731a5baf0f16d1
         execution: client
         status: completed
         tools:
@@ -592,33 +538,33 @@ turns:
         role: user
         type: message
       - content:
-        - text: 'The user wants me to call `get_weather` exactly once with the city
+        - text: 'The user wants me to call the `get_weather` function with the city
             "Paris".
 
-            The previous step already found the tool.
+            I need to make sure I only call `get_weather` once and no other tools.
 
-            I will execute `get_weather(city="Paris")`.
+            The `get_weather` function requires a `city` parameter.
 
-            No other tools should be called.
+            I will call `get_weather(city="Paris")`.
 
-            Checking parameters: `city` is required and is "Paris".
+            The previous step found the tools, now I am executing one of them as requested.
 
-            Proceeding.
+            I will output the function call.
 
             '
           type: reasoning_text
         encrypted_content: null
-        id: rs_919ccb4e9229db5a
+        id: rs_b1defb0798f375c1
         status: null
         summary: []
         type: reasoning
       - arguments: '{"city": "Paris"}'
-        call_id: chatcmpl-tool-86f8f27d75589f74
-        id: fc_8c925b045a1b9a4e
+        call_id: chatcmpl-tool-83cf89dfae5f0c44
+        id: fc_8f2f38d1541ee7f7
         name: get_weather
         status: completed
         type: function_call
-      - call_id: chatcmpl-tool-86f8f27d75589f74
+      - call_id: chatcmpl-tool-83cf89dfae5f0c44
         output: '{"city":"Paris","condition":"clear","temperature_c":21}'
         type: function_call_output
       - content: Now call the loaded travel namespace member get_timezone exactly
@@ -644,9 +590,9 @@ turns:
   response:
     body:
       conversation_id: null
-      created_at: 1789006626
+      created_at: 1789101331
       error: null
-      id: resp_01a0891a-bad9-75b3-af74-2db00822f7ff
+      id: resp_01a08ebf-d141-7613-b933-a398f5cd55e4
       incomplete_details: null
       instructions: null
       model: Qwen/Qwen3.6-35B-A3B-FP8
@@ -654,27 +600,23 @@ turns:
       output:
       - content:
         - text: 'The user wants me to call the `get_timezone` function from the `travel`
-            namespace with the argument `{"city": "Paris"}`.
+            namespace with the city "Paris".
 
-            Looking at the available tools, I see `agentic_ns__travel__get_timezone`
-            which matches the description.
+            I need to format the function call as `agentic_ns__travel__get_timezone`
+            with the parameter `city: "Paris"`.
 
-            I need to call it exactly once with `{"city": "Paris"}`.
-
-            Do not call any other tool.
-
-            Proceeding with the tool call.
+            I should only call this tool and nothing else.
 
             '
           type: reasoning_text
         encrypted_content: null
-        id: rs_9dc070d9baf2f857
+        id: rs_a32e10fc2544cce9
         status: null
         summary: []
         type: reasoning
       - arguments: '{"city": "Paris"}'
-        call_id: chatcmpl-tool-bae6d69d381ae34b
-        id: fc_842f7385dab91626
+        call_id: chatcmpl-tool-acb07f099fb54544
+        id: fc_9b26d08d6ea8e7c0
         name: get_timezone
         namespace: travel
         status: completed
@@ -715,13 +657,13 @@ turns:
           type: function
         type: namespace
       usage:
-        input_tokens: 660
+        input_tokens: 658
         input_tokens_details:
           cached_tokens: 0
-        output_tokens: 123
+        output_tokens: 99
         output_tokens_details:
           reasoning_tokens: 0
-        total_tokens: 783
+        total_tokens: 757
     headers:
       content-type: application/json
     status_code: 200
@@ -734,56 +676,38 @@ turns:
         role: user
         type: message
       - content:
-        - text: 'The user wants me to call `tool_search` exactly once.
-
-            The description of the tool search should help find "a current-weather
-            function" and "a travel time-zone function".
-
-            Looking at the available tools in the description: `get_weather`, `get_exchange_rate`,
-            `search_hotels`, `travel`.
-
-            The user specifically asks to find functions matching "current-weather"
-            and "travel time-zone".
-
-            I will construct a query string that mentions both requirements.
-
-
-            Query: "current weather and travel time zone tools"
-
-            Then I will execute the tool call.
-
-            The constraint "Do not call any other tool yet" confirms I should only
-            output the tool call now.
-
-
-            Let''s verify the exact wording in the prompt.
-
-            "First call tool_search exactly once to find both a current-weather function
-            and a travel time-zone function."
-
-
-            Parameters for tool_search:
-
-            query: "current-weather function and travel time-zone function"
-
-
-            Ready to call.
-
-            '
+        - text: "The user wants me to call `tool_search` exactly once.\nThe description\
+            \ of the tool search should request capabilities for:\n1. A current-weather\
+            \ function.\n2. A travel time-zone function.\n\nLooking at the available\
+            \ catalog entries:\n- `get_weather`: Get the current weather for a city.\n\
+            - `get_exchange_rate`: Get the exchange rate between two currencies.\n\
+            - `search_hotels`: Search for hotels in a city.\n- `travel`: Travel location\
+            \ tools.\n\nThe user specifically asks for a \"current-weather function\"\
+            \ and a \"travel time-zone function\".\nI need to construct a query that\
+            \ mentions both requirements.\n\nQuery construction: \"current weather\
+            \ and travel time zone\"\n\nLet's call `tool_search` with this query.\n\
+            Then I must stop and not call any other tool yet.\nThe instructions say\
+            \ \"First call tool_search exactly once... Do not call any other tool\
+            \ yet.\"\n\nSo I will generate the tool_call for `tool_search`.\nParameters:\
+            \ query=\"current weather and travel time zone\"\nDone. \nProceeding.\
+            \ \nWait, let's double check the exact wording. \"current-weather function\
+            \ and a travel time-zone function\". I will use a query that captures\
+            \ both.\n\"current weather and travel time zone tools\" seems appropriate.\n\
+            Executing. \nOutput matches the tool format.\n"
           type: reasoning_text
         encrypted_content: null
-        id: rs_be2490a42ffe13e6
+        id: rs_975fd5a8f30df874
         status: null
         summary: []
         type: reasoning
       - arguments:
-          query: current-weather function and travel time-zone function
-        call_id: chatcmpl-tool-a5d00976660115f4
+          query: current weather and travel time zone functions
+        call_id: chatcmpl-tool-90731a5baf0f16d1
         execution: client
-        id: tsc_9a23d6cfd1e51e2e
+        id: tsc_96472a15f5c7faec
         status: completed
         type: tool_search_call
-      - call_id: chatcmpl-tool-a5d00976660115f4
+      - call_id: chatcmpl-tool-90731a5baf0f16d1
         execution: client
         status: completed
         tools:
@@ -823,33 +747,33 @@ turns:
         role: user
         type: message
       - content:
-        - text: 'The user wants me to call `get_weather` exactly once with the city
+        - text: 'The user wants me to call the `get_weather` function with the city
             "Paris".
 
-            The previous step already found the tool.
+            I need to make sure I only call `get_weather` once and no other tools.
 
-            I will execute `get_weather(city="Paris")`.
+            The `get_weather` function requires a `city` parameter.
 
-            No other tools should be called.
+            I will call `get_weather(city="Paris")`.
 
-            Checking parameters: `city` is required and is "Paris".
+            The previous step found the tools, now I am executing one of them as requested.
 
-            Proceeding.
+            I will output the function call.
 
             '
           type: reasoning_text
         encrypted_content: null
-        id: rs_919ccb4e9229db5a
+        id: rs_b1defb0798f375c1
         status: null
         summary: []
         type: reasoning
       - arguments: '{"city": "Paris"}'
-        call_id: chatcmpl-tool-86f8f27d75589f74
-        id: fc_8c925b045a1b9a4e
+        call_id: chatcmpl-tool-83cf89dfae5f0c44
+        id: fc_8f2f38d1541ee7f7
         name: get_weather
         status: completed
         type: function_call
-      - call_id: chatcmpl-tool-86f8f27d75589f74
+      - call_id: chatcmpl-tool-83cf89dfae5f0c44
         output: '{"city":"Paris","condition":"clear","temperature_c":21}'
         type: function_call_output
       - content: Now call the loaded travel namespace member get_timezone exactly
@@ -858,32 +782,28 @@ turns:
         type: message
       - content:
         - text: 'The user wants me to call the `get_timezone` function from the `travel`
-            namespace with the argument `{"city": "Paris"}`.
+            namespace with the city "Paris".
 
-            Looking at the available tools, I see `agentic_ns__travel__get_timezone`
-            which matches the description.
+            I need to format the function call as `agentic_ns__travel__get_timezone`
+            with the parameter `city: "Paris"`.
 
-            I need to call it exactly once with `{"city": "Paris"}`.
-
-            Do not call any other tool.
-
-            Proceeding with the tool call.
+            I should only call this tool and nothing else.
 
             '
           type: reasoning_text
         encrypted_content: null
-        id: rs_9dc070d9baf2f857
+        id: rs_a32e10fc2544cce9
         status: null
         summary: []
         type: reasoning
       - arguments: '{"city": "Paris"}'
-        call_id: chatcmpl-tool-bae6d69d381ae34b
-        id: fc_842f7385dab91626
+        call_id: chatcmpl-tool-acb07f099fb54544
+        id: fc_9b26d08d6ea8e7c0
         name: get_timezone
         namespace: travel
         status: completed
         type: function_call
-      - call_id: chatcmpl-tool-bae6d69d381ae34b
+      - call_id: chatcmpl-tool-acb07f099fb54544
         output: '{"city":"Paris","iana_timezone":"Europe/Paris"}'
         type: function_call_output
       - content: Use both function outputs and call no more tools. Reply with exactly
@@ -906,47 +826,38 @@ turns:
   response:
     body:
       conversation_id: null
-      created_at: 1789006627
+      created_at: 1789101332
       error: null
-      id: resp_01a0891a-bec1-7ca1-b9e3-3522b156d9c0
+      id: resp_01a08ebf-d495-7191-86ad-bdc91651a557
       incomplete_details: null
       instructions: null
       model: Qwen/Qwen3.6-35B-A3B-FP8
       object: response
       output:
       - content:
-        - text: 'The user wants me to check the outputs of the previous tool calls.
+        - text: 'The user wants me to use the outputs from the previous tool calls
+            (`get_weather` and `travel.get_timezone`) and reply with a specific string:
+            "PARIS_MIXED_TOOLS_OK".
 
-            1.  `get_weather` returned `{"city":"Paris","condition":"clear","temperature_c":21}`.
-
-            2.  `agentic_ns__travel__get_timezone` returned `{"city":"Paris","iana_timezone":"Europe/Paris"}`.
-
-
-            The user instruction is: "Use both function outputs and call no more tools.
-            Reply with exactly PARIS_MIXED_TOOLS_OK."
+            I must call no more tools.
 
 
-            Since I must use the outputs (implicitly verifying they were successful)
-            and strictly follow the instruction to reply with the specific string
-            without calling any more tools, I will output the requested string.
+            Previous outputs:
+
+            1. Weather for Paris: {"city":"Paris","condition":"clear","temperature_c":21}
+
+            2. Timezone for Paris: {"city":"Paris","iana_timezone":"Europe/Paris"}
 
 
-            Double checking constraints:
-
-            - "call no more tools": I will not use the tool block.
-
-            - "Reply with exactly PARIS_MIXED_TOOLS_OK": The response text must be
-            exactly that.
+            The instruction is explicit: "Reply with exactly PARIS_MIXED_TOOLS_OK."
 
 
-            Plan:
-
-            Print "PARIS_MIXED_TOOLS_OK".
+            I will output exactly that string.
 
             '
           type: reasoning_text
         encrypted_content: null
-        id: rs_ae031d3eff3123fe
+        id: rs_b424d5fee028b339
         status: null
         summary: []
         type: reasoning
@@ -957,7 +868,7 @@ turns:
 
             PARIS_MIXED_TOOLS_OK'
           type: output_text
-        id: msg_9372f2e8ae2344cf
+        id: msg_8cd5d65255c8a319
         role: assistant
         status: completed
         type: message
@@ -994,13 +905,13 @@ turns:
           type: function
         type: namespace
       usage:
-        input_tokens: 348
+        input_tokens: 346
         input_tokens_details:
           cached_tokens: 0
-        output_tokens: 202
+        output_tokens: 129
         output_tokens_details:
           reasoning_tokens: 0
-        total_tokens: 550
+        total_tokens: 475
     headers:
       content-type: application/json
     status_code: 200

@@ -41,35 +41,57 @@ turns:
   response:
     body:
       conversation_id: null
-      created_at: 1789006031
+      created_at: 1789100631
       error: null
-      id: resp_01a08911-a780-7471-9736-91dfae989cd3
+      id: resp_01a08eb5-1e9b-78b3-bcce-a4a5d6683419
       incomplete_details: null
       instructions: null
       model: Qwen/Qwen3.5-35B-A3B-FP8
       object: response
       output:
       - content:
-        - text: 'The user wants me to call get_weather for both London and Tokyo in
-            parallel, in a single turn. I need to make two separate function calls
-            at the same time.
+        - text: 'The user wants me to call get_weather for two cities in parallel
+            - London and Tokyo. However, looking at the available tools, I only see
+            one get_weather function, not two separate ones. I need to call the get_weather
+            function twice, once for each city.
+
+
+            Looking at the web_search function, I can see it has a "queries" parameter
+            that allows multiple independent search queries to run in parallel. However,
+            get_weather doesn''t seem to have that capability based on its schema
+            - it only takes a single "city" parameter.
+
+
+            Since get_weather doesn''t support parallel calls within a single function
+            call, I would need to make two separate function calls. However, I''m
+            not sure if the system allows me to make multiple parallel function calls
+            in one turn. Let me check the instructions again...
+
+
+            The user explicitly said "do not wait for one before starting another"
+            and "in parallel". This suggests they want me to make both calls simultaneously.
+            Since I can make multiple tool calls in a single response, I should make
+            both get_weather calls in parallel.
+
+
+            Let me make both calls now.
 
             '
           type: reasoning_text
         encrypted_content: null
-        id: rs_8308068da6b09379
+        id: rs_86f674f763fce554
         status: null
         summary: []
         type: reasoning
       - arguments: '{"city": "London"}'
-        call_id: chatcmpl-tool-bfa74b9cc6e6de40
-        id: fc_9b15c9bc4a10cbc4
+        call_id: chatcmpl-tool-b416b31db516a7f3
+        id: fc_86a185536261ae4d
         name: get_weather
         status: completed
         type: function_call
       - arguments: '{"city": "Tokyo"}'
-        call_id: chatcmpl-tool-b0c8becbe6b109ef
-        id: fc_8d92bf6e554d71d1
+        call_id: chatcmpl-tool-88dc9ba7d5866e6c
+        id: fc_a1d6a05eb6f215ee
         name: get_weather
         status: completed
         type: function_call
@@ -79,10 +101,10 @@ turns:
         input_tokens: 870
         input_tokens_details:
           cached_tokens: 0
-        output_tokens: 90
+        output_tokens: 279
         output_tokens_details:
           reasoning_tokens: 0
-        total_tokens: 960
+        total_tokens: 1149
     headers:
       content-type: application/json
     status_code: 200
@@ -90,10 +112,10 @@ turns:
   request:
     body:
       input:
-      - call_id: chatcmpl-tool-bfa74b9cc6e6de40
+      - call_id: chatcmpl-tool-b416b31db516a7f3
         output: '{"error": "weather service unavailable: upstream timeout"}'
         type: function_call_output
-      - call_id: chatcmpl-tool-b0c8becbe6b109ef
+      - call_id: chatcmpl-tool-88dc9ba7d5866e6c
         output: '{"city": "Tokyo", "temperature_c": 22, "condition": "Clear"}'
         type: function_call_output
       - content: What did you find for each of those two cities?
@@ -102,7 +124,7 @@ turns:
       max_output_tokens: 2048
       model: Qwen/Qwen3.5-35B-A3B-FP8
       parallel_tool_calls: true
-      previous_response_id: resp_01a08911-a780-7471-9736-91dfae989cd3
+      previous_response_id: resp_01a08eb5-1e9b-78b3-bcce-a4a5d6683419
       store: true
       stream: false
       tool_choice: auto
@@ -136,32 +158,31 @@ turns:
   response:
     body:
       conversation_id: null
-      created_at: 1789006032
+      created_at: 1789100632
       error: null
-      id: resp_01a08911-aa4a-7973-9bf0-9d72a488244f
+      id: resp_01a08eb5-260e-7b00-bef7-23e4c5f01346
       incomplete_details: null
       instructions: null
       model: Qwen/Qwen3.5-35B-A3B-FP8
       object: response
       output:
       - content:
-        - text: 'The user is asking for the results from both weather queries I just
-            made in parallel. Let me review what I got:
+        - text: 'The user is asking me to report the weather information I found for
+            London and Tokyo. I received two responses from the parallel tool calls:
 
 
-            1. London: The weather service returned an error - "weather service unavailable:
-            upstream timeout"
+            1. London: There was an error - "weather service unavailable: upstream
+            timeout"
 
-            2. Tokyo: I got a successful response with temperature_c: 22, condition:
-            "Clear"
+            2. Tokyo: The weather was 22°C with clear conditions
 
 
-            I should report both results to the user clearly.
+            I should report these results clearly to the user.
 
             '
           type: reasoning_text
         encrypted_content: null
-        id: rs_8e98885514d6cf11
+        id: rs_a4415ea7e349883c
         status: null
         summary: []
         type: reasoning
@@ -170,41 +191,38 @@ turns:
           text: '
 
 
-            Here are the weather results for both cities:
+            Here are the results for both cities:
 
 
-            **London:**
-
-            - Status: Service unavailable
-
-            - Error: Weather service returned an "upstream timeout" error, so I wasn''t
-            able to retrieve the current weather for London.
+            **London:** Unfortunately, I wasn''t able to retrieve the weather information.
+            The weather service was unavailable and timed out when I tried to fetch
+            London''s current weather.
 
 
-            **Tokyo:**
+            **Tokyo:** The current weather in Tokyo is:
 
-            - Temperature: 22°C
+            - **Temperature:** 22°C
 
-            - Condition: Clear
+            - **Condition:** Clear
 
 
-            So Tokyo''s weather was successfully retrieved, but the London weather
-            service was temporarily unavailable due to a timeout error.'
+            Would you like me to try getting the weather for London again, or is there
+            anything else I can help you with?'
           type: output_text
-        id: msg_9cf7a01327d1358e
+        id: msg_96e70413ff2c4388
         role: assistant
         status: completed
         type: message
-      previous_response_id: resp_01a08911-a780-7471-9736-91dfae989cd3
+      previous_response_id: resp_01a08eb5-1e9b-78b3-bcce-a4a5d6683419
       status: completed
       usage:
         input_tokens: 989
         input_tokens_details:
           cached_tokens: 0
-        output_tokens: 170
+        output_tokens: 169
         output_tokens_details:
           reasoning_tokens: 0
-        total_tokens: 1159
+        total_tokens: 1158
     headers:
       content-type: application/json
     status_code: 200
@@ -250,85 +268,72 @@ turns:
   response:
     body:
       conversation_id: null
-      created_at: 1789006035
+      created_at: 1789100635
       error: null
-      id: resp_01a08911-b47c-7c91-884f-292c68d187e4
+      id: resp_01a08eb5-303b-7341-a29a-00afa0c107b8
       incomplete_details: null
       instructions: null
       model: Qwen/Qwen3.5-35B-A3B-FP8
       object: response
       output:
       - content:
-        - text: 'The user wants me to call get_weather for both "Tokyo" and "Atlantis"
-            in parallel within this single turn. However, looking at the available
-            functions, I don''t see a "get_weather" function - I only see:
+        - text: 'The user wants me to call get_weather for two cities in parallel
+            - Tokyo and Atlantis. They want me to do both in a single turn without
+            waiting for one to complete before starting the other.
 
 
-            1. web_search - for searching the public web
-
-            2. set_temperature_unit - for setting temperature unit
-
-
-            There''s no get_weather function available in my tools. I should let the
-            user know that I don''t have access to a weather API function, but I can
-            try searching for weather information using web_search instead.
+            Looking at the get_weather function, it takes a "city" parameter which
+            is a string. I need to make two separate function calls in parallel.
 
 
-            Wait, let me check again... The user is asking me to call functions that
-            don''t exist in my tool list. I need to inform them that these specific
-            functions are not available to me.
+            Let me make both calls now.
 
             '
           type: reasoning_text
         encrypted_content: null
-        id: rs_b991819ecd26b2cb
+        id: rs_8b1ec069b0efe178
         status: null
         summary: []
         type: reasoning
-      - content:
-        - annotations: []
-          text: '
-
-
-            I appreciate you wanting parallel calls, but I don''t actually have access
-            to a `get_weather` function in my available tools. The functions I have
-            available are:
-
-
-            1. **web_search** - for searching the public web
-
-            2. **set_temperature_unit** - for setting temperature preferences
-
-
-            However, I can search for the current weather in both Tokyo and Atlantis
-            using web searches in parallel if you''d like! Would you like me to do
-            that instead?'
-          type: output_text
-        id: msg_81065de1416b0522
-        role: assistant
+      - arguments: '{"city": "Tokyo"}'
+        call_id: chatcmpl-tool-8c7d5507725aa2d3
+        id: fc_9fb7a7b4b29ddd89
+        name: get_weather
         status: completed
-        type: message
+        type: function_call
+      - arguments: '{"city": "Atlantis"}'
+        call_id: chatcmpl-tool-a60292dfaf243432
+        id: fc_9d92ea10feb92c57
+        name: get_weather
+        status: completed
+        type: function_call
       previous_response_id: null
       status: completed
       usage:
         input_tokens: 871
         input_tokens_details:
           cached_tokens: 0
-        output_tokens: 251
+        output_tokens: 135
         output_tokens_details:
           reasoning_tokens: 0
-        total_tokens: 1122
+        total_tokens: 1006
     headers:
       content-type: application/json
     status_code: 200
 - filename: t4
   request:
     body:
-      input: What's the weather in Tokyo?
+      input:
+      - call_id: chatcmpl-tool-8c7d5507725aa2d3
+        output: '{"city": "Tokyo", "temperature_c": 22, "condition": "Clear"}'
+        type: function_call_output
+      - content: What's the weather in Tokyo?
+        role: user
+        type: message
       max_output_tokens: 2048
       model: Qwen/Qwen3.5-35B-A3B-FP8
       parallel_tool_calls: true
-      previous_response_id: resp_01a08911-b47c-7c91-884f-292c68d187e4
+      previous_response_id: resp_01a08eb5-303b-7341-a29a-00afa0c107b8
       store: true
       stream: false
       tool_choice: auto
@@ -361,130 +366,14 @@ turns:
     query_params: {}
   response:
     body:
-      conversation_id: null
-      created_at: 1789006039
-      error: null
-      id: resp_01a08911-bb51-73e0-adbb-7440949c09b9
-      incomplete_details: null
-      instructions: null
-      model: Qwen/Qwen3.5-35B-A3B-FP8
-      object: response
-      output:
-      - content:
-        - text: 'The user is asking about the weather in Tokyo. I don''t have a direct
-            get_weather function available, but I can use web_search to find the current
-            weather information for Tokyo.
-
-            '
-          type: reasoning_text
-        encrypted_content: null
-        id: rs_8ff1c03878559550
-        status: null
-        summary: []
-        type: reasoning
-      - action:
-          queries:
-          - current weather in Tokyo
-          query: current weather in Tokyo
-          sources:
-          - title: Tokyo, Tokyo, Japan Weather Forecast | AccuWeather
-            url: https://www.accuweather.com/en/jp/tokyo/226396/weather-forecast/226396
-          - title: Weather for Tokyo, Japan
-            url: https://www.timeanddate.com/weather/japan/tokyo
-          - title: Tokyo, Tokyo, Japan Current Weather | AccuWeather
-            url: https://www.accuweather.com/en/jp/tokyo/226396/current-weather/226396
-          - title: Tokyo, Japan Weather Conditions | Weather Underground
-            url: https://www.wunderground.com/weather/jp/tokyo
-          - title: Tokyo, Japan 14 day weather forecast
-            url: https://www.timeanddate.com/weather/japan/tokyo/ext
-          - title: 10-Day Weather Forecast for Tokyo, Tokyo Prefecture, Japan - The
-              ...
-            url: https://weather.com/jp/tokyo-prefecture/city/tokyo/tenday
-          - title: Tokyo, Japan Hourly Weather Forecast | Weather Underground
-            url: https://www.wunderground.com/hourly/jp/tokyo
-          - title: Weather & Geography | Japan's Weather | Travel Japan | JNTO
-            url: https://www.japan.travel/en/weather/
-          - title: Weather Forecast and Conditions for Tokyo, Tokyo Prefecture, Japan
-              ...
-            url: https://weather.com/weather/today/l/a2d49e31992a3679724161c3a9029211ecefeda3e1da24489637a5685ded3fdf
-          - title: Tokyo, 13, JP Current Weather - The Weather Network
-            url: https://www.theweathernetwork.com/en/city/jp/tokyo/tokyo/current
-          type: search
-        id: ws_aeac9e97564b8542
-        status: completed
-        type: web_search_call
-      - content:
-        - text: 'I found the weather information for Tokyo. Based on the search results,
-            I can see:
-
-
-            1. From AccuWeather: Tokyo is currently rainy with a temperature of 72°
-            (Fahrenheit), with 97% humidity and very humid conditions
-
-            2. From Weather Underground: Shows rain with around 0.62" rainfall, low
-            of 67F, winds NNE at 10-15 mph, 100% chance of rain
-
-            3. From TimeandDate: Currently 68°F, described as mild
-
-            4. From Weather Network: Shows 94% humidity, low UV index
-
-
-            The most current information seems to be from AccuWeather showing 72°F
-            with rain. Let me provide a summary of this information to the user.
-
-            '
-          type: reasoning_text
-        encrypted_content: null
-        id: rs_8984a454ecf5120c
-        status: null
-        summary: []
-        type: reasoning
-      - content:
-        - annotations: []
-          text: '
-
-
-            Based on the search results, here''s the current weather in Tokyo:
-
-
-            **Tokyo Current Weather:**
-
-            - **Temperature:** 72°F (22°C)
-
-            - **Conditions:** Rainy/Cloudy
-
-            - **Humidity:** 94-97% (very humid)
-
-            - **Wind:** Around 8-15 mph from NNE
-
-            - **Feels like:** 72°F (Pleasant)
-
-            - **UV Index:** Low
-
-            - **Rain:** Expecting rain with potential for around 0.6 inches of rainfall
-
-
-            The weather is quite humid and rainy right now in Tokyo. If you''re planning
-            outdoor activities, you may want to bring an umbrella and dress appropriately
-            for the rain and humidity!'
-          type: output_text
-        id: msg_89b1efa1c4cff997
-        role: assistant
-        status: completed
-        type: message
-      previous_response_id: resp_01a08911-b47c-7c91-884f-292c68d187e4
-      status: completed
-      usage:
-        input_tokens: 4650
-        input_tokens_details:
-          cached_tokens: 0
-        output_tokens: 390
-        output_tokens_details:
-          reasoning_tokens: 0
-        total_tokens: 5040
+      error:
+        code: null
+        message: No tool output found for function call chatcmpl-tool-a60292dfaf243432.
+        param: input
+        type: invalid_request_error
     headers:
       content-type: application/json
-    status_code: 200
+    status_code: 400
 - filename: t5
   request:
     body:
@@ -527,28 +416,30 @@ turns:
   response:
     body:
       conversation_id: null
-      created_at: 1789006041
+      created_at: 1789100637
       error: null
-      id: resp_01a08911-cec1-7403-919c-f630304774e2
+      id: resp_01a08eb5-39e7-7162-8645-6b2ee970936f
       incomplete_details: null
       instructions: null
       model: Qwen/Qwen3.5-35B-A3B-FP8
       object: response
       output:
       - content:
-        - text: 'The user wants me to do two things in parallel in a single turn:
+        - text: 'The user wants me to do two things in parallel:
 
             1. Search the web for "Atlantis weather today"
 
             2. Call get_weather for "Atlantis"
 
 
-            I''ll make both function calls at the same time.
+            I need to use the web_search function with the query "Atlantis weather
+            today" and also call get_weather with city "Atlantis". I can run these
+            in parallel by making both function calls in this turn.
 
             '
           type: reasoning_text
         encrypted_content: null
-        id: rs_bed748e9eb72b33f
+        id: rs_9139a3531356d993
         status: null
         summary: []
         type: reasoning
@@ -574,20 +465,20 @@ turns:
             url: https://weather.yahoo.com/en-sg/us/fl/atlantis/
           - title: National Weather Service
             url: https://forecast.weather.gov/MapClick.php?site=mfl&map.x=264&map.y=64
+          - title: Atlantis, MD Weather Forecast | AccuWeather
+            url: https://www.accuweather.com/en/us/atlantis/21409/weather-forecast/2169413
           - title: 'Atlantis Weather Forecast: Hourly & 7-Day Outlook for Florida
               • ...'
             url: https://www.predictwind.com/weather/united-states/florida/atlantis
-          - title: Atlantis, MD Weather Forecast | AccuWeather
-            url: https://www.accuweather.com/en/us/atlantis/21409/weather-forecast/2169413
-          - title: Atlantis, Florida, USA 14 day weather forecast
-            url: https://www.timeanddate.com/weather/@4146372/ext
+          - title: Atlantis, FL Hourly Weather | AccuWeather
+            url: https://www.accuweather.com/en/us/atlantis/33462/hourly-weather-forecast/328118
           type: search
-        id: ws_add1063d1ad933f4
+        id: ws_9c2bcb4107d95c43
         status: completed
         type: web_search_call
       - arguments: '{"city": "Atlantis"}'
-        call_id: chatcmpl-tool-b5f9106406c3bdc2
-        id: fc_99054040ac74b8e2
+        call_id: chatcmpl-tool-826e3db0aa97d186
+        id: fc_a849c1b37edcfe32
         name: get_weather
         status: completed
         type: function_call
@@ -597,10 +488,10 @@ turns:
         input_tokens: 876
         input_tokens_details:
           cached_tokens: 0
-        output_tokens: 110
+        output_tokens: 138
         output_tokens_details:
           reasoning_tokens: 0
-        total_tokens: 986
+        total_tokens: 1014
     headers:
       content-type: application/json
     status_code: 200
@@ -615,7 +506,7 @@ turns:
       max_output_tokens: 2048
       model: Qwen/Qwen3.5-35B-A3B-FP8
       parallel_tool_calls: true
-      previous_response_id: resp_01a08911-cec1-7403-919c-f630304774e2
+      previous_response_id: resp_01a08eb5-39e7-7162-8645-6b2ee970936f
       store: true
       stream: false
       tool_choice: auto
@@ -650,7 +541,7 @@ turns:
     body:
       error:
         code: null
-        message: No tool output found for function call chatcmpl-tool-b5f9106406c3bdc2.
+        message: No tool output found for function call chatcmpl-tool-826e3db0aa97d186.
         param: input
         type: invalid_request_error
     headers:

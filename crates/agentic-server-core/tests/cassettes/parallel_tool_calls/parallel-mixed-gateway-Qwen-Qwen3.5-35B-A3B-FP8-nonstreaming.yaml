@@ -43,48 +43,42 @@ turns:
   response:
     body:
       conversation_id: null
-      created_at: 1789006021
+      created_at: 1789100620
       error: null
-      id: resp_01a08911-7e0b-7481-ab94-befa133cb30e
+      id: resp_01a08eb4-f72f-7991-b9fb-3a5640701062
       incomplete_details: null
       instructions: null
       model: Qwen/Qwen3.5-35B-A3B-FP8
       object: response
       output:
       - content:
-        - text: 'The user wants me to call three functions in parallel, all in this
-            single turn. They want me to:
-
+        - text: 'The user wants me to do three things in parallel:
 
             1. Call get_weather for "Tokyo"
 
-            2. Call set_temperature_unit to set preferred unit to "fahrenheit"
+            2. Call set_temperature_unit to set to "fahrenheit"
 
-            3. Search the web for "Tokyo weather today"
-
-
-            I need to use the web_search function for the query, get_weather for Tokyo
-            weather, and set_temperature_unit for setting the temperature unit. All
-            of these should be done in parallel.
+            3. Call web_search for "Tokyo weather today"
 
 
-            Let me make these three function calls:
+            I need to make all three function calls in a single turn. Let me structure
+            this properly.
 
             '
           type: reasoning_text
         encrypted_content: null
-        id: rs_a96c56881d961aec
+        id: rs_a48b9075525fe346
         status: null
         summary: []
         type: reasoning
       - arguments: '{"city": "Tokyo"}'
-        call_id: chatcmpl-tool-8f783f085e02d3a9
-        id: fc_889b60fabee1326e
+        call_id: chatcmpl-tool-98bfb82f7c21a9bc
+        id: fc_99a2151e9872f7e3
         name: get_weather
         status: completed
         type: function_call
-      - call_id: chatcmpl-tool-946081398a064481
-        id: ctc_bba3bc03d2bae7dc
+      - call_id: chatcmpl-tool-8e51137f3a21add8
+        id: ctc_a1d2daac2c03b92b
         input: fahrenheit
         name: set_temperature_unit
         status: completed
@@ -99,25 +93,24 @@ turns:
           - title: 10-Day Weather Forecast for Tokyo, Tokyo Prefecture, Japan - The
               ...
             url: https://weather.com/jp/tokyo-prefecture/city/tokyo/tenday
-          - title: Tokyo, Japan Hourly Weather Forecast | Weather Underground
-            url: https://www.wunderground.com/hourly/jp/tokyo
-          - title: Weather for Tokyo, Japan
-            url: https://www.timeanddate.com/weather/japan/tokyo
-          - title: Weather Forecast and Conditions for Tokyo, Tokyo Prefecture, Japan
-              ...
-            url: https://weather.com/jp/tokyo-prefecture/city/tokyo/today
-          - title: Tokyo, Japan Weather Conditions | Weather Underground
-            url: https://www.wunderground.com/weather/jp/tokyo
-          - title: Tokyo, JP Weather Forecast, Conditions, and Maps – Yahoo Weather
-            url: https://weather.yahoo.com/jp/tokyo-prefecture/tokyo/
-          - title: Tokyo, Tokyo, Japan Current Weather | AccuWeather
-            url: https://www.accuweather.com/en/jp/tokyo/226396/current-weather/226396
           - title: Weather & Geography | Japan's Weather | Travel Japan | JNTO
             url: https://www.japan.travel/en/weather/
-          - title: Weather Today for Tokyo, Tokyo, Japan | AccuWeather
-            url: https://www.accuweather.com/en/jp/tokyo/226396/weather-today/226396
+          - title: Tokyo, JP Hourly Weather Forecast | Weather Underground
+            url: https://www.wunderground.com/hourly/jp/tokyo
+          - title: Japan Meteorological Agency | Weather forecast
+            url: https://www.data.jma.go.jp/multi/yoho/yoho_detail.html?code=130010&lang=en
+          - title: Tokyo - BBC Weather
+            url: https://www.bbc.com/weather/1850147
+          - title: Tokyo, JP Weather Forecast, Conditions, and Maps – Yahoo Weather
+            url: https://weather.yahoo.com/jp/tokyo-prefecture/tokyo/
+          - title: Tokyo, Japan Weather Conditions | Weather Underground
+            url: https://www.wunderground.com/weather/jp/tokyo
+          - title: Tokyo, Japan 14 day weather forecast
+            url: https://www.timeanddate.com/weather/japan/tokyo/ext
+          - title: Yr - Tokyo - Detailed weather forecast as a table
+            url: https://www.yr.no/en/details/table/2-1850147/Japan/Tokyo/Tokyo
           type: search
-        id: ws_a1564c42499d3fdd
+        id: ws_bdce6ba21fc74539
         status: completed
         type: web_search_call
       previous_response_id: null
@@ -126,10 +119,10 @@ turns:
         input_tokens: 901
         input_tokens_details:
           cached_tokens: 0
-        output_tokens: 195
+        output_tokens: 155
         output_tokens_details:
           reasoning_tokens: 0
-        total_tokens: 1096
+        total_tokens: 1056
     headers:
       content-type: application/json
     status_code: 200
@@ -137,10 +130,10 @@ turns:
   request:
     body:
       input:
-      - call_id: chatcmpl-tool-8f783f085e02d3a9
+      - call_id: chatcmpl-tool-98bfb82f7c21a9bc
         output: '{"city": "Tokyo", "temperature_c": 22, "condition": "Clear"}'
         type: function_call_output
-      - call_id: chatcmpl-tool-946081398a064481
+      - call_id: chatcmpl-tool-8e51137f3a21add8
         output: '{"status": "ok", "unit": "fahrenheit"}'
         type: custom_tool_call_output
       - content: Now report Tokyo's current temperature using the unit I just told
@@ -150,7 +143,7 @@ turns:
       max_output_tokens: 2048
       model: Qwen/Qwen3.5-35B-A3B-FP8
       parallel_tool_calls: true
-      previous_response_id: resp_01a08911-7e0b-7481-ab94-befa133cb30e
+      previous_response_id: resp_01a08eb4-f72f-7991-b9fb-3a5640701062
       store: true
       stream: false
       tool_choice: auto
@@ -184,26 +177,27 @@ turns:
   response:
     body:
       conversation_id: null
-      created_at: 1789006023
+      created_at: 1789100622
       error: null
-      id: resp_01a08911-844b-7793-a438-279402e253a9
+      id: resp_01a08eb4-fc77-7ff0-9742-f4610a3171b8
       incomplete_details: null
       instructions: null
       model: Qwen/Qwen3.5-35B-A3B-FP8
       object: response
       output:
       - content:
-        - text: "The user is asking me to report Tokyo's current temperature using\
-            \ the unit they just told me to prefer. They set their preferred unit\
-            \ to \"fahrenheit\" in the second tool call. \n\nFrom the get_weather\
-            \ tool, I received:\n- City: Tokyo\n- Temperature_c: 22°C\n- Condition:\
-            \ Clear\n\nI need to convert 22°C to Fahrenheit:\nF = (C × 9/5) + 32\n\
-            F = (22 × 9/5) + 32\nF = (22 × 1.8) + 32\nF = 39.6 + 32\nF = 71.6°F\n\n\
-            So the temperature is approximately 72°F. I should report this along with\
-            \ the condition information.\n"
+        - text: "The user asked me to set their temperature unit to fahrenheit, and\
+            \ I did that. Now they want me to report Tokyo's current temperature using\
+            \ that preferred unit. \n\nFrom the get_weather call, I got that Tokyo's\
+            \ temperature is 22°C. Since the user wants it in fahrenheit, I need to\
+            \ convert 22°C to fahrenheit.\n\nThe formula for converting Celsius to\
+            \ Fahrenheit is: F = (C × 9/5) + 32\n\nSo: F = (22 × 9/5) + 32 = (198/5)\
+            \ + 32 = 39.6 + 32 = 71.6°F\n\nRounded to a reasonable number, that would\
+            \ be about 72°F.\n\nI have all the information I need - the weather data\
+            \ from the get_weather call and the unit preference from set_temperature_unit.\n"
           type: reasoning_text
         encrypted_content: null
-        id: rs_8b70b38910834da3
+        id: rs_b8e65a2487881659
         status: null
         summary: []
         type: reasoning
@@ -212,23 +206,23 @@ turns:
           text: '
 
 
-            Based on the weather information I just retrieved, **Tokyo''s current
-            temperature is 72°F** with clear conditions.'
+            Tokyo''s current temperature is **72°F** (22°C). The weather is currently
+            clear.'
           type: output_text
-        id: msg_aa4c2761f95139e4
+        id: msg_8cfaa76080509dd0
         role: assistant
         status: completed
         type: message
-      previous_response_id: resp_01a08911-7e0b-7481-ab94-befa133cb30e
+      previous_response_id: resp_01a08eb4-f72f-7991-b9fb-3a5640701062
       status: completed
       usage:
-        input_tokens: 3608
+        input_tokens: 3447
         input_tokens_details:
           cached_tokens: 0
-        output_tokens: 196
+        output_tokens: 213
         output_tokens_details:
           reasoning_tokens: 0
-        total_tokens: 3804
+        total_tokens: 3660
     headers:
       content-type: application/json
     status_code: 200

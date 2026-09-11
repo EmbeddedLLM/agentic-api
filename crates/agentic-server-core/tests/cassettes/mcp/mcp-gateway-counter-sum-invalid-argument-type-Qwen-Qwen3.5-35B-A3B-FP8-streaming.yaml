@@ -15,7 +15,7 @@ turns:
         - sum
         require_approval: never
         server_label: counter
-        server_url: https://hang-inches-minolta-inquire.trycloudflare.com/mcp
+        server_url: https://forgotten-available-corporation-planet.trycloudflare.com/mcp
         type: mcp
     headers:
       accept: '*/*'
@@ -31,7 +31,7 @@ turns:
     - 'event: response.created
 
       '
-    - 'data: {"type":"response.created","sequence_number":0,"response":{"id":"resp_01a08912-07f3-7200-9a9b-e4017de11702","created_at":1789006055,"incomplete_details":null,"instructions":null,"metadata":null,"model":"Qwen/Qwen3.5-35B-A3B-FP8","object":"response","output":[],"parallel_tool_calls":false,"temperature":1.0,"tool_choice":"required","tools":[{"name":"mcp__counter__sum","parameters":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"a":{"format":"int32","type":"integer"},"b":{"format":"int32","type":"integer"}},"required":["a","b"],"type":"object"},"strict":false,"type":"function","allowed_callers":null,"defer_loading":null,"description":"Calculate
+    - 'data: {"type":"response.created","sequence_number":0,"response":{"id":"resp_01a08eb5-739f-78c0-a659-307b65b6c201","created_at":1789100651,"incomplete_details":null,"instructions":null,"metadata":null,"model":"Qwen/Qwen3.5-35B-A3B-FP8","object":"response","output":[],"parallel_tool_calls":false,"temperature":1.0,"tool_choice":"required","tools":[{"name":"mcp__counter__sum","parameters":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"a":{"format":"int32","type":"integer"},"b":{"format":"int32","type":"integer"}},"required":["a","b"],"type":"object"},"strict":false,"type":"function","allowed_callers":null,"defer_loading":null,"description":"Calculate
       the sum of two numbers","output_schema":null}],"top_p":0.95,"background":false,"max_output_tokens":4096,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","text":null,"top_logprobs":null,"truncation":"disabled","usage":null,"user":null,"presence_penalty":0.0,"frequency_penalty":0.0,"kv_transfer_params":null,"ec_transfer_params":null,"input_messages":null,"output_messages":null}}
 
       '
@@ -41,7 +41,7 @@ turns:
     - 'event: response.in_progress
 
       '
-    - 'data: {"type":"response.in_progress","sequence_number":1,"response":{"id":"resp_01a08912-07f3-7200-9a9b-e4017de11702","created_at":1789006055,"incomplete_details":null,"instructions":null,"metadata":null,"model":"Qwen/Qwen3.5-35B-A3B-FP8","object":"response","output":[],"parallel_tool_calls":false,"temperature":1.0,"tool_choice":"required","tools":[{"name":"mcp__counter__sum","parameters":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"a":{"format":"int32","type":"integer"},"b":{"format":"int32","type":"integer"}},"required":["a","b"],"type":"object"},"strict":false,"type":"function","allowed_callers":null,"defer_loading":null,"description":"Calculate
+    - 'data: {"type":"response.in_progress","sequence_number":1,"response":{"id":"resp_01a08eb5-739f-78c0-a659-307b65b6c201","created_at":1789100651,"incomplete_details":null,"instructions":null,"metadata":null,"model":"Qwen/Qwen3.5-35B-A3B-FP8","object":"response","output":[],"parallel_tool_calls":false,"temperature":1.0,"tool_choice":"required","tools":[{"name":"mcp__counter__sum","parameters":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"a":{"format":"int32","type":"integer"},"b":{"format":"int32","type":"integer"}},"required":["a","b"],"type":"object"},"strict":false,"type":"function","allowed_callers":null,"defer_loading":null,"description":"Calculate
       the sum of two numbers","output_schema":null}],"top_p":0.95,"background":false,"max_output_tokens":4096,"max_tool_calls":null,"previous_response_id":null,"prompt":null,"reasoning":null,"service_tier":"auto","status":"in_progress","text":null,"top_logprobs":null,"truncation":"disabled","usage":null,"user":null,"presence_penalty":0.0,"frequency_penalty":0.0,"kv_transfer_params":null,"ec_transfer_params":null,"input_messages":null,"output_messages":null}}
 
       '
@@ -51,7 +51,7 @@ turns:
     - 'event: response.output_item.added
 
       '
-    - 'data: {"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"type":"mcp_list_tools","id":"mcpl_01a08912-088e-7911-8113-3238ea89dde1","server_label":"counter","tools":[]}}
+    - 'data: {"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"type":"mcp_list_tools","id":"mcpl_01a08eb5-7461-7be0-9c74-4919f0a9c2e2","server_label":"counter","tools":[]}}
 
       '
     - '
@@ -60,7 +60,7 @@ turns:
     - 'event: response.mcp_list_tools.in_progress
 
       '
-    - 'data: {"type":"response.mcp_list_tools.in_progress","sequence_number":3,"item_id":"mcpl_01a08912-088e-7911-8113-3238ea89dde1","output_index":0}
+    - 'data: {"type":"response.mcp_list_tools.in_progress","sequence_number":3,"item_id":"mcpl_01a08eb5-7461-7be0-9c74-4919f0a9c2e2","output_index":0}
 
       '
     - '
@@ -69,7 +69,7 @@ turns:
     - 'event: response.mcp_list_tools.completed
 
       '
-    - 'data: {"type":"response.mcp_list_tools.completed","sequence_number":4,"item_id":"mcpl_01a08912-088e-7911-8113-3238ea89dde1","output_index":0}
+    - 'data: {"type":"response.mcp_list_tools.completed","sequence_number":4,"item_id":"mcpl_01a08eb5-7461-7be0-9c74-4919f0a9c2e2","output_index":0}
 
       '
     - '
@@ -78,7 +78,7 @@ turns:
     - 'event: response.output_item.done
 
       '
-    - 'data: {"type":"response.output_item.done","sequence_number":5,"output_index":0,"item":{"type":"mcp_list_tools","id":"mcpl_01a08912-088e-7911-8113-3238ea89dde1","server_label":"counter","tools":[{"name":"sum","description":"Calculate
+    - 'data: {"type":"response.output_item.done","sequence_number":5,"output_index":0,"item":{"type":"mcp_list_tools","id":"mcpl_01a08eb5-7461-7be0-9c74-4919f0a9c2e2","server_label":"counter","tools":[{"name":"sum","description":"Calculate
       the sum of two numbers","input_schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"a":{"format":"int32","type":"integer"},"b":{"format":"int32","type":"integer"}},"required":["a","b"],"type":"object"},"annotations":{"read_only":false}}]}}
 
       '
@@ -88,7 +88,7 @@ turns:
     - 'event: response.output_item.added
 
       '
-    - 'data: {"type":"response.output_item.added","sequence_number":6,"output_index":1,"item":{"id":"a88f1549a6314cfb","summary":[],"type":"reasoning","content":null,"encrypted_content":null,"status":"in_progress"}}
+    - 'data: {"type":"response.output_item.added","sequence_number":6,"output_index":1,"item":{"id":"8007a03de60a9814","summary":[],"type":"reasoning","content":null,"encrypted_content":null,"status":"in_progress"}}
 
       '
     - '
@@ -97,7 +97,7 @@ turns:
     - 'event: response.reasoning_part.added
 
       '
-    - 'data: {"type":"response.reasoning_part.added","sequence_number":7,"output_index":1,"content_index":0,"item_id":"a88f1549a6314cfb","part":{"text":"","type":"reasoning_text"}}
+    - 'data: {"type":"response.reasoning_part.added","sequence_number":7,"output_index":1,"content_index":0,"item_id":"8007a03de60a9814","part":{"text":"","type":"reasoning_text"}}
 
       '
     - '
@@ -106,7 +106,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":8,"output_index":1,"content_index":0,"delta":"The","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":8,"output_index":1,"content_index":0,"delta":"The","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -116,7 +116,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":9,"output_index":1,"content_index":0,"delta":"
-      user","item_id":"a88f1549a6314cfb"}
+      user","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -126,7 +126,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":10,"output_index":1,"content_index":0,"delta":"
-      is","item_id":"a88f1549a6314cfb"}
+      wants","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -136,7 +136,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":11,"output_index":1,"content_index":0,"delta":"
-      asking","item_id":"a88f1549a6314cfb"}
+      me","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -146,7 +146,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":12,"output_index":1,"content_index":0,"delta":"
-      me","item_id":"a88f1549a6314cfb"}
+      to","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -156,7 +156,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":13,"output_index":1,"content_index":0,"delta":"
-      to","item_id":"a88f1549a6314cfb"}
+      call","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -166,7 +166,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":14,"output_index":1,"content_index":0,"delta":"
-      call","item_id":"a88f1549a6314cfb"}
+      the","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -176,7 +176,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":15,"output_index":1,"content_index":0,"delta":"
-      the","item_id":"a88f1549a6314cfb"}
+      m","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -185,8 +185,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":16,"output_index":1,"content_index":0,"delta":"
-      m","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":16,"output_index":1,"content_index":0,"delta":"cp","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -195,7 +194,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":17,"output_index":1,"content_index":0,"delta":"cp","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":17,"output_index":1,"content_index":0,"delta":"__","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -204,7 +203,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":18,"output_index":1,"content_index":0,"delta":"__","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":18,"output_index":1,"content_index":0,"delta":"counter","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -213,7 +212,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":19,"output_index":1,"content_index":0,"delta":"counter","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":19,"output_index":1,"content_index":0,"delta":"__","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -222,7 +221,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":20,"output_index":1,"content_index":0,"delta":"__","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":20,"output_index":1,"content_index":0,"delta":"sum","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -231,7 +230,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":21,"output_index":1,"content_index":0,"delta":"sum","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":21,"output_index":1,"content_index":0,"delta":"
+      function","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -241,7 +241,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":22,"output_index":1,"content_index":0,"delta":"
-      function","item_id":"a88f1549a6314cfb"}
+      with","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -251,7 +251,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":23,"output_index":1,"content_index":0,"delta":"
-      with","item_id":"a88f1549a6314cfb"}
+      specific","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -261,7 +261,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":24,"output_index":1,"content_index":0,"delta":"
-      a","item_id":"a88f1549a6314cfb"}
+      arguments","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -270,8 +270,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":25,"output_index":1,"content_index":0,"delta":"
-      specific","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":25,"output_index":1,"content_index":0,"delta":",","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -281,7 +280,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":26,"output_index":1,"content_index":0,"delta":"
-      argument","item_id":"a88f1549a6314cfb"}
+      even","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -291,7 +290,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":27,"output_index":1,"content_index":0,"delta":"
-      object","item_id":"a88f1549a6314cfb"}
+      though","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -301,7 +300,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":28,"output_index":1,"content_index":0,"delta":"
-      where","item_id":"a88f1549a6314cfb"}
+      one","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -311,7 +310,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":29,"output_index":1,"content_index":0,"delta":"
-      \"","item_id":"a88f1549a6314cfb"}
+      of","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -320,7 +319,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":30,"output_index":1,"content_index":0,"delta":"a","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":30,"output_index":1,"content_index":0,"delta":"
+      them","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -329,7 +329,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":31,"output_index":1,"content_index":0,"delta":"\"","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":31,"output_index":1,"content_index":0,"delta":"
+      is","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -339,7 +340,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":32,"output_index":1,"content_index":0,"delta":"
-      is","item_id":"a88f1549a6314cfb"}
+      not","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -349,7 +350,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":33,"output_index":1,"content_index":0,"delta":"
-      \"","item_id":"a88f1549a6314cfb"}
+      the","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -358,7 +359,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":34,"output_index":1,"content_index":0,"delta":"not","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":34,"output_index":1,"content_index":0,"delta":"
+      correct","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -367,7 +369,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":35,"output_index":1,"content_index":0,"delta":"-an","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":35,"output_index":1,"content_index":0,"delta":"
+      type","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -376,7 +379,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":36,"output_index":1,"content_index":0,"delta":"-","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":36,"output_index":1,"content_index":0,"delta":".","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -385,7 +388,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":37,"output_index":1,"content_index":0,"delta":"integer","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":37,"output_index":1,"content_index":0,"delta":"
+      They","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -394,7 +398,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":38,"output_index":1,"content_index":0,"delta":"\"","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":38,"output_index":1,"content_index":0,"delta":"
+      explicitly","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -404,7 +409,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":39,"output_index":1,"content_index":0,"delta":"
-      (","item_id":"a88f1549a6314cfb"}
+      said","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -413,7 +418,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":40,"output_index":1,"content_index":0,"delta":"a","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":40,"output_index":1,"content_index":0,"delta":"
+      not","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -423,7 +429,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":41,"output_index":1,"content_index":0,"delta":"
-      string","item_id":"a88f1549a6314cfb"}
+      to","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -433,7 +439,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":42,"output_index":1,"content_index":0,"delta":"
-      instead","item_id":"a88f1549a6314cfb"}
+      correct","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -443,7 +449,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":43,"output_index":1,"content_index":0,"delta":"
-      of","item_id":"a88f1549a6314cfb"}
+      the","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -453,7 +459,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":44,"output_index":1,"content_index":0,"delta":"
-      an","item_id":"a88f1549a6314cfb"}
+      argument","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -463,7 +469,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":45,"output_index":1,"content_index":0,"delta":"
-      integer","item_id":"a88f1549a6314cfb"}
+      type","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -472,7 +478,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":46,"output_index":1,"content_index":0,"delta":")","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":46,"output_index":1,"content_index":0,"delta":".","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -482,7 +488,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":47,"output_index":1,"content_index":0,"delta":"
-      and","item_id":"a88f1549a6314cfb"}
+      They","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -492,7 +498,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":48,"output_index":1,"content_index":0,"delta":"
-      \"","item_id":"a88f1549a6314cfb"}
+      want","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -501,7 +507,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":49,"output_index":1,"content_index":0,"delta":"b","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":49,"output_index":1,"content_index":0,"delta":"
+      me","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -510,7 +517,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":50,"output_index":1,"content_index":0,"delta":"\"","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":50,"output_index":1,"content_index":0,"delta":"
+      to","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -520,7 +528,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":51,"output_index":1,"content_index":0,"delta":"
-      is","item_id":"a88f1549a6314cfb"}
+      report","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -530,7 +538,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":52,"output_index":1,"content_index":0,"delta":"
-      ","item_id":"a88f1549a6314cfb"}
+      the","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -539,7 +547,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":53,"output_index":1,"content_index":0,"delta":"2","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":53,"output_index":1,"content_index":0,"delta":"
+      error","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -548,7 +557,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":54,"output_index":1,"content_index":0,"delta":".","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":54,"output_index":1,"content_index":0,"delta":"
+      in","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -558,7 +568,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":55,"output_index":1,"content_index":0,"delta":"
-      They","item_id":"a88f1549a6314cfb"}
+      one","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -568,7 +578,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":56,"output_index":1,"content_index":0,"delta":"
-      explicitly","item_id":"a88f1549a6314cfb"}
+      sentence","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -578,7 +588,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":57,"output_index":1,"content_index":0,"delta":"
-      say","item_id":"a88f1549a6314cfb"}
+      after","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -588,7 +598,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":58,"output_index":1,"content_index":0,"delta":"
-      not","item_id":"a88f1549a6314cfb"}
+      it","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -598,7 +608,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":59,"output_index":1,"content_index":0,"delta":"
-      to","item_id":"a88f1549a6314cfb"}
+      fails","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -607,8 +617,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":60,"output_index":1,"content_index":0,"delta":"
-      correct","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":60,"output_index":1,"content_index":0,"delta":".","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -617,8 +626,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":61,"output_index":1,"content_index":0,"delta":"
-      the","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":61,"output_index":1,"content_index":0,"delta":"\n\n","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -627,8 +635,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":62,"output_index":1,"content_index":0,"delta":"
-      argument","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":62,"output_index":1,"content_index":0,"delta":"I","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -638,7 +645,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":63,"output_index":1,"content_index":0,"delta":"
-      type","item_id":"a88f1549a6314cfb"}
+      need","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -647,7 +654,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":64,"output_index":1,"content_index":0,"delta":",","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":64,"output_index":1,"content_index":0,"delta":"
+      to","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -657,7 +665,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":65,"output_index":1,"content_index":0,"delta":"
-      and","item_id":"a88f1549a6314cfb"}
+      call","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -667,7 +675,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":66,"output_index":1,"content_index":0,"delta":"
-      to","item_id":"a88f1549a6314cfb"}
+      m","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -676,8 +684,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":67,"output_index":1,"content_index":0,"delta":"
-      report","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":67,"output_index":1,"content_index":0,"delta":"cp","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -686,8 +693,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":68,"output_index":1,"content_index":0,"delta":"
-      the","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":68,"output_index":1,"content_index":0,"delta":"__","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -696,8 +702,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":69,"output_index":1,"content_index":0,"delta":"
-      error","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":69,"output_index":1,"content_index":0,"delta":"counter","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -706,8 +711,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":70,"output_index":1,"content_index":0,"delta":"
-      in","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":70,"output_index":1,"content_index":0,"delta":"__","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -716,8 +720,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":71,"output_index":1,"content_index":0,"delta":"
-      one","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":71,"output_index":1,"content_index":0,"delta":"sum","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -727,7 +730,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":72,"output_index":1,"content_index":0,"delta":"
-      sentence","item_id":"a88f1549a6314cfb"}
+      with","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -736,8 +739,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":73,"output_index":1,"content_index":0,"delta":"
-      after","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":73,"output_index":1,"content_index":0,"delta":":","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -746,8 +748,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":74,"output_index":1,"content_index":0,"delta":"
-      the","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":74,"output_index":1,"content_index":0,"delta":"\n","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -756,8 +757,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":75,"output_index":1,"content_index":0,"delta":"
-      call","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":75,"output_index":1,"content_index":0,"delta":"-","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -767,7 +767,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":76,"output_index":1,"content_index":0,"delta":"
-      fails","item_id":"a88f1549a6314cfb"}
+      a","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -776,7 +776,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":77,"output_index":1,"content_index":0,"delta":".","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":77,"output_index":1,"content_index":0,"delta":":","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -785,7 +785,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":78,"output_index":1,"content_index":0,"delta":"\n\n","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":78,"output_index":1,"content_index":0,"delta":"
+      \"","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -794,7 +795,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":79,"output_index":1,"content_index":0,"delta":"Let","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":79,"output_index":1,"content_index":0,"delta":"not","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -803,8 +804,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":80,"output_index":1,"content_index":0,"delta":"
-      me","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":80,"output_index":1,"content_index":0,"delta":"-an","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -813,8 +813,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":81,"output_index":1,"content_index":0,"delta":"
-      make","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":81,"output_index":1,"content_index":0,"delta":"-","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -823,8 +822,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":82,"output_index":1,"content_index":0,"delta":"
-      the","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":82,"output_index":1,"content_index":0,"delta":"integer","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -833,8 +831,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":83,"output_index":1,"content_index":0,"delta":"
-      call","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":83,"output_index":1,"content_index":0,"delta":"\"","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -844,7 +841,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":84,"output_index":1,"content_index":0,"delta":"
-      exactly","item_id":"a88f1549a6314cfb"}
+      (","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -853,8 +850,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":85,"output_index":1,"content_index":0,"delta":"
-      as","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":85,"output_index":1,"content_index":0,"delta":"a","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -864,7 +860,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":86,"output_index":1,"content_index":0,"delta":"
-      requested","item_id":"a88f1549a6314cfb"}
+      string","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -873,7 +869,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":87,"output_index":1,"content_index":0,"delta":",","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":87,"output_index":1,"content_index":0,"delta":",","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -883,7 +879,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":88,"output_index":1,"content_index":0,"delta":"
-      then","item_id":"a88f1549a6314cfb"}
+      not","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -893,7 +889,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":89,"output_index":1,"content_index":0,"delta":"
-      report","item_id":"a88f1549a6314cfb"}
+      an","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -903,7 +899,7 @@ turns:
 
       '
     - 'data: {"type":"response.reasoning_text.delta","sequence_number":90,"output_index":1,"content_index":0,"delta":"
-      the","item_id":"a88f1549a6314cfb"}
+      integer","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -912,8 +908,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":91,"output_index":1,"content_index":0,"delta":"
-      error","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":91,"output_index":1,"content_index":0,"delta":")","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -922,7 +917,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":92,"output_index":1,"content_index":0,"delta":".","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":92,"output_index":1,"content_index":0,"delta":"\n","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -931,7 +926,433 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":93,"output_index":1,"content_index":0,"delta":"\n","item_id":"a88f1549a6314cfb"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":93,"output_index":1,"content_index":0,"delta":"-","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":94,"output_index":1,"content_index":0,"delta":"
+      b","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":95,"output_index":1,"content_index":0,"delta":":","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":96,"output_index":1,"content_index":0,"delta":"
+      ","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":97,"output_index":1,"content_index":0,"delta":"2","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":98,"output_index":1,"content_index":0,"delta":"
+      (","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":99,"output_index":1,"content_index":0,"delta":"an","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":100,"output_index":1,"content_index":0,"delta":"
+      integer","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":101,"output_index":1,"content_index":0,"delta":")","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":102,"output_index":1,"content_index":0,"delta":"\n\n","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":103,"output_index":1,"content_index":0,"delta":"This","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":104,"output_index":1,"content_index":0,"delta":"
+      should","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":105,"output_index":1,"content_index":0,"delta":"
+      fail","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":106,"output_index":1,"content_index":0,"delta":"
+      because","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":107,"output_index":1,"content_index":0,"delta":"
+      \"","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":108,"output_index":1,"content_index":0,"delta":"a","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":109,"output_index":1,"content_index":0,"delta":"\"","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":110,"output_index":1,"content_index":0,"delta":"
+      should","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":111,"output_index":1,"content_index":0,"delta":"
+      be","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":112,"output_index":1,"content_index":0,"delta":"
+      an","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":113,"output_index":1,"content_index":0,"delta":"
+      integer","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":114,"output_index":1,"content_index":0,"delta":"
+      according","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":115,"output_index":1,"content_index":0,"delta":"
+      to","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":116,"output_index":1,"content_index":0,"delta":"
+      the","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":117,"output_index":1,"content_index":0,"delta":"
+      schema","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":118,"output_index":1,"content_index":0,"delta":",","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":119,"output_index":1,"content_index":0,"delta":"
+      but","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":120,"output_index":1,"content_index":0,"delta":"
+      I","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":121,"output_index":1,"content_index":0,"delta":"''m","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":122,"output_index":1,"content_index":0,"delta":"
+      providing","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":123,"output_index":1,"content_index":0,"delta":"
+      a","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":124,"output_index":1,"content_index":0,"delta":"
+      string","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":125,"output_index":1,"content_index":0,"delta":".","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":126,"output_index":1,"content_index":0,"delta":"
+      I","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":127,"output_index":1,"content_index":0,"delta":"''ll","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":128,"output_index":1,"content_index":0,"delta":"
+      make","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":129,"output_index":1,"content_index":0,"delta":"
+      the","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":130,"output_index":1,"content_index":0,"delta":"
+      call","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":131,"output_index":1,"content_index":0,"delta":"
+      and","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":132,"output_index":1,"content_index":0,"delta":"
+      then","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":133,"output_index":1,"content_index":0,"delta":"
+      report","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":134,"output_index":1,"content_index":0,"delta":"
+      the","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":135,"output_index":1,"content_index":0,"delta":"
+      error","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":136,"output_index":1,"content_index":0,"delta":".","item_id":"8007a03de60a9814"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":137,"output_index":1,"content_index":0,"delta":"\n","item_id":"8007a03de60a9814"}
 
       '
     - '
@@ -940,12 +1361,14 @@ turns:
     - 'event: response.reasoning_text.done
 
       '
-    - 'data: {"type":"response.reasoning_text.done","sequence_number":94,"output_index":1,"content_index":0,"item_id":"a88f1549a6314cfb","text":"The
-      user is asking me to call the mcp__counter__sum function with a specific argument
-      object where \"a\" is \"not-an-integer\" (a string instead of an integer) and
-      \"b\" is 2. They explicitly say not to correct the argument type, and to report
-      the error in one sentence after the call fails.\n\nLet me make the call exactly
-      as requested, then report the error.\n"}
+    - 'data: {"type":"response.reasoning_text.done","sequence_number":138,"output_index":1,"content_index":0,"item_id":"8007a03de60a9814","text":"The
+      user wants me to call the mcp__counter__sum function with specific arguments,
+      even though one of them is not the correct type. They explicitly said not to
+      correct the argument type. They want me to report the error in one sentence
+      after it fails.\n\nI need to call mcp__counter__sum with:\n- a: \"not-an-integer\"
+      (a string, not an integer)\n- b: 2 (an integer)\n\nThis should fail because
+      \"a\" should be an integer according to the schema, but I''m providing a string.
+      I''ll make the call and then report the error.\n"}
 
       '
     - '
@@ -954,12 +1377,14 @@ turns:
     - 'event: response.reasoning_part.done
 
       '
-    - 'data: {"type":"response.reasoning_part.done","sequence_number":95,"output_index":1,"content_index":0,"item_id":"a88f1549a6314cfb","part":{"text":"The
-      user is asking me to call the mcp__counter__sum function with a specific argument
-      object where \"a\" is \"not-an-integer\" (a string instead of an integer) and
-      \"b\" is 2. They explicitly say not to correct the argument type, and to report
-      the error in one sentence after the call fails.\n\nLet me make the call exactly
-      as requested, then report the error.\n","type":"reasoning_text"}}
+    - 'data: {"type":"response.reasoning_part.done","sequence_number":139,"output_index":1,"content_index":0,"item_id":"8007a03de60a9814","part":{"text":"The
+      user wants me to call the mcp__counter__sum function with specific arguments,
+      even though one of them is not the correct type. They explicitly said not to
+      correct the argument type. They want me to report the error in one sentence
+      after it fails.\n\nI need to call mcp__counter__sum with:\n- a: \"not-an-integer\"
+      (a string, not an integer)\n- b: 2 (an integer)\n\nThis should fail because
+      \"a\" should be an integer according to the schema, but I''m providing a string.
+      I''ll make the call and then report the error.\n","type":"reasoning_text"}}
 
       '
     - '
@@ -968,12 +1393,14 @@ turns:
     - 'event: response.output_item.done
 
       '
-    - 'data: {"type":"response.output_item.done","sequence_number":96,"output_index":1,"item":{"id":"a88f1549a6314cfb","summary":[],"type":"reasoning","content":[{"text":"The
-      user is asking me to call the mcp__counter__sum function with a specific argument
-      object where \"a\" is \"not-an-integer\" (a string instead of an integer) and
-      \"b\" is 2. They explicitly say not to correct the argument type, and to report
-      the error in one sentence after the call fails.\n\nLet me make the call exactly
-      as requested, then report the error.\n","type":"reasoning_text"}],"encrypted_content":null,"status":"completed"}}
+    - 'data: {"type":"response.output_item.done","sequence_number":140,"output_index":1,"item":{"id":"8007a03de60a9814","summary":[],"type":"reasoning","content":[{"text":"The
+      user wants me to call the mcp__counter__sum function with specific arguments,
+      even though one of them is not the correct type. They explicitly said not to
+      correct the argument type. They want me to report the error in one sentence
+      after it fails.\n\nI need to call mcp__counter__sum with:\n- a: \"not-an-integer\"
+      (a string, not an integer)\n- b: 2 (an integer)\n\nThis should fail because
+      \"a\" should be an integer according to the schema, but I''m providing a string.
+      I''ll make the call and then report the error.\n","type":"reasoning_text"}],"encrypted_content":null,"status":"completed"}}
 
       '
     - '
@@ -982,7 +1409,7 @@ turns:
     - 'event: response.output_item.added
 
       '
-    - 'data: {"type":"response.output_item.added","sequence_number":97,"output_index":2,"item":{"type":"mcp_call","id":"mcp_9b37b73cd3545a63","server_label":"counter","name":"sum","arguments":"","status":"in_progress","approval_request_id":null,"output":null,"error":null}}
+    - 'data: {"type":"response.output_item.added","sequence_number":141,"output_index":2,"item":{"type":"mcp_call","id":"mcp_970e09c486ca8d1d","server_label":"counter","name":"sum","arguments":"","status":"in_progress","approval_request_id":null,"output":null,"error":null}}
 
       '
     - '
@@ -991,7 +1418,7 @@ turns:
     - 'event: response.mcp_call.in_progress
 
       '
-    - 'data: {"type":"response.mcp_call.in_progress","sequence_number":98,"item_id":"mcp_9b37b73cd3545a63","output_index":2}
+    - 'data: {"type":"response.mcp_call.in_progress","sequence_number":142,"item_id":"mcp_970e09c486ca8d1d","output_index":2}
 
       '
     - '
@@ -1000,8 +1427,8 @@ turns:
     - 'event: response.mcp_call_arguments.delta
 
       '
-    - 'data: {"type":"response.mcp_call_arguments.delta","sequence_number":99,"delta":"{\"a\":
-      \"not-an-integer\", \"b\": 2}","item_id":"mcp_9b37b73cd3545a63","output_index":2}
+    - 'data: {"type":"response.mcp_call_arguments.delta","sequence_number":143,"delta":"{\"a\":
+      \"not-an-integer\", \"b\": 2}","item_id":"mcp_970e09c486ca8d1d","output_index":2}
 
       '
     - '
@@ -1010,8 +1437,8 @@ turns:
     - 'event: response.mcp_call_arguments.done
 
       '
-    - 'data: {"type":"response.mcp_call_arguments.done","sequence_number":100,"arguments":"{\"a\":
-      \"not-an-integer\", \"b\": 2}","item_id":"mcp_9b37b73cd3545a63","output_index":2}
+    - 'data: {"type":"response.mcp_call_arguments.done","sequence_number":144,"arguments":"{\"a\":
+      \"not-an-integer\", \"b\": 2}","item_id":"mcp_970e09c486ca8d1d","output_index":2}
 
       '
     - '
@@ -1020,7 +1447,7 @@ turns:
     - 'event: response.mcp_call.failed
 
       '
-    - 'data: {"type":"response.mcp_call.failed","sequence_number":101,"item_id":"mcp_9b37b73cd3545a63","output_index":2}
+    - 'data: {"type":"response.mcp_call.failed","sequence_number":145,"item_id":"mcp_970e09c486ca8d1d","output_index":2}
 
       '
     - '
@@ -1029,7 +1456,7 @@ turns:
     - 'event: response.output_item.done
 
       '
-    - 'data: {"type":"response.output_item.done","sequence_number":102,"output_index":2,"item":{"type":"mcp_call","id":"mcp_9b37b73cd3545a63","server_label":"counter","name":"sum","arguments":"{\"a\":
+    - 'data: {"type":"response.output_item.done","sequence_number":146,"output_index":2,"item":{"type":"mcp_call","id":"mcp_970e09c486ca8d1d","server_label":"counter","name":"sum","arguments":"{\"a\":
       \"not-an-integer\", \"b\": 2}","status":"failed","approval_request_id":null,"output":null,"error":{"type":"mcp_tool_execution_error","content":[{"type":"text","text":"failed
       to deserialize parameters: invalid type: string \"not-an-integer\", expected
       i32","annotations":null,"meta":null}]}}}
@@ -1041,7 +1468,7 @@ turns:
     - 'event: response.output_item.added
 
       '
-    - 'data: {"type":"response.output_item.added","sequence_number":103,"output_index":3,"item":{"id":"befd7558066a6e6a","summary":[],"type":"reasoning","content":null,"encrypted_content":null,"status":"in_progress"}}
+    - 'data: {"type":"response.output_item.added","sequence_number":147,"output_index":3,"item":{"id":"8fc7aac1d93b0063","summary":[],"type":"reasoning","content":null,"encrypted_content":null,"status":"in_progress"}}
 
       '
     - '
@@ -1050,7 +1477,7 @@ turns:
     - 'event: response.reasoning_part.added
 
       '
-    - 'data: {"type":"response.reasoning_part.added","sequence_number":104,"output_index":3,"content_index":0,"item_id":"befd7558066a6e6a","part":{"text":"","type":"reasoning_text"}}
+    - 'data: {"type":"response.reasoning_part.added","sequence_number":148,"output_index":3,"content_index":0,"item_id":"8fc7aac1d93b0063","part":{"text":"","type":"reasoning_text"}}
 
       '
     - '
@@ -1059,7 +1486,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":105,"output_index":3,"content_index":0,"delta":"The","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":149,"output_index":3,"content_index":0,"delta":"The","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1068,8 +1495,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":106,"output_index":3,"content_index":0,"delta":"
-      call","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":150,"output_index":3,"content_index":0,"delta":"
+      call","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1078,8 +1505,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":107,"output_index":3,"content_index":0,"delta":"
-      failed","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":151,"output_index":3,"content_index":0,"delta":"
+      failed","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1088,8 +1515,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":108,"output_index":3,"content_index":0,"delta":"
-      as","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":152,"output_index":3,"content_index":0,"delta":"
+      as","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1098,8 +1525,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":109,"output_index":3,"content_index":0,"delta":"
-      expected","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":153,"output_index":3,"content_index":0,"delta":"
+      expected","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1108,8 +1535,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":110,"output_index":3,"content_index":0,"delta":"
-      because","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":154,"output_index":3,"content_index":0,"delta":"
+      because","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1118,8 +1545,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":111,"output_index":3,"content_index":0,"delta":"
-      the","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":155,"output_index":3,"content_index":0,"delta":"
+      I","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1128,8 +1555,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":112,"output_index":3,"content_index":0,"delta":"
-      parameter","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":156,"output_index":3,"content_index":0,"delta":"
+      provided","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1138,8 +1565,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":113,"output_index":3,"content_index":0,"delta":"
-      \"","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":157,"output_index":3,"content_index":0,"delta":"
+      a","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1148,7 +1575,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":114,"output_index":3,"content_index":0,"delta":"a","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":158,"output_index":3,"content_index":0,"delta":"
+      string","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1157,7 +1585,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":115,"output_index":3,"content_index":0,"delta":"\"","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":159,"output_index":3,"content_index":0,"delta":"
+      for","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1166,8 +1595,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":116,"output_index":3,"content_index":0,"delta":"
-      was","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":160,"output_index":3,"content_index":0,"delta":"
+      parameter","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1176,8 +1605,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":117,"output_index":3,"content_index":0,"delta":"
-      a","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":161,"output_index":3,"content_index":0,"delta":"
+      \"","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1186,8 +1615,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":118,"output_index":3,"content_index":0,"delta":"
-      string","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":162,"output_index":3,"content_index":0,"delta":"a","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1196,8 +1624,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":119,"output_index":3,"content_index":0,"delta":"
-      instead","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":163,"output_index":3,"content_index":0,"delta":"\"","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1206,8 +1633,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":120,"output_index":3,"content_index":0,"delta":"
-      of","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":164,"output_index":3,"content_index":0,"delta":"
+      when","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1216,8 +1643,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":121,"output_index":3,"content_index":0,"delta":"
-      an","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":165,"output_index":3,"content_index":0,"delta":"
+      it","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1226,8 +1653,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":122,"output_index":3,"content_index":0,"delta":"
-      integer","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":166,"output_index":3,"content_index":0,"delta":"
+      expected","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1236,7 +1663,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":123,"output_index":3,"content_index":0,"delta":".","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":167,"output_index":3,"content_index":0,"delta":"
+      an","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1245,8 +1673,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":124,"output_index":3,"content_index":0,"delta":"
-      I","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":168,"output_index":3,"content_index":0,"delta":"
+      integer","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1255,8 +1683,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":125,"output_index":3,"content_index":0,"delta":"
-      need","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":169,"output_index":3,"content_index":0,"delta":".","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1265,8 +1692,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":126,"output_index":3,"content_index":0,"delta":"
-      to","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":170,"output_index":3,"content_index":0,"delta":"
+      The","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1275,8 +1702,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":127,"output_index":3,"content_index":0,"delta":"
-      report","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":171,"output_index":3,"content_index":0,"delta":"
+      error","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1285,8 +1712,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":128,"output_index":3,"content_index":0,"delta":"
-      this","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":172,"output_index":3,"content_index":0,"delta":"
+      message","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1295,8 +1722,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":129,"output_index":3,"content_index":0,"delta":"
-      error","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":173,"output_index":3,"content_index":0,"delta":"
+      indicates","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1305,8 +1732,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":130,"output_index":3,"content_index":0,"delta":"
-      in","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":174,"output_index":3,"content_index":0,"delta":"
+      the","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1315,8 +1742,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":131,"output_index":3,"content_index":0,"delta":"
-      one","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":175,"output_index":3,"content_index":0,"delta":"
+      des","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1325,8 +1752,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":132,"output_index":3,"content_index":0,"delta":"
-      sentence","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":176,"output_index":3,"content_index":0,"delta":"erialization","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1335,8 +1761,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":133,"output_index":3,"content_index":0,"delta":"
-      as","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":177,"output_index":3,"content_index":0,"delta":"
+      failed","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1345,8 +1771,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":134,"output_index":3,"content_index":0,"delta":"
-      requested","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":178,"output_index":3,"content_index":0,"delta":"
+      due","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1355,7 +1781,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":135,"output_index":3,"content_index":0,"delta":".","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":179,"output_index":3,"content_index":0,"delta":"
+      to","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1364,7 +1791,165 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":136,"output_index":3,"content_index":0,"delta":"\n","item_id":"befd7558066a6e6a"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":180,"output_index":3,"content_index":0,"delta":"
+      type","item_id":"8fc7aac1d93b0063"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":181,"output_index":3,"content_index":0,"delta":"
+      mismatch","item_id":"8fc7aac1d93b0063"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":182,"output_index":3,"content_index":0,"delta":".","item_id":"8fc7aac1d93b0063"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":183,"output_index":3,"content_index":0,"delta":"
+      Now","item_id":"8fc7aac1d93b0063"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":184,"output_index":3,"content_index":0,"delta":"
+      I","item_id":"8fc7aac1d93b0063"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":185,"output_index":3,"content_index":0,"delta":"
+      need","item_id":"8fc7aac1d93b0063"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":186,"output_index":3,"content_index":0,"delta":"
+      to","item_id":"8fc7aac1d93b0063"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":187,"output_index":3,"content_index":0,"delta":"
+      report","item_id":"8fc7aac1d93b0063"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":188,"output_index":3,"content_index":0,"delta":"
+      this","item_id":"8fc7aac1d93b0063"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":189,"output_index":3,"content_index":0,"delta":"
+      error","item_id":"8fc7aac1d93b0063"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":190,"output_index":3,"content_index":0,"delta":"
+      in","item_id":"8fc7aac1d93b0063"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":191,"output_index":3,"content_index":0,"delta":"
+      one","item_id":"8fc7aac1d93b0063"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":192,"output_index":3,"content_index":0,"delta":"
+      sentence","item_id":"8fc7aac1d93b0063"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":193,"output_index":3,"content_index":0,"delta":"
+      as","item_id":"8fc7aac1d93b0063"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":194,"output_index":3,"content_index":0,"delta":"
+      requested","item_id":"8fc7aac1d93b0063"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":195,"output_index":3,"content_index":0,"delta":".","item_id":"8fc7aac1d93b0063"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":196,"output_index":3,"content_index":0,"delta":"\n","item_id":"8fc7aac1d93b0063"}
 
       '
     - '
@@ -1373,9 +1958,10 @@ turns:
     - 'event: response.reasoning_text.done
 
       '
-    - 'data: {"type":"response.reasoning_text.done","sequence_number":137,"output_index":3,"content_index":0,"item_id":"befd7558066a6e6a","text":"The
-      call failed as expected because the parameter \"a\" was a string instead of
-      an integer. I need to report this error in one sentence as requested.\n"}
+    - 'data: {"type":"response.reasoning_text.done","sequence_number":197,"output_index":3,"content_index":0,"item_id":"8fc7aac1d93b0063","text":"The
+      call failed as expected because I provided a string for parameter \"a\" when
+      it expected an integer. The error message indicates the deserialization failed
+      due to type mismatch. Now I need to report this error in one sentence as requested.\n"}
 
       '
     - '
@@ -1384,9 +1970,10 @@ turns:
     - 'event: response.reasoning_part.done
 
       '
-    - 'data: {"type":"response.reasoning_part.done","sequence_number":138,"output_index":3,"content_index":0,"item_id":"befd7558066a6e6a","part":{"text":"The
-      call failed as expected because the parameter \"a\" was a string instead of
-      an integer. I need to report this error in one sentence as requested.\n","type":"reasoning_text"}}
+    - 'data: {"type":"response.reasoning_part.done","sequence_number":198,"output_index":3,"content_index":0,"item_id":"8fc7aac1d93b0063","part":{"text":"The
+      call failed as expected because I provided a string for parameter \"a\" when
+      it expected an integer. The error message indicates the deserialization failed
+      due to type mismatch. Now I need to report this error in one sentence as requested.\n","type":"reasoning_text"}}
 
       '
     - '
@@ -1395,9 +1982,10 @@ turns:
     - 'event: response.output_item.done
 
       '
-    - 'data: {"type":"response.output_item.done","sequence_number":139,"output_index":3,"item":{"id":"befd7558066a6e6a","summary":[],"type":"reasoning","content":[{"text":"The
-      call failed as expected because the parameter \"a\" was a string instead of
-      an integer. I need to report this error in one sentence as requested.\n","type":"reasoning_text"}],"encrypted_content":null,"status":"completed"}}
+    - 'data: {"type":"response.output_item.done","sequence_number":199,"output_index":3,"item":{"id":"8fc7aac1d93b0063","summary":[],"type":"reasoning","content":[{"text":"The
+      call failed as expected because I provided a string for parameter \"a\" when
+      it expected an integer. The error message indicates the deserialization failed
+      due to type mismatch. Now I need to report this error in one sentence as requested.\n","type":"reasoning_text"}],"encrypted_content":null,"status":"completed"}}
 
       '
     - '
@@ -1406,7 +1994,7 @@ turns:
     - 'event: response.output_item.added
 
       '
-    - 'data: {"type":"response.output_item.added","sequence_number":140,"output_index":4,"item":{"id":"b6666d8a3f69eacc","content":[],"role":"assistant","status":"in_progress","type":"message","phase":null}}
+    - 'data: {"type":"response.output_item.added","sequence_number":200,"output_index":4,"item":{"id":"bdddc050080669d6","content":[],"role":"assistant","status":"in_progress","type":"message","phase":null}}
 
       '
     - '
@@ -1415,7 +2003,7 @@ turns:
     - 'event: response.content_part.added
 
       '
-    - 'data: {"type":"response.content_part.added","sequence_number":141,"output_index":4,"content_index":0,"item_id":"b6666d8a3f69eacc","part":{"annotations":[],"text":"","type":"output_text","logprobs":[]}}
+    - 'data: {"type":"response.content_part.added","sequence_number":201,"output_index":4,"content_index":0,"item_id":"bdddc050080669d6","part":{"annotations":[],"text":"","type":"output_text","logprobs":[]}}
 
       '
     - '
@@ -1424,7 +2012,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":142,"output_index":4,"content_index":0,"delta":"\n\nThe","item_id":"b6666d8a3f69eacc","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":202,"output_index":4,"content_index":0,"delta":"\n\nThe","item_id":"bdddc050080669d6","logprobs":[]}
 
       '
     - '
@@ -1433,8 +2021,8 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":143,"output_index":4,"content_index":0,"delta":"
-      MCP","item_id":"b6666d8a3f69eacc","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":203,"output_index":4,"content_index":0,"delta":"
+      MCP","item_id":"bdddc050080669d6","logprobs":[]}
 
       '
     - '
@@ -1443,8 +2031,8 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":144,"output_index":4,"content_index":0,"delta":"
-      call","item_id":"b6666d8a3f69eacc","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":204,"output_index":4,"content_index":0,"delta":"
+      call","item_id":"bdddc050080669d6","logprobs":[]}
 
       '
     - '
@@ -1453,8 +2041,8 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":145,"output_index":4,"content_index":0,"delta":"
-      failed","item_id":"b6666d8a3f69eacc","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":205,"output_index":4,"content_index":0,"delta":"
+      failed","item_id":"bdddc050080669d6","logprobs":[]}
 
       '
     - '
@@ -1463,8 +2051,8 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":146,"output_index":4,"content_index":0,"delta":"
-      with","item_id":"b6666d8a3f69eacc","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":206,"output_index":4,"content_index":0,"delta":"
+      with","item_id":"bdddc050080669d6","logprobs":[]}
 
       '
     - '
@@ -1473,8 +2061,8 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":147,"output_index":4,"content_index":0,"delta":"
-      an","item_id":"b6666d8a3f69eacc","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":207,"output_index":4,"content_index":0,"delta":"
+      the","item_id":"bdddc050080669d6","logprobs":[]}
 
       '
     - '
@@ -1483,8 +2071,8 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":148,"output_index":4,"content_index":0,"delta":"
-      error","item_id":"b6666d8a3f69eacc","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":208,"output_index":4,"content_index":0,"delta":"
+      error","item_id":"bdddc050080669d6","logprobs":[]}
 
       '
     - '
@@ -1493,8 +2081,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":149,"output_index":4,"content_index":0,"delta":"
-      stating","item_id":"b6666d8a3f69eacc","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":209,"output_index":4,"content_index":0,"delta":":","item_id":"bdddc050080669d6","logprobs":[]}
 
       '
     - '
@@ -1503,8 +2090,8 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":150,"output_index":4,"content_index":0,"delta":"
-      it","item_id":"b6666d8a3f69eacc","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":210,"output_index":4,"content_index":0,"delta":"
+      failed","item_id":"bdddc050080669d6","logprobs":[]}
 
       '
     - '
@@ -1513,8 +2100,8 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":151,"output_index":4,"content_index":0,"delta":"
-      could","item_id":"b6666d8a3f69eacc","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":211,"output_index":4,"content_index":0,"delta":"
+      to","item_id":"bdddc050080669d6","logprobs":[]}
 
       '
     - '
@@ -1523,8 +2110,8 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":152,"output_index":4,"content_index":0,"delta":"
-      not","item_id":"b6666d8a3f69eacc","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":212,"output_index":4,"content_index":0,"delta":"
+      deserialize","item_id":"bdddc050080669d6","logprobs":[]}
 
       '
     - '
@@ -1533,8 +2120,8 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":153,"output_index":4,"content_index":0,"delta":"
-      deserialize","item_id":"b6666d8a3f69eacc","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":213,"output_index":4,"content_index":0,"delta":"
+      parameters","item_id":"bdddc050080669d6","logprobs":[]}
 
       '
     - '
@@ -1543,8 +2130,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":154,"output_index":4,"content_index":0,"delta":"
-      the","item_id":"b6666d8a3f69eacc","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":214,"output_index":4,"content_index":0,"delta":":","item_id":"bdddc050080669d6","logprobs":[]}
 
       '
     - '
@@ -1553,8 +2139,8 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":155,"output_index":4,"content_index":0,"delta":"
-      parameters","item_id":"b6666d8a3f69eacc","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":215,"output_index":4,"content_index":0,"delta":"
+      invalid","item_id":"bdddc050080669d6","logprobs":[]}
 
       '
     - '
@@ -1563,8 +2149,8 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":156,"output_index":4,"content_index":0,"delta":"
-      due","item_id":"b6666d8a3f69eacc","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":216,"output_index":4,"content_index":0,"delta":"
+      type","item_id":"bdddc050080669d6","logprobs":[]}
 
       '
     - '
@@ -1573,8 +2159,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":157,"output_index":4,"content_index":0,"delta":"
-      to","item_id":"b6666d8a3f69eacc","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":217,"output_index":4,"content_index":0,"delta":":","item_id":"bdddc050080669d6","logprobs":[]}
 
       '
     - '
@@ -1583,8 +2168,8 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":158,"output_index":4,"content_index":0,"delta":"
-      receiving","item_id":"b6666d8a3f69eacc","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":218,"output_index":4,"content_index":0,"delta":"
+      string","item_id":"bdddc050080669d6","logprobs":[]}
 
       '
     - '
@@ -1593,8 +2178,8 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":159,"output_index":4,"content_index":0,"delta":"
-      a","item_id":"b6666d8a3f69eacc","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":219,"output_index":4,"content_index":0,"delta":"
+      \"","item_id":"bdddc050080669d6","logprobs":[]}
 
       '
     - '
@@ -1603,8 +2188,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":160,"output_index":4,"content_index":0,"delta":"
-      string","item_id":"b6666d8a3f69eacc","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":220,"output_index":4,"content_index":0,"delta":"not","item_id":"bdddc050080669d6","logprobs":[]}
 
       '
     - '
@@ -1613,8 +2197,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":161,"output_index":4,"content_index":0,"delta":"
-      \"","item_id":"b6666d8a3f69eacc","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":221,"output_index":4,"content_index":0,"delta":"-an","item_id":"bdddc050080669d6","logprobs":[]}
 
       '
     - '
@@ -1623,7 +2206,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":162,"output_index":4,"content_index":0,"delta":"not","item_id":"b6666d8a3f69eacc","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":222,"output_index":4,"content_index":0,"delta":"-","item_id":"bdddc050080669d6","logprobs":[]}
 
       '
     - '
@@ -1632,7 +2215,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":163,"output_index":4,"content_index":0,"delta":"-an","item_id":"b6666d8a3f69eacc","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":223,"output_index":4,"content_index":0,"delta":"integer","item_id":"bdddc050080669d6","logprobs":[]}
 
       '
     - '
@@ -1641,7 +2224,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":164,"output_index":4,"content_index":0,"delta":"-","item_id":"b6666d8a3f69eacc","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":224,"output_index":4,"content_index":0,"delta":"\",","item_id":"bdddc050080669d6","logprobs":[]}
 
       '
     - '
@@ -1650,7 +2233,8 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":165,"output_index":4,"content_index":0,"delta":"integer","item_id":"b6666d8a3f69eacc","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":225,"output_index":4,"content_index":0,"delta":"
+      expected","item_id":"bdddc050080669d6","logprobs":[]}
 
       '
     - '
@@ -1659,7 +2243,8 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":166,"output_index":4,"content_index":0,"delta":"\"","item_id":"b6666d8a3f69eacc","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":226,"output_index":4,"content_index":0,"delta":"
+      i","item_id":"bdddc050080669d6","logprobs":[]}
 
       '
     - '
@@ -1668,8 +2253,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":167,"output_index":4,"content_index":0,"delta":"
-      instead","item_id":"b6666d8a3f69eacc","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":227,"output_index":4,"content_index":0,"delta":"3","item_id":"bdddc050080669d6","logprobs":[]}
 
       '
     - '
@@ -1678,8 +2262,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":168,"output_index":4,"content_index":0,"delta":"
-      of","item_id":"b6666d8a3f69eacc","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":228,"output_index":4,"content_index":0,"delta":"2","item_id":"bdddc050080669d6","logprobs":[]}
 
       '
     - '
@@ -1688,75 +2271,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":169,"output_index":4,"content_index":0,"delta":"
-      the","item_id":"b6666d8a3f69eacc","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'event: response.output_text.delta
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":170,"output_index":4,"content_index":0,"delta":"
-      expected","item_id":"b6666d8a3f69eacc","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'event: response.output_text.delta
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":171,"output_index":4,"content_index":0,"delta":"
-      i","item_id":"b6666d8a3f69eacc","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'event: response.output_text.delta
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":172,"output_index":4,"content_index":0,"delta":"3","item_id":"b6666d8a3f69eacc","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'event: response.output_text.delta
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":173,"output_index":4,"content_index":0,"delta":"2","item_id":"b6666d8a3f69eacc","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'event: response.output_text.delta
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":174,"output_index":4,"content_index":0,"delta":"
-      integer","item_id":"b6666d8a3f69eacc","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'event: response.output_text.delta
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":175,"output_index":4,"content_index":0,"delta":"
-      type","item_id":"b6666d8a3f69eacc","logprobs":[]}
-
-      '
-    - '
-
-      '
-    - 'event: response.output_text.delta
-
-      '
-    - 'data: {"type":"response.output_text.delta","sequence_number":176,"output_index":4,"content_index":0,"delta":".","item_id":"b6666d8a3f69eacc","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":229,"output_index":4,"content_index":0,"delta":".","item_id":"bdddc050080669d6","logprobs":[]}
 
       '
     - '
@@ -1765,10 +2280,9 @@ turns:
     - 'event: response.output_text.done
 
       '
-    - 'data: {"type":"response.output_text.done","sequence_number":177,"output_index":4,"content_index":0,"item_id":"b6666d8a3f69eacc","logprobs":[],"text":"\n\nThe
-      MCP call failed with an error stating it could not deserialize the parameters
-      due to receiving a string \"not-an-integer\" instead of the expected i32 integer
-      type."}
+    - 'data: {"type":"response.output_text.done","sequence_number":230,"output_index":4,"content_index":0,"item_id":"bdddc050080669d6","logprobs":[],"text":"\n\nThe
+      MCP call failed with the error: failed to deserialize parameters: invalid type:
+      string \"not-an-integer\", expected i32."}
 
       '
     - '
@@ -1777,10 +2291,9 @@ turns:
     - 'event: response.content_part.done
 
       '
-    - 'data: {"type":"response.content_part.done","sequence_number":178,"output_index":4,"content_index":0,"item_id":"b6666d8a3f69eacc","part":{"annotations":[],"text":"\n\nThe
-      MCP call failed with an error stating it could not deserialize the parameters
-      due to receiving a string \"not-an-integer\" instead of the expected i32 integer
-      type.","type":"output_text","logprobs":null}}
+    - 'data: {"type":"response.content_part.done","sequence_number":231,"output_index":4,"content_index":0,"item_id":"bdddc050080669d6","part":{"annotations":[],"text":"\n\nThe
+      MCP call failed with the error: failed to deserialize parameters: invalid type:
+      string \"not-an-integer\", expected i32.","type":"output_text","logprobs":null}}
 
       '
     - '
@@ -1789,10 +2302,9 @@ turns:
     - 'event: response.output_item.done
 
       '
-    - 'data: {"type":"response.output_item.done","sequence_number":179,"output_index":4,"item":{"id":"b6666d8a3f69eacc","content":[{"annotations":[],"text":"\n\nThe
-      MCP call failed with an error stating it could not deserialize the parameters
-      due to receiving a string \"not-an-integer\" instead of the expected i32 integer
-      type.","type":"output_text","logprobs":null}],"role":"assistant","status":"completed","type":"message","phase":null,"summary":[]}}
+    - 'data: {"type":"response.output_item.done","sequence_number":232,"output_index":4,"item":{"id":"bdddc050080669d6","content":[{"annotations":[],"text":"\n\nThe
+      MCP call failed with the error: failed to deserialize parameters: invalid type:
+      string \"not-an-integer\", expected i32.","type":"output_text","logprobs":null}],"role":"assistant","status":"completed","type":"message","phase":null,"summary":[]}}
 
       '
     - '
@@ -1801,21 +2313,23 @@ turns:
     - 'event: response.completed
 
       '
-    - 'data: {"type":"response.completed","sequence_number":180,"response":{"id":"resp_01a08912-07f3-7200-9a9b-e4017de11702","object":"response","created_at":1789006057,"model":"Qwen/Qwen3.5-35B-A3B-FP8","status":"completed","output":[{"type":"mcp_list_tools","id":"mcpl_01a08912-088e-7911-8113-3238ea89dde1","server_label":"counter","tools":[{"name":"sum","description":"Calculate
-      the sum of two numbers","input_schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"a":{"format":"int32","type":"integer"},"b":{"format":"int32","type":"integer"}},"required":["a","b"],"type":"object"},"annotations":{"read_only":false}}]},{"type":"reasoning","id":"a88f1549a6314cfb","content":[{"type":"reasoning_text","text":"The
-      user is asking me to call the mcp__counter__sum function with a specific argument
-      object where \"a\" is \"not-an-integer\" (a string instead of an integer) and
-      \"b\" is 2. They explicitly say not to correct the argument type, and to report
-      the error in one sentence after the call fails.\n\nLet me make the call exactly
-      as requested, then report the error.\n"}],"summary":[],"encrypted_content":null,"status":"completed"},{"type":"mcp_call","id":"mcp_9b37b73cd3545a63","server_label":"counter","name":"sum","arguments":"{\"a\":
+    - 'data: {"type":"response.completed","sequence_number":233,"response":{"id":"resp_01a08eb5-739f-78c0-a659-307b65b6c201","object":"response","created_at":1789100653,"model":"Qwen/Qwen3.5-35B-A3B-FP8","status":"completed","output":[{"type":"mcp_list_tools","id":"mcpl_01a08eb5-7461-7be0-9c74-4919f0a9c2e2","server_label":"counter","tools":[{"name":"sum","description":"Calculate
+      the sum of two numbers","input_schema":{"$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"a":{"format":"int32","type":"integer"},"b":{"format":"int32","type":"integer"}},"required":["a","b"],"type":"object"},"annotations":{"read_only":false}}]},{"type":"reasoning","id":"8007a03de60a9814","content":[{"type":"reasoning_text","text":"The
+      user wants me to call the mcp__counter__sum function with specific arguments,
+      even though one of them is not the correct type. They explicitly said not to
+      correct the argument type. They want me to report the error in one sentence
+      after it fails.\n\nI need to call mcp__counter__sum with:\n- a: \"not-an-integer\"
+      (a string, not an integer)\n- b: 2 (an integer)\n\nThis should fail because
+      \"a\" should be an integer according to the schema, but I''m providing a string.
+      I''ll make the call and then report the error.\n"}],"summary":[],"encrypted_content":null,"status":"completed"},{"type":"mcp_call","id":"mcp_970e09c486ca8d1d","server_label":"counter","name":"sum","arguments":"{\"a\":
       \"not-an-integer\", \"b\": 2}","status":"failed","approval_request_id":null,"output":null,"error":{"type":"mcp_tool_execution_error","content":[{"type":"text","text":"failed
       to deserialize parameters: invalid type: string \"not-an-integer\", expected
-      i32","annotations":null,"meta":null}]}},{"type":"reasoning","id":"befd7558066a6e6a","content":[{"type":"reasoning_text","text":"The
-      call failed as expected because the parameter \"a\" was a string instead of
-      an integer. I need to report this error in one sentence as requested.\n"}],"summary":[],"encrypted_content":null,"status":"completed"},{"type":"message","id":"b6666d8a3f69eacc","role":"assistant","status":"completed","content":[{"type":"output_text","text":"\n\nThe
-      MCP call failed with an error stating it could not deserialize the parameters
-      due to receiving a string \"not-an-integer\" instead of the expected i32 integer
-      type.","annotations":[]}]}],"usage":{"input_tokens":971,"output_tokens":200,"total_tokens":1171,"input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":0}},"incomplete_details":null,"error":null,"previous_response_id":null,"conversation_id":null,"instructions":null}}
+      i32","annotations":null,"meta":null}]}},{"type":"reasoning","id":"8fc7aac1d93b0063","content":[{"type":"reasoning_text","text":"The
+      call failed as expected because I provided a string for parameter \"a\" when
+      it expected an integer. The error message indicates the deserialization failed
+      due to type mismatch. Now I need to report this error in one sentence as requested.\n"}],"summary":[],"encrypted_content":null,"status":"completed"},{"type":"message","id":"bdddc050080669d6","role":"assistant","status":"completed","content":[{"type":"output_text","text":"\n\nThe
+      MCP call failed with the error: failed to deserialize parameters: invalid type:
+      string \"not-an-integer\", expected i32.","annotations":[]}]}],"usage":{"input_tokens":1015,"output_tokens":253,"total_tokens":1268,"input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":0}},"incomplete_details":null,"error":null,"previous_response_id":null,"conversation_id":null,"instructions":null}}
 
       '
     - '

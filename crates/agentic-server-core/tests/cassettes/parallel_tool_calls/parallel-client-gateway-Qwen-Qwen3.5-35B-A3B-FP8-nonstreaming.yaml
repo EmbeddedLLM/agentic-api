@@ -54,54 +54,55 @@ turns:
   response:
     body:
       conversation_id: null
-      created_at: 1789006025
+      created_at: 1789100625
       error: null
-      id: resp_01a08911-8f8d-7090-a99c-cf6b434df7bf
+      id: resp_01a08eb5-0836-75f0-a4ce-6a18b4a4ce99
       incomplete_details: null
       instructions: null
       model: Qwen/Qwen3.5-35B-A3B-FP8
       object: response
       output:
       - content:
-        - text: 'The user is asking me to make three function calls in parallel, in
-            a single turn. They want me to:
+        - text: 'The user is asking me to make three function calls in parallel:
+
+            1. get_weather for "Tokyo"
+
+            2. get_stock_price for "AAPL"
+
+            3. set_temperature_unit with "fahrenheit" as the input
 
 
-            1. Call get_weather for "Tokyo"
-
-            2. Call get_stock_price for "AAPL"
-
-            3. Call set_temperature_unit to set their preferred unit to "fahrenheit"
+            I need to make all three calls in a single turn without waiting for one
+            before starting another. Let me structure the function calls properly.
 
 
-            The user specifically says to do these in parallel and not wait for one
-            before starting another. This is possible in this system - I can make
-            multiple tool calls in parallel within a single turn.
+            For set_temperature_unit, the parameter is "input" which should be the
+            raw unit as plain text, so it should be "fahrenheit".
 
 
-            Let me make all three calls:
+            Let me make all three function calls.
 
             '
           type: reasoning_text
         encrypted_content: null
-        id: rs_94ae03d68a8b49cf
+        id: rs_a691a191d01e207d
         status: null
         summary: []
         type: reasoning
       - arguments: '{"city": "Tokyo"}'
-        call_id: chatcmpl-tool-a334b0154d190a39
-        id: fc_a9d6ce8a29dadb8d
+        call_id: chatcmpl-tool-903dc5c0b5178183
+        id: fc_898976af724cea37
         name: get_weather
         status: completed
         type: function_call
       - arguments: '{"ticker": "AAPL"}'
-        call_id: chatcmpl-tool-a62d21f46dd2eed9
-        id: fc_bc6bf8b8446db78e
+        call_id: chatcmpl-tool-9ed22ce866a7d90f
+        id: fc_8aa436dcab66c6fd
         name: get_stock_price
         status: completed
         type: function_call
-      - call_id: chatcmpl-tool-8062e7488d128e91
-        id: ctc_be65136187f737ef
+      - call_id: chatcmpl-tool-80a5b6d762d0c7dc
+        id: ctc_8e4cb75f2b36757b
         input: fahrenheit
         name: set_temperature_unit
         status: completed
@@ -112,10 +113,10 @@ turns:
         input_tokens: 661
         input_tokens_details:
           cached_tokens: 0
-        output_tokens: 195
+        output_tokens: 200
         output_tokens_details:
           reasoning_tokens: 0
-        total_tokens: 856
+        total_tokens: 861
     headers:
       content-type: application/json
     status_code: 200
@@ -123,13 +124,13 @@ turns:
   request:
     body:
       input:
-      - call_id: chatcmpl-tool-a334b0154d190a39
+      - call_id: chatcmpl-tool-903dc5c0b5178183
         output: '{"city": "Tokyo", "temperature_c": 22, "condition": "Clear"}'
         type: function_call_output
-      - call_id: chatcmpl-tool-a62d21f46dd2eed9
+      - call_id: chatcmpl-tool-9ed22ce866a7d90f
         output: '{"ticker": "AAPL", "price": 231.45, "currency": "USD"}'
         type: function_call_output
-      - call_id: chatcmpl-tool-8062e7488d128e91
+      - call_id: chatcmpl-tool-80a5b6d762d0c7dc
         output: '{"status": "ok", "unit": "fahrenheit"}'
         type: custom_tool_call_output
       - content: What did you find for the weather and the stock price, and what temperature
@@ -139,7 +140,7 @@ turns:
       max_output_tokens: 2048
       model: Qwen/Qwen3.5-35B-A3B-FP8
       parallel_tool_calls: true
-      previous_response_id: resp_01a08911-8f8d-7090-a99c-cf6b434df7bf
+      previous_response_id: resp_01a08eb5-0836-75f0-a4ce-6a18b4a4ce99
       store: true
       stream: false
       tool_choice: auto
@@ -185,76 +186,56 @@ turns:
   response:
     body:
       conversation_id: null
-      created_at: 1789006027
+      created_at: 1789100626
       error: null
-      id: resp_01a08911-94f1-7813-a188-7d28ebe32478
+      id: resp_01a08eb5-0db0-7f23-b6b5-6ab16bf30788
       incomplete_details: null
       instructions: null
       model: Qwen/Qwen3.5-35B-A3B-FP8
       object: response
       output:
       - content:
-        - text: 'The user is asking me to summarize the results from the three function
-            calls I made in parallel. Let me look at the responses:
+        - text: 'The user is asking for a summary of the three tool calls I made.
+            Let me compile the information:
 
 
-            1. Weather for Tokyo: temperature_c was 22°C, condition was "Clear"
+            1. Weather for Tokyo: 22°C, Clear condition
 
-            2. Stock price for AAPL: price was 231.45 USD
+            2. Stock price for AAPL: $231.45 USD
 
-            3. Temperature unit: was set to fahrenheit successfully
+            3. Temperature unit: fahrenheit (successfully set)
 
 
-            I should provide a clear summary of all three results to the user.
+            I should present this information clearly in my response.
 
             '
           type: reasoning_text
         encrypted_content: null
-        id: rs_b092fdc3431bc35d
+        id: rs_92d2843d61e99da4
         status: null
         summary: []
         type: reasoning
       - content:
         - annotations: []
-          text: '
-
-
-            Here''s what I found:
-
-
-            **Weather in Tokyo:**
-
-            - Temperature: 22°C (72°F - now in your preferred Fahrenheit unit)
-
-            - Condition: Clear
-
-
-            **AAPL Stock Price:**
-
-            - Price: $231.45 USD
-
-
-            **Temperature Unit:**
-
-            - Successfully set to Fahrenheit for the rest of this conversation
-
-
-            All three requests completed successfully!'
+          text: "\n\nHere's what I found:\n\n**Weather in Tokyo:** \n- Temperature:\
+            \ 22°C\n- Condition: Clear\n\n**Stock Price for AAPL:**\n- Price: $231.45\
+            \ USD\n\n**Temperature Unit:**\n- Successfully set to: fahrenheit (this\
+            \ will be used for all weather reports in our conversation going forward)"
           type: output_text
-        id: msg_ac7aa5394481d502
+        id: msg_ba2133d04b8167d5
         role: assistant
         status: completed
         type: message
-      previous_response_id: resp_01a08911-8f8d-7090-a99c-cf6b434df7bf
+      previous_response_id: resp_01a08eb5-0836-75f0-a4ce-6a18b4a4ce99
       status: completed
       usage:
         input_tokens: 850
         input_tokens_details:
           cached_tokens: 0
-        output_tokens: 176
+        output_tokens: 152
         output_tokens_details:
           reasoning_tokens: 0
-        total_tokens: 1026
+        total_tokens: 1002
     headers:
       content-type: application/json
     status_code: 200
@@ -267,7 +248,7 @@ turns:
       max_output_tokens: 2048
       model: Qwen/Qwen3.5-35B-A3B-FP8
       parallel_tool_calls: true
-      previous_response_id: resp_01a08911-94f1-7813-a188-7d28ebe32478
+      previous_response_id: resp_01a08eb5-0db0-7f23-b6b5-6ab16bf30788
       store: true
       stream: false
       tool_choice: auto
@@ -313,48 +294,48 @@ turns:
   response:
     body:
       conversation_id: null
-      created_at: 1789006027
+      created_at: 1789100627
       error: null
-      id: resp_01a08911-99eb-7c53-ac36-9bf1a895be2e
+      id: resp_01a08eb5-1213-7303-8cc8-e8f62c1bbfb7
       incomplete_details: null
       instructions: null
       model: Qwen/Qwen3.5-35B-A3B-FP8
       object: response
       output:
       - content:
-        - text: 'The user is asking me to call get_weather for two cities (Tokyo and
-            Paris) in parallel in a single turn. I need to make both function calls
-            at the same time, not wait for one before the other.
+        - text: 'The user wants me to call get_weather for both Tokyo and Paris in
+            parallel, in the same turn. I need to make both function calls without
+            waiting for one to complete before starting the other.
 
             '
           type: reasoning_text
         encrypted_content: null
-        id: rs_96a8c4d2bc1bacd8
+        id: rs_99c888af519305c0
         status: null
         summary: []
         type: reasoning
       - arguments: '{"city": "Tokyo"}'
-        call_id: chatcmpl-tool-964b5368c170cf60
-        id: fc_9670bdb6d15467df
+        call_id: chatcmpl-tool-92036da04381eabb
+        id: fc_88fc3fee721cb589
         name: get_weather
         status: completed
         type: function_call
       - arguments: '{"city": "Paris"}'
-        call_id: chatcmpl-tool-9e479691a87fda81
-        id: fc_b4f9d94c30093412
+        call_id: chatcmpl-tool-9565d1c73d281fe2
+        id: fc_9c82f7296b50aecb
         name: get_weather
         status: completed
         type: function_call
-      previous_response_id: resp_01a08911-94f1-7813-a188-7d28ebe32478
+      previous_response_id: resp_01a08eb5-0db0-7f23-b6b5-6ab16bf30788
       status: completed
       usage:
-        input_tokens: 986
+        input_tokens: 979
         input_tokens_details:
           cached_tokens: 0
-        output_tokens: 101
+        output_tokens: 95
         output_tokens_details:
           reasoning_tokens: 0
-        total_tokens: 1087
+        total_tokens: 1074
     headers:
       content-type: application/json
     status_code: 200
@@ -362,10 +343,10 @@ turns:
   request:
     body:
       input:
-      - call_id: chatcmpl-tool-964b5368c170cf60
+      - call_id: chatcmpl-tool-92036da04381eabb
         output: '{"city": "Tokyo", "temperature_c": 22, "condition": "Clear"}'
         type: function_call_output
-      - call_id: chatcmpl-tool-9e479691a87fda81
+      - call_id: chatcmpl-tool-9565d1c73d281fe2
         output: '{"city": "Paris", "temperature_c": 22, "condition": "Clear"}'
         type: function_call_output
       - content: What's the weather in each of those two cities?
@@ -374,7 +355,7 @@ turns:
       max_output_tokens: 2048
       model: Qwen/Qwen3.5-35B-A3B-FP8
       parallel_tool_calls: true
-      previous_response_id: resp_01a08911-99eb-7c53-ac36-9bf1a895be2e
+      previous_response_id: resp_01a08eb5-1213-7303-8cc8-e8f62c1bbfb7
       store: true
       stream: false
       tool_choice: auto
@@ -420,35 +401,23 @@ turns:
   response:
     body:
       conversation_id: null
-      created_at: 1789006029
+      created_at: 1789100628
       error: null
-      id: resp_01a08911-9d1c-71a3-a9c8-793c729cb6b7
+      id: resp_01a08eb5-1530-7d30-a99b-df263c0b91a1
       incomplete_details: null
       instructions: null
       model: Qwen/Qwen3.5-35B-A3B-FP8
       object: response
       output:
       - content:
-        - text: 'The user is asking about the weather in the two cities I just looked
-            up (Tokyo and Paris). I have the results from the parallel function calls,
-            so I can provide this information directly.
-
-
-            From the results:
-
-            - Tokyo: 22°C, Clear
-
-            - Paris: 22°C, Clear
-
-
-            Since I set the temperature unit to Fahrenheit earlier in the conversation,
-            I should convert these to Fahrenheit for the user. 22°C = 71.6°F (approximately
-            72°F).
+        - text: 'The user is asking about the weather in the two cities I just checked
+            - Tokyo and Paris. I have the results from both function calls and can
+            provide a clear comparison.
 
             '
           type: reasoning_text
         encrypted_content: null
-        id: rs_a1ed86ff1b91216f
+        id: rs_96d3daace0bd6cc2
         status: null
         summary: []
         type: reasoning
@@ -462,35 +431,36 @@ turns:
 
             **Tokyo:**
 
-            - Temperature: 22°C (72°F)
+            - Temperature: 22°C (71.6°F)
 
             - Condition: Clear
 
 
             **Paris:**
 
-            - Temperature: 22°C (72°F)
+            - Temperature: 22°C (71.6°F)
 
             - Condition: Clear
 
 
-            Both cities have the same clear weather conditions and temperature right
-            now!'
+            Both cities are experiencing the same weather conditions right now - clear
+            skies with a temperature of 22°C. The temperature has been automatically
+            converted to Fahrenheit as you requested earlier in our conversation.'
           type: output_text
-        id: msg_83026635403c4c10
+        id: msg_987cd7ec9285c3d1
         role: assistant
         status: completed
         type: message
-      previous_response_id: resp_01a08911-99eb-7c53-ac36-9bf1a895be2e
+      previous_response_id: resp_01a08eb5-1213-7303-8cc8-e8f62c1bbfb7
       status: completed
       usage:
-        input_tokens: 1114
+        input_tokens: 1107
         input_tokens_details:
           cached_tokens: 0
-        output_tokens: 177
+        output_tokens: 134
         output_tokens_details:
           reasoning_tokens: 0
-        total_tokens: 1291
+        total_tokens: 1241
     headers:
       content-type: application/json
     status_code: 200
