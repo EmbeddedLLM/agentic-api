@@ -1389,3 +1389,159 @@ fn public_catalog_distinguishes_inactive_search_from_an_empty_active_catalog() {
         assert_eq!(payload.tools.is_some(), active);
     }
 }
+
+#[test]
+fn shell_function_arguments_restore_openai_shell_lifecycle() {
+    let mut accumulator = ResponseAccumulator::new("resp_1".to_owned(), None);
+    let context = test_context(HashMap::from([("shell".to_owned(), ToolType::Shell)]));
+    let mut translator = TranslationDispatcher::new(context);
+    let events = [
+        serde_json::json!({
+            "type": "response.output_item.added", "output_index": 0,
+            "item": {"id": "fc_shell", "type": "function_call", "call_id": "call_shell",
+                "name": "shell", "arguments": "", "status": "in_progress"}
+        }),
+        serde_json::json!({
+            "type": "response.function_call_arguments.delta", "output_index": 0,
+            "item_id": "fc_shell", "call_id": "call_shell",
+            "delta": "{\"commands\":[\"pwd\"],\"timeout_ms\":1000}"
+        }),
+        serde_json::json!({
+            "type": "response.function_call_arguments.done", "output_index": 0,
+            "item_id": "fc_shell", "call_id": "call_shell", "name": "shell",
+            "arguments": "{\"commands\":[\"pwd\"],\"timeout_ms\":1000}"
+        }),
+        serde_json::json!({
+            "type": "response.output_item.done", "output_index": 0,
+            "item": {"id": "fc_shell", "type": "function_call", "call_id": "call_shell",
+                "name": "shell", "arguments": "{\"commands\":[\"pwd\"],\"timeout_ms\":1000}",
+                "status": "completed"}
+        }),
+    ];
+
+    let frames = events
+        .iter()
+        .flat_map(|event| translate(&mut accumulator, &mut translator, event).frames)
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        frames.iter().map(|frame| frame.event_type).collect::<Vec<_>>(),
+        [
+            SSEEventType::OutputItemAdded,
+            SSEEventType::ShellCallCommandAdded,
+            SSEEventType::ShellCallCommandDelta,
+            SSEEventType::ShellCallCommandDone,
+            SSEEventType::OutputItemDone
+        ]
+    );
+    assert_eq!(frames[0].wire.rest["item"]["type"], "shell_call");
+    assert_eq!(frames[0].wire.rest["item"]["id"], "sh_shell");
+    assert_eq!(frames[0].wire.rest["item"]["status"], "in_progress");
+    assert_eq!(frames[0].wire.rest["item"]["action"]["commands"], serde_json::json!([]));
+    assert_eq!(frames[3].wire.rest["command"], "pwd");
+    assert_eq!(frames[4].wire.rest["item"]["status"], "completed");
+}
+
+#[test]
+fn gateway_owned_shell_suppresses_canonical_lifecycle() {
+    let mut accumulator = ResponseAccumulator::new("resp_1".to_owned(), None);
+    let context = test_context(HashMap::from([("shell".to_owned(), ToolType::Shell)]))
+        .with_gateway_owned_names(HashSet::from(["shell".to_owned()]));
+    let mut translator = TranslationDispatcher::new(context);
+    for event in [
+        serde_json::json!({
+            "type": "response.output_item.added", "output_index": 0,
+            "item": {"id": "fc_shell", "type": "function_call", "call_id": "call_shell",
+                "name": "shell", "arguments": "", "status": "in_progress"}
+        }),
+        serde_json::json!({
+            "type": "response.function_call_arguments.delta", "output_index": 0,
+            "item_id": "fc_shell", "delta": "{\"commands\":[\"pwd\"]}"
+        }),
+        serde_json::json!({
+            "type": "response.output_item.done", "output_index": 0,
+            "item": {"id": "fc_shell", "type": "function_call", "call_id": "call_shell",
+                "name": "shell", "arguments": "{\"commands\":[\"pwd\"]}", "status": "completed"}
+        }),
+    ] {
+        let translated = translate(&mut accumulator, &mut translator, &event);
+        assert!(translated.frames.is_empty());
+        assert_eq!(translated.defer_from_output_index, Some(0));
+    }
+}
+
+#[test]
+fn shell_commands_stream_before_arguments_done_with_split_escapes_and_reordered_fields() {
+    let mut accumulator = ResponseAccumulator::new("resp_1".to_owned(), None);
+    let context = test_context(HashMap::from([("shell".to_owned(), ToolType::Shell)]));
+    let mut translator = TranslationDispatcher::new(context);
+    translate(
+        &mut accumulator,
+        &mut translator,
+        &serde_json::json!({
+            "type": "response.output_item.added", "output_index": 2,
+            "item": {"id": "fc_shell", "type": "function_call", "call_id": "call_shell",
+                "name": "shell", "arguments": "", "status": "in_progress"}
+        }),
+    );
+    let arguments = r#"{"timeout_ms":1000,"metadata":{"commands":["ignored"]},"commands":["echo \"hi\"\n\uD83D\uDE00","","pwd"],"max_output_length":4096}"#;
+    let mut frames = Vec::new();
+    for ch in arguments.chars() {
+        frames.extend(
+            translate(
+                &mut accumulator,
+                &mut translator,
+                &serde_json::json!({
+                    "type": "response.function_call_arguments.delta", "output_index": 2,
+                    "item_id": "fc_shell", "call_id": "call_shell", "delta": ch.to_string()
+                }),
+            )
+            .frames,
+        );
+    }
+    let commands = frames
+        .iter()
+        .filter(|frame| frame.event_type == SSEEventType::ShellCallCommandDone)
+        .map(|frame| frame.wire.rest["command"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(commands, ["echo \"hi\"\n😀", "", "pwd"]);
+    assert!(frames.iter().all(|frame| frame.wire.output_index == Some(2)));
+    assert_eq!(
+        frames
+            .iter()
+            .filter(|frame| frame.event_type == SSEEventType::ShellCallCommandAdded)
+            .count(),
+        3
+    );
+    let done = translate(
+        &mut accumulator,
+        &mut translator,
+        &serde_json::json!({
+            "type": "response.function_call_arguments.done", "output_index": 2,
+            "item_id": "fc_shell", "call_id": "call_shell", "name": "shell", "arguments": arguments
+        }),
+    );
+    assert!(done.frames.is_empty(), "don't repeat completed command events");
+}
+
+#[test]
+fn malformed_shell_arguments_fail_closed() {
+    let mut accumulator = ResponseAccumulator::new("resp_1".to_owned(), None);
+    let context = test_context(HashMap::from([("shell".to_owned(), ToolType::Shell)]));
+    let mut translator = TranslationDispatcher::new(context);
+    let added = serde_json::json!({
+        "type": "response.output_item.added", "output_index": 0,
+        "item": {"id": "fc_shell", "type": "function_call", "call_id": "call_shell",
+            "name": "shell", "arguments": "", "status": "in_progress"}
+    });
+    translate(&mut accumulator, &mut translator, &added);
+    let done = serde_json::json!({
+        "type": "response.function_call_arguments.done", "output_index": 0,
+        "item_id": "fc_shell", "call_id": "call_shell", "name": "shell",
+        "arguments": "not-json"
+    });
+
+    let error = RoundIngestion::translate_line(&mut accumulator, SseLine::parse(&sse(&done)), &mut translator)
+        .expect_err("invalid shell action must fail");
+    assert!(error.to_string().contains("invalid action arguments"));
+}

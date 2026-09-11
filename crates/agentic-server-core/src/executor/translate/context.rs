@@ -13,6 +13,7 @@ use std::collections::{HashMap, HashSet};
 #[derive(Default)]
 pub(in crate::executor) struct TranslationContext {
     tool_types: HashMap<String, ToolType>,
+    gateway_owned_names: HashSet<String>,
     withheld_function_names: HashSet<String>,
     tool_search_active: bool,
     namespace_map: Option<NamespaceMap>,
@@ -45,6 +46,16 @@ impl TranslationContext {
         }
     }
 
+    /// Resolved ownership copied from the registry, including opt-in gateway shell execution.
+    pub(in crate::executor) fn with_gateway_owned_names(mut self, names: HashSet<String>) -> Self {
+        self.gateway_owned_names = names;
+        self
+    }
+
+    pub(super) fn is_gateway_owned(&self, name: &str) -> bool {
+        self.gateway_owned_names.contains(name)
+    }
+
     /// Owned public mappings; construction performs no registry lookups.
     pub(in crate::executor) fn with_response_metadata(
         mut self,
@@ -62,6 +73,13 @@ impl TranslationContext {
 
     pub(super) fn restore_stream_event_wire(&self, wire: &mut WireEvent) -> ExecutorResult<()> {
         super::tool_search::restore_response_tools(wire, self.response_tools.as_deref())?;
+        if self.response_tools.is_some()
+            && let Some(choice) = self.response_tool_choice.as_ref()
+            && let Some(response) = wire.rest.get_mut("response").and_then(serde_json::Value::as_object_mut)
+            && response.contains_key("tool_choice")
+        {
+            response.insert("tool_choice".to_owned(), serde_json::to_value(choice)?);
+        }
         super::custom::CustomTranslator::restore_response_wire(wire, self.custom_tool_map.as_ref());
         let _ = super::namespace::CodexNamespaceTranslator::restore_response_wire(wire, self.namespace_map.as_ref());
         Ok(())

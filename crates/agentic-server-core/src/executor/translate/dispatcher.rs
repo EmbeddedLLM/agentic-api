@@ -167,8 +167,15 @@ impl TranslationDispatcher {
             ToolType::Function => Box::new(FunctionHandler::new_translator()),
             ToolType::CodexNamespace => Box::new(CodexNamespaceHandler::new_translator()),
             ToolType::Custom => Box::new(CustomHandler::new_translator()),
+            ToolType::Shell if !self.context.is_gateway_owned(name) => {
+                Box::new(crate::tool::ShellHandler::new_translator())
+            }
             ToolType::ToolSearch => Box::new(ToolSearchHandler::new_translator()),
-            ToolType::Mcp | ToolType::WebSearch | ToolType::FileSearch | ToolType::CodeInterpreter => {
+            ToolType::Shell
+            | ToolType::Mcp
+            | ToolType::WebSearch
+            | ToolType::FileSearch
+            | ToolType::CodeInterpreter => {
                 self.active.insert(output_index, ActiveCall::Gateway);
                 if self.first_gateway_output_index.is_none_or(|first| output_index < first) {
                     self.first_gateway_output_index = Some(output_index);

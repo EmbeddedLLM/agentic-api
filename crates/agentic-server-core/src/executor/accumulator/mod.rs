@@ -25,6 +25,7 @@ use crate::types::request_response::{IncompleteDetails, ResponsePayload};
 use crate::utils::common::{deserialize_from_str, deserialize_from_value_opt};
 use crate::utils::uuid7_str;
 
+mod completion;
 mod json;
 mod slot;
 
@@ -643,6 +644,7 @@ fn output_item_call_id(item: &OutputItem) -> Option<&str> {
         OutputItem::FunctionCall(call) => Some(&call.call_id),
         OutputItem::ToolSearchCall(call) => Some(&call.call_id),
         OutputItem::CustomToolCall(call) => Some(&call.call_id),
+        OutputItem::ShellCall(call) => Some(&call.call_id),
         _ => None,
     }
 }
@@ -667,7 +669,7 @@ fn item_identity<'a>(frame: &'a EventFrame, validated: Option<&ValidatedFrame<'a
     if let Some(item) = validated.and_then(|frame| frame.item.as_ref()) {
         return Some(ItemIdentity {
             index: Some(OutputIndex::new(item.output_index)),
-            item_id: Some(item.item_id),
+            item_id: (!item.item_id.is_empty()).then_some(item.item_id),
             item_type: item.item_type,
         });
     }

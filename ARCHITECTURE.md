@@ -538,8 +538,11 @@ state.
 
 Output items are constructed through their `TryFrom<&EventPayload>` implementations in
 `types/io/output.rs`. Active slots fold deltas in place and use the type's `ApplyDone`
-implementation when its completion event arrives. Finalization promotes each completed
-typed item once and preserves validated output-index order.
+implementation when its completion event arrives. For an already parsed output-item
+completion, the private `MergeDone` implementations in `accumulator/completion.rs`
+merge the concrete item with its retained fields and buffers. `slot.rs` dispatches
+to those implementations after validating identity and lifecycle. Finalization
+promotes each completed typed item once and preserves validated output-index order.
 
 The pipeline's streaming entry is `process_line(ClassifiedSseLine)`. It normalizes and
 validates a data line, applies the event to the slot keyed by its validated output
@@ -561,6 +564,7 @@ translation state, classifies each validated function call from an owned
 
 - `FunctionHandler` → `FunctionTranslator`
 - `CustomHandler` → `CustomTranslator`
+- `ShellHandler` → `ShellTranslator`
 - `CodexNamespaceHandler` → `CodexNamespaceTranslator`
 - `ToolSearchHandler` → `ToolSearchTranslator`
 
@@ -585,6 +589,12 @@ starts, completes, or fails. `GatewayStreamAccumulator` then assigns cross-round
 sequence numbers, rebases output indexes, and deduplicates response start events.
 Events that arrive before a function name is known are buffered with a 256 KiB total
 byte limit and replayed when the call resolves.
+
+Shell functions are restored to `shell_call` and command SSE events for client
+execution by default. When an application registers a shell executor, the owned
+translation context carries the resolved gateway ownership so the dispatcher
+suppresses the canonical function lifecycle. The gateway event plan then emits
+the shell call’s public added/done lifecycle.
 
 #### `gateway_accumulator.rs` and `pipeline/delivery.rs` — continuous client SSE
 
@@ -669,7 +679,7 @@ scheduler switch. It is forwarded to vLLM for all supported declaration mixtures
 defaults to `false` when omitted. Whatever calls the model emits are executed under
 the per-round execution permit limit and each handler's same-tool safety policy.
 
-#### `messages_loop.rs` / `messages_request.rs` / `messages_stream.rs`
+#### `messages_context.rs` / `messages_loop.rs` / `messages_request.rs` / `messages_stream.rs`
 
 A **parallel, independent implementation** of the same shape of loop for the Anthropic
 Messages API. `messages_stream.rs`'s own header comment describes it as "structurally
@@ -681,6 +691,18 @@ pieces: `ToolRegistry::dispatch` and `types::messages::tool_seam`. The round/tim
 constants (`MAX_GATEWAY_TOOL_ROUNDS`, `GATEWAY_TOOL_TIMEOUT`) are duplicated and
 manually kept in sync with the Responses-side ones rather than shared — a known seam,
 not an oversight, per the future-consolidation note.
+
+Both loops take a `MessagesRequestContext` (`messages_context.rs`), the per-request
+type that replaced a bare `serde_json::Value` at that boundary. It holds two views of
+one request: a typed `MessagesRequest` for reading `tools`/`stream`/`model`, and the
+raw JSON body that is actually forwarded upstream. The raw body is deliberately *not*
+re-serialized from the typed view — `ContentBlock` catches unmodeled block types in
+`#[serde(other)] Unknown` and models only the fields the gateway reads, so a typed
+round-trip would drop `cache_control` and `is_error` and collapse `image`/
+`redacted_thinking` into `{"type":"unknown"}`. The context owns every mutation the
+loops make to that body (`force_stream`, `append_round`) and the native web-search
+budget, so the two views cannot drift apart uncontrolled; `messages` and `system` are
+reachable only through the raw body, never the typed view.
 
 ### `storage/` — persistence
 
@@ -878,12 +900,22 @@ declaration until they have a complete handler and execution path.
   reused across requests, specifically for gateway tools that need **lazy, per-request
   connection setup**: MCP servers (connects and caches `McpClient`s keyed by server
   URL, falling back to connecting a fresh request-declared server) and the shared
-  `WebSearchHandler`. As of today it only has slots for `ToolType::Mcp` and
-  `ToolType::WebSearch`; `GatewayExecutorRegistration` has typed variants for those
-  supported slots. Client-owned
+  `WebSearchHandler`. It also has an optional, application-provided `ShellExecutor`
+  slot. `GatewayExecutorRegistration::Shell` is an explicit execution grant; an
+  unregistered shell declaration remains client-executed. `ShellExecutor` accepts
+  a typed call with bounded action limits and cancellation and returns typed command
+  outputs. The adapter binds into the existing gateway scheduler, not a second tool loop.
+  Client-owned
   tools (`function`, `custom`, `namespace`) never touch this file; their registry
   entries are inserted with `ToolOwnership::Client` and no `GatewayExecutors`
   involvement.
+
+Shell item history is preserved publicly in storage. At the inference boundary,
+`ShellHandler::model_input` lowers shell calls and outputs into matching function
+history, just as declarations and explicit shell selectors are normalized. For an
+opt-in gateway executor, storage additionally retains the canonical internal function
+call/output pair; rehydration omits that pair's public shell-call projection to avoid
+replaying the invocation twice. Client-executed shell history is not omitted.
 
 **To add a new tool type:**
 1. Implement `ToolHandler`, including its typed `ToolParams`, for it.

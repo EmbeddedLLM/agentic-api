@@ -4,8 +4,17 @@ use super::HasTranslator;
 use super::custom::CustomTranslator;
 use super::function::FunctionTranslator;
 use super::namespace::CodexNamespaceTranslator;
+use super::shell::ShellTranslator;
 use super::tool_search::ToolSearchTranslator;
-use crate::tool::{CodexNamespaceHandler, CustomHandler, FunctionHandler, ToolSearchHandler};
+use crate::tool::{CodexNamespaceHandler, CustomHandler, FunctionHandler, ShellHandler, ToolSearchHandler};
+
+impl HasTranslator for ShellHandler {
+    type Translator = ShellTranslator;
+
+    fn new_translator() -> Self::Translator {
+        ShellTranslator::default()
+    }
+}
 
 impl HasTranslator for FunctionHandler {
     type Translator = FunctionTranslator;

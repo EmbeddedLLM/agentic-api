@@ -23,10 +23,16 @@ struct ToolSearchIdentity {
     call_id: String,
 }
 
+/// Retained until the synthetic call completes, including across an aborted item.done.
+#[derive(Debug)]
+struct ToolSearchCallState {
+    internal_item_id: String,
+    output_index: u32,
+}
+
 #[derive(Debug, Default)]
 pub(super) struct ToolSearchTranslator {
-    internal_item_id: Option<String>,
-    output_index: u32,
+    state: Option<ToolSearchCallState>,
 }
 
 impl ToolTranslator for ToolSearchTranslator {
@@ -53,8 +59,10 @@ impl ToolTranslator for ToolSearchTranslator {
                     validate_tool_search_added(original, name)?;
                 }
                 let public = tool_search::started_public_call(call.item)?;
-                self.internal_item_id = Some(call.item.id.clone());
-                self.output_index = output_index;
+                self.state = Some(ToolSearchCallState {
+                    internal_item_id: call.item.id.clone(),
+                    output_index,
+                });
                 Ok(vec![tool_search_frame(
                     SSEEventType::OutputItemAdded,
                     output_index,
@@ -72,13 +80,14 @@ impl ToolTranslator for ToolSearchTranslator {
                 let completed = matches!(&original.payload, EventPayload::OutputItemDone { item, .. }
                     if item.get("status").and_then(Value::as_str) == Some("completed"));
                 if completed {
+                    let state = self
+                        .state
+                        .as_ref()
+                        .ok_or_else(|| ExecutorError::Tool(tool_search::invalid_upstream_search_call()))?;
                     let public = tool_search::completed_public_call(call.item)?;
-                    self.internal_item_id = None;
-                    Ok(vec![tool_search_frame(
-                        SSEEventType::OutputItemDone,
-                        self.output_index,
-                        &public,
-                    )?])
+                    let frame = tool_search_frame(SSEEventType::OutputItemDone, state.output_index, &public)?;
+                    self.state = None;
+                    Ok(vec![frame])
                 } else {
                     Ok(Vec::new())
                 }
@@ -88,10 +97,11 @@ impl ToolTranslator for ToolSearchTranslator {
     }
 
     fn unfinished_tool_search_item_id(&self) -> Option<&str> {
-        self.internal_item_id.as_deref()
+        self.state.as_ref().map(|state| state.internal_item_id.as_str())
     }
 }
 
+/// Round-wide checks shared by native and synthetic search calls.
 #[derive(Debug, Default)]
 pub(super) struct ToolSearchStreamState {
     active_native_tool_search: HashSet<u32>,
