@@ -29,6 +29,14 @@ export function isInstallMethod(value: unknown): value is InstallMethod {
   return value === 'crates' || value === 'pypi' || value === 'source';
 }
 
+export function getServeCommand(installation: InstallMethod) {
+  if (installation === 'pypi')
+    return 'python -m agentic_api serve --vllm-base-url http://127.0.0.1:5050';
+  const executable =
+    installation === 'source' ? './target/debug/agentic' : 'agentic';
+  return executable + ' serve --upstream http://127.0.0.1:5050';
+}
+
 export function getLaunchCommands(installation: InstallMethod) {
   const executable =
     installation === 'source' ? './target/debug/agentic' : 'agentic';
@@ -63,6 +71,7 @@ export function getLaunchInstructions(input: unknown) {
     note: INSTALL_METHODS[installation].note,
     install: INSTALL_METHODS[installation].command,
     launch: getLaunchCommands(installation)[input.harness],
+    serve: getServeCommand(installation),
     guide: REPO + '#agentic-api-cli',
   };
 }

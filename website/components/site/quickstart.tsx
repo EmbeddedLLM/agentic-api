@@ -8,6 +8,7 @@ import {
   type InstallMethod,
   isInstallMethod,
   getLaunchCommands,
+  getServeCommand,
   getLaunchInstructions,
 } from '@/lib/quickstart';
 import { REPO } from '@/lib/site';
@@ -193,6 +194,15 @@ export function Quickstart() {
               </TabsContent>
             ))}
           </Tabs>
+          <CopyCode
+            key={installation + '-serve'}
+            code={getServeCommand(installation)}
+            label="Start the standalone server"
+          />
+          <p className="install-note">
+            Or launch a coding client below; its launcher starts the gateway for
+            you.
+          </p>
           <Tabs defaultValue="codex" className="launch-tabs">
             <TabsList
               className="launch-tab-list"

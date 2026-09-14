@@ -2,7 +2,17 @@
 
 All notable changes to Agentic API are documented here.
 
-## [Unreleased]
+## [0.7.0] - 2026-09-14
+
+### Added
+
+- Added client-executed shell tools with typed `shell_call` and `shell_call_output` items, incremental command
+  streaming, explicit tool selection, and stored-history continuation (#264).
+- Added a configurable serialized request size limit for HTTP bodies and WebSocket messages through
+  `--max-request-body-size-bytes`, `AGENTIC_MAX_REQUEST_BODY_SIZE_BYTES`, or `[server] max_request_body_size_bytes`,
+  retaining the 10 MiB default (#260).
+- Added the Agentic API website, versioned documentation navigation, contributor profiles, and automatic website
+  deployment after crate releases (#272, #285, #287).
 
 ### Changed
 
@@ -20,6 +30,33 @@ All notable changes to Agentic API are documented here.
   limits are unchanged. `WebSearchProviderConfig` keeps its existing public shape, gains a `new` constructor, and
   redacts the API key in `Debug` output; provider selection and per-provider concurrency configuration are
   deferred to the first additional provider.
+
+
+- Unified Responses JSON and SSE processing under `AgentPipeline`, sharing synchronous ingestion, typed output-item
+  assembly, tool-call translation, lifecycle validation, and ordered client delivery (#274).
+- Introduced `MessagesRequestContext` for the Messages tool loop, preserving unmodeled upstream fields while
+  centralizing request mutation and web-search budgets (#249).
+- Changed Rust integration APIs: Messages loops now accept `MessagesRequestContext`, the public `function_sse` module
+  was removed, and gateway configuration uses `GatewayOptions`. Downstream crate consumers must adapt affected
+  integrations (#249, #274, #260).
+
+### Fixed
+
+- Made stream delivery cancellation-safe, committing lifecycle and sequence state only after successful delivery and
+  bounding deferred events by count and bytes (#302).
+- Finished Messages inference rounds at `message_stop`, and allowed Messages to answer after forced tool use
+  (#290, #296).
+- Preserved incomplete upstream terminal status when an SSE completion event carries an incomplete response (#277).
+- Honored Responses WebSocket storage settings with bounded connection-local sessions (#257).
+- Applied the configured streaming chunk timeout to stalled upstream error-body reads in Responses streaming and
+  Messages tool-loop requests (#286).
+
+### Testing
+
+- Added opt-in Python wheel publishing through PyPI Trusted Publishing, using the declared Cargo workspace version,
+  and rejected duplicate PyPI and crates.io releases before building (#301).
+- Expanded shell-tool replay and continuation coverage, shared-ingestion lifecycle checks, WebSocket session and
+  storage tests, request-size boundary tests, and stalled upstream error-body regressions.
 
 ## [0.6.0] - 2026-09-09
 
