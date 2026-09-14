@@ -1,3 +1,14 @@
+//! Gateway-owned `web_search` tool.
+//!
+//! `mod.rs` owns the OpenAI-facing adapter: the [`WebSearchHandler`], the
+//! private [`WebSearchProvider`] contract, the typed result shape every
+//! provider normalizes into, and the mapping to public `web_search_call`
+//! output items. [`args`] parses the model's arguments; provider modules such
+//! as [`you`] shape requests and map responses.
+
+pub(crate) mod args;
+pub(crate) mod you;
+
 use std::collections::HashMap;
 use std::future::Future;
 use std::io::{self, Write};
@@ -6,22 +17,20 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use futures::{StreamExt, TryStreamExt};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use tokio::sync::Semaphore;
 
+use self::args::{MAX_WEB_SEARCH_QUERIES, WebSearchArguments};
+use self::you::{YOU_API_BASE_URL, YOU_API_KEY, YouSearchProvider};
 use super::handler::MAX_GATEWAY_TOOL_OUTPUT_BYTES;
 use super::handler::{GatewayExecutor, GatewayToolEventPlan, ToolError, ToolHandler, ToolOutput};
 use super::ownership::GatewayBinding;
 use super::registry::{ToolEntry, ToolType};
-use crate::config::DEFAULT_MAX_CONCURRENT_GATEWAY_CALLS;
+use crate::config::{DEFAULT_MAX_CONCURRENT_GATEWAY_CALLS, WebSearchProviderKind};
 use crate::types::io::output::{FunctionToolCall, WebSearchCall, WebSearchCallStatus, WebSearchSource};
 use crate::types::io::{FunctionTool, OutputItem};
-use crate::types::tools::{WebSearchContextSize, WebSearchToolParam};
-
-const YOU_API_KEY: &str = "YOU_API_KEY";
-const YOU_API_BASE_URL: &str = "YOU_API_BASE_URL";
-const MAX_WEB_SEARCH_QUERIES: usize = 5;
+use crate::types::tools::WebSearchToolParam;
 
 #[derive(Default)]
 struct CountingWriter {
@@ -166,6 +175,10 @@ impl WebSearchHandler {
         )
     }
 
+    /// Builds the You.com-backed handler.
+    ///
+    /// `max_concurrent_queries` is the gateway-wide ceiling; the provider's own
+    /// [`WebSearchProvider::max_concurrent_requests`] ceiling caps it again.
     #[must_use]
     pub fn from_values(
         client: Arc<reqwest::Client>,
@@ -173,10 +186,9 @@ impl WebSearchHandler {
         base_url: Option<String>,
         max_concurrent_queries: NonZeroUsize,
     ) -> Self {
-        Self::with_provider_and_query_concurrency(
-            Arc::new(YouSearchProvider::from_values(client, api_key, base_url)),
-            max_concurrent_queries,
-        )
+        let provider = Arc::new(YouSearchProvider::from_values(client, api_key, base_url));
+        let effective = effective_query_concurrency(provider.as_ref(), max_concurrent_queries);
+        Self::with_provider_and_query_concurrency(provider, effective)
     }
 
     #[must_use]
@@ -226,7 +238,7 @@ impl WebSearchHandler {
             .as_ref()
             .ok_or_else(|| ToolError::Config("web_search spec-only handler cannot execute tools".to_owned()))?;
         let args = WebSearchArguments::from_json(arguments)?;
-        let queries = args.all_queries();
+        let queries = args.queries();
         let args_ref = &args;
         let mut responses = Box::pin(
             futures::stream::iter(queries.iter().cloned())
@@ -243,13 +255,13 @@ impl WebSearchHandler {
                 .buffered(self.max_concurrent_queries.get()),
         );
 
-        let mut web = Vec::new();
-        let mut news = Vec::new();
-        let mut metadata = Vec::new();
+        let mut results = WebSearchResultSections::default();
+        let mut metadata = Vec::with_capacity(queries.len());
         let mut accumulated_bytes = 0usize;
-        while let Some(mut response) = responses.try_next().await? {
+        while let Some(response) = responses.try_next().await? {
             let mut counter = CountingWriter::default();
-            serde_json::to_writer(&mut counter, &response.results)
+            serde_json::to_writer(&mut counter, &response.web)
+                .and_then(|()| serde_json::to_writer(&mut counter, &response.news))
                 .and_then(|()| serde_json::to_writer(&mut counter, &response.metadata))
                 .map_err(|error| ToolError::Execution(format!("failed to size web_search output: {error}")))?;
             accumulated_bytes = accumulated_bytes.saturating_add(counter.bytes);
@@ -258,20 +270,16 @@ impl WebSearchHandler {
                     "web_search output exceeded {MAX_GATEWAY_TOOL_OUTPUT_BYTES} bytes"
                 )));
             }
-            if let Some(results) = response.results.get_mut("web").and_then(Value::as_array_mut) {
-                web.append(results);
-            }
-            if let Some(results) = response.results.get_mut("news").and_then(Value::as_array_mut) {
-                news.append(results);
-            }
+            results.web.extend(response.web);
+            results.news.extend(response.news);
             metadata.push(response.metadata);
         }
-        let output = serde_json::to_string(&serde_json::json!({
-            "query": queries[0],
-            "queries": queries,
-            "results": {"web": web, "news": news},
-            "metadata": metadata
-        }))
+        let output = serde_json::to_string(&WebSearchToolOutput {
+            query: &queries[0],
+            queries,
+            results,
+            metadata,
+        })
         .map_err(|e| ToolError::Execution(format!("failed to serialize web_search output: {e}")))?;
         if output.len() > MAX_GATEWAY_TOOL_OUTPUT_BYTES {
             return Err(ToolError::Execution(format!(
@@ -286,110 +294,138 @@ impl WebSearchHandler {
     }
 }
 
-trait WebSearchProvider: std::fmt::Debug + Send + Sync {
+/// Caps the requested query concurrency at the provider's own ceiling.
+fn effective_query_concurrency(provider: &dyn WebSearchProvider, requested: NonZeroUsize) -> NonZeroUsize {
+    provider
+        .max_concurrent_requests()
+        .map_or(requested, |ceiling| requested.min(ceiling))
+}
+
+/// A search backend behind `web_search`.
+///
+/// Implementations shape one provider request per query and normalize the
+/// response into [`WebSearchProviderResponse`]; the handler owns fan-out,
+/// concurrency, and the model-facing output shape.
+pub(crate) trait WebSearchProvider: std::fmt::Debug + Send + Sync {
     fn search<'a>(
         &'a self,
         query: &'a str,
         args: &'a WebSearchArguments,
         config: &'a WebSearchToolParam,
     ) -> Pin<Box<dyn Future<Output = Result<WebSearchProviderResponse, ToolError>> + Send + 'a>>;
-}
 
-struct WebSearchProviderResponse {
-    results: Value,
-    metadata: Value,
-}
-
-#[derive(Debug, Clone)]
-struct YouSearchProvider {
-    client: Arc<reqwest::Client>,
-    api_key: Option<String>,
-    base_url: Option<String>,
-}
-
-impl YouSearchProvider {
-    fn from_values(client: Arc<reqwest::Client>, api_key: Option<String>, base_url: Option<String>) -> Self {
-        let api_key = api_key
-            .map(|value| value.trim().to_owned())
-            .filter(|value| !value.is_empty());
-        let base_url = base_url.and_then(|value| clean_base_url(&value));
-        Self {
-            client,
-            api_key,
-            base_url,
-        }
-    }
-
-    fn with_api_key(client: Arc<reqwest::Client>, api_key: String, base_url: &str) -> Self {
-        Self {
-            client,
-            api_key: Some(api_key),
-            base_url: clean_base_url(base_url),
-        }
+    /// Provider-imposed ceiling on concurrent requests, if any. The handler
+    /// never schedules more queries at once than this allows.
+    fn max_concurrent_requests(&self) -> Option<NonZeroUsize> {
+        None
     }
 }
 
-impl WebSearchProvider for YouSearchProvider {
-    fn search<'a>(
-        &'a self,
-        query: &'a str,
-        args: &'a WebSearchArguments,
-        config: &'a WebSearchToolParam,
-    ) -> Pin<Box<dyn Future<Output = Result<WebSearchProviderResponse, ToolError>> + Send + 'a>> {
-        Box::pin(async move {
-            let api_key = self
-                .api_key
-                .as_deref()
-                .ok_or_else(|| ToolError::Config(format!("{YOU_API_KEY} must be set to use the web_search tool")))?;
-            let base_url = self.base_url.as_deref().ok_or_else(|| {
-                ToolError::Config(format!("{YOU_API_BASE_URL} must be set to use the web_search tool"))
-            })?;
-            let request = YouSearchRequest::from_args_and_config(query, args, config)?;
-            let resp = self
-                .client
-                .get(format!("{base_url}/v1/search"))
-                .query(&request.query_params())
-                .header("X-API-Key", api_key)
-                .send()
-                .await
-                .map_err(|e| ToolError::Execution(format!("You.com search request failed: {e}")))?;
-
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let body = read_search_response_limited(resp).await.unwrap_or_default();
-                return Err(ToolError::Execution(format!(
-                    "You.com search returned {status}: {body}"
-                )));
-            }
-
-            let response_text = read_search_response_limited(resp).await?;
-            let response: Value = serde_json::from_str(&response_text)
-                .map_err(|e| ToolError::Execution(format!("You.com search returned invalid JSON: {e}")))?;
-            Ok(WebSearchProviderResponse {
-                results: response
-                    .get("results")
-                    .cloned()
-                    .unwrap_or_else(|| serde_json::json!({"web": [], "news": []})),
-                metadata: response.get("metadata").cloned().unwrap_or(Value::Null),
-            })
-        })
-    }
+/// One normalized search hit. Serialized field names are the model-facing
+/// contract and reuse You.com's wire names; `url` is empty when the provider
+/// omitted it, and empty/`None` fields are not serialized. Fields outside this
+/// struct (cosmetic `thumbnail_url` / `favicon_url`, unknown keys) are dropped.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct WebSearchResult {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, deserialize_with = "null_as_default", skip_serializing_if = "Vec::is_empty")]
+    pub snippets: Vec<String>,
+    /// Kept as `page_age` (You.com's wire name) so existing model-facing output
+    /// is unchanged; a provider-neutral name is deferred to the first provider
+    /// that needs it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_age: Option<String>,
+    /// Live-crawled page body, present when the provider fetched the page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contents: Option<WebSearchPageContents>,
 }
 
-async fn read_search_response_limited(resp: reqwest::Response) -> Result<String, ToolError> {
+/// Live-crawled page body in the formats the provider returned.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct WebSearchPageContents {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub html: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub markdown: Option<String>,
+    #[serde(default, deserialize_with = "null_as_default", skip_serializing_if = "Vec::is_empty")]
+    pub highlights: Vec<String>,
+}
+
+/// Per-query provider metadata echoed to the model as `metadata[]`.
+///
+/// `provider` is available to the gateway but not serialized, so `metadata[]`
+/// keeps the You.com shape (`query`, `search_uuid`, `latency`) that existing
+/// consumers see; exposing the provider name is #291 open question Q5.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub(crate) struct WebSearchProviderMetadata {
+    #[serde(skip)]
+    pub provider: WebSearchProviderKind,
+    pub query: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub search_uuid: Option<String>,
+    /// Provider-reported latency in seconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency: Option<f64>,
+}
+
+/// Normalized response for a single query.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct WebSearchProviderResponse {
+    pub web: Vec<WebSearchResult>,
+    pub news: Vec<WebSearchResult>,
+    pub metadata: WebSearchProviderMetadata,
+}
+
+#[derive(Debug, Default, Serialize)]
+struct WebSearchResultSections {
+    web: Vec<WebSearchResult>,
+    news: Vec<WebSearchResult>,
+}
+
+/// Model-facing `web_search` tool output; field order is the wire contract.
+#[derive(Debug, Serialize)]
+struct WebSearchToolOutput<'a> {
+    query: &'a str,
+    queries: &'a [String],
+    results: WebSearchResultSections,
+    metadata: Vec<WebSearchProviderMetadata>,
+}
+
+/// Deserializes an explicit JSON `null` as the field's default instead of
+/// failing, so a degenerate provider response cannot fail the whole search.
+pub(crate) fn null_as_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Option::unwrap_or_default)
+}
+
+/// Reads a provider HTTP response body, failing as soon as it exceeds
+/// [`MAX_GATEWAY_TOOL_OUTPUT_BYTES`] so an oversized provider reply is never
+/// buffered in full. Every provider module reads its responses through here.
+pub(super) async fn read_response_limited(
+    resp: reqwest::Response,
+    provider: WebSearchProviderKind,
+) -> Result<String, ToolError> {
     let mut stream = resp.bytes_stream();
     let mut body = Vec::new();
     while let Some(chunk) = stream.next().await {
-        let chunk =
-            chunk.map_err(|error| ToolError::Execution(format!("failed to read You.com search response: {error}")))?;
+        let chunk = chunk
+            .map_err(|error| ToolError::Execution(format!("failed to read {provider} search response: {error}")))?;
         if chunk.len() > MAX_GATEWAY_TOOL_OUTPUT_BYTES.saturating_sub(body.len()) {
             return Err(ToolError::Execution(format!(
-                "You.com search response exceeded {MAX_GATEWAY_TOOL_OUTPUT_BYTES} bytes"
+                "{provider} search response exceeded {MAX_GATEWAY_TOOL_OUTPUT_BYTES} bytes"
             )));
         }
         body.extend_from_slice(&chunk);
     }
-    String::from_utf8(body).map_err(|_| ToolError::Execution("You.com search response was not valid UTF-8".to_owned()))
+    String::from_utf8(body).map_err(|_| ToolError::Execution(format!("{provider} search response was not valid UTF-8")))
 }
 
 impl ToolHandler for WebSearchHandler {
@@ -451,201 +487,6 @@ impl GatewayExecutor for WebSearchHandler {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct WebSearchArguments {
-    #[serde(default)]
-    query: Option<String>,
-    #[serde(default)]
-    queries: Option<Vec<String>>,
-    count: Option<u16>,
-    freshness: Option<String>,
-    country: Option<String>,
-    language: Option<String>,
-    safesearch: Option<String>,
-    livecrawl: Option<String>,
-    livecrawl_formats: Option<Vec<String>>,
-    crawl_timeout: Option<u16>,
-    include_domains: Option<Vec<String>>,
-    exclude_domains: Option<Vec<String>>,
-    boost_domains: Option<Vec<String>>,
-}
-
-impl WebSearchArguments {
-    fn from_json(arguments: &str) -> Result<Self, ToolError> {
-        let args = serde_json::from_str::<Self>(arguments)
-            .map_err(|e| ToolError::Config(format!("web_search arguments must be valid JSON: {e}")))?;
-        let query_count = args.all_queries().len();
-        if query_count == 0 {
-            return Err(ToolError::Config(
-                "web_search requires a non-empty query or queries".to_owned(),
-            ));
-        }
-        if query_count > MAX_WEB_SEARCH_QUERIES {
-            return Err(ToolError::Config(format!(
-                "web_search accepts at most {MAX_WEB_SEARCH_QUERIES} queries per call"
-            )));
-        }
-        Ok(args)
-    }
-
-    fn all_queries(&self) -> Vec<String> {
-        let queries = clean_vec(self.queries.as_deref()).unwrap_or_default();
-        if !queries.is_empty() {
-            return queries;
-        }
-        clean_string(self.query.as_deref()).into_iter().collect()
-    }
-}
-
-#[derive(Debug, Serialize)]
-struct YouSearchRequest {
-    query: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    count: Option<u8>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    freshness: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    country: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    language: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    safesearch: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    livecrawl: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    livecrawl_formats: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    crawl_timeout: Option<u8>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    include_domains: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    exclude_domains: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    boost_domains: Option<Vec<String>>,
-}
-
-impl YouSearchRequest {
-    fn query_params(&self) -> Vec<(String, String)> {
-        let mut params = vec![("query".to_owned(), self.query.clone())];
-        if let Some(count) = self.count {
-            params.push(("count".to_owned(), count.to_string()));
-        }
-        if let Some(freshness) = &self.freshness {
-            params.push(("freshness".to_owned(), freshness.clone()));
-        }
-        if let Some(country) = &self.country {
-            params.push(("country".to_owned(), country.clone()));
-        }
-        if let Some(language) = &self.language {
-            params.push(("language".to_owned(), language.clone()));
-        }
-        if let Some(safesearch) = &self.safesearch {
-            params.push(("safesearch".to_owned(), safesearch.clone()));
-        }
-        if let Some(livecrawl) = &self.livecrawl {
-            params.push(("livecrawl".to_owned(), livecrawl.clone()));
-        }
-        for format in self.livecrawl_formats.iter().flatten() {
-            params.push(("livecrawl_formats".to_owned(), format.clone()));
-        }
-        if let Some(crawl_timeout) = self.crawl_timeout {
-            params.push(("crawl_timeout".to_owned(), crawl_timeout.to_string()));
-        }
-        for domain in self.include_domains.iter().flatten() {
-            params.push(("include_domains".to_owned(), domain.clone()));
-        }
-        for domain in self.exclude_domains.iter().flatten() {
-            params.push(("exclude_domains".to_owned(), domain.clone()));
-        }
-        for domain in self.boost_domains.iter().flatten() {
-            params.push(("boost_domains".to_owned(), domain.clone()));
-        }
-        params
-    }
-
-    fn from_args_and_config(
-        query: &str,
-        args: &WebSearchArguments,
-        config: &WebSearchToolParam,
-    ) -> Result<Self, ToolError> {
-        let count = args
-            .count
-            .or_else(|| {
-                config
-                    .search_context_size
-                    .map(WebSearchContextSize::default_count)
-                    .map(u16::from)
-            })
-            .map(validate_count)
-            .transpose()?;
-        let crawl_timeout = args.crawl_timeout.map(validate_crawl_timeout).transpose()?;
-        let config_domains = config
-            .filters
-            .as_ref()
-            .and_then(|filters| clean_vec(filters.allowed_domains.as_deref()));
-        let config_blocked_domains = config
-            .filters
-            .as_ref()
-            .and_then(|filters| clean_vec(filters.blocked_domains.as_deref()));
-        let include_domains = config_domains.or_else(|| clean_vec(args.include_domains.as_deref()));
-        let exclude_domains = config_blocked_domains.or_else(|| clean_vec(args.exclude_domains.as_deref()));
-        let boost_domains = clean_vec(args.boost_domains.as_deref());
-        if include_domains.is_some() && (exclude_domains.is_some() || boost_domains.is_some()) {
-            return Err(ToolError::Config(
-                "include_domains cannot be combined with exclude_domains or boost_domains".to_owned(),
-            ));
-        }
-        let country = config
-            .user_location
-            .as_ref()
-            .and_then(|location| clean_string(location.country.as_deref()))
-            .or_else(|| clean_string(args.country.as_deref()))
-            .map(|value| value.to_ascii_uppercase());
-
-        Ok(Self {
-            query: query.trim().to_owned(),
-            count,
-            freshness: clean_string(args.freshness.as_deref()),
-            country,
-            language: clean_string(args.language.as_deref()),
-            safesearch: clean_string(args.safesearch.as_deref()),
-            livecrawl: clean_string(args.livecrawl.as_deref()),
-            livecrawl_formats: clean_vec(args.livecrawl_formats.as_deref()),
-            crawl_timeout,
-            include_domains,
-            exclude_domains,
-            boost_domains,
-        })
-    }
-}
-
-fn validate_count(count: u16) -> Result<u8, ToolError> {
-    if (1..=100).contains(&count) {
-        Ok(u8::try_from(count).expect("validated web_search count must fit in u8"))
-    } else {
-        Err(ToolError::Config(
-            "web_search count must be between 1 and 100".to_owned(),
-        ))
-    }
-}
-
-fn validate_crawl_timeout(timeout: u16) -> Result<u8, ToolError> {
-    if (1..=60).contains(&timeout) {
-        u8::try_from(timeout).map_err(|e| ToolError::Config(format!("invalid crawl_timeout: {e}")))
-    } else {
-        Err(ToolError::Config(
-            "web_search crawl_timeout must be between 1 and 60".to_owned(),
-        ))
-    }
-}
-
-fn clean_string(value: Option<&str>) -> Option<String> {
-    value
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned)
-}
-
 fn clean_json_str(value: Option<&Value>) -> Option<String> {
     value
         .and_then(Value::as_str)
@@ -696,20 +537,6 @@ fn source_from_result(result: &Value) -> Option<WebSearchSource> {
     })
 }
 
-fn clean_base_url(value: &str) -> Option<String> {
-    let trimmed = value.trim().trim_end_matches('/');
-    (!trimmed.is_empty()).then(|| trimmed.to_owned())
-}
-
-fn clean_vec(values: Option<&[String]>) -> Option<Vec<String>> {
-    let cleaned: Vec<String> = values
-        .unwrap_or_default()
-        .iter()
-        .filter_map(|value| clean_string(Some(value.as_str())))
-        .collect();
-    (!cleaned.is_empty()).then_some(cleaned)
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -719,6 +546,15 @@ mod tests {
     use bytes::Bytes;
 
     use super::*;
+
+    fn metadata(provider_label: &str) -> WebSearchProviderMetadata {
+        WebSearchProviderMetadata {
+            provider: WebSearchProviderKind::You,
+            query: provider_label.to_owned(),
+            search_uuid: None,
+            latency: None,
+        }
+    }
 
     #[derive(Debug)]
     struct MockSearchProvider;
@@ -732,16 +568,13 @@ mod tests {
         ) -> Pin<Box<dyn Future<Output = Result<WebSearchProviderResponse, ToolError>> + Send + 'a>> {
             Box::pin(async move {
                 Ok(WebSearchProviderResponse {
-                    results: serde_json::json!({
-                        "web": [
-                            {
-                                "url": "https://example.com/potato",
-                                "title": "Potato"
-                            }
-                        ],
-                        "news": []
-                    }),
-                    metadata: serde_json::json!({"provider": "mock"}),
+                    web: vec![WebSearchResult {
+                        url: "https://example.com/potato".to_owned(),
+                        title: Some("Potato".to_owned()),
+                        ..WebSearchResult::default()
+                    }],
+                    news: Vec::new(),
+                    metadata: metadata("mock"),
                 })
             })
         }
@@ -759,11 +592,12 @@ mod tests {
         ) -> Pin<Box<dyn Future<Output = Result<WebSearchProviderResponse, ToolError>> + Send + 'a>> {
             Box::pin(async move {
                 Ok(WebSearchProviderResponse {
-                    results: serde_json::json!({
-                        "web": [{"snippet": "x".repeat(600 * 1024)}],
-                        "news": []
-                    }),
-                    metadata: Value::Null,
+                    web: vec![WebSearchResult {
+                        snippets: vec!["x".repeat(600 * 1024)],
+                        ..WebSearchResult::default()
+                    }],
+                    news: Vec::new(),
+                    metadata: metadata("large"),
                 })
             })
         }
@@ -773,6 +607,7 @@ mod tests {
     struct ConcurrencyTrackingProvider {
         active: AtomicUsize,
         max_active: AtomicUsize,
+        ceiling: Option<NonZeroUsize>,
     }
 
     impl WebSearchProvider for ConcurrencyTrackingProvider {
@@ -788,10 +623,15 @@ mod tests {
                 tokio::time::sleep(Duration::from_millis(20)).await;
                 self.active.fetch_sub(1, Ordering::SeqCst);
                 Ok(WebSearchProviderResponse {
-                    results: serde_json::json!({"web": [], "news": []}),
-                    metadata: serde_json::json!({"provider": "tracking"}),
+                    web: Vec::new(),
+                    news: Vec::new(),
+                    metadata: metadata("tracking"),
                 })
             })
+        }
+
+        fn max_concurrent_requests(&self) -> Option<NonZeroUsize> {
+            self.ceiling
         }
     }
 
@@ -824,7 +664,7 @@ mod tests {
             .await
             .expect("fetch oversized search response");
 
-        let error = read_search_response_limited(response)
+        let error = read_response_limited(response, WebSearchProviderKind::You)
             .await
             .expect_err("oversized search response must fail");
         assert!(error.to_string().contains("search response exceeded"));
@@ -847,7 +687,8 @@ mod tests {
         assert_eq!(output.call_id, "call_search");
         assert_eq!(body["query"], "potato");
         assert_eq!(body["queries"], serde_json::json!(["potato"]));
-        assert_eq!(body["metadata"][0]["provider"], "mock");
+        assert_eq!(body["metadata"][0]["query"], "mock");
+        assert_eq!(body["metadata"][0].get("provider"), None);
         assert_eq!(body["results"]["web"][0]["url"], "https://example.com/potato");
     }
 
@@ -923,5 +764,106 @@ mod tests {
         first.expect("first batched call");
         second.expect("second batched call");
         assert_eq!(provider.max_active.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn web_search_output_serializes_in_wire_order() {
+        let output = WebSearchToolOutput {
+            query: "potato",
+            queries: &["potato".to_owned()],
+            results: WebSearchResultSections {
+                web: vec![WebSearchResult {
+                    url: "https://example.com/potato".to_owned(),
+                    title: Some("Potato".to_owned()),
+                    description: Some("A tuber".to_owned()),
+                    snippets: vec!["Starchy.".to_owned()],
+                    page_age: None,
+                    contents: None,
+                }],
+                news: vec![WebSearchResult::default()],
+            },
+            metadata: vec![WebSearchProviderMetadata {
+                provider: WebSearchProviderKind::You,
+                query: "potato".to_owned(),
+                search_uuid: Some("s1".to_owned()),
+                latency: Some(0.12),
+            }],
+        };
+        assert_eq!(
+            serde_json::to_string(&output).unwrap(),
+            concat!(
+                r#"{"query":"potato","queries":["potato"],"#,
+                r#""results":{"web":[{"url":"https://example.com/potato","title":"Potato","#,
+                r#""description":"A tuber","snippets":["Starchy."]}],"news":[{}]},"#,
+                r#""metadata":[{"query":"potato","search_uuid":"s1","latency":0.12}]}"#
+            )
+        );
+    }
+
+    #[test]
+    fn from_values_inherits_gateway_concurrency() {
+        let handler = WebSearchHandler::from_values(
+            Arc::new(reqwest::Client::new()),
+            None,
+            None,
+            NonZeroUsize::new(7).expect("nonzero test limit"),
+        );
+        assert_eq!(handler.max_concurrent_queries.get(), 7);
+        assert_eq!(handler.query_permits.available_permits(), 7);
+        assert!(format!("{handler:?}").contains("YouSearchProvider"));
+    }
+
+    #[test]
+    fn from_values_does_not_leak_api_key_in_debug_output() {
+        let handler = WebSearchHandler::from_values(
+            Arc::new(reqwest::Client::new()),
+            Some("super-secret-key".to_owned()),
+            Some("https://api.example".to_owned()),
+            DEFAULT_MAX_CONCURRENT_GATEWAY_CALLS,
+        );
+        let rendered = format!("{handler:?}");
+        assert!(!rendered.contains("super-secret-key"));
+        assert!(rendered.contains("ApiKey(<redacted>)"));
+    }
+
+    #[test]
+    fn effective_query_concurrency_respects_provider_ceiling() {
+        let requested = NonZeroUsize::new(4).expect("nonzero test limit");
+        let unlimited = ConcurrencyTrackingProvider::default();
+        assert_eq!(effective_query_concurrency(&unlimited, requested), requested);
+
+        let capped = ConcurrencyTrackingProvider {
+            ceiling: NonZeroUsize::new(1),
+            ..ConcurrencyTrackingProvider::default()
+        };
+        assert_eq!(effective_query_concurrency(&capped, requested).get(), 1);
+
+        let roomy = ConcurrencyTrackingProvider {
+            ceiling: NonZeroUsize::new(8),
+            ..ConcurrencyTrackingProvider::default()
+        };
+        assert_eq!(effective_query_concurrency(&roomy, requested), requested);
+    }
+
+    #[tokio::test]
+    async fn provider_concurrency_ceiling_caps_requested_limit() {
+        let provider = Arc::new(ConcurrencyTrackingProvider {
+            ceiling: NonZeroUsize::new(1),
+            ..ConcurrencyTrackingProvider::default()
+        });
+        let requested = NonZeroUsize::new(4).expect("nonzero test limit");
+        let effective = effective_query_concurrency(provider.as_ref(), requested);
+        let handler = WebSearchHandler::with_provider_and_query_concurrency(provider.clone(), effective);
+        let params = WebSearchToolParam::default();
+        let arguments = r#"{"queries":["one","two","three"]}"#;
+
+        let (first, second) = tokio::join!(
+            handler.execute("call_one", "web_search", arguments, &params),
+            handler.execute("call_two", "web_search", arguments, &params),
+        );
+
+        first.expect("first batched call");
+        second.expect("second batched call");
+        assert_eq!(provider.max_active.load(Ordering::SeqCst), 1);
     }
 }

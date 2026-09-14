@@ -2,6 +2,25 @@
 
 All notable changes to Agentic API are documented here.
 
+## [Unreleased]
+
+### Changed
+
+- Refactored `web_search` into a typed provider contract and module split (`tool/web_search/{mod,args,you}`) as
+  the extension seam for further providers (#291): provider responses now normalize into `WebSearchResult` /
+  `WebSearchProviderMetadata` instead of forwarding raw You.com JSON, and the provider trait exposes a
+  `max_concurrent_requests` ceiling that bounds query fan-out. The model-facing tool output keeps You.com's field
+  names and the public `web_search_call.action.sources` list is unchanged, but the normalization contract is now
+  explicit: cosmetic `thumbnail_url` / `original_thumbnail_url` / `favicon_url` and unknown fields are dropped, keys
+  follow the typed struct order, `null` and empty fields are omitted, and each query has a metadata object even
+  when the provider omits metadata or returns `null`. Its `query` falls back to the submitted query; absent
+  `search_uuid` and `latency` remain omitted. This intentionally changes the model-facing output from
+  `metadata: [null]` to `metadata: [{"query": "..."}]` in that case. An invalid `freshness` fails fast with a
+  tool config error instead of a provider round trip. The You.com response body and aggregate tool-output size
+  limits are unchanged. `WebSearchProviderConfig` keeps its existing public shape, gains a `new` constructor, and
+  redacts the API key in `Debug` output; provider selection and per-provider concurrency configuration are
+  deferred to the first additional provider.
+
 ## [0.6.0] - 2026-09-09
 
 ### Added

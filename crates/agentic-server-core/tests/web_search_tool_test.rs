@@ -6,7 +6,9 @@ use std::time::Duration;
 
 use agentic_core::executor::{ConversationHandler, ExecuteRequest, ExecutionContext, ResponseHandler};
 use agentic_core::storage::{ConversationStore, ResponseStore};
-use agentic_core::tool::{GatewayExecutor, WebSearchHandler};
+use agentic_core::tool::{GatewayExecutor, ToolOutput, WebSearchHandler};
+use agentic_core::types::event::MessageStatus;
+use agentic_core::types::io::output::{FunctionToolCall, WebSearchCallStatus};
 use agentic_core::types::io::{
     FunctionToolResultMessage, InputItem, OutputItem, ResponsesInput, ToolCallOutput, ToolChoice,
 };
@@ -460,6 +462,177 @@ async fn web_search_handler_requires_base_url() {
         err.to_string(),
         "invalid tool config: YOU_API_BASE_URL must be set to use the web_search tool"
     );
+}
+
+/// Exact pre-refactor serialization of [`spawn_mock_you`]'s response for the
+/// request below, captured before the typed normalization introduced for
+/// #291. For a response that only carries modeled fields in wire order, the
+/// typed path must reproduce the legacy pass-through output byte-for-byte.
+const MOCK_YOU_TOOL_OUTPUT: &str = concat!(
+    r#"{"query":"rust async","queries":["rust async"],"#,
+    r#""results":{"web":[{"url":"https://example.com/rust","title":"Rust async guide","#,
+    r#""description":"A useful guide","snippets":["Use async carefully."]}],"news":[]},"#,
+    r#""metadata":[{"query":"rust async","search_uuid":"search_123","latency":0.12}]}"#
+);
+
+#[tokio::test]
+async fn web_search_handler_output_is_byte_identical_for_mock_you_response() {
+    let (base_url, _captured, _handle) = spawn_mock_you().await;
+    let handler =
+        WebSearchHandler::with_api_key(Arc::new(reqwest::Client::new()), "secret-you-key".to_owned(), &base_url);
+    let params = WebSearchToolParam::default();
+    let arguments = r#"{"query":"rust async","count":2,"exclude_domains":["example.com","example.org"]}"#;
+
+    let output = handler
+        .execute("call_search", "web_search", arguments, &params)
+        .await
+        .unwrap();
+
+    assert_eq!(output.output, MOCK_YOU_TOOL_OUTPUT);
+
+    let call = FunctionToolCall {
+        id: "fc_search".to_owned(),
+        call_id: "call_search".to_owned(),
+        name: "web_search".to_owned(),
+        namespace: None,
+        arguments: arguments.to_owned(),
+        status: MessageStatus::Completed,
+    };
+    let public = handler
+        .public_output(&call, &output, WebSearchCallStatus::Completed, &params)
+        .expect("web_search_call public output");
+    assert_eq!(
+        serde_json::to_value(&public).unwrap(),
+        serde_json::json!({
+            "id": "ws_search",
+            "type": "web_search_call",
+            "status": "completed",
+            "action": {
+                "type": "search",
+                "query": "rust async",
+                "queries": ["rust async"],
+                "sources": [{"url": "https://example.com/rust", "title": "Rust async guide"}]
+            }
+        })
+    );
+}
+
+/// Sanitized live You.com `GET /v1/search` responses, extracted from
+/// `cassettes/messages_multiround/sequential-web-search-qwen3-nonstreaming.yaml`
+/// with `cassettes/extract_you_search_fixture.py`. That cassette was recorded
+/// while the gateway forwarded You.com's `results` and `metadata` verbatim, so
+/// the fixtures carry the provider's real field set: `original_thumbnail_url`
+/// alongside `thumbnail_url` / `favicon_url`, results without `page_age`, and a
+/// response whose `results` has no `news` section at all. Only `search_uuid`
+/// and `latency` were sanitized and the result lists truncated.
+const YOU_SEARCH_RESPONSE_FIXTURE: &str = include_str!("fixtures/you_search_response.json");
+const YOU_SEARCH_RESPONSE_WITHOUT_NEWS_FIXTURE: &str = include_str!("fixtures/you_search_response_without_news.json");
+
+/// Fields You.com returns that the typed normalization deliberately drops.
+const YOU_COSMETIC_FIELDS: [&str; 3] = ["thumbnail_url", "original_thumbnail_url", "favicon_url"];
+
+async fn execute_recorded_you_response(fixture: &serde_json::Value, query: &str) -> (WebSearchHandler, ToolOutput) {
+    let (base_url, _captured, _handle) = spawn_mock_you_with_response(StatusCode::OK, fixture.clone()).await;
+    let handler =
+        WebSearchHandler::with_api_key(Arc::new(reqwest::Client::new()), "secret-you-key".to_owned(), &base_url);
+    let arguments = serde_json::json!({ "query": query }).to_string();
+    let output = handler
+        .execute("call_search", "web_search", &arguments, &WebSearchToolParam::default())
+        .await
+        .unwrap();
+    (handler, output)
+}
+
+#[tokio::test]
+async fn web_search_handler_normalizes_recorded_you_response() {
+    let fixture: serde_json::Value = serde_json::from_str(YOU_SEARCH_RESPONSE_FIXTURE).unwrap();
+    let query = fixture["metadata"]["query"].as_str().unwrap();
+    let (handler, output) = execute_recorded_you_response(&fixture, query).await;
+    let output_json: serde_json::Value = serde_json::from_str(&output.output).unwrap();
+
+    let mut seen_cosmetic_fields = std::collections::BTreeSet::new();
+    for section in ["web", "news"] {
+        let expected = fixture["results"][section].as_array().unwrap();
+        let actual = output_json["results"][section].as_array().unwrap();
+        assert_eq!(actual.len(), expected.len(), "{section} result count");
+        for (expected, actual) in expected.iter().zip(actual) {
+            let expected_object = expected.as_object().unwrap();
+            let actual_object = actual.as_object().unwrap();
+            for (field, value) in expected_object {
+                if YOU_COSMETIC_FIELDS.contains(&field.as_str()) {
+                    seen_cosmetic_fields.insert(field.as_str());
+                    assert!(!actual_object.contains_key(field), "{section}.{field} is cosmetic");
+                } else if value.as_array().is_some_and(Vec::is_empty) {
+                    assert!(
+                        !actual_object.contains_key(field),
+                        "{section}.{field} empty list is elided"
+                    );
+                } else {
+                    assert_eq!(actual_object.get(field), Some(value), "{section}.{field}");
+                }
+            }
+            let unexpected: Vec<&String> = actual_object
+                .keys()
+                .filter(|key| !expected_object.contains_key(*key))
+                .collect();
+            assert!(unexpected.is_empty(), "{section} gained fields {unexpected:?}");
+        }
+    }
+    assert_eq!(
+        seen_cosmetic_fields.into_iter().collect::<Vec<_>>(),
+        ["favicon_url", "original_thumbnail_url", "thumbnail_url"],
+        "recorded fixture must exercise every cosmetic field"
+    );
+    assert_eq!(output_json["metadata"], serde_json::json!([fixture["metadata"]]));
+
+    let call = FunctionToolCall {
+        id: "fc_search".to_owned(),
+        call_id: "call_search".to_owned(),
+        name: "web_search".to_owned(),
+        namespace: None,
+        arguments: serde_json::json!({ "query": query }).to_string(),
+        status: MessageStatus::Completed,
+    };
+    let public = handler
+        .public_output(
+            &call,
+            &output,
+            WebSearchCallStatus::Completed,
+            &WebSearchToolParam::default(),
+        )
+        .expect("web_search_call public output");
+    let public = serde_json::to_value(&public).unwrap();
+    let expected_sources: Vec<serde_json::Value> = ["web", "news"]
+        .into_iter()
+        .flat_map(|section| fixture["results"][section].as_array().unwrap().iter())
+        .map(|result| serde_json::json!({"url": result["url"], "title": result["title"]}))
+        .collect();
+    assert_eq!(public["action"]["sources"], serde_json::Value::Array(expected_sources));
+}
+
+#[tokio::test]
+async fn web_search_handler_tolerates_recorded_you_response_without_news() {
+    let fixture: serde_json::Value = serde_json::from_str(YOU_SEARCH_RESPONSE_WITHOUT_NEWS_FIXTURE).unwrap();
+    assert!(
+        fixture["results"].get("news").is_none(),
+        "fixture must lack a news section"
+    );
+    let query = fixture["metadata"]["query"].as_str().unwrap();
+    let (_handler, output) = execute_recorded_you_response(&fixture, query).await;
+    let output_json: serde_json::Value = serde_json::from_str(&output.output).unwrap();
+
+    assert_eq!(output_json["results"]["news"], serde_json::json!([]));
+    let expected_web = fixture["results"]["web"].as_array().unwrap();
+    let actual_web = output_json["results"]["web"].as_array().unwrap();
+    assert_eq!(actual_web.len(), expected_web.len());
+    for (expected, actual) in expected_web.iter().zip(actual_web) {
+        assert_eq!(actual["url"], expected["url"]);
+        assert_eq!(actual["title"], expected["title"]);
+        assert_eq!(actual["snippets"], expected["snippets"]);
+        assert_eq!(actual.get("page_age"), expected.get("page_age"));
+        assert!(actual.get("favicon_url").is_none());
+    }
+    assert_eq!(output_json["metadata"], serde_json::json!([fixture["metadata"]]));
 }
 
 fn web_search_function_call_response() -> support::MockResponse {

@@ -3,6 +3,8 @@ use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
+
 use crate::error::Error;
 use crate::tool::McpServerEntry;
 
@@ -85,10 +87,67 @@ impl Default for SqliteConfig {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+/// Backend that serves the gateway-owned `web_search` tool.
+///
+/// Additional providers are added here (#291). The enum is non-exhaustive so
+/// downstream crates keep a fallback arm when a new variant lands. Selecting a
+/// provider through [`WebSearchProviderConfig`] is deferred until a second
+/// provider exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum WebSearchProviderKind {
+    #[default]
+    You,
+}
+
+impl WebSearchProviderKind {
+    /// Environment variable that conventionally carries this provider's API key.
+    #[must_use]
+    pub const fn default_api_key_env(self) -> &'static str {
+        match self {
+            Self::You => "YOU_API_KEY",
+        }
+    }
+
+    /// Human-readable provider name used in operator-facing messages.
+    #[must_use]
+    pub const fn display_name(self) -> &'static str {
+        match self {
+            Self::You => "You.com",
+        }
+    }
+}
+
+impl std::fmt::Display for WebSearchProviderKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.display_name())
+    }
+}
+
+/// Credentials for the gateway-owned `web_search` provider (You.com).
+#[derive(Clone, Default)]
 pub struct WebSearchProviderConfig {
     pub api_key: Option<String>,
     pub base_url: Option<String>,
+}
+
+impl WebSearchProviderConfig {
+    /// Builds the config from the credential and endpoint the deployment resolved.
+    #[must_use]
+    pub const fn new(api_key: Option<String>, base_url: Option<String>) -> Self {
+        Self { api_key, base_url }
+    }
+}
+
+impl std::fmt::Debug for WebSearchProviderConfig {
+    /// Redacts `api_key` so debug-printing any enclosing config never logs the secret.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WebSearchProviderConfig")
+            .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
+            .field("base_url", &self.base_url)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -237,6 +296,35 @@ pub fn normalize_base_url(url: &str) -> String {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn web_search_provider_config_debug_redacts_api_key() {
+        let config = WebSearchProviderConfig::new(
+            Some("super-secret-key".to_owned()),
+            Some("https://api.example".to_owned()),
+        );
+        let rendered = format!("{config:?}");
+        assert!(!rendered.contains("super-secret-key"));
+        assert!(rendered.contains(r#"api_key: Some("<redacted>")"#));
+        assert!(rendered.contains(r#"base_url: Some("https://api.example")"#));
+
+        let tools = ToolRuntimeConfig {
+            web_search: config,
+            ..ToolRuntimeConfig::default()
+        };
+        assert!(!format!("{tools:?}").contains("super-secret-key"));
+        assert_eq!(
+            format!("{:?}", WebSearchProviderConfig::default()),
+            "WebSearchProviderConfig { api_key: None, base_url: None }"
+        );
+    }
+
+    #[test]
+    fn web_search_provider_kind_labels() {
+        assert_eq!(WebSearchProviderKind::You.to_string(), "You.com");
+        assert_eq!(WebSearchProviderKind::You.default_api_key_env(), "YOU_API_KEY");
+        assert_eq!(WebSearchProviderKind::default(), WebSearchProviderKind::You);
+    }
 
     #[test]
     fn strip_trailing_v1() {
