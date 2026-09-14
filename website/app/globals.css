@@ -1247,6 +1247,22 @@ h2 {
   color: var(--blue-ink) !important;
   border-bottom-color: var(--brand-blue) !important;
 }
+.install-tab-list {
+  border-top: 0;
+  padding-inline: 12px !important;
+  gap: 4px !important;
+}
+.install-tab-list [data-slot='tabs-trigger'] {
+  flex: 1 1 auto !important;
+  padding-inline: 6px !important;
+  font-size: 12px !important;
+}
+.install-note {
+  margin: -10px 24px 24px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.65;
+}
 .terminal-note {
   border-top: 1px solid light-dark(#ccd7e3, #282c32);
   padding: 17px 23px;

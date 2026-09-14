@@ -26,6 +26,7 @@ Routes:
 - `/community/contributors` — a contributor directory and guidance for thoughtful contributions.
 - `/docs` — documentation directory for the default tagged version.
 - `/docs/latest` and `/docs/v0.1.0` through `/docs/v0.5.0` — shareable documentation directories for development and tagged snapshots.
+- `/llms.txt` — a concise Markdown project overview and curated links to raw documentation, following [llmstxt.org](https://llmstxt.org/).
 
 ## GitHub Pages deployment
 
@@ -54,6 +55,7 @@ Update the two URL variables in the workflow when moving to a custom domain.
 - `lib/data/docs-versions.json`: available documentation versions, the default version, pinned source revisions, and optional hosted documentation destinations.
 - `lib/docs.ts`: documentation sections and version-specific link resolution.
 - `lib/quickstart.ts`: visible CLI examples and the optional read-only WebMCP tool contract.
+- `public/llms.txt`: agent-readable documentation index, copied into every static deployment. Each page links to it with `rel="describedby"` using the deployment base path.
 - `lib/data/community.json`: bundled profile snapshot, contributor refresh date, and roster sources; contributor profiles retain GitHub’s contribution order.
 - `public/people/`: public GitHub avatars, bundled to avoid runtime requests.
 
@@ -64,6 +66,8 @@ The team roster follows [CODEOWNERS](https://github.com/vllm-project/agentic-api
 Every profile uses the same presentation, including in the homepage avatar mosaic. This commit-based source is not a complete record of reviews, issue reports, or community support. GitHub caches the endpoint, so a new commit can take a few hours to appear. All API requests and photo downloads must succeed before the saved data is replaced. A failed refresh stops deployment and leaves the currently published site in place. Ordinary local builds and pull request checks use the bundled snapshot without contacting GitHub.
 
 Integration copy and commands were checked against the project's [README](https://github.com/vllm-project/agentic-api/blob/main/README.md). Shell/editor function tools execute in the client. Built-in web search and MCP tools execute on the gateway. Model compatibility depends on the served model and its tool-calling configuration.
+
+The quickstart defaults to the published `agentic-server` crate and offers PyPI and build-from-source tabs. Package installs launch `agentic`; source builds launch `./target/debug/agentic`. The optional WebMCP tool accepts an `installation` value (`crates`, `pypi`, or `source`) and defaults to crates.io. PyPI is marked coming soon because the registry currently contains only the reserved 0.0.0 placeholder. Its command requires `agentic-api>=0.6.0` so it cannot install that placeholder. After the Python package is published, update the availability copy in `lib/quickstart.ts`, the quickstart component, and `public/llms.txt`; switch `DEFAULT_INSTALL_METHOD` to `pypi` if Python should become the default. The base Python wheel bundles the Rust executables and does not install vLLM.
 
 The community information architecture is inspired by the supplied vLLM Semantic Router pages. The layout, visual system, and wording were created for this site. The website does not run an agent or contact a model: the launch instructions are examples for a user's own environment.
 

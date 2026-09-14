@@ -59,6 +59,22 @@ for (const [file, heading] of pages) {
   assert.ok(/<title>[^<]+<\/title>/.test(document), `${file}: document title`);
   assert.ok(/name="description"/.test(document), `${file}: page description`);
   assert.ok(/id="main"/.test(document), `${file}: skip-link target`);
+  assert.ok(
+    document.includes('rel="describedby"') &&
+      document.includes('href="' + basePath + '/llms.txt"'),
+    file + ': agent documentation discovery link includes deployment path',
+  );
+  if (file === 'index.html') {
+    assert.ok(
+      document.includes('cargo install agentic-server --locked'),
+      'The quickstart initially shows the published Cargo package',
+    );
+    assert.ok(
+      document.includes('agentic run codex') &&
+        !document.includes('./target/debug/agentic'),
+      'The default launch instructions use the installed CLI',
+    );
+  }
   if (siteUrl && file !== '404.html' && file !== 'index.html') {
     const route = file === 'index.html' ? '/' : `/${file.slice(0, -5)}`;
     assert.ok(
@@ -102,6 +118,13 @@ for (const [file, heading] of pages) {
       errors.push(`${file}: missing local destination ${match[1]}`);
   }
 }
+const llms = readFileSync(resolve(output, 'llms.txt'), 'utf8');
+assert.ok(llms.startsWith('# vLLM Agentic API\n\n> '), 'llms.txt overview');
+assert.match(
+  llms,
+  /^- \[[^\]]+\]\(https:\/\/raw\.githubusercontent\.com\/vllm-project\/agentic-api\/main\/docs\/api\/index\.md\): .+$/m,
+  'llms.txt links to the Markdown API reference',
+);
 const manifest = JSON.parse(
   readFileSync('dist/server/vinext-prerender.json', 'utf8'),
 );

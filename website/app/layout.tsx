@@ -16,11 +16,11 @@ export const metadata: Metadata = {
     template: '%s | vLLM Agentic API',
   },
   description:
-    'vLLM Agentic API is the agentic server that lets you run Codex and Claude Code on top of vLLM.',
+    'Everything you need for agentic inference: run Codex and Claude Code on vLLM with conversation state, built-in tools, and multi-turn execution.',
   openGraph: {
     title: 'vLLM Agentic API — Your agent harness. Now on vLLM.',
     description:
-      'vLLM Agentic API is the agentic server that lets you run Codex and Claude Code on top of vLLM.',
+      'Everything you need for agentic inference: run Codex and Claude Code on vLLM with conversation state, built-in tools, and multi-turn execution.',
     type: 'website',
   },
   icons: { icon: assetPath('/icon.svg') },
@@ -33,6 +33,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
+        <link rel="describedby" href={assetPath('/llms.txt')} />
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       <body className={`${sans.variable} ${mono.variable}`}>
