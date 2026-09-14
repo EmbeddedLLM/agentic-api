@@ -81,6 +81,7 @@ class ModelsHandler(BaseHTTPRequestHandler):
     auth_headers: list[str | None] = []
     response_statuses: list[int] = [200]
     response_delay_s = 0.0
+    disconnect_requests = 0
 
     def do_GET(self) -> None:  # noqa: N802
         type(self).requests_seen += 1
@@ -88,6 +89,10 @@ class ModelsHandler(BaseHTTPRequestHandler):
         if self.path != "/v1/models":
             self.send_response(404)
             self.end_headers()
+            return
+
+        if type(self).requests_seen <= type(self).disconnect_requests:
+            self.close_connection = True
             return
 
         if type(self).response_delay_s:
@@ -109,6 +114,7 @@ def reset_models_handler() -> None:
     ModelsHandler.auth_headers = []
     ModelsHandler.response_statuses = [200]
     ModelsHandler.response_delay_s = 0.0
+    ModelsHandler.disconnect_requests = 0
 
 
 @pytest.fixture
@@ -428,6 +434,81 @@ def test_wait_for_vllm_ready_times_out_without_leaking_api_key() -> None:
             timeout=0.15,
             interval=0.02,
         )
+
+
+@pytest.mark.parametrize("disconnects", [1, 2])
+def test_wait_for_vllm_ready_retries_disconnected_responses(
+    models_server: tuple[ThreadingHTTPServer, str], disconnects: int,
+) -> None:
+    _, base_url = models_server
+    ModelsHandler.disconnect_requests = disconnects
+
+    wait_for_vllm_ready(
+        base_url=base_url,
+        api_key="readiness-token",
+        process=DummyProcess([None]),
+        timeout=1.0,
+        interval=0.01,
+    )
+
+    assert ModelsHandler.requests_seen == disconnects + 1
+    assert ModelsHandler.auth_headers == ["Bearer readiness-token"] * (disconnects + 1)
+
+
+def test_wait_for_vllm_ready_disconnections_respect_timeout(
+    models_server: tuple[ThreadingHTTPServer, str],
+) -> None:
+    _, base_url = models_server
+    ModelsHandler.disconnect_requests = 10_000
+
+    with pytest.raises(TimeoutError, match="connection failure") as exc_info:
+        wait_for_vllm_ready(
+            base_url=base_url,
+            api_key="readiness-token",
+            process=DummyProcess([None]),
+            timeout=0.15,
+            interval=0.01,
+        )
+
+    assert ModelsHandler.requests_seen >= 1
+    assert "readiness-token" not in str(exc_info.value)
+
+
+def test_wait_for_vllm_ready_reports_child_exit_after_disconnection(
+    models_server: tuple[ThreadingHTTPServer, str],
+) -> None:
+    _, base_url = models_server
+    ModelsHandler.disconnect_requests = 1
+
+    with pytest.raises(RuntimeError, match="exited with status 17"):
+        wait_for_vllm_ready(
+            base_url=base_url,
+            api_key=None,
+            process=DummyProcess([None, 17]),
+            timeout=1.0,
+            interval=0.01,
+        )
+
+    assert ModelsHandler.requests_seen == 1
+
+
+def test_wait_for_vllm_ready_honors_shutdown_after_disconnection(
+    models_server: tuple[ThreadingHTTPServer, str],
+) -> None:
+    _, base_url = models_server
+    ModelsHandler.disconnect_requests = 1
+
+    with pytest.raises(ShutdownRequested):
+        wait_for_vllm_ready(
+            base_url=base_url,
+            api_key=None,
+            process=DummyProcess([None]),
+            timeout=1.0,
+            interval=0.01,
+            shutdown_requested=lambda: ModelsHandler.requests_seen > 0,
+        )
+
+    assert ModelsHandler.requests_seen == 1
 
 
 def test_wait_for_vllm_ready_retries_request_timeouts_without_leaking_api_key(

@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import os
 import signal
+import socket
+import sys
+import textwrap
 from pathlib import Path
 from typing import Any, Callable
 
 import pytest
 
 from agentic_api.cli import ServeOptions
-from agentic_api.process import ChildResult, ShutdownRequested
+from agentic_api.process import ChildResult, ProcessSupervisor, ShutdownRequested
 
 
 class FakeChild:
@@ -131,6 +134,86 @@ def test_run_serve_local_mode_starts_vllm_then_rust(monkeypatch: pytest.MonkeyPa
     assert signal.SIGINT in signal_handlers
     assert signal.SIGTERM in signal_handlers
     assert supervisor.terminate_timeout == 10.0
+
+
+@pytest.mark.skipif(os.name != "posix", reason="requires executable POSIX helpers")
+def test_run_serve_recovers_from_disconnected_readiness_and_reaps_children(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    import agentic_api.launcher as launcher
+
+    ready = tmp_path / "ready"
+    started = tmp_path / "gateway-started"
+    vllm = tmp_path / "vllm"
+    gateway = tmp_path / "agentic-server"
+    vllm.write_text(f"#!{sys.executable}\n" + textwrap.dedent(f"""\
+        import sys
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        from pathlib import Path
+
+        class Handler(BaseHTTPRequestHandler):
+            requests = 0
+
+            def do_GET(self):
+                assert self.path == "/v1/models"
+                type(self).requests += 1
+                if type(self).requests == 1:
+                    self.close_connection = True
+                    return
+                Path({str(ready)!r}).write_text(str(type(self).requests))
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'{{"data":[{{"id":"model-a"}}]}}')
+
+            def log_message(self, *args):
+                pass
+
+        port = int(sys.argv[sys.argv.index("--port") + 1])
+        HTTPServer(("127.0.0.1", port), Handler).serve_forever()
+        """))
+    gateway.write_text(f"#!{sys.executable}\n" + textwrap.dedent(f"""\
+        from pathlib import Path
+        assert Path({str(ready)!r}).read_text() == "2"
+        Path({str(started)!r}).write_text("started after readiness")
+        raise SystemExit(7)
+        """))
+    vllm.chmod(0o755)
+    gateway.chmod(0o755)
+
+    supervisor = ProcessSupervisor()
+    children = []
+    start = supervisor.start
+
+    def track_start(command: list[str], env: dict[str, str]) -> Any:
+        child = start(command, env)
+        children.append(child)
+        return child
+
+    monkeypatch.setattr(supervisor, "start", track_start)
+    monkeypatch.setattr(launcher, "ProcessSupervisor", lambda: supervisor)
+    monkeypatch.setattr(launcher, "find_packaged_binary", lambda name: gateway)
+    monkeypatch.setattr(launcher, "find_active_environment_executable", lambda name: vllm)
+    monkeypatch.setattr(launcher, "_installed_vllm_version", lambda: launcher.SUPPORTED_VLLM_VERSION)
+    monkeypatch.setattr(launcher, "READY_INTERVAL_S", 0.01)
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    previous_handlers = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
+
+    try:
+        assert launcher.run_serve(make_options(
+            vllm_port=port, startup_timeout_s=3.0, shutdown_timeout_s=0.5,
+        )) == 7
+        assert ready.read_text() == "2"
+        assert started.read_text() == "started after readiness"
+        assert len(children) == 2
+        assert all(child.poll() is not None for child in children)
+        for child in children:
+            with pytest.raises(ProcessLookupError):
+                os.killpg(child.pid, 0)
+        assert {sig: signal.getsignal(sig) for sig in previous_handlers} == previous_handlers
+    finally:
+        supervisor.terminate_all(timeout=0.1)
 
 
 def test_run_serve_local_mode_checks_packaged_gateway_before_starting_vllm(

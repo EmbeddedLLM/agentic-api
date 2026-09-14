@@ -206,7 +206,8 @@ def wait_for_vllm_ready(
             last_error = f"HTTP {error.code}"
         except (TimeoutError, socket.timeout):
             last_error = "request timeout"
-        except urllib.error.URLError:
+        # urllib can surface connection errors directly while reading response headers.
+        except (urllib.error.URLError, ConnectionError):
             last_error = "connection failure"
 
         if shutdown_requested is not None and shutdown_requested():
