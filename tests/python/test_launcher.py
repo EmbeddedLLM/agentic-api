@@ -151,8 +151,15 @@ def test_run_serve_recovers_from_disconnected_readiness_and_reaps_children(
     gateway = tmp_path / "agentic-server"
     vllm.write_text(f"#!{sys.executable}\n" + textwrap.dedent(f"""\
         import sys
-        from http.server import BaseHTTPRequestHandler, HTTPServer
+        import socket
+        from http.server import BaseHTTPRequestHandler
         from pathlib import Path
+        from socketserver import TCPServer
+
+        def reject_hostname_lookup(*args, **kwargs):
+            raise AssertionError("loopback fixture must not depend on hostname lookup")
+
+        socket.getfqdn = reject_hostname_lookup
 
         class Handler(BaseHTTPRequestHandler):
             requests = 0
@@ -174,7 +181,9 @@ def test_run_serve_recovers_from_disconnected_readiness_and_reaps_children(
         import time
         time.sleep({fixture_startup_delay})
         port = int(sys.argv[sys.argv.index("--port") + 1])
-        server = HTTPServer(("127.0.0.1", port), Handler)
+        # HTTPServer resolves its server name during bind; this fixture only
+        # needs a loopback socket and must also work when DNS is unavailable.
+        server = TCPServer(("127.0.0.1", port), Handler)
         Path({str(listening)!r}).touch()
         server.serve_forever()
         """))
