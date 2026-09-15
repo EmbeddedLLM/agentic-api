@@ -66,7 +66,9 @@ for (const [file, heading] of pages) {
   );
   if (file === 'index.html') {
     assert.ok(
-      document.includes('cargo install agentic-server --locked'),
+      document.includes(
+        'cargo install agentic-server --version 0.7.0 --locked',
+      ),
       'The quickstart initially shows the published Cargo package',
     );
     assert.ok(

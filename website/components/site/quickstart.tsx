@@ -12,6 +12,7 @@ import {
 import {
   DEFAULT_INSTALL_METHOD,
   INSTALL_METHODS,
+  PUBLISHED_VERSION,
   type InstallMethod,
   isInstallMethod,
   getLaunchCommands,
@@ -82,8 +83,7 @@ export function Quickstart() {
           {
             name: 'get_launch_instructions',
             title: 'Get agent launch instructions',
-            description:
-              'Read installation and launch instructions for Codex or Claude Code with vLLM. Defaults to the crates.io release; PyPI instructions are for the upcoming release. Returns commands; does not run commands or change configuration.',
+            description: `Read installation and launch instructions for Codex or Claude Code with vLLM. Version ${PUBLISHED_VERSION} is available on crates.io and PyPI; defaults to crates.io. Returns commands; does not run commands or change configuration.`,
             inputSchema: {
               type: 'object',
               properties: {
@@ -138,8 +138,8 @@ export function Quickstart() {
               <div>
                 <strong>Install Agentic API</strong>
                 <p>
-                  Get the release from crates.io. A Python package is coming to
-                  PyPI, with source builds available for development.
+                  Install v{PUBLISHED_VERSION} from PyPI or crates.io, with
+                  source builds available for development.
                 </p>
               </div>
             </li>
@@ -193,8 +193,8 @@ export function Quickstart() {
                     method === 'source'
                       ? 'Build from source'
                       : method === 'pypi'
-                        ? 'Install from PyPI — coming soon'
-                        : 'Install from crates.io'
+                        ? `Install from PyPI (v${PUBLISHED_VERSION})`
+                        : `Install from crates.io (v${PUBLISHED_VERSION})`
                   }
                 />
                 <p className="install-note">{details.note}</p>

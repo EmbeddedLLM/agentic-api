@@ -6,7 +6,14 @@ build-backend = "maturin"
 name = "agentic-api"
 dynamic = ["version"]
 description = "Agentic API gateway for OpenAI-compatible inference servers"
+readme = "python/README.md"
 requires-python = ">=3.10"
+
+[project.urls]
+Homepage = "https://vllm-project.github.io/agentic-api/"
+Documentation = "https://vllm-project.github.io/agentic-api/docs/latest"
+Repository = "https://github.com/vllm-project/agentic-api"
+Issues = "https://github.com/vllm-project/agentic-api/issues"
 
 [project.optional-dependencies]
 local = ["vllm==0.11.0; platform_system == 'Linux'"]

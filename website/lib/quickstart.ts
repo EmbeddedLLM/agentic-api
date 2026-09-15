@@ -1,15 +1,17 @@
 import { REPO } from './site';
 
+export const PUBLISHED_VERSION = '0.7.0';
+
 export const INSTALL_METHODS = {
   crates: {
     label: 'crates.io',
-    command: 'cargo install agentic-server --locked',
+    command: `cargo install agentic-server --version ${PUBLISHED_VERSION} --locked`,
     note: 'Install the released gateway and agentic CLI. Requires Rust and Cargo.',
   },
   pypi: {
     label: 'PyPI',
-    command: 'python -m pip install "agentic-api>=0.6.0"',
-    note: 'Coming soon. Use this command after the PyPI release, in a Python 3.10+ environment. The wheel includes the gateway and agentic CLI; vLLM is installed separately.',
+    command: `python -m pip install agentic-api==${PUBLISHED_VERSION}`,
+    note: 'Requires Python 3.10+. The wheel includes the gateway and agentic CLI; vLLM is installed separately.',
   },
   source: {
     label: 'Build from source',
