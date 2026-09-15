@@ -273,3 +273,10 @@ def test_pypi_duplicate_version_check_fails_closed(tmp_path: Path) -> None:
         assert (result.returncode == 0) == succeeds, (status, result.stdout, result.stderr)
         if status == '200':
             assert 'already published' in result.stdout + result.stderr
+
+
+
+def test_release_installs_declared_rust_components_before_cargo() -> None:
+    workflow = RELEASE_WORKFLOW.read_text()
+    install = workflow.split('      - name: Install Rust toolchain', 1)[1].split('      - name:', 1)[0]
+    assert 'components: clippy, rustfmt' in install
