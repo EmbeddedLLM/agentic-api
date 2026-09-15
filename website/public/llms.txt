@@ -12,8 +12,12 @@ The Markdown guides below track the development branch (`main`). For a released 
 
 ## Getting started
 
+- [Roadmap](https://raw.githubusercontent.com/vllm-project/agentic-api/main/ROADMAP.md): Project goals, near-term priorities, longer-term direction, and non-goals.
+
 - [Project overview and quickstart](https://raw.githubusercontent.com/vllm-project/agentic-api/main/README.md): Architecture, installation, agentic CLI commands, and configuration examples.
-- [Python installation and workflows](https://raw.githubusercontent.com/vllm-project/agentic-api/main/docs/guides/python-installation.md): Wheel artifacts, PyPI publication status, remote and managed-vLLM modes, and diagnostics.
+- [Rust CLI reference](https://vllm-project.github.io/agentic-api/docs/latest/rust-cli.md): Generated commands, options, and defaults for `agentic ...`: run a harness, attach to an existing gateway, serve, and validate. Installed by both Cargo and PyPI.
+- [Python CLI reference](https://vllm-project.github.io/agentic-api/docs/latest/python-cli.md): Generated command-line reference for the Python launcher, `agentic-api ...` (or `python -m agentic_api ...`). The Rust CLI uses `agentic ...` and has separate commands and flags.
+- [Python installation and workflows](https://raw.githubusercontent.com/vllm-project/agentic-api/main/docs/guides/python-installation.md): PyPI installation, remote and managed-vLLM modes, and diagnostics.
 - [Development setup](https://raw.githubusercontent.com/vllm-project/agentic-api/main/docs/developing/getting-started.md): Build from source and run the development checks.
 
 ## APIs and state
@@ -39,6 +43,9 @@ The Markdown guides below track the development branch (`main`). For a released 
 - [Kubernetes](https://raw.githubusercontent.com/vllm-project/agentic-api/main/docs/deploying/kubernetes.md): Kubernetes deployment and configuration.
 
 ## Optional
+
+- [Community meeting invite](https://zoom-lfx.platform.linuxfoundation.org/meeting/99957052764?password=caffe82c-cdfe-478e-964c-5e1d95c0c72e&invite=true): Open the community meeting invitation on LFX.
+- [Meeting notes](https://docs.google.com/document/d/1zJUfxdloxu9_oBYfbfTtgbz5sSZxwAnqvlnt72T67oU/edit?tab=t.0#heading=h.d5de0vs6frfk): Read the shared community meeting notes.
 
 - [Contributing](https://raw.githubusercontent.com/vllm-project/agentic-api/main/docs/community/index.md): Ways to contribute code, documentation, reviews, and feedback.
 - [Releases](https://github.com/vllm-project/agentic-api/releases): Published versions and release notes.

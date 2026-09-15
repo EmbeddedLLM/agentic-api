@@ -55,6 +55,15 @@ export function Header() {
         Documentation
       </Link>
       <Link
+        href="/roadmap"
+        onClick={() => setOpen(false)}
+        aria-current={
+          path.replace(/\/$/, '') === '/roadmap' ? 'page' : undefined
+        }
+      >
+        Roadmap
+      </Link>
+      <Link
         href="/community/team"
         onClick={() => setOpen(false)}
         aria-current={path.startsWith('/community') ? 'page' : undefined}

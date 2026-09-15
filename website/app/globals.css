@@ -736,7 +736,7 @@ h2 {
     font-size: 37px;
   }
 }
-@media (max-width: 850px) {
+@media (max-width: 980px) {
   .desktop-nav {
     display: none;
   }
@@ -750,6 +750,8 @@ h2 {
     color: light-dark(#243445, #ddd);
     padding: 8px;
   }
+}
+@media (max-width: 850px) {
   .hero {
     grid-template-columns: 1fr;
     gap: 44px;
@@ -1318,6 +1320,174 @@ h2 {
   align-items: center;
   gap: 24px;
 }
+.community-meeting-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+  margin-top: 16px;
+}
+.community-meeting-links a {
+  min-height: 32px;
+}
+.roadmap-source,
+.roadmap-source > div,
+.roadmap-source a,
+.roadmap-source > span {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.roadmap-source {
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 16px 30px;
+  border-block: 1px solid var(--border);
+  padding-block: 20px;
+  font-size: 13px;
+}
+.roadmap-source > span {
+  color: var(--muted);
+}
+.roadmap-source > div {
+  flex-wrap: wrap;
+  gap: 16px 26px;
+  color: var(--blue-ink);
+}
+.roadmap-source a:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.roadmap-body {
+  max-width: 780px;
+  margin-inline: auto;
+  padding-block: 42px 72px;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.85;
+  overflow-wrap: anywhere;
+}
+.roadmap-body h2 {
+  margin: 52px 0 24px;
+  padding-top: 26px;
+  border-top: 1px solid var(--border);
+  color: var(--gold-ink);
+  font-size: clamp(27px, 3vw, 34px);
+  line-height: 1.25;
+  letter-spacing: -0.8px;
+}
+.roadmap-body h3 {
+  margin: 34px 0 16px;
+  color: light-dark(#243445, #e6edf5);
+  font-size: clamp(20px, 2vw, 24px);
+  line-height: 1.4;
+  letter-spacing: -0.4px;
+}
+.roadmap-body p {
+  margin: 0 0 18px;
+}
+.roadmap-body ul,
+.roadmap-body ol {
+  padding-left: 24px;
+  margin: 18px 0 26px;
+}
+.roadmap-body ul {
+  list-style: disc;
+}
+.roadmap-body ol {
+  list-style: decimal;
+}
+.roadmap-body li {
+  margin-block: 8px;
+  padding-left: 4px;
+}
+.roadmap-body li::marker {
+  color: var(--blue-ink);
+}
+.roadmap-body a {
+  color: var(--blue-ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.command-prompt {
+  margin-inline-end: 0.55em;
+  color: var(--blue-ink);
+  user-select: none;
+}
+.roadmap-body .command-heading {
+  font-family: var(--font-geist-mono), monospace;
+  font-size: clamp(22px, 2.6vw, 30px);
+  letter-spacing: -0.5px;
+}
+.command-prompt-note {
+  font-size: 14px;
+}
+.cli-interface-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.cli-interface-nav a {
+  display: grid;
+  gap: 8px;
+  flex: 1 1 220px;
+  padding: 18px 22px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.cli-interface-nav a > span {
+  color: var(--muted);
+  font-size: 14px;
+}
+.cli-interface-nav code {
+  font-size: 18px;
+  font-family: var(--font-geist-mono), monospace;
+}
+.cli-interface-nav a[aria-current='page'],
+.cli-interface-nav a:hover {
+  border-color: var(--blue-ink);
+  background: light-dark(#e6f1fc, #16283b);
+}
+.roadmap-body .heading-anchor {
+  display: block;
+  border-radius: 4px;
+  color: inherit;
+  text-decoration: none;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+}
+.roadmap-body .heading-anchor:hover,
+.roadmap-body .heading-anchor:focus-visible {
+  color: var(--blue-ink);
+  text-decoration-line: underline;
+}
+.roadmap-body strong {
+  color: light-dark(#243445, #e6edf5);
+  font-weight: 550;
+}
+.roadmap-body code {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 5px;
+  background: light-dark(#edf2f7, #181d25);
+  color: light-dark(#365f81, #b9dcf9);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.85em;
+}
+.roadmap-body pre {
+  overflow-x: auto;
+  padding: 18px;
+  background: light-dark(#edf2f7, #181d25);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.roadmap-body pre code {
+  border: 0;
+  padding: 0;
+}
+.roadmap-body img {
+  max-width: 100%;
+}
 .community-visual {
   text-align: center;
 }
@@ -1375,13 +1545,15 @@ h2 {
 .community-nav {
   border-block: 1px solid light-dark(#ccd7e3, #32343a);
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
-  gap: 25px;
+  gap: 0 25px;
 }
 .community-nav > div {
   display: flex;
-  gap: 28px;
+  flex-wrap: wrap;
+  column-gap: 28px;
 }
 .community-nav a {
   display: flex;
@@ -1715,7 +1887,7 @@ h2 {
     font-size: 12px;
   }
   .community-nav > div {
-    gap: 21px;
+    column-gap: 21px;
   }
 }
 @media (max-width: 540px) {
@@ -1790,7 +1962,7 @@ h2 {
   .community-nav > div {
     width: 100%;
     justify-content: flex-start;
-    gap: 28px;
+    column-gap: 28px;
   }
   .community-nav a {
     font-size: 13px;

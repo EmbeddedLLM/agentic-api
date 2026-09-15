@@ -59,6 +59,28 @@ export function DocsPage({ version }: { version: DocsVersion }) {
           {!version.hostedBaseUrl && ' Guides currently open on GitHub.'}
         </p>
       </aside>
+      <Link href="/docs/latest/rust-cli" className="docs-section-link">
+        <BookOpen size={22} aria-hidden="true" />
+        <div>
+          <h2>Rust command-line reference</h2>
+          <p>
+            Latest / development · The <code>agentic</code> CLI: run harnesses,
+            serve, and validate.
+          </p>
+        </div>
+        <ArrowUpRight size={20} aria-hidden="true" />
+      </Link>
+      <Link href="/docs/latest/python-cli" className="docs-section-link">
+        <BookOpen size={22} aria-hidden="true" />
+        <div>
+          <h2>Python command-line reference</h2>
+          <p>
+            Latest / development · The <code>agentic-api</code> Python launcher:
+            commands, options, and defaults.
+          </p>
+        </div>
+        <ArrowUpRight size={20} aria-hidden="true" />
+      </Link>
       <section
         className="docs-section-list"
         aria-label={`${version.label} guides`}

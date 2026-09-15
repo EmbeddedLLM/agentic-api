@@ -1,5 +1,6 @@
 import { ArrowUpRight } from 'lucide-react';
 import { REPO, SLACK, SLACK_CHANNEL } from '@/lib/site';
+import { CommunityMeetingLinks } from './community-meeting-links';
 export function CommunityCTA() {
   return (
     <section className="community-cta">
@@ -13,6 +14,7 @@ export function CommunityCTA() {
         <p className="slack-note">
           Join us in <a href={SLACK}>{SLACK_CHANNEL} on the vLLM Slack</a>.
         </p>
+        <CommunityMeetingLinks />
       </div>
       <a className="button primary" href={`${REPO}/blob/main/CONTRIBUTING.md`}>
         Start contributing <ArrowUpRight size={17} />

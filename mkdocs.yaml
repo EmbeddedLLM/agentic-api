@@ -7,6 +7,7 @@ edit_uri: edit/main/docs/
 
 exclude_docs: |
   superpowers/
+  mkdocs/generate_cli_reference.py
 
 theme:
   name: material
@@ -53,6 +54,9 @@ theme:
 extra_css:
   - mkdocs/stylesheets/extra.css
 
+hooks:
+  - docs/mkdocs/generate_cli_reference.py
+
 plugins:
   - search
   - autorefs
@@ -61,6 +65,10 @@ plugins:
       timezone: UTC
       fallback_to_build_date: true
       enable_creation_date: true
+      # Generated from the CLI; this Markdown file has no independent git history.
+      exclude:
+        - reference/python-cli.md
+        - reference/rust-cli.md
   - minify:
       minify_html: true
       minify_js: true
@@ -95,7 +103,11 @@ markdown_extensions:
 nav:
   - Home: index.md
   - API Reference: api/index.md
+  - Command-Line Reference:
+    - Rust CLI (agentic): reference/rust-cli.md
+    - Python Launcher (agentic-api): reference/python-cli.md
   - Guides:
+    - Python Installation: guides/python-installation.md
     - Responses Compaction: guides/responses-compaction.md
     - Harness CLI Testing: guides/harness-cli-testing.md
     - Codex Desktop: guides/codex-desktop.md

@@ -3,6 +3,14 @@
 version = 4
 
 [[package]]
+name = "agentic-cli-docs"
+version = "0.7.0"
+dependencies = [
+ "clap",
+ "url",
+]
+
+[[package]]
 name = "agentic-llm-d"
 version = "0.7.0"
 dependencies = [

@@ -1,0 +1,5 @@
+# Build-generated documentation snapshots for standalone website previews.
+# Review their source documents and generators instead of the copied output.
+/website/content/roadmap.md linguist-generated=true
+/website/content/python-cli.md linguist-generated=true
+/website/content/rust-cli.md linguist-generated=true

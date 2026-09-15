@@ -61,28 +61,58 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     serve_parser = subparsers.add_parser(
-        "serve", help="Launch Agentic API in local or remote mode", allow_abbrev=False
+        "serve",
+        help="Launch Agentic API in local or remote mode",
+        description="Launch the packaged Rust gateway. Choose exactly one of --model (managed local vLLM) "
+        "or --vllm-base-url (an existing upstream server).",
+        epilog="Pass extra vLLM arguments after -- in local mode. The launcher reserves --host, --port, "
+        "and --api-key; --uds is incompatible. Ports must be 1-65535. Timeouts must be greater than 0 "
+        "and at most 86400 seconds.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        allow_abbrev=False,
     )
-    serve_parser.add_argument("--model")
-    serve_parser.add_argument("--vllm-base-url")
-    serve_parser.add_argument("--host", default=DEFAULT_HOST)
-    serve_parser.add_argument("--port", type=_tcp_port, default=DEFAULT_PORT)
-    serve_parser.add_argument("--startup-timeout-s", type=_bounded_timeout, default=DEFAULT_STARTUP_TIMEOUT_S)
-    serve_parser.add_argument("--shutdown-timeout-s", type=_bounded_timeout, default=DEFAULT_SHUTDOWN_TIMEOUT_S)
-    serve_parser.add_argument("--vllm-port", type=_tcp_port, default=DEFAULT_VLLM_PORT)
-    serve_parser.add_argument("--gateway-api-key-env", default=DEFAULT_GATEWAY_API_KEY_ENV)
-    serve_parser.add_argument("--vllm-api-key-env", default=DEFAULT_VLLM_API_KEY_ENV)
-    serve_parser.add_argument("vllm_args", nargs=argparse.REMAINDER)
+    serve_parser.add_argument("--model", help="Model to serve with managed local vLLM; requires a local vLLM install")
+    serve_parser.add_argument("--vllm-base-url", help="HTTP(S) base URL of an existing upstream, without credentials")
+    serve_parser.add_argument("--host", default=DEFAULT_HOST, help="Gateway listen address")
+    serve_parser.add_argument("--port", type=_tcp_port, default=DEFAULT_PORT, help="Gateway listen port")
+    serve_parser.add_argument(
+        "--startup-timeout-s", type=_bounded_timeout, default=DEFAULT_STARTUP_TIMEOUT_S,
+        help="Startup readiness timeout in seconds",
+    )
+    serve_parser.add_argument(
+        "--shutdown-timeout-s", type=_bounded_timeout, default=DEFAULT_SHUTDOWN_TIMEOUT_S,
+        help="Grace period in seconds before terminating child processes forcibly",
+    )
+    serve_parser.add_argument(
+        "--vllm-port", type=_tcp_port, default=DEFAULT_VLLM_PORT, help="Managed local vLLM listen port",
+    )
+    serve_parser.add_argument(
+        "--gateway-api-key-env", default=DEFAULT_GATEWAY_API_KEY_ENV,
+        help="Environment variable containing the upstream API key used by the gateway",
+    )
+    serve_parser.add_argument(
+        "--vllm-api-key-env", default=DEFAULT_VLLM_API_KEY_ENV,
+        help="Environment variable containing the managed local vLLM API key; also passed to the gateway",
+    )
+    serve_parser.add_argument("vllm_args", nargs=argparse.REMAINDER, help="Extra local vLLM arguments after --")
 
     doctor_parser = subparsers.add_parser(
-        "doctor", help="Report packaged binary and compatibility diagnostics", allow_abbrev=False
+        "doctor",
+        help="Report packaged binary and compatibility diagnostics",
+        description="Check the packaged gateway and local vLLM compatibility. Without --mode, report both "
+        "modes and use remote health for the exit status. Exit 0 when healthy, 1 otherwise.",
+        allow_abbrev=False,
     )
-    doctor_parser.add_argument("--mode", choices=("local", "remote"))
+    doctor_parser.add_argument("--mode", choices=("local", "remote"), help="Select which mode to check")
     doctor_parser.add_argument(
         "--json", action="store_true", dest="json_output", help="Emit a machine-readable JSON report"
     )
 
-    subparsers.add_parser("version", help="Print package and packaged binary versions")
+    subparsers.add_parser(
+        "version", help="Print package and packaged binary versions",
+        description="Print the Python package, packaged Rust binary, and supported and installed vLLM versions. "
+        "Use agentic-api --version to print only the Python package version.",
+    )
     return parser
 
 

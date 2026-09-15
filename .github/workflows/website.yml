@@ -3,12 +3,42 @@ name: Website
 on:
   pull_request:
     paths:
+      - 'ROADMAP.md'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/agentic-cli-docs/**'
+      - 'crates/agentic-server/src/agentic_cli.rs'
+      - 'crates/agentic-server/src/agentic_output.rs'
+      # The docs generator imports the parser and these module dependencies.
+      - 'python/agentic_api/cli.py'
+      - 'python/agentic_api/__init__.py'
+      - 'python/agentic_api/diagnostics.py'
+      - 'python/agentic_api/version.py'
+      - 'python/agentic_api/binary.py'
+      - 'python/agentic_api/compatibility.py'
+      - 'scripts/generate_python_cli_docs.py'
+      - 'scripts/tests/test_python_cli_docs.py'
       - 'website/**'
       - '.github/workflows/website.yml'
       - '.github/workflows/release-crates.yml'
   push:
     branches: [main]
     paths:
+      - 'ROADMAP.md'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/agentic-cli-docs/**'
+      - 'crates/agentic-server/src/agentic_cli.rs'
+      - 'crates/agentic-server/src/agentic_output.rs'
+      # The docs generator imports the parser and these module dependencies.
+      - 'python/agentic_api/cli.py'
+      - 'python/agentic_api/__init__.py'
+      - 'python/agentic_api/diagnostics.py'
+      - 'python/agentic_api/version.py'
+      - 'python/agentic_api/binary.py'
+      - 'python/agentic_api/compatibility.py'
+      - 'scripts/generate_python_cli_docs.py'
+      - 'scripts/tests/test_python_cli_docs.py'
       - 'website/**'
       - '.github/workflows/website.yml'
   workflow_dispatch:
@@ -47,6 +77,18 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: website/package-lock.json
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: 1.98.0
+      - name: Test Rust CLI documentation generation
+        working-directory: .
+        run: cargo test --locked -p agentic-cli-docs
+      - name: Test Python CLI documentation generation
+        working-directory: .
+        run: python -m unittest discover -s scripts/tests -p test_python_cli_docs.py
       - run: npm ci
       - run: npm run format:check
       - run: npm test

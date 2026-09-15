@@ -11,6 +11,7 @@ build:
   os: ubuntu-22.04
   tools:
     python: "3.12"
+    rust: "1.98.0"
   jobs:
     post_checkout:
       - git fetch --unshallow origin main --no-tags

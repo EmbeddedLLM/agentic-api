@@ -39,3 +39,10 @@ next-env.d.ts
 
 # TypeScript incremental cache
 *.tsbuildinfo
+
+# Markdown export generated from the roadmap source before each build
+/public/roadmap.md
+
+# Generated Python CLI Markdown export
+/public/docs/latest/python-cli.md
+/public/docs/latest/rust-cli.md

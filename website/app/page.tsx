@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Features } from '@/components/site/features';
 import { Quickstart } from '@/components/site/quickstart';
 import { Ecosystem } from '@/components/site/ecosystem';
+import { CommunityMeetingLinks } from '@/components/site/community-meeting-links';
 import community from '@/lib/data/community.json';
 import { REPO, SLACK, SLACK_CHANNEL, assetPath } from '@/lib/site';
 export default function Home() {
@@ -93,6 +94,7 @@ export default function Home() {
           <p className="slack-note">
             Join us in <a href={SLACK}>{SLACK_CHANNEL} on the vLLM Slack</a>.
           </p>
+          <CommunityMeetingLinks />
           <div className="hero-actions">
             <Link className="button secondary" href="/community/team">
               Meet the team <ArrowRight size={16} />
