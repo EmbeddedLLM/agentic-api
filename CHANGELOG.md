@@ -2,6 +2,37 @@
 
 All notable changes to Agentic API are documented here.
 
+## [Unreleased]
+
+### Added
+
+- Added Brave Search as a selectable backend for the gateway-owned `web_search` tool (#294, Phase 2 of #291).
+  Select it with `AGENTIC_WEB_SEARCH_PROVIDER=brave` or `[web_search] provider = "brave"` and supply `BRAVE_API_KEY`;
+  the endpoint defaults to `https://api.search.brave.com` and can be overridden with `AGENTIC_WEB_SEARCH_BASE_URL`
+  or `[web_search] base_url`. Web and news results come from one request per query. The gateway adapts the shared
+  tool contract: `allowed_domains` / `blocked_domains` and the model's `include_domains` / `exclude_domains` are
+  enforced client-side on a label boundary, `count` is clamped to Brave's maximum of 20, `freshness` is rendered in
+  Brave syntax, `language` maps to `search_lang`, and the You.com-specific `livecrawl`, `livecrawl_formats`,
+  `crawl_timeout`, and `boost_domains` arguments are ignored. Rejected credentials and HTTP 429 responses fail the
+  `web_search_call` without an automatic retry, naming the key variable or the upstream `Retry-After` value and never
+  echoing the secret. Each Brave `metadata[]` entry carries `"provider": "brave"`.
+- Added `[web_search] max_concurrent_queries` and `AGENTIC_WEB_SEARCH_MAX_CONCURRENT_QUERIES` to cap concurrent
+  provider requests inside one batched search. Brave defaults to `1` for its free-plan rate limit; You.com keeps
+  inheriting `max_concurrent_gateway_calls`. The effective ceiling is the smallest of the gateway limit, this
+  override, and the provider's own ceiling.
+
+### Changed
+
+- `WebSearchProviderConfig` is now `#[non_exhaustive]` and gains `provider` and `max_concurrent_queries` fields;
+  construct it with `WebSearchProviderConfig::new(api_key, base_url)` plus the `with_provider` and
+  `with_max_concurrent_queries` builders. Downstream crates that built it with a struct literal must switch to the
+  constructor; field reads and `Default` are unchanged. `WebSearchProviderKind` gains a `Brave` variant, `FromStr`
+  (case-insensitive), `default_base_url`, `default_max_concurrent_queries`, and `config_name`;
+  `WebSearchHandler::from_config` builds the handler for the selected provider and `GatewayExecutors::from_config`
+  uses it. With `provider` unset, You.com behavior, configuration, and model-facing output are unchanged; a generated
+  `config.toml` now records `provider = "you"` and leaves `api_key_env` unset so provider switches select the matching
+  default credential variable.
+
 ## [0.7.0] - 2026-09-14
 
 ### Added
