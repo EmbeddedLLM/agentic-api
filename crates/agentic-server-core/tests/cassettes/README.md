@@ -59,7 +59,10 @@ Each smoke script starts a replay server and Agentic API, then invokes the insta
 `MESSAGES_GATEWAY_TOOL_ALIASES=WebSearch=web_search`; it asserts the recorded answer, two Messages rounds, one search
 request, a hidden `tool_result`, cache-bearing system and user blocks, and the exact Qwen model requested by Claude
 Code 2.1.245. The Codex job asserts the recorded `HELLO` answer, one streaming Responses request, and the exact Qwen
-model requested by Codex 0.149.1.
+model requested by Codex 0.149.1. It then runs `scripts/codex_image_smoke.py`, which attaches the committed
+`images/inputs/red-blue-64.png` through both launcher modes and compares its bytes with the upstream capture. A third
+run explicitly advertises text-only and requires the image to be absent. These cases replay the existing Qwen2.5-VL
+single-image SSE recording unchanged; they validate client/catalog propagation, not fresh model inference.
 
 ## Modes
 

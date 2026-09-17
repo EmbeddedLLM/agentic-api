@@ -248,11 +248,27 @@ max_request_body_size_bytes = 10485760
 # Must be greater than zero.
 max_concurrent_gateway_calls = 5
 
+[models."Qwen/Qwen3-VL-8B-Instruct"]
+# Input modalities to advertise for this served model ID.
+# Accepted values are "text" and "text" + "image"; text is always required.
+input_modalities = ["text", "image"]
+
 [mcp_servers.counter]
 url = "https://mcp.example.com/mcp"
 allowed_tools = ["tool_1_name", "tool_2_name"]
 require_approval = "never"
 ```
+
+`[models."<served-model-id>"]` declares capabilities the gateway cannot infer. `input_modalities` resolves in this
+order: an explicit override here, then `capabilities: ["image"]` from the upstream `/v1/models` entry, then a
+conservative text-only fallback. Capabilities are never guessed from a model name, so a vision model served without
+capability metadata needs this override. An explicit `["text"]` wins over upstream image metadata, which pins a model
+to text. Unknown modality names, empty lists, duplicates, and image-only lists are rejected at startup with the
+offending file and line.
+
+This matters because Codex reads its local model catalog and strips image content from a request before sending it
+when the catalog says the model is text-only, so a missing override blocks image input even against a vision-capable
+upstream.
 
 `max_request_body_size_bytes` bounds the serialized request the gateway accepts on `/v1/responses`,
 `/v1/responses/compact`, `/v1/conversations`, the Anthropic Messages endpoints, and the Responses WebSocket. It counts
