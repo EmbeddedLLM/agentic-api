@@ -84,6 +84,17 @@ All notable changes to Agentic API are documented here.
   stream, and bounded concurrency across streams (#240).
 - Added compile-time OpenAPI 3.1 schema generation and checked-in schema validation for the HTTP API (#229).
 - Added pinned SGLang conformance recordings, replay coverage, and launch and recording guidance (#267).
+- Verified image preservation through the Responses gateway end to end (#253): integration coverage for mixed
+  text/image ordering, multiple images per turn, client-executed `view_image` tool output, `previous_response_id`
+  continuation, `conversation_id` rehydration, stateless `store: false` proxying, and compaction of retained
+  image-bearing user messages, over both the HTTP and WebSocket transports.
+- Recorded paired image cassettes — client → OpenAI as the reference and client → gateway → vLLM serving
+  `Qwen/Qwen2.5-VL-3B-Instruct` — for a text-and-image message, two interleaved images, a `previous_response_id`
+  follow-up, and a client-executed tool returning an image through a structured `function_call_output`, each
+  streaming and non-streaming. Replay coverage compares request shape, completed-response structure, the streaming
+  event lifecycle, and the history the gateway forwards on continuation; model wording is never compared (#253).
+  The cassette recorder accepts `--input-file` for the first of several turns and sends a tool handler's list of
+  content parts as a structured output array.
 
 ### Changed
 
@@ -99,6 +110,8 @@ All notable changes to Agentic API are documented here.
   architecture (#246).
 - Updated the execution architecture documentation to match the current scheduler and llm-d backend (#270).
 - Preserved the typed `ignore_eos` extension when forwarding Responses requests to vLLM (#268).
+- Modeled `refusal` as an assistant-history content part so OpenAI-style history replays through the typed
+  Responses executor instead of being rejected as unmodeled (#253).
 
 ### Fixed
 
@@ -110,6 +123,12 @@ All notable changes to Agentic API are documented here.
 - Required a healthy packaged gateway before `agentic-api doctor --mode local` reports success (#223).
 - Rebuilt workspace crates after `cargo-chef` dependency cooking so container binaries carry current source and package
   metadata (#208, #209).
+- Rejected message content the typed Responses executor cannot convey — unmodeled part types and empty part arrays,
+  alongside the existing `input_file` rejection — with a `400` naming the offending part, instead of forwarding a
+  synthetic `{"type": "unknown"}` part or silently dropping it. Modeled parts keep their unmodeled extension fields
+  through the typed path, so a message is never mutated in transit, never means something different on the typed
+  path than on the raw `store: false` path, and is never persisted with content the client did not send (#253).
+- Counted an image referenced by `file_id` as retained context during compaction, matching inline images (#253).
 - Hardened split execution with atomic duplicate persistence, strict relayed-response validation, independent secret
   validation, bounded hydrate and persist payloads, stable error envelopes, and graceful shutdown error propagation
   (#235).
