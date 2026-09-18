@@ -18,8 +18,10 @@ use agentic_server::app::DEFAULT_MAX_REQUEST_BODY_SIZE;
 use agentic_server::auth::OidcConfig;
 
 mod config_file;
+mod responses_config;
 mod server;
 mod web_search_config;
+use responses_config::{generated_responses_file_config, resolve_responses_config};
 
 use config_file::{FileConfig, McpFileConfig, MessagesGatewayFileConfig, ServerFileConfig, ToolsFileConfig};
 use server::GatewayOptions;
@@ -314,6 +316,7 @@ fn build_config(llm_api_base: String, common: &CommonArgs, file: &FileConfig) ->
         "AGENTIC_MAX_CONCURRENT_GATEWAY_CALLS",
         max_concurrent_gateway_calls_default,
     )?;
+    let responses_config = resolve_responses_config(&file.responses)?;
     Ok(Config {
         llm_api_base,
         openai_api_key: common.openai_api_key.clone(),
@@ -330,6 +333,7 @@ fn build_config(llm_api_base: String, common: &CommonArgs, file: &FileConfig) ->
             messages_gateway_tool_aliases: file.messages_gateway.tool_aliases.clone(),
             max_concurrent_gateway_calls,
         },
+        responses: responses_config,
     })
 }
 
@@ -369,6 +373,7 @@ fn generated_file_config(llm_api_base: String) -> FileConfig {
         messages_gateway: MessagesGatewayFileConfig {
             tool_aliases: environment_value("MESSAGES_GATEWAY_TOOL_ALIASES"),
         },
+        responses: generated_responses_file_config(),
         mcp_servers: HashMap::new(),
         ..FileConfig::default()
     }

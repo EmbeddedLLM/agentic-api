@@ -29,68 +29,25 @@ use super::error::WsError;
 use crate::app::AppState;
 use crate::auth::AuthenticatedPrincipal;
 
+mod event;
+use event::{StreamId, WsEventLimit, WsOutboundEvent};
+#[cfg(test)]
+use event::{WS_MAX_STREAM_ID_CHARS, WS_ROUTING_SLACK_BYTES, attach_stream_id, ws_routing_overhead};
+
 type WsSender = SplitSink<WebSocket, Message>;
 
+/// Outbound events queued ahead of the socket writer. Each entry is bounded by
+/// the configured `max_stream_event_bytes`, so the queue holds at most
+/// `WS_OUTBOUND_BUFFER * max_stream_event_bytes` serialized bytes.
 const WS_OUTBOUND_BUFFER: usize = 64;
-const WS_MAX_EVENT_BYTES: usize = 1024 * 1024;
 const WS_MAX_OUTSTANDING_REQUESTS: usize = 64;
 const WS_MAX_OUTSTANDING_BYTES: usize = 12 * 1024 * 1024;
-const WS_MAX_STREAM_ID_CHARS: usize = 256;
 // Retained state is bounded separately from queued requests and outbound events.
 // Limits cover serialized checkpoints, including pinned parents and replacements.
 const WS_MAX_SESSION_LANES: usize = 128;
 const WS_MAX_CHECKPOINT_ITEMS: usize = 32_768;
 const WS_MAX_CHECKPOINT_BYTES: usize = 16 * 1024 * 1024;
 const WS_MAX_RETAINED_BYTES: usize = 32 * 1024 * 1024;
-
-/// Serialized and size-checked before entering the bounded outbound queue.
-struct WsOutboundEvent(String);
-
-impl WsOutboundEvent {
-    fn new(value: Value, stream_id: Option<&StreamId>) -> Result<Self, WsError> {
-        let value = attach_stream_id(value, stream_id)?;
-        let text = serde_json::to_string(&value).map_err(WsError::SerializeJson)?;
-        if text.len() > WS_MAX_EVENT_BYTES {
-            return Err(WsError::from(ExecutorError::StreamError(format!(
-                "websocket event exceeded {WS_MAX_EVENT_BYTES} bytes"
-            ))));
-        }
-        Ok(Self(text))
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
-#[serde(try_from = "String")]
-struct StreamId(String);
-
-impl StreamId {
-    fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl TryFrom<String> for StreamId {
-    type Error = String;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        let character_count = value.chars().count();
-        if (1..=WS_MAX_STREAM_ID_CHARS).contains(&character_count) {
-            Ok(Self(value))
-        } else {
-            Err(format!(
-                "stream_id must contain between 1 and {WS_MAX_STREAM_ID_CHARS} characters"
-            ))
-        }
-    }
-}
-
-impl TryFrom<&str> for StreamId {
-    type Error = String;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        Self::try_from(value.to_owned())
-    }
-}
 
 struct WsRequest {
     payload: RequestPayload,
@@ -209,6 +166,10 @@ impl WsMultiplexer {
         }
     }
 
+    fn event_limit(&self) -> WsEventLimit {
+        WsEventLimit::from_state(&self.state)
+    }
+
     fn has_capacity_for(&self, input_bytes: usize) -> bool {
         self.request_tasks.len() + self.queued_requests < WS_MAX_OUTSTANDING_REQUESTS
             && self.byte_budget.can_reserve(input_bytes)
@@ -307,6 +268,7 @@ impl WsMultiplexer {
         let shutdown_token = self.shutdown_token.clone();
         let stream_id = work.stream_id().cloned();
         let input_bytes = work.input_bytes();
+        let event_limit = self.event_limit();
         // schedule creates a session before admitting work; idle sessions survive schedule_next.
         let session = Arc::clone(self.sessions.get(&lane).expect("admitted lane has a session"));
         self.request_tasks.spawn(async move {
@@ -316,12 +278,21 @@ impl WsMultiplexer {
                 return RequestCompletion {
                     lane,
                     input_bytes,
-                    result: queue_ws_json(&outbound_tx, event, stream_id.as_ref()).await,
+                    result: queue_ws_json(&outbound_tx, event, stream_id.as_ref(), event_limit).await,
                 };
             }
             let result = match work {
                 WsWorkItem::Execute { request, .. } => {
-                    handle_ws_request(*request, &state, auth, &outbound_tx, &shutdown_token, &session).await
+                    handle_ws_request(
+                        *request,
+                        &state,
+                        auth,
+                        &outbound_tx,
+                        &shutdown_token,
+                        &session,
+                        event_limit,
+                    )
+                    .await
                 }
                 WsWorkItem::Reject { error, .. } => {
                     if let Some(parent) = error.previous_response_id.as_deref() {
@@ -342,7 +313,7 @@ impl WsMultiplexer {
             };
             let result = match result {
                 Ok(()) => Ok(()),
-                Err(error) => queue_ws_error(&outbound_tx, error, stream_id.as_ref()).await,
+                Err(error) => queue_ws_error(&outbound_tx, error, stream_id.as_ref(), event_limit).await,
             };
             RequestCompletion {
                 lane,
@@ -507,7 +478,7 @@ async fn handle_ws_client_message(
         Message::Text(text) => {
             if let Some(event) = websocket_identity_error_event(multiplexer.principal.as_deref()) {
                 let stream_id = stream_id_from_text(&text);
-                let send_succeeded = match WsOutboundEvent::new(event, stream_id.as_ref()) {
+                let send_succeeded = match WsOutboundEvent::new(event, stream_id.as_ref(), multiplexer.event_limit()) {
                     Ok(event) => send_ws_event(sender, event).await.is_ok(),
                     Err(error) => {
                         warn!(%error, "failed to build websocket identity error event");
@@ -530,7 +501,8 @@ async fn handle_ws_client_message(
             let input_bytes = text.len();
             if !multiplexer.has_capacity_for(input_bytes) {
                 let stream_id = stream_id_from_text(&text);
-                return handle_ws_error(sender, WsError::TooManyRequests, stream_id.as_ref()).await;
+                let limit = multiplexer.event_limit();
+                return handle_ws_error(sender, WsError::TooManyRequests, stream_id.as_ref(), limit).await;
             }
             let work = match parse_ws_request(&text) {
                 Ok(request) => WsWorkItem::Execute {
@@ -544,13 +516,14 @@ async fn handle_ws_client_message(
                 debug!("discarded websocket response.create during shutdown");
                 return true;
             }
+            let limit = multiplexer.event_limit();
             match multiplexer.schedule(work) {
                 Ok(()) => true,
-                Err(rejected) => handle_ws_error(sender, rejected.error, rejected.stream_id.as_ref()).await,
+                Err(rejected) => handle_ws_error(sender, rejected.error, rejected.stream_id.as_ref(), limit).await,
             }
         }
         Message::Binary(_) if *draining => true,
-        Message::Binary(_) => handle_ws_error(sender, WsError::BinaryFrame, None).await,
+        Message::Binary(_) => handle_ws_error(sender, WsError::BinaryFrame, None, multiplexer.event_limit()).await,
         Message::Close(_) => false,
         Message::Ping(payload) => sender.send(Message::Pong(payload)).await.is_ok(),
         Message::Pong(_) => true,
@@ -675,6 +648,7 @@ async fn handle_ws_request(
     outbound_tx: &mpsc::Sender<WsOutboundEvent>,
     shutdown_token: &CancellationToken,
     session: &ResponseSession,
+    event_limit: WsEventLimit,
 ) -> Result<(), WsError> {
     let WsRequest {
         payload,
@@ -684,12 +658,16 @@ async fn handle_ws_request(
 
     if generate == Some(false) {
         debug!("handling non-generating websocket request locally");
-        return complete_without_inference(outbound_tx, state, payload, stream_id.as_ref(), session).await;
+        return complete_without_inference(outbound_tx, state, payload, stream_id.as_ref(), session, event_limit).await;
     }
 
+    // The executor validates every frame, including the terminal
+    // `response.completed`, against what this socket can deliver after routing
+    // metadata is attached, and does so before persisting the response.
     let result = ExecuteRequest::new(payload, Arc::clone(&state.exec_ctx))
         .with_auth(auth)
         .with_session(session)?
+        .with_max_stream_event_bytes(event_limit.executor_limit(stream_id.as_ref()))
         .run()
         .await?;
     let Some(result) = keep_if_running(shutdown_token, result) else {
@@ -702,7 +680,7 @@ async fn handle_ws_request(
         ))));
     };
 
-    stream_ws_response(outbound_tx, stream, stream_id.as_ref()).await
+    stream_ws_response(outbound_tx, stream, stream_id.as_ref(), event_limit).await
 }
 
 async fn complete_without_inference(
@@ -711,6 +689,7 @@ async fn complete_without_inference(
     payload: RequestPayload,
     stream_id: Option<&StreamId>,
     session: &ResponseSession,
+    event_limit: WsEventLimit,
 ) -> Result<(), WsError> {
     let ctx = rehydrate_in_session(payload, &state.exec_ctx, session).await?;
     let created_at = utcnow_str();
@@ -727,8 +706,8 @@ async fn complete_without_inference(
     // Validate both lifecycle events, including routing metadata, before any
     // persistence or delivery. Completion metadata can exceed the limit even
     // when the created event fits.
-    let created_event = WsOutboundEvent::new(created_event, stream_id)?;
-    let completed_event = WsOutboundEvent::new(completed_event, stream_id)?;
+    let created_event = WsOutboundEvent::new(created_event, stream_id, event_limit)?;
+    let completed_event = WsOutboundEvent::new(completed_event, stream_id, event_limit)?;
 
     #[cfg(debug_assertions)]
     state.websocket_tracker.pause_local_completion_after_rehydration().await;
@@ -776,9 +755,10 @@ async fn stream_ws_response(
     outbound_tx: &mpsc::Sender<WsOutboundEvent>,
     mut stream: BoxStream,
     stream_id: Option<&StreamId>,
+    event_limit: WsEventLimit,
 ) -> Result<(), WsError> {
     while let Some(line) = stream.next().await {
-        forward_ws_stream_chunk(outbound_tx, &line, stream_id).await?;
+        forward_ws_stream_chunk(outbound_tx, &line, stream_id, event_limit).await?;
     }
     Ok(())
 }
@@ -795,37 +775,25 @@ async fn forward_ws_stream_chunk(
     outbound_tx: &mpsc::Sender<WsOutboundEvent>,
     chunk: &str,
     stream_id: Option<&StreamId>,
+    event_limit: WsEventLimit,
 ) -> Result<(), WsError> {
     for data in sse_json_data_lines(chunk) {
         let value = serde_json::from_str::<Value>(data)
             .map_err(ExecutorError::from)
             .map_err(WsError::from)?;
-        queue_ws_json(outbound_tx, value, stream_id).await?;
+        queue_ws_json(outbound_tx, value, stream_id, event_limit).await?;
     }
     Ok(())
-}
-
-fn attach_stream_id(mut value: Value, stream_id: Option<&StreamId>) -> Result<Value, WsError> {
-    let event = value.as_object_mut().ok_or_else(|| {
-        WsError::from(ExecutorError::StreamError(
-            "upstream WebSocket event must be a JSON object".to_owned(),
-        ))
-    })?;
-    if let Some(stream_id) = stream_id {
-        event.insert("stream_id".to_owned(), Value::String(stream_id.as_str().to_owned()));
-    } else {
-        event.remove("stream_id");
-    }
-    Ok(value)
 }
 
 async fn queue_ws_json(
     outbound_tx: &mpsc::Sender<WsOutboundEvent>,
     value: Value,
     stream_id: Option<&StreamId>,
+    event_limit: WsEventLimit,
 ) -> Result<(), WsError> {
     outbound_tx
-        .send(WsOutboundEvent::new(value, stream_id)?)
+        .send(WsOutboundEvent::new(value, stream_id, event_limit)?)
         .await
         .map_err(|_| WsError::SendFailed)
 }
@@ -834,25 +802,36 @@ async fn queue_ws_error(
     outbound_tx: &mpsc::Sender<WsOutboundEvent>,
     err: WsError,
     stream_id: Option<&StreamId>,
+    event_limit: WsEventLimit,
 ) -> Result<(), WsError> {
     let Some(frame) = err.to_ws_frame() else {
         return Err(err);
     };
-    queue_ws_json(outbound_tx, frame, stream_id).await
+    queue_ws_json(outbound_tx, frame, stream_id, event_limit).await
 }
 
-async fn handle_ws_error(sender: &mut WsSender, err: WsError, stream_id: Option<&StreamId>) -> bool {
+async fn handle_ws_error(
+    sender: &mut WsSender,
+    err: WsError,
+    stream_id: Option<&StreamId>,
+    event_limit: WsEventLimit,
+) -> bool {
     match err {
         WsError::SendFailed => false,
-        err => send_ws_error(sender, &err, stream_id).await.is_ok(),
+        err => send_ws_error(sender, &err, stream_id, event_limit).await.is_ok(),
     }
 }
 
-async fn send_ws_error(sender: &mut WsSender, err: &WsError, stream_id: Option<&StreamId>) -> Result<(), WsError> {
+async fn send_ws_error(
+    sender: &mut WsSender,
+    err: &WsError,
+    stream_id: Option<&StreamId>,
+    event_limit: WsEventLimit,
+) -> Result<(), WsError> {
     let Some(frame) = err.to_ws_frame() else {
         return Err(WsError::SendFailed);
     };
-    send_ws_event(sender, WsOutboundEvent::new(frame, stream_id)?).await
+    send_ws_event(sender, WsOutboundEvent::new(frame, stream_id, event_limit)?).await
 }
 
 async fn send_ws_event(sender: &mut WsSender, event: WsOutboundEvent) -> Result<(), WsError> {
@@ -873,9 +852,10 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     use super::{
-        StreamId, WS_MAX_OUTSTANDING_BYTES, WS_MAX_OUTSTANDING_REQUESTS, WS_MAX_STREAM_ID_CHARS, WsByteBudget, WsError,
-        attach_stream_id, close_ws, forward_ws_stream_chunk, keep_if_running, parse_ws_request, queue_ws_json,
-        sse_json_data_lines, websocket_identity_error_event,
+        StreamId, WS_MAX_OUTSTANDING_BYTES, WS_MAX_OUTSTANDING_REQUESTS, WS_MAX_STREAM_ID_CHARS,
+        WS_ROUTING_SLACK_BYTES, WsByteBudget, WsError, WsEventLimit, WsOutboundEvent, attach_stream_id, close_ws,
+        forward_ws_stream_chunk, keep_if_running, parse_ws_request, queue_ws_json, sse_json_data_lines,
+        websocket_identity_error_event, ws_routing_overhead,
     };
     use crate::auth::AuthenticatedPrincipal;
 
@@ -883,10 +863,11 @@ mod tests {
 
     #[tokio::test]
     async fn outbound_event_limit_counts_routing_metadata_and_json_escaping() {
+        let limit = WsEventLimit(1024 * 1024);
         let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
         // The JSON envelope {"text":"","type":"test"} occupies 25 bytes.
         let event = json!({"text": "x".repeat(1024 * 1024 - 25), "type": "test"});
-        queue_ws_json(&sender, event.clone(), None)
+        queue_ws_json(&sender, event.clone(), None, limit)
             .await
             .expect("exact limit is accepted");
         assert_eq!(receiver.recv().await.unwrap().0.len(), 1024 * 1024);
@@ -894,7 +875,7 @@ mod tests {
         let stream_id = StreamId::try_from("🦀").unwrap();
         let chunk = format!("data: {event}\n\n");
         assert!(
-            forward_ws_stream_chunk(&sender, &chunk, Some(&stream_id))
+            forward_ws_stream_chunk(&sender, &chunk, Some(&stream_id), limit)
                 .await
                 .is_err()
         );
@@ -904,11 +885,34 @@ mod tests {
         );
 
         let escaped = json!({"type": "test", "text": "\n".repeat(512 * 1024)});
-        assert!(queue_ws_json(&sender, escaped, None).await.is_err());
+        assert!(queue_ws_json(&sender, escaped, None, limit).await.is_err());
         assert!(
             receiver.try_recv().is_err(),
             "escaped JSON bytes must count toward the limit"
         );
+    }
+
+    #[test]
+    fn executor_limit_reserves_the_exact_routing_member_plus_slack() {
+        let limit = WsEventLimit(1024 * 1024);
+        assert_eq!(limit.executor_limit(None), 1024 * 1024 - WS_ROUTING_SLACK_BYTES);
+
+        // Any frame the executor admits must still fit once `stream_id` is attached,
+        // for an ASCII id and for one whose JSON encoding is longer than its chars.
+        for raw_id in ["lane-a", "quote\"d", "🦀"] {
+            let stream_id = StreamId::try_from(raw_id).unwrap();
+            let overhead = ws_routing_overhead(Some(&stream_id));
+            let event = json!({"type": "test", "text": "x".repeat(limit.executor_limit(Some(&stream_id)) - 25)});
+            let bare = serde_json::to_string(&event).unwrap().len();
+            assert!(bare <= limit.executor_limit(Some(&stream_id)));
+            let routed = WsOutboundEvent::new(event, Some(&stream_id), limit).expect("routed event fits");
+            assert!(routed.0.len() <= limit.bytes());
+            assert_eq!(
+                routed.0.len() - bare,
+                overhead - WS_ROUTING_SLACK_BYTES,
+                "the member overhead is exact for {raw_id:?}"
+            );
+        }
     }
 
     #[test]

@@ -27,6 +27,14 @@ All notable changes to Agentic API are documented here.
 
 ### Changed
 
+- Rust `agentic_core::config::Config` struct literals must now provide `responses: ResponsesConfig::default()`
+  (or validated custom limits). `ExecutionContext::new` keeps its signature and defaults; use
+  `ExecutionContext::with_responses_config` to override them. `ExecuteRequest::with_max_stream_event_bytes` and
+  `GatewayStreamAccumulator::with_max_stream_event_bytes` add explicit delivery limits; existing constructors and
+  `call_inference` remain available, with `inference::call_inference_limited` exposing a custom SSE-line limit.
+- Response-size failures now use `ExecutorError::ResourceLimitExceeded { limit, max_bytes }`; `ResourceLimit` is
+  re-exported from `agentic_core::executor`. Callers classifying size failures should handle this typed variant
+  instead of inspecting error messages (#304).
 - Modeled the Codex model catalog and the upstream model listing as typed Rust structs instead of
   untyped JSON, and reported an undecodable upstream `/v1/models` payload as `502` rather than
   serving it as an empty catalog (#252).
@@ -48,6 +56,17 @@ All notable changes to Agentic API are documented here.
 
 ### Fixed
 
+- Accounted for unrestricted output role/type/status strings, empty web-search query entries, pending or late-bound
+  item identities, and terminal error details in response limits. Kept reasoning-part and shell-command completion
+  accounting linear for sequential multipart streams (#304).
+- Charged the Responses retained-byte budget for logical output (text, arguments, annotations, nested JSON, and one
+  structural charge per retained entry, including empty JSON values) instead of raw upstream SSE line bytes, so fine-grained
+  chunking, coarse chunking, and non-streaming JSON consume identical budget, and empty or done-only parts are charged as they arrive (#288, #304).
+- Replaced the fixed 1 MiB Responses WebSocket event ceiling with the configured `max_stream_event_bytes`; the
+  executor now validates the terminal `response.completed` event against the WebSocket transport limit, including
+  `stream_id` routing metadata, before persisting the response or publishing a session checkpoint (#304).
+- Added independent, validated `[responses]` limits for upstream JSON bodies, upstream SSE lines, retained output, and
+  client stream events, with a typed `ResourceLimitExceeded` error that maps upstream overflows to HTTP 502 (#288).
 - Resolved Codex image capabilities consistently: the HTTP model catalog and both launcher modes
   now advertise the same resolved `input_modalities`, so a vision-capable model no longer has image
   content stripped client-side because an isolated catalog hardcoded `["text"]`. Existing persistent
