@@ -106,28 +106,7 @@ Other documented model IDs already exercised in this repository include `Qwen/Qw
 
 ## Publishing wheels (maintainers)
 
-The `Release Python` GitHub Actions workflow builds and validates Linux x86_64, macOS x86_64, and macOS arm64 wheels.
-Relevant pull requests, merge-queue entries, and pushes to `main` run this same release matrix automatically,
-including installed-wheel tests and the Linux OpenSSL linkage check. These CI runs only build and validate artifacts.
-It reads `[workspace.package].version` from `Cargo.toml` at the selected workflow commit.
-There is no separate version input or default to maintain. Leave `publish` unchecked to validate a branch before
-merging. To publish, select `main` and check `publish`; PyPI upload waits for every platform build, installed-wheel
-test, and wheel check to succeed. Publishing from other branches is blocked. Merging code does not publish a package.
-
-Publish runs check PyPI before building and fail if the declared version already exists. Only a not-found response
-allows the build to proceed; network errors and other HTTP failures stop the run. Build-only runs skip this check.
-
-The publishing job downloads the validated artifacts from the same workflow run, requires the complete three-wheel
-set, and uploads them without rebuilding. It uses the `pypi` GitHub environment and PyPI Trusted Publishing for
-`vllm-project/agentic-api`, workflow `release-python.yml`, environment `pypi`; no PyPI API token secret is required.
-The build jobs do not receive the publishing job's OpenID Connect permission.
-
-After merge, a maintainer can dispatch publication with:
-
-```bash
-gh workflow run release-python.yml --ref main -F publish=true
-```
-
-Review the resolved workspace version and run before announcing availability. Existing files
-are not silently skipped: if an upload partially succeeds, inspect the PyPI release before deciding how to recover.
-The workflow does not configure or publish to TestPyPI.
+See the [release guide](../developing/releases.md) for version preparation, GitHub Actions UI and CLI instructions,
+PyPI Trusted Publishing configuration, the required wheel matrix, registry verification, and recovery from failed or
+partial uploads. PRs and merges build and validate wheels. Trigger the release workflow on `main` to have GitHub
+Actions validate and publish them.

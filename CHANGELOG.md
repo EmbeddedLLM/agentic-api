@@ -6,11 +6,23 @@ All notable changes to Agentic API are documented here.
 
 ### Added
 
+- Verified image preservation through the Responses gateway end to end (#253): integration coverage for mixed
+  text/image ordering, multiple images per turn, client-executed `view_image` tool output, `previous_response_id`
+  continuation, `conversation_id` rehydration, stateless `store: false` proxying, and compaction of retained
+  image-bearing user messages, over both the HTTP and WebSocket transports.
+- Recorded paired image cassettes — client → OpenAI as the reference and client → gateway → vLLM serving
+  `Qwen/Qwen2.5-VL-3B-Instruct` — for a text-and-image message, two interleaved images, a `previous_response_id`
+  follow-up, and a client-executed tool returning an image through a structured `function_call_output`, each
+  streaming and non-streaming. Replay coverage compares request shape, completed-response structure, the streaming
+  event lifecycle, and the history the gateway forwards on continuation; model wording is never compared (#253).
+  The cassette recorder accepts `--input-file` for the first of several turns and sends a tool handler's list of
+  content parts as a structured output array.
+- Added automated Docker Hub release and nightly container publishing with 30-day nightly tag retention (#322).
 - Added typed per-model input-modality overrides to `config.toml`
   (`[models."<served-model-id>"] input_modalities = ["text", "image"]`), validated at startup:
   unknown modality names, empty lists, duplicates, and image-only lists are rejected with the
   offending file and line (#252).
-- Added Brave Search as a selectable backend for the gateway-owned `web_search` tool (#294, Phase 2 of #291).
+- Added Brave Search as a selectable backend for the gateway-executed built-in `web_search` tool (#294, Phase 2 of #291).
   Select it with `AGENTIC_WEB_SEARCH_PROVIDER=brave` or `[web_search] provider = "brave"` and supply `BRAVE_API_KEY`;
   the endpoint defaults to `https://api.search.brave.com` and can be overridden with `AGENTIC_WEB_SEARCH_BASE_URL`
   or `[web_search] base_url`. Web and news results come from one request per query. The gateway adapts the shared
@@ -27,6 +39,13 @@ All notable changes to Agentic API are documented here.
 
 ### Changed
 
+- Modeled `refusal` as an assistant-history content part so OpenAI-style history replays through the typed
+  Responses executor instead of being rejected as unmodeled (#253).
+- Changed Rust input-content APIs (#263): `InputTextContent`, `InputImageContent`, and `InputFileContent` now retain
+  unmodeled fields in `extra`. Use `InputTextContent::new(text)` or supply `extra: Default::default()` when migrating
+  struct literals. `InputContent` gains `Refusal(RefusalContent)` and replaces the unit `Unknown` variant with
+  `Unknown(String)`; update exhaustive matches and constructors. `Unknown` cannot be serialized and typed execution
+  rejects it with the original content type in the error. Existing content-type re-export paths are preserved.
 - Rust `agentic_core::config::Config` struct literals must now provide `responses: ResponsesConfig::default()`
   (or validated custom limits). `ExecutionContext::new` keeps its signature and defaults; use
   `ExecutionContext::with_responses_config` to override them. `ExecuteRequest::with_max_stream_event_bytes` and
@@ -56,6 +75,14 @@ All notable changes to Agentic API are documented here.
 
 ### Fixed
 
+- Rejected message content the typed Responses executor cannot convey — unmodeled part types and empty part arrays,
+  alongside the existing `input_file` rejection — with a `400` naming the offending part, instead of forwarding a
+  synthetic `{"type": "unknown"}` part or silently dropping it. Modeled parts keep their unmodeled extension fields
+  through the typed path, so a message is never mutated in transit, never means something different on the typed
+  path than on the raw `store: false` path, and is never persisted with content the client did not send (#253).
+- Counted an image referenced by `file_id` as retained context during compaction, matching inline images (#253).
+- Followed MCP `tools/list` pagination to discover tools beyond the first page, including opaque empty cursors;
+  reject repeated cursors and bounded-pagination failures instead of exposing partial discovery (#311).
 - Accounted for unrestricted output role/type/status strings, empty web-search query entries, pending or late-bound
   item identities, and terminal error details in response limits. Kept reasoning-part and shell-command completion
   accounting linear for sequential multipart streams (#304).
@@ -160,17 +187,6 @@ All notable changes to Agentic API are documented here.
   stream, and bounded concurrency across streams (#240).
 - Added compile-time OpenAPI 3.1 schema generation and checked-in schema validation for the HTTP API (#229).
 - Added pinned SGLang conformance recordings, replay coverage, and launch and recording guidance (#267).
-- Verified image preservation through the Responses gateway end to end (#253): integration coverage for mixed
-  text/image ordering, multiple images per turn, client-executed `view_image` tool output, `previous_response_id`
-  continuation, `conversation_id` rehydration, stateless `store: false` proxying, and compaction of retained
-  image-bearing user messages, over both the HTTP and WebSocket transports.
-- Recorded paired image cassettes — client → OpenAI as the reference and client → gateway → vLLM serving
-  `Qwen/Qwen2.5-VL-3B-Instruct` — for a text-and-image message, two interleaved images, a `previous_response_id`
-  follow-up, and a client-executed tool returning an image through a structured `function_call_output`, each
-  streaming and non-streaming. Replay coverage compares request shape, completed-response structure, the streaming
-  event lifecycle, and the history the gateway forwards on continuation; model wording is never compared (#253).
-  The cassette recorder accepts `--input-file` for the first of several turns and sends a tool handler's list of
-  content parts as a structured output array.
 
 ### Changed
 
@@ -186,8 +202,6 @@ All notable changes to Agentic API are documented here.
   architecture (#246).
 - Updated the execution architecture documentation to match the current scheduler and llm-d backend (#270).
 - Preserved the typed `ignore_eos` extension when forwarding Responses requests to vLLM (#268).
-- Modeled `refusal` as an assistant-history content part so OpenAI-style history replays through the typed
-  Responses executor instead of being rejected as unmodeled (#253).
 
 ### Fixed
 
@@ -199,12 +213,6 @@ All notable changes to Agentic API are documented here.
 - Required a healthy packaged gateway before `agentic-api doctor --mode local` reports success (#223).
 - Rebuilt workspace crates after `cargo-chef` dependency cooking so container binaries carry current source and package
   metadata (#208, #209).
-- Rejected message content the typed Responses executor cannot convey — unmodeled part types and empty part arrays,
-  alongside the existing `input_file` rejection — with a `400` naming the offending part, instead of forwarding a
-  synthetic `{"type": "unknown"}` part or silently dropping it. Modeled parts keep their unmodeled extension fields
-  through the typed path, so a message is never mutated in transit, never means something different on the typed
-  path than on the raw `store: false` path, and is never persisted with content the client did not send (#253).
-- Counted an image referenced by `file_id` as retained context during compaction, matching inline images (#253).
 - Hardened split execution with atomic duplicate persistence, strict relayed-response validation, independent secret
   validation, bounded hydrate and persist payloads, stable error envelopes, and graceful shutdown error propagation
   (#235).

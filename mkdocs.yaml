@@ -115,6 +115,7 @@ nav:
     - SGLang Upstream: guides/sglang-upstream.md
   - Developing:
     - Getting Started: developing/getting-started.md
+    - Releases: developing/releases.md
   - Architecture:
     - ADR-01: adr/ADR-01_core.md
     - ADR-02: adr/ADR-02_response_store.md
