@@ -135,6 +135,74 @@ extend.
 - Document behavior as it stabilizes, especially where compatibility or tool
   ownership rules are subtle.
 
+## Responses API Compatibility and Interactive Execution
+
+The [GPT-6 Astra API guide](https://developers.openai.com/api/docs/guides/latest-model#gpt-6-astra-update-api-and-model-parameters)
+identifies newer Responses capabilities needed by agentic clients. Track these
+as API and orchestration work while keeping model inference, prompt rendering,
+and KV-cache execution in the upstream. Accepting a field does not establish
+support: each deployment must preserve, deliberately transform, or explicitly
+reject it across HTTP, WebSocket, storage, and continuation paths.
+
+### First: Request and Continuation Compatibility
+
+- **Prompt caching and service tiers:** preserve typed cache controls, cache
+  keys, supported breakpoints, and processing-tier metadata; validate unsupported
+  model/backend combinations without imposing one provider's restrictions on
+  every vLLM model
+  ([#330](https://github.com/vllm-project/agentic-api/issues/330)).
+- **Cache-preserving reasoning updates:** support `configuration_update` items,
+  their ordered history and effective effort, and explicit compatibility rules
+  for compaction, truncation, and multi-agent mode
+  ([#331](https://github.com/vllm-project/agentic-api/issues/331)).
+- **Provider-aware reasoning replay:** retain safe plaintext replay for vLLM
+  while allowing compatible upstreams to consume their own opaque reasoning
+  state. Cross-provider decryption is outside scope
+  ([#335](https://github.com/vllm-project/agentic-api/issues/335)).
+
+These issues extend the capability contract in
+[#314](https://github.com/vllm-project/agentic-api/issues/314). Document support
+per execution path and prioritize preventing silent loss of request semantics.
+Provider-specific replay is conditional on a supported deployment need.
+
+### Next: Interactive Execution
+
+- **Async function and custom tools:** preserve async declarations and calls,
+  retain pending call identity across responses, and allow independent model
+  work before the application returns a tool call output. Define bounded
+  lifecycle rules for any gateway-managed pending work
+  ([#332](https://github.com/vllm-project/agentic-api/issues/332)).
+- **Mid-turn steering:** accept WebSocket `response.steer`, queue user updates,
+  emit steering lifecycle events, and continue from completed work with correct
+  handling of pending tool outputs, approvals, and disconnects
+  ([#333](https://github.com/vllm-project/agentic-api/issues/333)).
+
+Reuse the shared typed ingestion, orchestration, and ordered delivery boundaries
+tracked in [#241](https://github.com/vllm-project/agentic-api/issues/241) and
+[#244](https://github.com/vllm-project/agentic-api/issues/244). Parallel tool calls,
+independent WebSocket lanes, async calls, and steering have distinct semantics.
+
+### Broader Tool and Multi-Agent Capabilities
+
+- **Programmatic Tool Calling:** define execution ownership and upstream
+  requirements, then implement typed programmatic calls, caller policies, and
+  continuation for supported profiles. Gateway execution requires an isolated,
+  resource-bounded runtime
+  ([#334](https://github.com/vllm-project/agentic-api/issues/334)).
+- **Multi-agent orchestration:** implement isolated agent contexts and shared
+  scheduling through the existing tracker
+  ([#298](https://github.com/vllm-project/agentic-api/issues/298)), including HTTP
+  execution ([#299](https://github.com/vllm-project/agentic-api/issues/299)) and
+  WebSocket injection ([#300](https://github.com/vllm-project/agentic-api/issues/300)).
+- **Computer use:** add typed computer calls, ordered actions, screenshots, and
+  explicit execution-location handling through the existing feature issue
+  ([#171](https://github.com/vllm-project/agentic-api/issues/171)).
+
+Use reference recordings and matching gateway scenarios to qualify each
+capability. Reuse the cassette recorder workflow; document intentional
+differences and unsupported upstream combinations rather than implying full
+OpenAI conformance from request-schema coverage alone.
+
 ## Enterprise Readiness
 
 [Enterprise Readiness](https://github.com/vllm-project/agentic-api/issues/316)
