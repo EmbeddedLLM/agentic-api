@@ -70,6 +70,9 @@ jobs:
     needs: authorize-publication
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      statuses: write
     environment: docker-publish
     steps:
       - name: Verify configuration
@@ -152,12 +155,14 @@ jobs:
           main_sha="$(git rev-parse FETCH_HEAD)"
 
           image_tags=()
+          nightly=false
           if [ "$RELEASE_BUILD" = "true" ]; then
             image_tags+=("$REQUESTED_IMAGE_TAG")
           elif [ "$EVENT_NAME" = "release" ]; then
             image_tags+=("$RELEASE_TAG")
           elif [ "$EVENT_NAME" = "schedule" ] \
             || { [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$sha" = "$main_sha" ]; }; then
+            nightly=true
             image_tags+=("nightly-$sha" "nightly")
             if [ -n "$REQUESTED_IMAGE_TAG" ]; then
               image_tags+=("$REQUESTED_IMAGE_TAG")
@@ -178,6 +183,7 @@ jobs:
           version="${image_tags[0]}"
 
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "nightly=$nightly" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           {
             echo "tags<<EOF"
@@ -186,24 +192,56 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           printf 'Publishing %s\n' "${tags[@]}"
 
+      - name: Check for an already published nightly commit
+        id: nightly-check
+        if: steps.source.outputs.nightly == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_IMAGE }}
+        run: |
+          set -euo pipefail
+          status_context="container/nightly/$DOCKERHUB_IMAGE"
+          # Read GitHub's publication record, without querying Docker Hub. API
+          # failures must stop the run rather than be interpreted as a cache miss.
+          statuses="$(gh api --paginate --method GET \
+            "repos/$GITHUB_REPOSITORY/commits/$SOURCE_SHA/statuses" \
+            -f per_page=100 --jq '.[] | [.context, .state] | @tsv')"
+          skip=false
+          # The API returns newest statuses first; use the latest for this image.
+          while IFS=$'\t' read -r context state; do
+            if [ "$context" = "$status_context" ]; then
+              if [ "$state" = "success" ]; then
+                skip=true
+              fi
+              break
+            fi
+          done <<< "$statuses"
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          if [ "$skip" = "true" ]; then
+            message="Skipping nightly: $DOCKERHUB_IMAGE at $SOURCE_SHA was already published."
+            echo "$message"
+            echo "$message" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Set up Docker Buildx
+        if: steps.nightly-check.outputs.skip != 'true'
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
-      - name: Log in to Docker Hub
-        uses: docker/login-action@e92390c5fb421da1463c202d546fed0ec5c39f20 # v4.0.0
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: Generate image metadata
+        if: steps.nightly-check.outputs.skip != 'true'
         id: image-metadata
         run: echo "created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push runtime image
+      # Pull public build dependencies anonymously. The publishing token may only
+      # have access to the destination repository, not docker/dockerfile or base images.
+      - name: Build runtime image
+        if: steps.nightly-check.outputs.skip != 'true'
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
-          push: true
+          push: false
+          load: true
           tags: ${{ steps.source.outputs.tags }}
           build-args: |
             OCI_BUILD_PIPELINE=${{ github.workflow }}
@@ -214,7 +252,46 @@ jobs:
           cache-from: type=gha,scope=agentic-api-container
           cache-to: type=gha,mode=max,scope=agentic-api-container,ignore-error=true
 
+      - name: Log in to Docker Hub for publication
+        if: steps.nightly-check.outputs.skip != 'true'
+        uses: docker/login-action@e92390c5fb421da1463c202d546fed0ec5c39f20 # v4.0.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push runtime image
+        if: steps.nightly-check.outputs.skip != 'true'
+        env:
+          IMAGE_TAGS: ${{ steps.source.outputs.tags }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r tag; do
+            docker push "$tag"
+          done <<< "$IMAGE_TAGS"
+
+      - name: Record successful nightly publication
+        if: steps.source.outputs.nightly == 'true' && steps.nightly-check.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_IMAGE }}
+        run: |
+          set -euo pipefail
+          gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$SOURCE_SHA" \
+            -f state=success \
+            -f context="container/nightly/$DOCKERHUB_IMAGE" \
+            -f description='All nightly image tags successfully pushed' \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --silent
+
+      - name: Report disabled nightly cleanup
+        if: vars.DOCKERHUB_CLEANUP_ENABLED != 'true'
+        run: |
+          echo "::warning::Nightly cleanup is disabled; 30-day retention is not enforced."
+          echo "Enable DOCKERHUB_CLEANUP_ENABLED only with tag-read and tag-delete permissions."
+
       - name: Delete nightly tags older than 30 days
+        if: vars.DOCKERHUB_CLEANUP_ENABLED == 'true'
         env:
           DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_IMAGE }}
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}

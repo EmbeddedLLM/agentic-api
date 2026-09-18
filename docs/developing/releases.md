@@ -10,7 +10,7 @@ The workflow files are the source of truth:
 | --- | --- | --- | --- |
 | [Prepare release PR](https://github.com/vllm-project/agentic-api/actions/workflows/prepare-release-pr.yml) | Open the version-bump PR | Required `version` | Nothing |
 | [Release crates](https://github.com/vllm-project/agentic-api/actions/workflows/release-crates.yml) | Validate or publish Rust packages | `dry_run=true`; required `version` | With `dry_run=false`: crates, Git tag, GitHub release; then publishes the tagged container and deploys the website |
-| [Release container](https://github.com/vllm-project/agentic-api/actions/workflows/release-container.yml) | Publish a tagged release or nightly image | Called by crates release; also release events, daily schedule, or manual `source_ref` / optional `image_tag` | Docker Hub image; expires old `nightly-*` tags |
+| [Release container](https://github.com/vllm-project/agentic-api/actions/workflows/release-container.yml) | Publish a tagged release or nightly image | Called by crates release; also release events, daily schedule, or manual `source_ref` / optional `image_tag` | Docker Hub image; optional cleanup of old `nightly-*` tags |
 | [Release Python](https://github.com/vllm-project/agentic-api/actions/workflows/release-python.yml) | Build and validate all release wheels | `publish=false`; no version input | With `publish=true`: PyPI wheels after all builds pass |
 
 There is no automatic handoff from crates publishing to PyPI publishing. Dispatch both for a release of both
@@ -31,8 +31,12 @@ Container releases build the release tag. Manual container runs select their sou
   `id-token: write` permission.
 - **Docker Hub:** configure the `docker-publish` GitHub environment with variable `DOCKERHUB_IMAGE`
   (`namespace/repository`) and secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`. The credential needs image push
-  and tag deletion access for nightly cleanup. Ensure environment branch/tag rules allow the intended workflow
-  refs and complete any configured approval. Manual container publication also requires `maintain` or `admin`.
+  access to that repository. Public dependencies are pulled anonymously before login; the token is used to push
+  the finished image. To enable nightly cleanup, grant tag-read and tag-delete permissions and set environment
+  variable `DOCKERHUB_CLEANUP_ENABLED` to `true`. Otherwise cleanup is skipped with a warning and 30-day retention
+  is not enforced. Ensure environment branch/tag rules allow the intended workflow refs and complete any configured
+  approval. Manual container publication also requires `maintain` or `admin`. The publishing job uses
+  `GITHUB_TOKEN` with `statuses: write` to record successful nightly pushes without querying Docker Hub.
 
 These are configuration requirements, not confirmation that a token or publisher is currently valid. A build-only
 run verifies packaging and tests, but does not exercise registry upload authorization. TestPyPI is not configured.
@@ -159,8 +163,14 @@ changes and verify deployment before announcing the updated install instructions
 
 The container workflow runs daily at 05:00 UTC, building `main` and publishing both `nightly-<full-SHA>` and `nightly`.
 A manual run whose selected commit equals current `main` also publishes those tags, plus `image_tag` if supplied.
-Other manual refs use the explicit `image_tag`, or the source ref with slashes replaced by hyphens. Publication
-cleans up `nightly-*` tags last updated more than 30 days ago; stable release tags are outside that cleanup.
+If the same commit has a successful publication status for the same Docker Hub repository, the nightly run skips
+the build, login, and all pushes, including a manual `image_tag` override. Success is recorded after every tag has
+been pushed and before optional cleanup. The first run may publish a previously built commit once because older
+publications have no status record. A GitHub status lookup failure stops the run.
+
+Other manual refs use the explicit `image_tag`, or the source ref with slashes replaced by hyphens. When explicitly
+enabled, cleanup removes `nightly-*` tags last updated more than 30 days ago, even on runs that skip a duplicate
+nightly build; stable release tags are outside that cleanup.
 
 If crates and the GitHub release succeeded but the container job failed, inspect the Docker Hub tag and run logs
 first. The image may already have been pushed before nightly cleanup failed. Repair credentials, environment rules,
@@ -175,7 +185,10 @@ gh workflow run release-container.yml --ref main \
 This publishes an image; it has no dry-run mode and does not republish crates or PyPI wheels. Confirm the existing
 Git tag resolves to the intended release SHA before dispatching. A manual rebuild can replace the Docker tag's
 existing digest, so verify and record the new digest and labels afterward. If that commit is still current `main`,
-the manual run also updates the nightly tags described above. Container publication currently uses the default
+the manual run also follows the nightly rules above and may skip all pushes when that commit was already published.
+For a failed release container job, rerunning only that job preserves explicit release mode and avoids this nightly
+skip. If recording a nightly success status fails after a push, inspect registry state before retrying: the Docker
+push and GitHub status update are separate operations. Container publication currently uses the default
 Linux runner architecture; do not assume a multi-platform image from the Python wheel matrix.
 
 ## Failed runs and duplicate versions
