@@ -4,8 +4,15 @@ All notable changes to Agentic API are documented here.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-19
+
 ### Added
 
+- Added opt-in OpenTelemetry traces and HTTP metrics with OTLP HTTP/protobuf export, optional gzip compression,
+  incoming W3C trace context, trace-correlated local logs, and deadline-bounded shutdown. Telemetry is disabled
+  by default; enable signals with `OTEL_TRACES_EXPORTER=otlp` and/or `OTEL_METRICS_EXPORTER=otlp`. Request spans
+  remain open through response-body completion or disconnect, and cancellation is distinguished from handler
+  panics. See [the observability guide](docs/deploying/observability.md) for configuration (#341).
 - Verified image preservation through the Responses gateway end to end (#253): integration coverage for mixed
   text/image ordering, multiple images per turn, client-executed `view_image` tool output, `previous_response_id`
   continuation, `conversation_id` rehydration, stateless `store: false` proxying, and compaction of retained
@@ -17,7 +24,8 @@ All notable changes to Agentic API are documented here.
   event lifecycle, and the history the gateway forwards on continuation; model wording is never compared (#253).
   The cassette recorder accepts `--input-file` for the first of several turns and sends a tool handler's list of
   content parts as a structured output array.
-- Added automated Docker Hub release and nightly container publishing with 30-day nightly tag retention (#322).
+- Added automated Docker Hub release and nightly container publishing, with optional 30-day nightly tag retention
+  when `DOCKERHUB_CLEANUP_ENABLED=true` and the credential has tag-read and tag-delete permissions (#322, #337).
 - Added typed per-model input-modality overrides to `config.toml`
   (`[models."<served-model-id>"] input_modalities = ["text", "image"]`), validated at startup:
   unknown modality names, empty lists, duplicates, and image-only lists are rejected with the
@@ -39,6 +47,8 @@ All notable changes to Agentic API are documented here.
 
 ### Changed
 
+- Bounded Tokio runtime shutdown to 1 second after request draining, followed by a separate 3-second telemetry
+  shutdown deadline. In-flight blocking work no longer keeps process exit waiting indefinitely (#341).
 - Modeled `refusal` as an assistant-history content part so OpenAI-style history replays through the typed
   Responses executor instead of being rejected as unmodeled (#253).
 - Changed Rust input-content APIs (#263): `InputTextContent`, `InputImageContent`, and `InputFileContent` now retain
@@ -75,6 +85,13 @@ All notable changes to Agentic API are documented here.
 
 ### Fixed
 
+- Reported accumulated token usage across all hidden gateway-executed Messages tool rounds instead of reporting
+  only the final inference round, for both JSON responses and streaming responses (#325).
+- Fixed Python release setup, fixture readiness, and portable wheel builds; validate Linux x86_64, macOS Intel,
+  and macOS Apple Silicon wheels in CI. Included the package description and documentation links in PyPI
+  metadata (#305, #307, #309).
+- Built public container dependencies before Docker Hub authentication so repository-scoped credentials can
+  publish releases, and skipped unchanged nightly publications using recorded successful commit status (#337).
 - Rejected message content the typed Responses executor cannot convey — unmodeled part types and empty part arrays,
   alongside the existing `input_file` rejection — with a `400` naming the offending part, instead of forwarding a
   synthetic `{"type": "unknown"}` part or silently dropping it. Modeled parts keep their unmodeled extension fields
