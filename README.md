@@ -122,16 +122,24 @@ permission checks and disables Codex approvals and sandboxing.
 
 ### Python distribution
 
-The `agentic-api` wheel packages the Rust gateway and a small Python launcher. This release produces wheel artifacts
-for 0.7.0 as a build-only release: download the wheel for your platform from the release workflow, then install that
-local file. It is not published on PyPI yet.
+The `agentic-api` Python package is [available on PyPI](https://pypi.org/project/agentic-api/0.8.0/). Version 0.8.0
+includes the Rust gateway, the `agentic` CLI, and a small Python launcher. Prebuilt wheels support Linux x86_64
+(glibc 2.17 or newer), macOS Intel, and macOS Apple Silicon; Python 3.10 or newer is required.
+
+With uv installed, run the packaged Rust CLI without a global installation:
 
 ```bash
-WHEEL_PATH=/absolute/path/to/agentic_api-PLATFORM.whl
-uv pip install "$WHEEL_PATH"
+uvx --from agentic-api==0.8.0 agentic --version
+uvx --from agentic-api==0.8.0 agentic serve --upstream http://existing-vllm:8000
+```
+
+Or install the Python launcher, with the optional local inference runtime:
+
+```bash
+python -m pip install agentic-api==0.8.0
 agentic-api serve --vllm-base-url http://existing-vllm:8000
 
-uv pip install "agentic-api[local] @ file://$WHEEL_PATH"
+python -m pip install "agentic-api[local]==0.8.0"
 agentic-api serve --model MODEL_ID
 ```
 
