@@ -1,3 +1,5 @@
+pub mod otlp_stub;
+
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 

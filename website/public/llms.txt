@@ -41,6 +41,7 @@ The Markdown guides below track the development branch (`main`). For a released 
 
 - [Containers](https://raw.githubusercontent.com/vllm-project/agentic-api/main/docs/deploying/container.md): Build and run a container deployment.
 - [Kubernetes](https://raw.githubusercontent.com/vllm-project/agentic-api/main/docs/deploying/kubernetes.md): Kubernetes deployment and configuration.
+- [Observability](https://raw.githubusercontent.com/vllm-project/agentic-api/main/docs/deploying/observability.md): Opt-in OpenTelemetry traces, metrics, and log correlation.
 
 ## Optional
 

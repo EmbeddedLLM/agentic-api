@@ -8,3 +8,4 @@ pub mod handler;
 pub mod model_capabilities;
 #[cfg(feature = "openapi")]
 pub mod openapi;
+pub mod telemetry;

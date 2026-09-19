@@ -12,6 +12,7 @@ use agentic_core::readiness::{llm_readiness_client, wait_llm_ready};
 use agentic_server::app::{AppState, ReadinessTracker, ServerConfig, WebSocketTracker, build_router_with_auth};
 use agentic_server::auth::{OidcAuthError, OidcAuthenticator, OidcConfig};
 use agentic_server::model_capabilities::ModelCapabilities;
+use agentic_server::telemetry::TelemetryError;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
@@ -40,6 +41,8 @@ pub enum ServerError {
     Io(#[from] std::io::Error),
     #[error("failed to initialize OIDC authentication: {0}")]
     Oidc(#[source] OidcAuthError),
+    #[error("failed to initialize telemetry: {0}")]
+    Telemetry(#[from] TelemetryError),
 }
 
 impl From<OidcAuthError> for ServerError {

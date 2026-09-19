@@ -133,6 +133,7 @@ nav:
     - GitHub authentication with Dex: deploying/github-oidc.md
     - Kubernetes: deploying/kubernetes.md
     - Kubernetes with kind: deploying/README.md
+    - Observability: deploying/observability.md
   - Community: community/index.md
 
 extra:

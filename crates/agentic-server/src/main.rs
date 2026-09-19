@@ -16,6 +16,8 @@ use agentic_core::config::{
 use agentic_core::error::Error;
 use agentic_server::app::DEFAULT_MAX_REQUEST_BODY_SIZE;
 use agentic_server::auth::OidcConfig;
+use agentic_server::telemetry::{self, DEFAULT_SHUTDOWN_TIMEOUT, TelemetryConfig, TelemetryError, TelemetryGuard};
+use tracing::warn;
 
 mod config_file;
 mod responses_config;
@@ -398,20 +400,42 @@ fn parse_comma_separated(value: &str) -> Vec<String> {
         .collect()
 }
 
-#[tokio::main]
-async fn main() -> Result<(), server::ServerError> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "agentic_server=info,agentic_core=info".parse().expect("valid filter")),
-        )
-        .init();
+/// Upper bound for stopping the runtime once the gateway has drained. Request
+/// tasks the drain deadline abandoned are dropped here, which finalizes their
+/// spans and metrics; only in-flight blocking work can hold this up.
+const RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
 
+fn main() -> Result<(), server::ServerError> {
+    // Parse first so `--help`/`--version` never build exporters.
+    let cli = Cli::parse();
+    // Providers and the subscriber are created outside the runtime so the
+    // guard outlives every task.
+    let telemetry_config = TelemetryConfig::from_env().map_err(TelemetryError::from)?;
+    let telemetry = telemetry::init(&telemetry_config)?;
+    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+    let result = runtime.block_on(run(cli));
+    // Stop the runtime before flushing telemetry: connection tasks that outlived
+    // the gateway drain are dropped now, so their final measurements land in
+    // providers that are still accepting them.
+    runtime.shutdown_timeout(RUNTIME_SHUTDOWN_TIMEOUT);
+    shutdown_telemetry(telemetry);
+    result
+}
+
+/// Flush exported telemetry after the runtime has stopped; failures are
+/// logged rather than surfaced because the gateway result is what matters.
+fn shutdown_telemetry(telemetry: TelemetryGuard) {
+    if let Err(error) = telemetry.shutdown_blocking(DEFAULT_SHUTDOWN_TIMEOUT) {
+        warn!(%error, "telemetry shutdown incomplete");
+    }
+}
+
+async fn run(cli: Cli) -> Result<(), server::ServerError> {
     let Cli {
         command,
         llm_api_base,
         common,
-    } = Cli::parse();
+    } = cli;
     let agentic_home = ensure_agentic_api_home()?;
     let loaded_file_config = FileConfig::load(&agentic_home)?;
     let config_file_missing = loaded_file_config.is_none();

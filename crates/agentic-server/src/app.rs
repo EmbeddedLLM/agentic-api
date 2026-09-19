@@ -20,6 +20,7 @@ use crate::handler::{
     compact_response, conversations, count_tokens, health, messages, models, ready, responses, responses_ws_with_auth,
 };
 use crate::model_capabilities::ModelCapabilities;
+use crate::telemetry::http::{HttpMetrics, track_request};
 
 /// Default ceiling on serialized inbound request bytes for HTTP bodies and
 /// WebSocket messages.
@@ -298,5 +299,11 @@ pub fn build_router_with_auth(
     public_routes
         .merge(protected_routes)
         .layer(server_config.cors_layer())
+        // Outermost: sees every request after routing, including rejected ones,
+        // and holds the server span open across the whole response body.
+        .layer(middleware::from_fn_with_state(
+            HttpMetrics::from_global(),
+            track_request,
+        ))
         .with_state(state)
 }
