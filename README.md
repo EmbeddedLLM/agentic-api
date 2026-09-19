@@ -149,15 +149,15 @@ the launcher can manage a local vLLM process on supported Linux hosts.
 Use `agentic-api --version` for a quick install check and `agentic-api doctor --mode remote --json` when an agent or
 script needs machine-readable diagnostics.
 
-#### After PyPI publication
+#### Python launcher with uv
 
-These public-index and `uvx` examples apply only after the PyPI publication gate for a future release:
+Use uv to install the published package or run the Python launcher without a global installation:
 
 ```bash
-uv pip install agentic-api
-uv pip install "agentic-api[local]"
-uvx --from agentic-api agentic-api doctor
-uvx --from agentic-api agentic-api serve --vllm-base-url http://existing-vllm:8000
+uv pip install agentic-api==0.8.0
+uv pip install "agentic-api[local]==0.8.0"
+uvx --from agentic-api==0.8.0 agentic-api doctor
+uvx --from agentic-api==0.8.0 agentic-api serve --vllm-base-url http://existing-vllm:8000
 ```
 
 The Rust-native `agentic` CLI remains supported for `run codex`, `run claude`, `serve`, and `validate`. For the full

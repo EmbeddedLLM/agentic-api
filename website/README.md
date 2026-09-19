@@ -17,7 +17,7 @@ npm run check
 npm run format:check
 ```
 
-Requires Node.js 22.13 or newer plus Python 3.11+ and Rust/Cargo for source-based CLI documentation generation (CI uses Python 3.12 and Rust 1.98.0). Set `PYTHON` to a Python executable path if needed. Standalone website checkouts use bundled CLI references and do not need Python or Cargo. The site exports static HTML and browser assets to `dist/client`. Deploy that folder with clean-URL HTML routing (`/docs/v0.5.0` serves `docs/v0.5.0.html`) and `404.html` for missing routes. `NEXT_PUBLIC_SITE_URL` and `NEXT_PUBLIC_BASE_PATH` configure the canonical URL and deployment prefix at build time; their defaults preserve the Sites preview. The PR preview is hosted at [vLLM Agentic API](https://vllm-agentic-api.franciscojavierarceo.chatgpt.site/). Hosting credentials and account configuration are not part of this repository. There is no application server, database, or runtime GitHub dependency.
+Requires Node.js 22.13 or newer plus Python 3.11+ and Rust/Cargo for source-based CLI documentation generation (CI uses Python 3.12 and Rust 1.98.0). Set `PYTHON` to a Python executable path if needed. Standalone website checkouts use bundled CLI references and do not need Python or Cargo. The site exports static HTML and browser assets to `dist/client`. Deploy that folder with clean-URL HTML routing (`/docs/v0.8.0` serves `docs/v0.5.0.html`) and `404.html` for missing routes. `NEXT_PUBLIC_SITE_URL` and `NEXT_PUBLIC_BASE_PATH` configure the canonical URL and deployment prefix at build time; their defaults preserve the Sites preview. The PR preview is hosted at [vLLM Agentic API](https://vllm-agentic-api.franciscojavierarceo.chatgpt.site/). Hosting credentials and account configuration are not part of this repository. There is no application server, database, or runtime GitHub dependency.
 
 Routes:
 
@@ -26,7 +26,7 @@ Routes:
 - `/community/team` — maintainers from the project's CODEOWNERS.
 - `/community/contributors` — a contributor directory and guidance for thoughtful contributions.
 - `/docs` — documentation directory for the default tagged version.
-- `/docs/latest` and `/docs/v0.1.0` through `/docs/v0.5.0` — shareable documentation directories for development and tagged snapshots.
+- `/docs/latest` and `/docs/v0.1.0` through `/docs/v0.8.0` — shareable documentation directories for development and tagged snapshots.
 - `/docs/latest/rust-cli` — Rust `agentic` command reference, generated from the Clap definitions; `/docs/latest/rust-cli.md` provides the same content as Markdown.
 - `/docs/latest/python-cli` — Python launcher reference generated from the real CLI parser; `/docs/latest/python-cli.md` provides the same content as Markdown.
 - `/llms.txt` — a concise Markdown project overview and curated links to raw documentation, following [llmstxt.org](https://llmstxt.org/).

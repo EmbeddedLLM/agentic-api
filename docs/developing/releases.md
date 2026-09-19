@@ -156,8 +156,11 @@ cargo install agentic-server --version "=$release_version" --locked --root /tmp/
 After publication is confirmed, update `PUBLISHED_VERSION` in `website/lib/quickstart.ts`, the matching install
 examples in `website/public/llms.txt`, `website/README.md`, and `docs/guides/python-installation.md`, plus any pinned
 README examples and static website assertions. Keep `python/README.md` accurate for the next Python release.
-The crates workflow's website deployment does not edit these files or prove PyPI availability. Merge the website
-changes and verify deployment before announcing the updated install instructions.
+Also update the documentation version manifest in `website/lib/data/docs-versions.json`: resolve the release tag
+to its full commit SHA, verify the listed guide paths at that commit, and set the new default version and check date
+as described in `website/docs/versioning.md`. The crates workflow's website deployment does not edit these files
+or prove PyPI availability. Merge the website changes and verify deployment before announcing the updated install
+instructions.
 
 ## Nightly containers and container-only recovery
 
