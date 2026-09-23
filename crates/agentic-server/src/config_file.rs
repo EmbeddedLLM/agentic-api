@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 use std::io::Write;
-use std::num::NonZeroUsize;
+use std::num::{NonZeroU64, NonZeroUsize};
 use std::path::Path;
+use std::time::Duration;
 
 use agentic_core::McpServerEntry;
-use agentic_core::config::CONFIG_FILE_NAME;
+use agentic_core::config::{CONFIG_FILE_NAME, CodeInterpreterRuntimeConfig};
 use agentic_core::error::Error;
 use serde::{Deserialize, Serialize};
 
@@ -51,6 +52,66 @@ impl ServerFileConfig {
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
+pub(crate) struct CodeInterpreterFileConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_source_bytes: Option<NonZeroUsize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_wall_time_seconds: Option<NonZeroU64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_fuel: Option<NonZeroU64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_guest_memory_bytes: Option<NonZeroUsize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_stdout_bytes: Option<NonZeroUsize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_stderr_bytes: Option<NonZeroUsize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_concurrent_guests: Option<NonZeroUsize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_aggregate_guest_memory_bytes: Option<NonZeroUsize>,
+}
+
+impl CodeInterpreterFileConfig {
+    fn is_empty(&self) -> bool {
+        self.enabled.is_none()
+            && self.max_source_bytes.is_none()
+            && self.execution_wall_time_seconds.is_none()
+            && self.max_fuel.is_none()
+            && self.max_guest_memory_bytes.is_none()
+            && self.max_stdout_bytes.is_none()
+            && self.max_stderr_bytes.is_none()
+            && self.max_concurrent_guests.is_none()
+            && self.max_aggregate_guest_memory_bytes.is_none()
+    }
+
+    /// Apply file values to safe, disabled defaults. Environment precedence is
+    /// resolved separately by the server entry point.
+    #[must_use]
+    pub(crate) fn with_defaults(&self) -> CodeInterpreterRuntimeConfig {
+        let defaults = CodeInterpreterRuntimeConfig::default();
+        CodeInterpreterRuntimeConfig {
+            enabled: self.enabled.unwrap_or(defaults.enabled),
+            max_source_bytes: self.max_source_bytes.unwrap_or(defaults.max_source_bytes),
+            execution_wall_time: Duration::from_secs(
+                self.execution_wall_time_seconds
+                    .map_or(defaults.execution_wall_time.as_secs(), NonZeroU64::get),
+            ),
+            max_fuel: self.max_fuel.unwrap_or(defaults.max_fuel),
+            max_guest_memory_bytes: self.max_guest_memory_bytes.unwrap_or(defaults.max_guest_memory_bytes),
+            max_stdout_bytes: self.max_stdout_bytes.unwrap_or(defaults.max_stdout_bytes),
+            max_stderr_bytes: self.max_stderr_bytes.unwrap_or(defaults.max_stderr_bytes),
+            max_concurrent_guests: self.max_concurrent_guests.unwrap_or(defaults.max_concurrent_guests),
+            max_aggregate_guest_memory_bytes: self
+                .max_aggregate_guest_memory_bytes
+                .unwrap_or(defaults.max_aggregate_guest_memory_bytes),
+        }
+    }
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
 pub(crate) struct ToolsFileConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_concurrent_gateway_calls: Option<NonZeroUsize>,
@@ -90,6 +151,8 @@ pub(crate) struct FileConfig {
     pub server: ServerFileConfig,
     #[serde(skip_serializing_if = "ToolsFileConfig::is_empty")]
     pub tools: ToolsFileConfig,
+    #[serde(skip_serializing_if = "CodeInterpreterFileConfig::is_empty")]
+    pub code_interpreter: CodeInterpreterFileConfig,
     #[serde(skip_serializing_if = "MessagesGatewayFileConfig::is_empty")]
     pub messages_gateway: MessagesGatewayFileConfig,
     #[serde(skip_serializing_if = "HashMap::is_empty")]
@@ -218,6 +281,12 @@ impl FileConfig {
                 path.display()
             )));
         }
+        self.code_interpreter.with_defaults().validate().map_err(|error| {
+            Error::Config(format!(
+                "configuration file {} contains invalid code interpreter limits: {error}",
+                path.display()
+            ))
+        })?;
         for (label, server) in &self.mcp_servers {
             if let Some(allowed_tools) = server.allowed_tools() {
                 if allowed_tools.is_empty() {
@@ -251,7 +320,7 @@ mod tests {
     use agentic_core::McpServerEntry;
     use tempfile::tempdir;
 
-    use super::{FileConfig, McpFileConfig, ServerFileConfig, WebSearchFileConfig};
+    use super::{CodeInterpreterFileConfig, FileConfig, McpFileConfig, ServerFileConfig, WebSearchFileConfig};
 
     #[test]
     fn missing_config_file_uses_defaults() {
@@ -375,6 +444,80 @@ mod tests {
                 .map(std::num::NonZeroUsize::get),
             Some(3)
         );
+    }
+
+    #[test]
+    fn code_interpreter_file_limits_are_operator_owned_and_default_disabled() {
+        let defaults = CodeInterpreterFileConfig::default().with_defaults();
+        assert!(!defaults.enabled);
+
+        let home = tempdir().expect("temp home");
+        fs::write(
+            home.path().join("config.toml"),
+            concat!(
+                "[code_interpreter]\n",
+                "enabled = true\n",
+                "max_source_bytes = 4096\n",
+                "execution_wall_time_seconds = 3\n",
+                "max_fuel = 12345\n",
+                "max_guest_memory_bytes = 64\n",
+                "max_stdout_bytes = 16\n",
+                "max_stderr_bytes = 8\n",
+                "max_concurrent_guests = 2\n",
+                "max_aggregate_guest_memory_bytes = 128\n"
+            ),
+        )
+        .expect("write config");
+
+        let config = FileConfig::load(home.path())
+            .expect("valid operator limits")
+            .expect("existing config")
+            .code_interpreter
+            .with_defaults();
+        assert!(config.enabled);
+        assert_eq!(config.max_source_bytes.get(), 4096);
+        assert_eq!(config.execution_wall_time, std::time::Duration::from_secs(3));
+        assert_eq!(config.max_fuel.get(), 12_345);
+        assert_eq!(config.max_guest_memory_bytes.get(), 64);
+        assert_eq!(config.max_aggregate_guest_memory_bytes.get(), 128);
+    }
+
+    #[test]
+    fn rejects_code_interpreter_under_tools() {
+        let home = tempdir().expect("temp home");
+        fs::write(
+            home.path().join("config.toml"),
+            "[tools.code_interpreter]\nenabled = true\n",
+        )
+        .expect("write config");
+
+        let error = FileConfig::load(home.path()).expect_err("code interpreter config must be top-level");
+        assert!(error.to_string().contains("unknown field `code_interpreter`"));
+    }
+
+    #[test]
+    fn code_interpreter_file_limits_reject_zero_and_impossible_memory_reservations() {
+        let home = tempdir().expect("temp home");
+        fs::write(
+            home.path().join("config.toml"),
+            "[code_interpreter]\nmax_stdout_bytes = 0\n",
+        )
+        .expect("write config");
+        let zero_error = FileConfig::load(home.path()).expect_err("zero byte limit must fail deserialization");
+        assert!(zero_error.to_string().contains("max_stdout_bytes"));
+
+        fs::write(
+            home.path().join("config.toml"),
+            concat!(
+                "[code_interpreter]\n",
+                "max_guest_memory_bytes = 129\n",
+                "max_aggregate_guest_memory_bytes = 128\n"
+            ),
+        )
+        .expect("replace config");
+        let reservation_error =
+            FileConfig::load(home.path()).expect_err("an impossible single guest reservation must fail startup config");
+        assert!(reservation_error.to_string().contains("max_guest_memory_bytes"));
     }
 
     #[test]

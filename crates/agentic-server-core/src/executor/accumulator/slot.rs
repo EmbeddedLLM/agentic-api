@@ -12,8 +12,8 @@ use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::types::event::MessageStatus;
 use crate::types::io::output::McpListTools;
 use crate::types::io::{
-    ApplyDone, CompactionItem, CustomToolCall, FunctionToolCall, McpCall, OutputItem, OutputMessage, OutputTextContent,
-    ReasoningOutput, ShellCall, ToolSearchCall, WebSearchCall,
+    ApplyDone, CodeInterpreterCall, CompactionItem, CustomToolCall, FunctionToolCall, McpCall, OutputItem,
+    OutputMessage, OutputTextContent, ReasoningOutput, ShellCall, ToolSearchCall, WebSearchCall,
 };
 use crate::utils::common::deserialize_from_value_opt;
 use crate::utils::uuid7_str;
@@ -283,6 +283,7 @@ impl SlotMap {
         if let Some(
             mut item @ (OutputItem::Reasoning(_)
             | OutputItem::FunctionCall(_)
+            | OutputItem::CodeInterpreterCall(_)
             | OutputItem::ToolSearchCall(_)
             | OutputItem::CustomToolCall(_)
             | OutputItem::ShellCall(_)
@@ -338,6 +339,9 @@ pub(super) enum ActiveItem {
         item: FunctionToolCall,
         arguments: String,
     },
+    CodeInterpreterCall {
+        item: Option<CodeInterpreterCall>,
+    },
     ToolSearchCall {
         item: ToolSearchCall,
     },
@@ -370,6 +374,7 @@ impl std::fmt::Debug for ActiveItem {
             Self::Message { .. } => write!(f, "ActiveItem::Message {{ .. }}"),
             Self::Reasoning { .. } => write!(f, "ActiveItem::Reasoning {{ .. }}"),
             Self::FunctionCall { .. } => write!(f, "ActiveItem::FunctionCall {{ .. }}"),
+            Self::CodeInterpreterCall { .. } => write!(f, "ActiveItem::CodeInterpreterCall {{ .. }}"),
             Self::ToolSearchCall { .. } => write!(f, "ActiveItem::ToolSearchCall {{ .. }}"),
             Self::CustomToolCall { .. } => write!(f, "ActiveItem::CustomToolCall {{ .. }}"),
             Self::ShellCall { .. } => write!(f, "ActiveItem::ShellCall {{ .. }}"),
@@ -403,6 +408,7 @@ impl ActiveItem {
                         arguments: String::with_capacity(128),
                     })
             }
+            SSEItemType::CodeInterpreterCall => Some(ActiveItem::CodeInterpreterCall { item: None }),
             SSEItemType::ToolSearchCall => ToolSearchCall::try_from(payload)
                 .ok()
                 .map(|item| ActiveItem::ToolSearchCall { item }),
@@ -434,6 +440,7 @@ impl ActiveItem {
             Self::Message { .. } => SSEItemType::Message,
             Self::Reasoning { .. } => SSEItemType::Reasoning,
             Self::FunctionCall { .. } => SSEItemType::FunctionCall,
+            Self::CodeInterpreterCall { .. } => SSEItemType::CodeInterpreterCall,
             Self::ToolSearchCall { .. } => SSEItemType::ToolSearchCall,
             Self::CustomToolCall { .. } => SSEItemType::CustomToolCall,
             Self::ShellCall { .. } => SSEItemType::ShellCall,
@@ -462,6 +469,7 @@ impl ActiveItem {
                 item,
                 arguments: String::new(),
             },
+            OutputItem::CodeInterpreterCall(item) => Self::CodeInterpreterCall { item: Some(item) },
             OutputItem::ToolSearchCall(item) => Self::ToolSearchCall { item },
             OutputItem::CustomToolCall(item) => Self::CustomToolCall {
                 item,
@@ -543,6 +551,7 @@ impl ActiveItem {
                 _ => {}
             },
             Self::ToolSearchCall { .. }
+            | Self::CodeInterpreterCall { .. }
             | Self::WebSearchCall { .. }
             | Self::McpCall { .. }
             | Self::McpListTools { .. }
@@ -577,6 +586,7 @@ impl ActiveItem {
                 item.status = Some(MessageStatus::Completed);
                 Some(OutputItem::CustomToolCall(item))
             }
+            Self::CodeInterpreterCall { item } => item.map(OutputItem::CodeInterpreterCall),
             Self::WebSearchCall { item } => item.map(OutputItem::WebSearchCall),
             Self::McpCall { item } => Some(OutputItem::McpCall(item)),
             Self::McpListTools { item } => Some(OutputItem::McpListTools(item)),
@@ -657,6 +667,9 @@ fn apply_output_item_done(
         (ActiveItem::Reasoning { item }, Some(OutputItem::Reasoning(done))) => item.merge_done(done, payload),
         (ActiveItem::FunctionCall { item, arguments }, Some(OutputItem::FunctionCall(done))) => {
             item.merge_done(done, arguments);
+        }
+        (ActiveItem::CodeInterpreterCall { item }, Some(OutputItem::CodeInterpreterCall(done))) => {
+            item.merge_done(done, item_id);
         }
         (ActiveItem::ToolSearchCall { item }, Some(OutputItem::ToolSearchCall(done))) => item.merge_done(done, ()),
         (ActiveItem::CustomToolCall { item, input }, Some(OutputItem::CustomToolCall(done))) => {
