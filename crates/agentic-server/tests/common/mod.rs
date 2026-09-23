@@ -34,10 +34,14 @@ pub fn test_config(llm_url: &str) -> Config {
     }
 }
 
+// Used by other test modules, not directly by conversations_test
+#[allow(dead_code)]
 pub fn test_state(config: &Config) -> AppState {
     test_state_with_max_request_body_size(config, DEFAULT_MAX_REQUEST_BODY_SIZE)
 }
 
+// Used by other test modules, not directly by conversations_test
+#[allow(dead_code)]
 pub fn test_state_with_max_request_body_size(config: &Config, max_request_body_size: NonZeroUsize) -> AppState {
     let exec_ctx = ExecutionContext::new(
         ConversationHandler::new(ConversationStore::disabled()),

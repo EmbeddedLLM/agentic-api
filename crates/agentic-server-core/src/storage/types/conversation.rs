@@ -3,36 +3,15 @@
 use super::super::models::Conversation as StorageDbConversation;
 use super::item::InOutItem;
 
-/// Version of a conversation's persisted turns.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ConversationVersion {
-    /// The conversation has no stored items or responses.
-    Empty,
-    /// The sequence number of the last stored item in a legacy conversation.
-    ///
-    /// Rows persisted before the response link was introduced have no exact
-    /// response identity, but their item sequence remains a valid checkpoint.
-    LastSequence(i64),
-    /// The response that committed the latest turn and its final item sequence.
-    ///
-    /// `last_sequence` is `None` when the turn persisted no items.
-    LastResponse {
-        response_id: String,
-        last_sequence: Option<i64>,
-    },
-}
-
-impl ConversationVersion {
-    pub(crate) fn from_snapshot(last_sequence: Option<i64>, latest_response_id: Option<String>) -> Self {
-        match (last_sequence, latest_response_id) {
-            (last_sequence, Some(response_id)) => Self::LastResponse {
-                response_id,
-                last_sequence,
-            },
-            (Some(sequence), None) => Self::LastSequence(sequence),
-            (None, None) => Self::Empty,
-        }
-    }
+/// Version of a conversation snapshot, including item mutations and legacy state.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ConversationVersion {
+    /// Last sequence still detects writes by legacy persistence paths.
+    pub last_sequence: Option<i64>,
+    /// Exact persisted turn used to restore effective request metadata.
+    pub response_id: Option<String>,
+    /// Monotonic revision detects deletion, including deleting all items.
+    pub revision: i64,
 }
 
 /// Rehydrated conversation items together with their storage version.
@@ -55,6 +34,8 @@ pub struct ConversationData {
     pub metadata: Option<String>,
     /// Creation timestamp as Unix timestamp in seconds
     pub created_at: i64,
+    /// Tenant identifier for multi-tenancy isolation
+    pub tenant_id: Option<String>,
 }
 
 impl From<StorageDbConversation> for ConversationData {
@@ -63,6 +44,7 @@ impl From<StorageDbConversation> for ConversationData {
             conversation_id: row.id,
             metadata: row.metadata,
             created_at: row.created_at,
+            tenant_id: row.tenant_id,
         }
     }
 }
@@ -74,6 +56,8 @@ impl From<ConversationData> for StorageDbConversation {
             metadata: data.metadata,
             created_at: data.created_at,
             latest_response_id: None,
+            revision: 0,
+            tenant_id: data.tenant_id,
         }
     }
 }
@@ -89,6 +73,8 @@ mod tests {
             metadata: None,
             created_at: 1_704_067_200,
             latest_response_id: None,
+            revision: 0,
+            tenant_id: None,
         };
 
         let conversation: ConversationData = db_row.into();
@@ -102,6 +88,7 @@ mod tests {
             conversation_id: "conv_456".to_string(),
             metadata: Some(r#"{"key":"value"}"#.to_string()),
             created_at: 1_704_067_200,
+            tenant_id: Some("tenant_test".to_string()),
         };
 
         let db_row: StorageDbConversation = data.into();
@@ -116,6 +103,7 @@ mod tests {
             conversation_id: "conv_clone".to_string(),
             metadata: None,
             created_at: 1_704_067_200,
+            tenant_id: None,
         };
 
         let cloned = data.clone();
@@ -129,6 +117,7 @@ mod tests {
             conversation_id: "conv_debug".to_string(),
             metadata: None,
             created_at: 1_704_067_200,
+            tenant_id: None,
         };
 
         let debug_str = format!("{data:?}");
@@ -142,6 +131,7 @@ mod tests {
             conversation_id: "conv_bidir".to_string(),
             metadata: None,
             created_at: 1_706_790_600,
+            tenant_id: None,
         };
 
         let db_row: StorageDbConversation = original.clone().into();

@@ -1,5 +1,8 @@
 //! Conversation history item stored in the database.
 
+mod conversation;
+pub use conversation::{detach_from_conversation_in_tx, get_for_conversation, list_for_conversation};
+
 use serde_json::Value;
 use std::fmt::Write;
 use tracing::warn;
@@ -35,6 +38,9 @@ pub struct Item {
 
     /// Optional sequence number within conversation.
     pub seq: Option<i64>,
+
+    /// Tenant identifier for multi-tenancy isolation.
+    pub tenant_id: Option<String>,
 }
 
 impl Item {
@@ -344,6 +350,7 @@ mod tests {
             created_at: 1_704_067_200,
             conversation_id: Some("conv_456".to_string()),
             seq: Some(1),
+            tenant_id: None,
         };
 
         assert_eq!(item.id, "item_123");
@@ -359,6 +366,7 @@ mod tests {
             created_at: 1_704_067_200,
             conversation_id: None,
             seq: None,
+            tenant_id: None,
         };
 
         assert!(item.conversation_id.is_none());
@@ -386,6 +394,7 @@ mod tests {
             created_at: 1_704_067_200,
             conversation_id: None,
             seq: None,
+            tenant_id: None,
         };
 
         let Some(InOutItem::Output(OutputItem::Reasoning(reasoning))) = item.as_inout() else {
@@ -419,6 +428,7 @@ mod tests {
             created_at: 1_704_067_200,
             conversation_id: None,
             seq: None,
+            tenant_id: None,
         };
 
         let stored = item.as_inout().expect("stored item");
@@ -444,6 +454,7 @@ mod tests {
             created_at: 1_704_067_200,
             conversation_id: None,
             seq: None,
+            tenant_id: None,
         };
 
         let inputs = InOutItem::into_input_items(vec![item.as_inout().expect("stored item")]);
@@ -479,6 +490,7 @@ mod tests {
             created_at: 1_704_067_200,
             conversation_id: None,
             seq: None,
+            tenant_id: None,
         };
 
         let inputs = InOutItem::into_input_items(vec![item.as_inout().expect("stored shell item")]);
@@ -521,6 +533,7 @@ mod tests {
                 created_at: 1_704_067_200,
                 conversation_id: None,
                 seq: Some(idx.try_into().expect("seq")),
+                tenant_id: None,
             })
             .map(|item| item.as_inout().expect("stored item"))
             .collect();
@@ -554,6 +567,7 @@ mod tests {
             created_at: 1_704_067_200,
             conversation_id: None,
             seq: None,
+            tenant_id: None,
         };
 
         let inputs = InOutItem::into_input_items(vec![item.as_inout().expect("stored item")]);

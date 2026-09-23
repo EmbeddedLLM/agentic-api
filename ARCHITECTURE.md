@@ -155,7 +155,10 @@ what stops the HTTP catalog and a launcher catalog from disagreeing about image 
 |---|---|---|
 | `POST /v1/responses` | `responses` | `handler/http/responses.rs` |
 | `POST /v1/responses/compact` | `compact_response` | `handler/http/responses.rs` |
-| `POST /v1/conversations` | `conversations` | `handler/http/conversations.rs` |
+| `POST /v1/conversations` | `create_conversation` | `handler/http/conversations.rs` |
+| `GET/POST/DELETE /v1/conversations/{id}` | Conversation CRUD | `handler/http/conversations.rs` |
+| `POST/GET /v1/conversations/{id}/items` | Batch append and ordered listing | `handler/http/conversation_items.rs` |
+| `GET/DELETE /v1/conversations/{id}/items/{item_id}` | Item retrieval and removal | `handler/http/conversation_items.rs` |
 | `POST /v1/messages` | `messages` | `handler/http/messages.rs` |
 | `POST /v1/messages/count_tokens` | `count_tokens` | `handler/http/messages.rs` |
 | `GET /v1/models` | `models` | `handler/http/models.rs` |
@@ -857,7 +860,11 @@ round that omits `usage` still reports the hidden rounds' counters.
   connection URL, plus URL redaction for safe logging.
 - **`schema.rs`** — migrations and readiness (`PoolWithSchema::ensure_schema_ready`),
   including a path for a supervisor-managed schema that skips running migrations
-  itself and just verifies compatibility.
+  itself and just verifies compatibility. Readiness probes live in `schema/readiness.rs`.
+- **`conversation/api.rs`** — tenant-scoped conversation and item CRUD. Item ownership is checked through
+  the conversation so Responses-persisted items are visible too. Item writes share `lock_in_tx` with
+  turn persistence; a monotonic conversation revision makes deletions invalidate active snapshots.
+  Removal detaches items rather than destroying history referenced by stored responses.
 - **`models/`** — raw `sqlx::FromRow` row structs per table (`Conversation`, `Item`,
   `Response`) plus their raw, transaction-aware SQL functions (`create_in_tx`, `get`,
   `lock_in_tx`, ...). This is the literal DB row shape: JSON columns are still strings

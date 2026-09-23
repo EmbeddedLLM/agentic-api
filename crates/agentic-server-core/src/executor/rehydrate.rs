@@ -594,7 +594,7 @@ mod tests {
 
         let ctx = rehydrate_conversation(request(Some(&conversation.conversation_id), None), &exec_ctx).await?;
 
-        assert_eq!(ctx.conversation_version, Some(ConversationVersion::Empty));
+        assert_eq!(ctx.conversation_version, Some(ConversationVersion::default()));
         Ok(())
     }
 
@@ -622,8 +622,9 @@ mod tests {
 
         assert_eq!(
             ctx.conversation_version,
-            Some(ConversationVersion::LastResponse {
-                response_id: "resp_prior".to_owned(),
+            Some(ConversationVersion {
+                response_id: Some("resp_prior".to_owned()),
+                revision: 1,
                 last_sequence: Some(0),
             })
         );
