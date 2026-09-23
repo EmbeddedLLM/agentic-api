@@ -16,20 +16,30 @@ use futures::{Stream, StreamExt};
 
 use crate::events::{
     ClassifiedSseLine, EventFrame, EventPayload, SSEEventType, SSEItemType, SseLine, ValidatedFrame,
-    expected_item_type, normalize_sse_data_checked, output_item_identity, validate_frame,
+    normalize_sse_data_checked, output_item_identity, validate_frame,
 };
 use crate::executor::error::{ExecutorError, ExecutorResult};
+use crate::executor::response_budget::{
+    ExecutorResponseBudget, RETAINED_CONTAINER_OVERHEAD_BYTES, RetainedAccount, RetainedSize,
+    retained_response_parts_bytes,
+};
 use crate::types::event::ResponseStatus;
 use crate::types::io::{FunctionToolCall, OutputItem, ResponseUsage};
 use crate::types::request_response::{IncompleteDetails, ResponsePayload};
 use crate::utils::common::{deserialize_from_str, deserialize_from_value_opt};
 use crate::utils::uuid7_str;
 
+mod active;
+mod active_text;
+mod identity;
+use identity::{invalid_lifecycle, invalid_lifecycle_or_id, invalid_stream, item_identity, output_item_call_id};
 mod completion;
+mod details;
 mod json;
 mod slot;
 
-use slot::{ActiveItem, ItemIdentity, OutputIndex, SlotMap, SlotState};
+use active::ActiveItem;
+use slot::{OutputIndex, SlotMap, SlotState};
 
 /// Validation policy selected once for an accumulator's lifetime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -120,10 +130,12 @@ pub struct ResponseAccumulator {
     status: ResponseStatus,
     incomplete_details: Option<IncompleteDetails>,
     error: Option<serde_json::Value>,
+    terminal_details_account: RetainedAccount,
     /// Per-round active and completed items, keyed by validated output index.
     slots: SlotMap,
     strict_call_ids: HashMap<u32, CallIdObservation>,
     stream_lifecycle: StreamLifecycle,
+    pub(super) budget: Option<ExecutorResponseBudget>,
 }
 
 impl ResponseAccumulator {
@@ -147,10 +159,23 @@ impl ResponseAccumulator {
             status: ResponseStatus::InProgress,
             incomplete_details: None,
             error: None,
+            terminal_details_account: RetainedAccount::default(),
             slots: SlotMap::default(),
             strict_call_ids: HashMap::new(),
             stream_lifecycle: StreamLifecycle::AwaitingCreated,
+            budget: None,
         }
+    }
+
+    pub(super) fn with_validation_and_budget(
+        response_id: String,
+        conversation_id: Option<String>,
+        validation: Validation,
+        budget: Option<ExecutorResponseBudget>,
+    ) -> Self {
+        let mut acc = Self::with_validation(response_id, conversation_id, validation);
+        acc.budget = budget;
+        acc
     }
 
     /// Parses a non-streaming JSON response body.
@@ -162,7 +187,16 @@ impl ResponseAccumulator {
     }
 
     pub(super) fn load_json_body(&mut self, body: &str) -> ExecutorResult<()> {
-        *self = Self::read_json(body, self.conversation_id.clone(), self.validation)?;
+        let acc = Self::read_json(body, self.conversation_id.clone(), self.validation)?;
+        let retained = retained_response_parts_bytes(&acc.response_id, &acc.output)
+            + acc.incomplete_details.retained_bytes()
+            + acc.error.retained_bytes();
+        if let Some(budget) = &self.budget {
+            budget.consume(retained)?;
+        }
+        let budget = self.budget.clone();
+        *self = acc;
+        self.budget = budget;
         Ok(())
     }
 
@@ -202,9 +236,11 @@ impl ResponseAccumulator {
             status,
             incomplete_details,
             error,
+            terminal_details_account: RetainedAccount::default(),
             slots: SlotMap::default(),
             strict_call_ids: HashMap::new(),
             stream_lifecycle: StreamLifecycle::Terminal,
+            budget: None,
         })
     }
 
@@ -256,7 +292,7 @@ impl ResponseAccumulator {
         for line in rx {
             let _ = acc.process_line(SseLine::parse(&line))?;
         }
-        acc.finish_stream();
+        acc.finish_stream()?;
         Ok(acc)
     }
 
@@ -277,13 +313,15 @@ impl ResponseAccumulator {
         for line in lines {
             let _ = acc.process_line(SseLine::parse(&line))?;
         }
-        acc.finalize_all();
+        acc.finalize_all()?;
         Ok(acc)
     }
 
     /// Finalizes all streaming items in upstream `output_index` order.
-    pub(crate) fn finalize_all(&mut self) {
-        self.output.extend(self.slots.drain_output());
+    pub(crate) fn finalize_all(&mut self) -> ExecutorResult<()> {
+        self.output
+            .extend(self.slots.drain_output_with_budget(self.budget.as_ref())?);
+        Ok(())
     }
 
     /// Normalize classified data once, then validate and fold under the fixed policy.
@@ -310,7 +348,7 @@ impl ResponseAccumulator {
             }
             Validation::Lenient => None,
         };
-        self.capture_terminal_details_if_needed(frame);
+        self.capture_terminal_details_if_needed(frame)?;
         self.process_event_checked(frame, validated.as_ref())
     }
 
@@ -450,10 +488,10 @@ impl ResponseAccumulator {
     pub(super) fn accumulated_function_call(&self, output_index: u32) -> Option<AccumulatedFunctionCall<'_>> {
         let slot = self.slots.get(OutputIndex::new(output_index))?;
         match &slot.state {
-            SlotState::Active(ActiveItem::FunctionCall { item, arguments }) => Some(AccumulatedFunctionCall {
-                item,
+            SlotState::Active(ActiveItem::FunctionCall(state)) => Some(AccumulatedFunctionCall {
+                item: &state.item,
                 output_index,
-                arguments,
+                arguments: &state.arguments,
             }),
             SlotState::Done(OutputItem::FunctionCall(item)) => Some(AccumulatedFunctionCall {
                 item,
@@ -464,43 +502,22 @@ impl ResponseAccumulator {
         }
     }
 
-    fn capture_terminal_details(&mut self, frame: &EventFrame) {
-        let Some(response) = frame.wire.rest.get("response") else {
-            return;
-        };
-
-        self.incomplete_details = response
-            .get("incomplete_details")
-            .cloned()
-            .and_then(deserialize_from_value_opt::<IncompleteDetails>);
-        self.error = response.get("error").filter(|error| !error.is_null()).cloned();
-    }
-
-    fn capture_terminal_details_if_needed(&mut self, frame: &EventFrame) {
-        if matches!(
-            frame.event_type,
-            SSEEventType::ResponseCompleted | SSEEventType::ResponseFailed | SSEEventType::ResponseIncomplete
-        ) {
-            self.capture_terminal_details(frame);
-        }
-    }
-
     pub(crate) fn finish_strict_stream(&mut self) -> ExecutorResult<()> {
         if self.stream_lifecycle != StreamLifecycle::Terminal {
             return Err(ExecutorError::InvalidRequest(
                 "upstream stream ended without a terminal event".to_owned(),
             ));
         }
-        self.finish_stream();
-        Ok(())
+        self.finish_stream()
     }
 
-    pub(crate) fn finish_stream(&mut self) {
-        self.finalize_all();
+    pub(crate) fn finish_stream(&mut self) -> ExecutorResult<()> {
+        self.finalize_all()?;
         if self.status == ResponseStatus::InProgress {
             self.status = ResponseStatus::Completed;
         }
         self.stream_lifecycle = StreamLifecycle::Terminal;
+        Ok(())
     }
 
     /// Feeds typed test fixtures through the same policy-controlled transitions as ingestion.
@@ -516,6 +533,9 @@ impl ResponseAccumulator {
     ) -> ExecutorResult<EventDisposition> {
         match (&frame.event_type, &frame.payload) {
             (SSEEventType::ResponseCreated, EventPayload::Response { id, .. }) if !id.is_empty() => {
+                if let Some(budget) = &self.budget {
+                    budget.consume(RETAINED_CONTAINER_OVERHEAD_BYTES + id.len())?;
+                }
                 self.response_id.clone_from(id);
                 self.stream_lifecycle = StreamLifecycle::Created;
             }
@@ -527,13 +547,16 @@ impl ResponseAccumulator {
                 | SSEEventType::ResponseFailed
                 | SSEEventType::ResponseIncomplete),
                 EventPayload::Response { usage, .. },
-            ) => self.finish_response_event(*event_type, *usage),
+            ) => self.finish_response_event(*event_type, *usage)?,
             _ => {
                 let Some(identity) = item_identity(frame, validated) else {
                     return Ok(EventDisposition::Emit(None));
                 };
                 let index = match frame.event_type {
-                    SSEEventType::OutputItemAdded => self.slots.open(identity, &frame.payload, self.validation)?,
+                    SSEEventType::OutputItemAdded => {
+                        self.slots
+                            .open(identity, &frame.payload, self.validation, self.budget.as_ref())?
+                    }
                     SSEEventType::OutputItemDone => self.slots.complete(
                         identity,
                         &frame.payload,
@@ -541,8 +564,11 @@ impl ResponseAccumulator {
                             .and_then(|frame| frame.item.as_ref())
                             .and_then(|item| item.done_item.as_ref()),
                         self.validation,
+                        self.budget.as_ref(),
                     )?,
-                    _ => self.slots.apply(identity, &frame.payload, self.validation)?,
+                    _ => self
+                        .slots
+                        .apply(identity, &frame.payload, self.validation, self.budget.as_ref())?,
                 };
                 if self.validation == Validation::Strict
                     && let Some(index) = index
@@ -570,21 +596,22 @@ impl ResponseAccumulator {
         Ok(EventDisposition::Emit(None))
     }
 
-    fn finish_response_event(&mut self, event_type: SSEEventType, usage: Option<ResponseUsage>) {
+    fn finish_response_event(&mut self, event_type: SSEEventType, usage: Option<ResponseUsage>) -> ExecutorResult<()> {
         let status = match event_type {
             SSEEventType::ResponseCompleted => ResponseStatus::Completed,
             SSEEventType::ResponseFailed => ResponseStatus::Error,
             SSEEventType::ResponseIncomplete => ResponseStatus::Incomplete,
-            _ => return,
+            _ => return Ok(()),
         };
-        self.finish_response(status, usage);
+        self.finish_response(status, usage)
     }
 
-    fn finish_response(&mut self, status: ResponseStatus, usage: Option<ResponseUsage>) {
-        self.finalize_all();
+    fn finish_response(&mut self, status: ResponseStatus, usage: Option<ResponseUsage>) -> ExecutorResult<()> {
+        self.finalize_all()?;
         self.status = status;
         self.usage = usage;
         self.stream_lifecycle = StreamLifecycle::Terminal;
+        Ok(())
     }
 
     /// Marks the response as incomplete due to an error or interruption.
@@ -604,7 +631,7 @@ impl ResponseAccumulator {
     ) -> ExecutorResult<ResponsePayload> {
         match self.validation {
             Validation::Strict => self.finish_strict_stream()?,
-            Validation::Lenient => self.finish_stream(),
+            Validation::Lenient => self.finish_stream()?,
         }
         Ok(self.finalize(model, previous_response_id, instructions))
     }
@@ -639,73 +666,8 @@ impl ResponseAccumulator {
     }
 }
 
-fn output_item_call_id(item: &OutputItem) -> Option<&str> {
-    match item {
-        OutputItem::FunctionCall(call) => Some(&call.call_id),
-        OutputItem::ToolSearchCall(call) => Some(&call.call_id),
-        OutputItem::CustomToolCall(call) => Some(&call.call_id),
-        OutputItem::ShellCall(call) => Some(&call.call_id),
-        _ => None,
-    }
-}
-
-fn invalid_lifecycle(event_name: &str) -> ExecutorError {
-    invalid_stream(format!(
-        "upstream stream event '{event_name}' is out of lifecycle order"
-    ))
-}
-
-fn invalid_lifecycle_or_id(event_name: &str) -> ExecutorError {
-    invalid_stream(format!(
-        "upstream stream event '{event_name}' is out of lifecycle order or changes the response id"
-    ))
-}
-
-fn invalid_stream(message: impl Into<String>) -> ExecutorError {
-    ExecutorError::InvalidRequest(message.into())
-}
-
-fn item_identity<'a>(frame: &'a EventFrame, validated: Option<&ValidatedFrame<'a>>) -> Option<ItemIdentity<'a>> {
-    if let Some(item) = validated.and_then(|frame| frame.item.as_ref()) {
-        return Some(ItemIdentity {
-            index: Some(OutputIndex::new(item.output_index)),
-            item_id: (!item.item_id.is_empty()).then_some(item.item_id),
-            item_type: item.item_type,
-        });
-    }
-    let (item_id, item_type) = match &frame.payload {
-        EventPayload::OutputItemAdded { item_id, item_type, .. }
-        | EventPayload::OutputItemDone { item_id, item_type, .. } => (item_id.as_str(), *item_type),
-        payload => {
-            let item_type = expected_item_type(frame.event_type)?;
-            let item_id = match payload {
-                EventPayload::TextDelta { item_id, .. }
-                | EventPayload::TextDone { item_id, .. }
-                | EventPayload::FunctionCallArgsDelta { item_id, .. }
-                | EventPayload::FunctionCallArgsDone { item_id, .. }
-                | EventPayload::CustomToolCallInputDelta { item_id, .. }
-                | EventPayload::CustomToolCallInputDone { item_id, .. }
-                | EventPayload::ReasoningTextDelta { item_id, .. }
-                | EventPayload::ReasoningTextDone { item_id, .. }
-                | EventPayload::ReasoningSummaryTextDelta { item_id, .. }
-                | EventPayload::ReasoningSummaryTextDone { item_id, .. } => item_id.as_str(),
-                _ => frame
-                    .wire
-                    .rest
-                    .get("item_id")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or(""),
-            };
-            (item_id, item_type)
-        }
-    };
-    Some(ItemIdentity {
-        index: frame.output_index().map(OutputIndex::new),
-        item_id: (!item_id.is_empty()).then_some(item_id),
-        item_type,
-    })
-}
-
+#[cfg(test)]
+mod budget_tests;
 #[cfg(test)]
 mod tests;
 

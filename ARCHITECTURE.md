@@ -116,18 +116,24 @@ continuous SSE lifecycle.
 
 The crate produces a library plus two independent binaries. `src/lib.rs` exports
 `agentic_cli`, `agentic_harness`, `agentic_output`, `agentic_process`, `app`, `auth`,
-and `handler`. On top of that:
+`handler`, and `model_capabilities`. On top of that:
 
 | Binary | Entry point | Uses |
 |---|---|---|
-| `agentic-server` (the gateway) | `src/main.rs` | `app`, `auth`, `handler`, plus binary-private `server.rs` and `config_file.rs` |
-| `agentic` (the CLI launcher) | `src/bin/agentic.rs` | `agentic_cli`, `agentic_harness`, `agentic_output`, `agentic_process` only |
+| `agentic-server` (the gateway) | `src/main.rs` | `app`, `auth`, `handler`, `model_capabilities`, plus binary-private `server.rs` and `config_file.rs` |
+| `agentic` (the CLI launcher) | `src/bin/agentic.rs` | `agentic_cli`, `agentic_harness`, `agentic_output`, `agentic_process`, `model_capabilities` |
 
 These are two unrelated concerns bundled in one crate. If you're working on request
 handling, ignore `agentic_cli*`/`agentic_harness.rs`/`agentic_output.rs`/
 `agentic_process.rs` entirely — they're the launcher that spawns the gateway binary and
 a coding harness (Codex or Claude Code) as subprocesses for local, single-command use
 (`agentic serve <model>`), and never touch the request path.
+
+`model_capabilities.rs` is the one deliberate exception: it is the shared contract both
+sides speak. The gateway resolves each model's `InputModalities` there and serves them in
+the Codex catalog; the launcher parses that same catalog back through
+`CodexCatalogCapabilities` before writing an isolated Codex home. Keeping one definition is
+what stops the HTTP catalog and a launcher catalog from disagreeing about image support.
 
 ### `app.rs`, `server.rs`, `main.rs`
 
@@ -149,7 +155,10 @@ a coding harness (Codex or Claude Code) as subprocesses for local, single-comman
 |---|---|---|
 | `POST /v1/responses` | `responses` | `handler/http/responses.rs` |
 | `POST /v1/responses/compact` | `compact_response` | `handler/http/responses.rs` |
-| `POST /v1/conversations` | `conversations` | `handler/http/conversations.rs` |
+| `POST /v1/conversations` | `create_conversation` | `handler/http/conversations.rs` |
+| `GET/POST/DELETE /v1/conversations/{id}` | Conversation CRUD | `handler/http/conversations.rs` |
+| `POST/GET /v1/conversations/{id}/items` | Batch append and ordered listing | `handler/http/conversation_items.rs` |
+| `GET/DELETE /v1/conversations/{id}/items/{item_id}` | Item retrieval and removal | `handler/http/conversation_items.rs` |
 | `POST /v1/messages` | `messages` | `handler/http/messages.rs` |
 | `POST /v1/messages/count_tokens` | `count_tokens` | `handler/http/messages.rs` |
 | `GET /v1/models` | `models` | `handler/http/models.rs` |
@@ -183,15 +192,22 @@ doesn't wait for upgraded connections, `AppState` carries a separate
 `WebSocketTracker` so shutdown can drain in-flight sessions.
 
 Executor streams propagate downstream backpressure through a bounded event channel.
-Upstream SSE lines are capped at 256 KiB, while normalized events are capped at 1 MiB.
-Each request also shares a 1 MiB response budget across MCP discovery, upstream rounds,
-and normalized gateway tool output, so a slow consumer cannot turn a fixed event-count
-buffer into unbounded retained memory. MCP discovery participates in the same 16-permit
+`[responses]` configures separate ceilings for upstream JSON bodies, upstream SSE
+lines, retained response data, and client stream events. Wire ceilings default to
+16 MiB each. Each request shares an 8 MiB retained-data budget across MCP discovery,
+upstream rounds, and normalized gateway tool output. Ingestion charges logical retained
+items rather than repeated SSE envelopes, so changing delta size does not change the
+budget for the same output. These are logical limits, not total process memory bounds. MCP discovery participates in the same 16-permit
 materialization window as gateway calls and is capped at 64 server declarations and
 128 discovered tools per request.
-The WebSocket transport queues only serialized, size-checked events, capped at
-1 MiB each including routing metadata, in its 64-entry outbound queue. Local
-completion validates both lifecycle events before persistence. Authentication is
+The WebSocket transport queues only serialized, size-checked events, capped at the
+configured `max_stream_event_bytes` including routing metadata, in its 64-entry outbound
+queue. `handler/websocket/responses/event.rs` owns that envelope and its limit. The
+executor receives the effective event ceiling after routing overhead and checks its
+terminal event before persistence or session checkpoint publication. Local completion
+validates both lifecycle events before persistence. A slow connection can retain up to
+64 times the configured event ceiling in its outbound queue, in addition to executor
+queues, parsed upstream payloads, and active response state. Authentication is
 rechecked at request dispatch so queued work cannot start after identity expiry.
 Errors are modeled by a dedicated `WsError` enum (`handler/websocket/error.rs`) rather
 than reusing the HTTP JSON-error path, since some failure modes (a dead socket) must
@@ -477,8 +493,8 @@ call inference, run the tool loop, persist. `agentic-server` never reaches past 
   they do not remain pending at this boundary.
 - **`upstream.rs`** — the narrow adapter between inference transport and the pipeline.
   It builds `UpstreamRequest`s, snapshots registry classification facts into an owned
-  `TranslationContext`, charges the request-wide response budget, and passes each live
-  JSON or SSE body to `AgentPipeline`.
+  `TranslationContext`, passes the shared retained-data budget into ingestion, and
+  passes each live JSON or SSE body to `AgentPipeline`. It does not charge SSE wire bytes.
 - **`inference.rs`** — `call_inference()`: the raw HTTP/SSE transport to vLLM. No
   parsing beyond splitting `data: ...` lines and stopping at `[DONE]`.
 - **`pipeline.rs`, `pipeline/`** — `AgentPipeline`, the request-owned entry point for
@@ -493,7 +509,8 @@ call inference, run the tool loop, persist. `agentic-server` never reaches past 
   changes continuation `tool_choice` to `auto`, and persists gateway calls plus their
   outputs as model-facing `InputItem`s. Also home to `run_compaction_trigger`,
   `run_blocking`, and `run_stream` (spawns the loop, forwards events as SSE, persists
-  before yielding the terminal event).
+  before yielding the terminal event). `engine/streaming.rs` owns the streaming task's
+  cancellation, failure delivery, and terminal validation before persistence.
 - **`persist.rs`** — `persist_response`/`persist_turn`, which route to
   `ConversationHandler` or `ResponseHandler` in `modes/` depending on whether the turn
   is conversation-scoped or response-scoped.
@@ -586,8 +603,10 @@ The boundary contract is one owner and one path per concern:
 
 `ResponseAccumulator` owns validation, response lifecycle, typed output slots, delta
 folding, terminal error/incomplete state, usage, and final `ResponsePayload` assembly.
-`slot.rs` contains the typed active/completed slot model and `json.rs` contains strict
-JSON response-shape validation. Both JSON and SSE ultimately use the same finalization
+`slot.rs` owns active/completed lifecycle and identity bindings, `identity.rs` extracts
+semantic identities, and `json.rs` contains strict JSON response-shape validation.
+`active.rs` dispatches exhaustively to per-kind state; `active_text.rs` owns message
+parts and reasoning text/summary accounting. Both JSON and SSE ultimately use the same finalization
 state.
 
 Output items are constructed through their `TryFrom<&EventPayload>` implementations in
@@ -606,8 +625,26 @@ folded arguments. `finish` applies SSE end-of-stream policy; `finalize` preserve
 status loaded from a complete JSON body.
 
 When adding an output-item kind, extend its typed construction and completion logic in
-`types/io/output.rs`, the slot variants in `accumulator/slot.rs`, and the exhaustive
-transition and finalization matches in `accumulator/mod.rs`.
+`types/io/output.rs`, the variants and exhaustive dispatch in `accumulator/active.rs`,
+and completed-item measurement in `executor/response_budget.rs`.
+
+Retained-byte accounting stays in synchronous ingestion. `response_budget.rs` defines
+one comprehensive `RetainedSize` measurement and `RetainedAccount` for charging growth
+and reconciling completed items. Every unbounded collection entry has a structural
+charge, including empty JSON values and web-search queries; unrestricted string fields
+such as `role`, content `type`, and reasoning `status` count by length. Bounded enums
+need no variable charge. Delta text and new part containers are charged before growth.
+Completion uses the existing `ApplyDone`/`MergeDone` policy and measures its effect;
+reasoning text/summary completion measures only the inserted part and its corresponding
+streamed counter; shell command completion measures only its command and current buffer.
+Both avoid rescanning preceding parts or static nested metadata. Full measurement is reserved
+for item completion and final reconciliation. `slot.rs` charges supplied identities before
+index insertion or late binding; IDs shared by a typed item and its indexes count once
+logically, including pending kinds with no typed snapshot yet. `accumulator/details.rs`
+charges retained terminal errors and incomplete reasons under the same JSON/SSE measurement.
+Charges are cumulative without refunds.
+A rejected completion may temporarily allocate its single bounded wire payload before
+ingestion drops the failed round.
 
 #### `translate/` — tool-specific public-shape translation
 
@@ -807,6 +844,21 @@ function tools and truncated rounds remain terminal. A completed client-executed
 calls and await the client's output. Token limits, other stop reasons and streams
 without a completed round keep their original terminal semantics.
 
+Hide-the-call covers every terminal round, not only a mixed one. A round can end while a
+gateway `tool_use` is present whenever the stop reason is not a tool-call stop — a
+`max_tokens` truncation mid-call, or an `end_turn` the context does not accept — and that
+call is never executed. `messages_loop.rs`'s `deliver` strips gateway-owned `tool_use`
+blocks from the returned message, matching the streaming accumulator, which suppresses them
+on every round. The assistant turn fed back to the model still carries the call.
+
+Each round's `usage` is folded into `messages_usage.rs`'s `MessagesUsageTotals`, so when
+hidden gateway rounds ran, the returned message (JSON) and the terminal `message_delta` (SSE)
+report the saturating sum of the Anthropic token counters across every round rather than the
+final round alone. A streamed round counts its `message_start.usage` overlaid by its
+`message_delta.usage`. Counters no round reported stay absent, the remaining `usage` fields
+pass through from the final round, a single-round turn is returned unchanged, and a final
+round that omits `usage` still reports the hidden rounds' counters.
+
 ### `storage/` — persistence
 
 - **`pool.rs`** — `DbPool = sqlx::Pool<sqlx::Any>`, driver-agnostic across SQLite and
@@ -816,7 +868,11 @@ without a completed round keep their original terminal semantics.
   connection URL, plus URL redaction for safe logging.
 - **`schema.rs`** — migrations and readiness (`PoolWithSchema::ensure_schema_ready`),
   including a path for a supervisor-managed schema that skips running migrations
-  itself and just verifies compatibility.
+  itself and just verifies compatibility. Readiness probes live in `schema/readiness.rs`.
+- **`conversation/api.rs`** — tenant-scoped conversation and item CRUD. Item ownership is checked through
+  the conversation so Responses-persisted items are visible too. Item writes share `lock_in_tx` with
+  turn persistence; a monotonic conversation revision makes deletions invalidate active snapshots.
+  Removal detaches items rather than destroying history referenced by stored responses.
 - **`models/`** — raw `sqlx::FromRow` row structs per table (`Conversation`, `Item`,
   `Response`) plus their raw, transaction-aware SQL functions (`create_in_tx`, `get`,
   `lock_in_tx`, ...). This is the literal DB row shape: JSON columns are still strings
@@ -957,7 +1013,8 @@ succeed.
     (`CodexNamespaceHandler`), and `tool_search.rs` (`ToolSearchHandler`). Their calls
     are returned for the client to resolve; the gateway does not execute them.
   - **Gateway-owned / built-in** tools implement both traits: see `web_search/mod.rs`
-    (`WebSearchHandler`, backed by You.com) and `mcp/handler.rs` (`McpHandler`, backed
+    (`WebSearchHandler`, backed by the configured `WebSearchProvider` in `web_search/you.rs`
+    or `web_search/brave.rs`) and `mcp/handler.rs` (`McpHandler`, backed
     by `mcp/client.rs`'s MCP protocol client and `mcp/pool.rs`'s connection pool). They
     have no client translator association because the gateway owns their execution and
     public lifecycle.

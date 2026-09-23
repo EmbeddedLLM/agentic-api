@@ -8,13 +8,16 @@
 //!   * gateway-owned `tool_use` blocks suppressed (and their `input_json_delta`
 //!     buffered to reconstruct the call for dispatch);
 //!   * intermediate `message_delta`/`message_stop` (the per-round terminals)
-//!     suppressed; the final round's terminal is forwarded once.
+//!     suppressed; the final terminal is forwarded once, carrying every round's summed `usage`.
 //!
 //! Each `message_stop` ends its upstream round without waiting for HTTP EOF.
 //!
 //! Structurally the Anthropic-native analogue of the Responses `GatewayStreamAccumulator`
 //! (#119/#132); kept deliberately parallel for a future consolidation. Reuses
 //! only the neutral tool layer via [`crate::types::messages::tool_seam`].
+
+mod wire;
+use wire::{error_sse, executor_error_sse, sse};
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -24,15 +27,16 @@ use futures::StreamExt;
 use serde_json::{Value, json};
 
 use crate::events::{ClassifiedSseLine, SseLine};
-use crate::executor::error::{ExecutorError, ExecutorResult};
+use crate::executor::error::ExecutorResult;
 use crate::executor::inference::{BoxStream, response_lines, send_request};
 use crate::executor::messages_context::MessagesRequestContext;
 use crate::executor::messages_request::web_search_budget_exhausted_result;
+use crate::executor::messages_usage::MessagesUsageTotals;
 use crate::executor::request::ExecutionContext;
 use crate::proxy::processed_response_headers;
 use crate::tool::ToolRegistry;
 use crate::types::messages::{GatewayToolResult, tool_seam};
-use crate::utils::common::{deserialize_from_str, serialize_to_string};
+use crate::utils::common::deserialize_from_str;
 
 // Shared with the non-streaming loop so the two Messages loops can't drift.
 use crate::executor::messages_loop::{
@@ -69,7 +73,10 @@ pub async fn run_messages_stream(
     let response_headers = processed_response_headers(first_response.headers());
 
     let body: BoxStream = Box::pin(stream! {
-        let mut acc = MessagesStreamAccumulator::new(exec_ctx.messages_gateway_tools.clone());
+        let mut acc = MessagesStreamAccumulator {
+            gateway_map: exec_ctx.messages_gateway_tools.clone(),
+            ..Default::default()
+        };
         let mut prepared_response = Some(first_response);
 
         for _round in 0..MAX_GATEWAY_TOOL_ROUNDS {
@@ -94,7 +101,11 @@ pub async fn run_messages_stream(
                     Err(e) => { yield executor_error_sse(&e); return; }
                 }
             };
-            let mut response_stream = Box::pin(response_lines(response, exec_ctx.streaming_timeout));
+            let mut response_stream = Box::pin(response_lines(
+                response,
+                exec_ctx.streaming_timeout,
+                exec_ctx.responses_config.max_upstream_sse_line_bytes,
+            ));
 
             acc.begin_round();
             while let Some(line) = response_stream.next().await {
@@ -171,8 +182,9 @@ struct BufferedBlock {
     is_gateway_tool: bool,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 enum RoundState {
+    #[default]
     Active,
     Completed,
     UpstreamError,
@@ -220,6 +232,7 @@ fn append_str(block: &mut Value, field: &str, fragment: Option<&Value>) {
 
 /// State machine that turns per-round Anthropic SSE into one client-visible
 /// message. Fed line-by-line via [`Self::push`].
+#[derive(Default)]
 struct MessagesStreamAccumulator {
     message_started: bool,
     /// Next client-visible block index (contiguous across rounds).
@@ -241,6 +254,8 @@ struct MessagesStreamAccumulator {
     final_message_delta: Option<Value>,
     /// Whether this round is active, complete, or terminated with an upstream error.
     round_state: RoundState,
+    /// Every consumed round's terminal `usage`, reported once in the final `message_delta`.
+    usage: MessagesUsageTotals,
     /// Operator-configured client-tool → gateway-executor aliases, so a client
     /// tool like Claude Code's `WebSearch` is classified gateway-owned (and
     /// suppressed) the same way the built-in `web_search` is.
@@ -248,20 +263,6 @@ struct MessagesStreamAccumulator {
 }
 
 impl MessagesStreamAccumulator {
-    fn new(gateway_map: tool_seam::GatewayToolMap) -> Self {
-        Self {
-            message_started: false,
-            next_index: 0,
-            index_map: HashMap::new(),
-            suppressed_indices: HashSet::new(),
-            blocks: BTreeMap::new(),
-            has_client_tool_use: false,
-            final_message_delta: None,
-            round_state: RoundState::Active,
-            gateway_map,
-        }
-    }
-
     fn begin_round(&mut self) {
         self.index_map.clear();
         self.suppressed_indices.clear();
@@ -283,6 +284,8 @@ impl MessagesStreamAccumulator {
     /// `thinking`/`text`/`signature` and the gateway `tool_use` blocks (F3); the
     /// calls are the gateway `tool_use` blocks reconstructed for dispatch.
     fn take_round(&mut self) -> (Vec<Value>, Vec<StreamedCall>) {
+        // This round's terminal is suppressed; its usage joins the final one's.
+        self.usage.commit();
         let blocks = std::mem::take(&mut self.blocks);
         let mut assistant_content = Vec::with_capacity(blocks.len());
         let mut calls = Vec::new();
@@ -344,6 +347,7 @@ impl MessagesStreamAccumulator {
             Some("content_block_stop") => self.on_block_stop(&mut event),
             Some("message_delta") => {
                 // Buffer as the (possibly) final terminal; suppress mid-loop.
+                self.usage.observe(event.get("usage"));
                 self.final_message_delta = Some(event);
                 Vec::new()
             }
@@ -362,6 +366,8 @@ impl MessagesStreamAccumulator {
     }
 
     fn on_message_start(&mut self, event: &Value) -> Vec<String> {
+        // Later rounds' message_start is suppressed, but its usage still counts.
+        self.usage.observe(event["message"].get("usage"));
         if self.message_started {
             return Vec::new();
         }
@@ -445,37 +451,12 @@ impl MessagesStreamAccumulator {
             if self.has_client_tool_use && self.has_completed_round() && delta["delta"]["stop_reason"] == "end_turn" {
                 delta["delta"]["stop_reason"] = json!("tool_use");
             }
+            self.usage.finish(&mut delta);
             out.push(sse("message_delta", &delta));
         }
         out.push(sse("message_stop", &json!({"type": "message_stop"})));
         out
     }
-}
-
-fn sse(event: &str, value: &Value) -> String {
-    let json = serialize_to_string(value).unwrap_or_default();
-    format!("event: {event}\ndata: {json}\n\n")
-}
-
-fn error_sse(message: &str) -> String {
-    let event = json!({"type": "error", "error": {"type": "api_error", "message": message}});
-    let json = serialize_to_string(&event).unwrap_or_default();
-    format!("event: error\ndata: {json}\n\n")
-}
-
-fn executor_error_sse(error: &ExecutorError) -> String {
-    if let ExecutorError::LLMRequest { body, .. } = error
-        && let Ok(value) = deserialize_from_str::<Value>(body)
-        && value.get("type").and_then(Value::as_str) == Some("error")
-    {
-        let data = if body.contains(['\r', '\n']) {
-            serialize_to_string(&value).unwrap_or_else(|_| body.clone())
-        } else {
-            body.clone()
-        };
-        return format!("event: error\ndata: {data}\n\n");
-    }
-    error_sse(&error.to_string())
 }
 
 /// Execute reconstructed gateway calls (concurrent, per-call timeout). Errors
@@ -530,11 +511,112 @@ mod tests {
 
     /// Accumulator with the default gateway map (built-in `web_search` only).
     fn acc() -> MessagesStreamAccumulator {
-        MessagesStreamAccumulator::new(tool_seam::GatewayToolMap::default())
+        MessagesStreamAccumulator::default()
     }
 
     fn context() -> MessagesRequestContext {
         MessagesRequestContext::from_value(json!({"model":"test", "max_tokens":64, "messages":[]})).unwrap()
+    }
+
+    fn message_start(input_tokens: u64) -> Value {
+        json!({"type":"message_start", "message":{"id":"m", "type":"message", "role":"assistant", "content":[],
+            "model":"test", "stop_reason":null, "usage":{"input_tokens":input_tokens, "output_tokens":1}}})
+    }
+
+    /// A final round whose `message_delta` carries no `usage` still reports the
+    /// hidden round's counters plus its own `message_start` snapshot.
+    #[test]
+    fn final_message_delta_without_usage_still_reports_hidden_rounds() {
+        let mut acc = acc();
+        acc.begin_round();
+        acc.push(&line(&message_start(10)));
+        acc.push(&line(
+            &json!({"type":"content_block_start", "index":0, "content_block":{
+                "type":"tool_use", "id":"search", "name":"web_search", "input":{}
+            }}),
+        ));
+        acc.push(&line(&json!({"type":"content_block_stop", "index":0})));
+        acc.push(&line(
+            &json!({"type":"message_delta", "delta":{"stop_reason":"tool_use"}, "usage":{"output_tokens":4}}),
+        ));
+        acc.push(&line(&json!({"type":"message_stop"})));
+        assert!(acc.should_continue_loop(&context()));
+        acc.take_round();
+
+        acc.begin_round();
+        acc.push(&line(&message_start(20)));
+        acc.push(&line(
+            &json!({"type":"message_delta", "delta":{"stop_reason":"end_turn"}}),
+        ));
+        acc.push(&line(&json!({"type":"message_stop"})));
+        assert_eq!(
+            acc.finish(),
+            vec![
+                sse(
+                    "message_delta",
+                    &json!({"type":"message_delta", "delta":{"stop_reason":"end_turn"},
+                        "usage":{"input_tokens":30, "output_tokens":5}})
+                ),
+                sse("message_stop", &json!({"type":"message_stop"}))
+            ]
+        );
+    }
+
+    /// Part of #315: the suppressed gateway round's usage is summed into the final
+    /// `message_delta`. Each round is `message_start.usage` overlaid by its deltas,
+    /// so an upstream whose deltas carry only `output_tokens` still reports its
+    /// input, a repeated cumulative delta counts once, and non-counter fields pass
+    /// through from the last round.
+    #[test]
+    fn final_message_delta_reports_every_rounds_usage() {
+        let mut acc = acc();
+        acc.begin_round();
+        acc.push(&line(&message_start(10)));
+        acc.push(&line(
+            &json!({"type":"content_block_start", "index":0, "content_block":{
+                "type":"tool_use", "id":"search", "name":"web_search", "input":{}
+            }}),
+        ));
+        acc.push(&line(&json!({"type":"content_block_delta", "index":0, "delta":{
+            "type":"input_json_delta", "partial_json":"{\"query\":\"rust\"}"
+        }})));
+        acc.push(&line(&json!({"type":"content_block_stop", "index":0})));
+        acc.push(&line(
+            &json!({"type":"message_delta", "delta":{"stop_reason":null}, "usage":{"output_tokens":1}}),
+        ));
+        acc.push(&line(
+            &json!({"type":"message_delta", "delta":{"stop_reason":"tool_use"},
+                "usage":{"output_tokens":4, "cache_read_input_tokens":128}}),
+        ));
+        acc.push(&line(&json!({"type":"message_stop"})));
+        assert!(acc.should_continue_loop(&context()));
+        let (_, calls) = acc.take_round();
+        assert_eq!(calls.len(), 1);
+
+        acc.begin_round();
+        acc.push(&line(&message_start(20)));
+        acc.push(&line(
+            &json!({"type":"content_block_start", "index":0, "content_block":{"type":"text", "text":""}}),
+        ));
+        acc.push(&line(&json!({"type":"content_block_stop", "index":0})));
+        acc.push(&line(
+            &json!({"type":"message_delta", "delta":{"stop_reason":"end_turn"},
+                "usage":{"output_tokens":6, "extension":{"value":1}}}),
+        ));
+        acc.push(&line(&json!({"type":"message_stop"})));
+        assert!(!acc.should_continue_loop(&context()));
+        assert_eq!(
+            acc.finish(),
+            vec![
+                sse(
+                    "message_delta",
+                    &json!({"type":"message_delta", "delta":{"stop_reason":"end_turn"}, "usage":{
+                        "output_tokens":10, "extension":{"value":1}, "input_tokens":30, "cache_read_input_tokens":128
+                    }})
+                ),
+                sse("message_stop", &json!({"type":"message_stop"}))
+            ]
+        );
     }
 
     #[test]
@@ -630,7 +712,11 @@ mod tests {
             }
             write!(body, "{prefix}[DONE]\n\n").expect("write SSE termination marker");
             let response = reqwest::Response::from(http::Response::new(body));
-            let mut lines = Box::pin(response_lines(response, std::time::Duration::ZERO));
+            let mut lines = Box::pin(response_lines(
+                response,
+                std::time::Duration::ZERO,
+                crate::config::DEFAULT_MAX_UPSTREAM_SSE_LINE_BYTES,
+            ));
             let mut output = Vec::new();
             while let Some(line) = lines.next().await {
                 output.extend(acc.push(&line.expect("valid SSE transport")));

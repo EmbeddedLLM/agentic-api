@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -9,26 +10,36 @@ DOCS_INDEX = REPO_ROOT / "docs" / "index.md"
 INSTALL_GUIDE = REPO_ROOT / "docs" / "guides" / "python-installation.md"
 
 
-def test_documented_python_install_commands_respect_release_publication_gate() -> None:
+def test_documented_python_installs_match_the_published_website_version() -> None:
     guide = INSTALL_GUIDE.read_text(encoding="utf-8")
     readme = README.read_text(encoding="utf-8")
     index = DOCS_INDEX.read_text(encoding="utf-8")
+    quickstart = (REPO_ROOT / "website" / "lib" / "quickstart.ts").read_text(encoding="utf-8")
+    match = re.search(r"PUBLISHED_VERSION = '([^']+)'", quickstart)
+    assert match is not None
+    version = match.group(1)
 
-    combined = "\n".join((readme, index, guide))
+    for document in (readme, guide):
+        assert f"python -m pip install agentic-api=={version}" in document
+        assert f'python -m pip install "agentic-api[local]=={version}"' in document
+        assert f"uvx --from agentic-api=={version} agentic --version" in document
 
-    assert 'uv pip install "$WHEEL_PATH"' in combined
-    assert 'agentic-api[local] @ file://$WHEEL_PATH' in combined
-    assert "This release produces wheel artifacts" in combined
-    assert "After PyPI publication" in combined
-    assert "after the PyPI publication gate" in combined
-    assert "Planned for 0.5.0" not in combined
-    assert "0.4.0 build-only release" not in combined
-    assert "future 0.5.0 public-index gate" not in combined
-    assert "uv pip install agentic-api" in combined
-    assert 'uv pip install "agentic-api[local]"' in combined
-    assert "uvx --from agentic-api agentic-api doctor" in combined
-    assert "uvx --from agentic-api agentic-api serve --vllm-base-url http://existing-vllm:8000" in combined
-    assert "uvx pip install" not in combined
+    for document in (readme, index, guide):
+        assert f"https://pypi.org/project/agentic-api/{version}/" in document
+        assert "not published on PyPI" not in document
+        assert "This release produces wheel artifacts" not in document
+        assert "After PyPI publication" not in document
+        assert "after the PyPI publication gate" not in document
+        assert "uvx pip install" not in document
+
+    assert "python -m pip install /absolute/path/to/agentic_api-PLATFORM.whl" in guide
+    assert f"uv pip install agentic-api=={version}" in readme
+    assert f'uv pip install "agentic-api[local]=={version}"' in readme
+    assert f"uvx --from agentic-api=={version} agentic-api doctor" in readme
+    assert (
+        f"uvx --from agentic-api=={version} agentic-api serve --vllm-base-url http://existing-vllm:8000"
+        in readme
+    )
 
 
 def test_python_install_guide_covers_workflows_and_backend_language() -> None:

@@ -1,6 +1,6 @@
 {
-  "checkedAt": "2026-09-09",
-  "defaultVersion": "v0.5.0",
+  "checkedAt": "2026-09-19",
+  "defaultVersion": "v0.8.0",
   "versions": [
     {
       "id": "latest",
@@ -13,6 +13,58 @@
         "overview",
         "api",
         "codex-desktop",
+        "developing",
+        "community",
+        "sglang",
+        "dynamo",
+        "llmd"
+      ]
+    },
+    {
+      "id": "v0.8.0",
+      "label": "v0.8.0",
+      "channel": "release",
+      "ref": "v0.8.0",
+      "sourceRef": "8f5fe27d03c612fd009887d437803bf20109d547",
+      "hostedBaseUrl": null,
+      "sections": [
+        "overview",
+        "api",
+        "codex-desktop",
+        "developing",
+        "community",
+        "sglang",
+        "dynamo",
+        "llmd"
+      ]
+    },
+    {
+      "id": "v0.7.0",
+      "label": "v0.7.0",
+      "channel": "release",
+      "ref": "v0.7.0",
+      "sourceRef": "72ab8aa32b234d833123fedb65635bd5860db954",
+      "hostedBaseUrl": null,
+      "sections": [
+        "overview",
+        "api",
+        "developing",
+        "community",
+        "sglang",
+        "dynamo",
+        "llmd"
+      ]
+    },
+    {
+      "id": "v0.6.0",
+      "label": "v0.6.0",
+      "channel": "release",
+      "ref": "v0.6.0",
+      "sourceRef": "2d0c66c93d7f765b38ccf2b7caaa3602a369a3d3",
+      "hostedBaseUrl": null,
+      "sections": [
+        "overview",
+        "api",
         "developing",
         "community",
         "sglang",

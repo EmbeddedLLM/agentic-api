@@ -1,5 +1,7 @@
 //! Conversation storage operations.
 
+mod api;
+
 use std::convert::TryFrom;
 use std::sync::Arc;
 
@@ -34,7 +36,7 @@ impl ConversationStore {
     /// # Errors
     ///
     /// Returns error if store is disabled (no pool configured).
-    fn pool(&self) -> StoreResult<&DbPool> {
+    pub fn pool(&self) -> StoreResult<&DbPool> {
         self.pool.as_deref().ok_or(StorageError::NotConfigured)
     }
 
@@ -105,7 +107,11 @@ impl ConversationStore {
                 .into_iter()
                 .filter_map(|row| row.as_inout())
                 .collect(),
-            version: ConversationVersion::from_snapshot(last_sequence, snapshot_rows.latest_response_id),
+            version: ConversationVersion {
+                last_sequence,
+                response_id: snapshot_rows.latest_response_id,
+                revision: snapshot_rows.revision,
+            },
         })
     }
 
@@ -119,7 +125,7 @@ impl ConversationStore {
         conversation_id: &str,
         version: &ConversationVersion,
     ) -> StoreResult<Option<ResponseMetadata>> {
-        let ConversationVersion::LastResponse { response_id, .. } = version else {
+        let Some(response_id) = &version.response_id else {
             return Ok(None);
         };
         let pool = self.pool()?;
@@ -210,10 +216,11 @@ impl ConversationStore {
             Err(error) => return Err(error.into()),
         };
         if let Some(expected_version) = expected_version {
-            let current_version = ConversationVersion::from_snapshot(
-                item::last_conversation_sequence_in_tx(&mut tx, conversation_id).await?,
-                locked_conversation.latest_response_id,
-            );
+            let current_version = ConversationVersion {
+                last_sequence: item::last_conversation_sequence_in_tx(&mut tx, conversation_id).await?,
+                response_id: locked_conversation.latest_response_id,
+                revision: locked_conversation.revision,
+            };
             if current_version != expected_version {
                 return Err(StorageError::ConversationConflict {
                     conversation_id: conversation_id.to_owned(),
@@ -232,6 +239,7 @@ impl ConversationStore {
         )
         .await?;
         conversation::set_latest_response_in_tx(&mut tx, conversation_id, response_id).await?;
+        conversation::bump_revision_in_tx(&mut tx, conversation_id).await?;
         tx.commit().await?;
 
         Ok(())

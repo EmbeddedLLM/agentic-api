@@ -68,7 +68,7 @@ async fn conversation_snapshot_reports_empty_and_last_response() -> Result<(), B
 
     let snapshot = store.rehydrate_snapshot(&conversation.conversation_id).await?;
     assert!(snapshot.items.is_empty());
-    assert_eq!(snapshot.version, ConversationVersion::Empty);
+    assert_eq!(snapshot.version, ConversationVersion::default());
 
     store
         .persist(
@@ -84,8 +84,9 @@ async fn conversation_snapshot_reports_empty_and_last_response() -> Result<(), B
     assert_eq!(snapshot.items.len(), 2);
     assert_eq!(
         snapshot.version,
-        ConversationVersion::LastResponse {
-            response_id: "resp_1".to_owned(),
+        ConversationVersion {
+            response_id: Some("resp_1".to_owned()),
+            revision: 1,
             last_sequence: Some(1),
         }
     );
@@ -124,8 +125,9 @@ async fn conversation_snapshot_version_includes_an_undecodable_final_row() -> Re
     assert_eq!(snapshot.items, vec![stored_item]);
     assert_eq!(
         snapshot.version,
-        ConversationVersion::LastResponse {
-            response_id: "resp_1".to_owned(),
+        ConversationVersion {
+            response_id: Some("resp_1".to_owned()),
+            revision: 1,
             last_sequence: Some(1),
         }
     );
@@ -189,7 +191,13 @@ async fn legacy_item_only_version_upgrades_on_the_next_persist() -> Result<(), B
         .await?;
 
     let legacy = store.rehydrate_snapshot(&conversation.conversation_id).await?;
-    assert_eq!(legacy.version, ConversationVersion::LastSequence(0));
+    assert_eq!(
+        legacy.version,
+        ConversationVersion {
+            last_sequence: Some(0),
+            ..ConversationVersion::default()
+        }
+    );
 
     store
         .persist_if_version(
@@ -204,8 +212,9 @@ async fn legacy_item_only_version_upgrades_on_the_next_persist() -> Result<(), B
     let upgraded = store.rehydrate_snapshot(&conversation.conversation_id).await?;
     assert_eq!(
         upgraded.version,
-        ConversationVersion::LastResponse {
-            response_id: "resp_after_legacy".to_owned(),
+        ConversationVersion {
+            response_id: Some("resp_after_legacy".to_owned()),
+            revision: 1,
             last_sequence: Some(0),
         }
     );
@@ -223,7 +232,7 @@ async fn conversation_version_empty_checked_persist_succeeds() -> Result<(), Box
     store
         .persist_if_version(
             &conversation.conversation_id,
-            ConversationVersion::Empty,
+            ConversationVersion::default(),
             "resp_first",
             None,
             items.clone(),
@@ -235,8 +244,9 @@ async fn conversation_version_empty_checked_persist_succeeds() -> Result<(), Box
     assert_eq!(snapshot.items, items);
     assert_eq!(
         snapshot.version,
-        ConversationVersion::LastResponse {
-            response_id: "resp_first".to_owned(),
+        ConversationVersion {
+            response_id: Some("resp_first".to_owned()),
+            revision: 1,
             last_sequence: Some(1),
         }
     );
@@ -271,8 +281,9 @@ async fn zero_item_turn_advances_version_and_retains_exact_metadata() -> Result<
     assert!(first.items.is_empty());
     assert_eq!(
         first.version,
-        ConversationVersion::LastResponse {
-            response_id: "resp_zero_items_first".to_owned(),
+        ConversationVersion {
+            response_id: Some("resp_zero_items_first".to_owned()),
+            revision: 1,
             last_sequence: None,
         }
     );
@@ -487,7 +498,7 @@ async fn conversation_version_is_scoped_per_conversation() -> Result<(), Box<dyn
     store
         .persist_if_version(
             &second.conversation_id,
-            ConversationVersion::Empty,
+            ConversationVersion::default(),
             "resp_second_conversation",
             None,
             vec![create_input_item("second conversation")],

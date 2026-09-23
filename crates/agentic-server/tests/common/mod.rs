@@ -1,3 +1,5 @@
+pub mod otlp_stub;
+
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
@@ -28,20 +30,26 @@ pub fn test_config(llm_url: &str) -> Config {
         postgres: agentic_core::config::PostgresConfig::default(),
         sqlite: agentic_core::config::SqliteConfig::default(),
         tools: agentic_core::config::ToolRuntimeConfig::default(),
+        responses: agentic_core::config::ResponsesConfig::default(),
     }
 }
 
+// Used by other test modules, not directly by conversations_test
+#[allow(dead_code)]
 pub fn test_state(config: &Config) -> AppState {
     test_state_with_max_request_body_size(config, DEFAULT_MAX_REQUEST_BODY_SIZE)
 }
 
+// Used by other test modules, not directly by conversations_test
+#[allow(dead_code)]
 pub fn test_state_with_max_request_body_size(config: &Config, max_request_body_size: NonZeroUsize) -> AppState {
     let exec_ctx = ExecutionContext::new(
         ConversationHandler::new(ConversationStore::disabled()),
         ResponseHandler::new(ResponseStore::disabled()),
         Arc::new(reqwest::Client::new()),
         config.llm_api_base.clone(),
-    );
+    )
+    .with_responses_config(config.responses);
     let exec_ctx = Arc::new(exec_ctx);
     let proxy_state = ProxyState::new(config.clone()).expect("proxy state");
     AppState {
@@ -54,6 +62,7 @@ pub fn test_state_with_max_request_body_size(config: &Config, max_request_body_s
         llm_api_base: config.llm_api_base.clone(),
         skip_llm_ready_check: config.skip_llm_ready_check,
         openai_api_key: config.openai_api_key.clone(),
+        model_capabilities: std::sync::Arc::default(),
         max_request_body_size,
     }
 }

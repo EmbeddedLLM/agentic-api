@@ -16,25 +16,47 @@ use crate::types::io::{
 use crate::types::request_response::RequestPayload;
 use crate::utils::uuid7_str;
 
-/// Reject unsupported message files on typed paths, including restored history.
+/// Reject message content the typed executor cannot convey, including restored history.
 ///
 /// Keep this out of deserialization: eligible raw proxy requests must retain their
 /// original bytes and leave support decisions to the upstream. Structured tool
 /// call outputs have a separate content type and are deliberately not rejected.
-pub(super) fn validate_message_files(input: &ResponsesInput) -> ExecutorResult<()> {
+///
+/// A part is rejected rather than dropped so a message is never mutated in
+/// transit: `input_file` because support is decided after routing, an unmodeled
+/// type because it cannot be forwarded or persisted without inventing a
+/// synthetic part, and an empty part array because the turn would carry nothing.
+pub(super) fn validate_message_content(input: &ResponsesInput) -> ExecutorResult<()> {
     let ResponsesInput::Items(items) = input else {
         return Ok(());
     };
-    let has_file = items.iter().any(|item| {
-        matches!(item, InputItem::Message(message)
-            if matches!(&message.content, InputMessageContent::Parts(parts)
-                if parts.iter().any(|part| matches!(part, InputContent::InputFile(_)))))
-    });
-    if has_file {
-        return Err(ExecutorError::InvalidRequest(
-            "input_file content in messages is not supported by the typed Responses executor; provide input_text or input_image content instead"
-                .to_owned(),
-        ));
+    for (item_index, item) in items.iter().enumerate() {
+        let InputItem::Message(message) = item else {
+            continue;
+        };
+        let InputMessageContent::Parts(parts) = &message.content else {
+            continue;
+        };
+        if parts.is_empty() {
+            return Err(ExecutorError::InvalidRequest(format!(
+                "input[{item_index}].content: a message must contain at least one content part"
+            )));
+        }
+        for (part_index, part) in parts.iter().enumerate() {
+            let unsupported = match part {
+                InputContent::InputFile(_) => "input_file",
+                InputContent::Unknown(kind) => kind.as_str(),
+                InputContent::InputText(_)
+                | InputContent::InputImage(_)
+                | InputContent::OutputText(_)
+                | InputContent::Refusal(_)
+                | InputContent::ReasoningText(_) => continue,
+            };
+            return Err(ExecutorError::InvalidRequest(format!(
+                "input[{item_index}].content[{part_index}]: message content part type `{unsupported}` is not \
+                 supported by the typed Responses executor; provide input_text or input_image content instead"
+            )));
+        }
     }
     Ok(())
 }
@@ -145,12 +167,12 @@ pub(crate) async fn rehydrate_with_continuation(
     exec_ctx: &ExecutionContext,
     continuation: Option<ResponseContinuation>,
 ) -> ExecutorResult<RequestContext> {
-    // Fail before storage work for explicitly declared tools and new files;
+    // Fail before storage work for explicitly declared tools and new content;
     // check again once stored effective settings and history are resolved.
     exec_ctx
         .gateway_executors
         .validate_declarations(request.tools.as_deref())?;
-    validate_message_files(&request.input)?;
+    validate_message_content(&request.input)?;
     let response_id = uuid7_str("resp_");
     // Persistence keeps the public items. Tool lowering belongs to the enriched
     // inference copy, including when a later turn loads these items from storage.
@@ -188,7 +210,7 @@ pub(crate) async fn rehydrate_with_continuation(
     exec_ctx
         .gateway_executors
         .validate_declarations(ctx.enriched_request.tools.as_deref())?;
-    validate_message_files(&ctx.enriched_request.input)?;
+    validate_message_content(&ctx.enriched_request.input)?;
     Ok(ctx)
 }
 
@@ -579,7 +601,7 @@ mod tests {
 
         let ctx = rehydrate_conversation(request(Some(&conversation.conversation_id), None), &exec_ctx).await?;
 
-        assert_eq!(ctx.conversation_version, Some(ConversationVersion::Empty));
+        assert_eq!(ctx.conversation_version, Some(ConversationVersion::default()));
         Ok(())
     }
 
@@ -607,8 +629,9 @@ mod tests {
 
         assert_eq!(
             ctx.conversation_version,
-            Some(ConversationVersion::LastResponse {
-                response_id: "resp_prior".to_owned(),
+            Some(ConversationVersion {
+                response_id: Some("resp_prior".to_owned()),
+                revision: 1,
                 last_sequence: Some(0),
             })
         );

@@ -191,12 +191,18 @@ Recommendation: ship A.
 | client-owned `tool_use` | returned to the client, which executes and resends `tool_result` |
 | `tool_result` content block (may carry `is_error: true`) | fed into the next upstream turn |
 | `tool_choice` (`auto`/`any`/`tool`/`none`, `disable_parallel_tool_use`) | forwarded on the first round; a fulfilled forced choice becomes `auto` after gateway tool results are appended; parallel-use settings remain unchanged |
+| `usage` | after hidden gateway rounds, the returned message (JSON) and the terminal `message_delta` (SSE) report the saturating sum of `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, and `cache_read_input_tokens` across every inference round, each streamed round being its `message_start.usage` overlaid by its `message_delta.usage`; a counter no round reported stays absent, other fields pass through from the final round, `message_start.usage` is the first round's snapshot, a single-round turn is unchanged, and a final round that omits `usage` still reports the hidden rounds' counters |
 
 vLLM may label a completed named tool call `end_turn`. The gateway accepts that stop only when the explicitly
 selected gateway tool appears in the round; streaming also requires `message_stop`. Rounds containing
 client-executed function tools return control to the client with `stop_reason: tool_use`, including when vLLM
 labels a completed call `end_turn`. The correction applies to JSON and the terminal streaming `message_delta`;
 gateway calls in a mixed round remain hidden. Truncation and other stop reasons retain their original meaning.
+
+A round that ends while a gateway call is present — a `max_tokens` truncation mid-call, or an `end_turn` the
+gateway does not accept as a tool stop — does not execute that call, and both transports keep it hidden. The
+client declared these tools for the gateway to run, so surfacing one would name a tool the client never agreed
+to execute.
 
 Gateway-tool requests parse `tool_choice` as a typed union with a required non-empty name for `tool`. Malformed
 selectors return HTTP 400 before inference. Known variants preserve parallel-use settings and extension fields;

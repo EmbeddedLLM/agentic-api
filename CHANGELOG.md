@@ -2,6 +2,126 @@
 
 All notable changes to Agentic API are documented here.
 
+## [Unreleased]
+
+## [0.8.0] - 2026-09-19
+
+### Added
+
+- Added opt-in OpenTelemetry traces and HTTP metrics with OTLP HTTP/protobuf export, optional gzip compression,
+  incoming W3C trace context, trace-correlated local logs, and deadline-bounded shutdown. Telemetry is disabled
+  by default; enable signals with `OTEL_TRACES_EXPORTER=otlp` and/or `OTEL_METRICS_EXPORTER=otlp`. Request spans
+  remain open through response-body completion or disconnect, and cancellation is distinguished from handler
+  panics. See [the observability guide](docs/deploying/observability.md) for configuration (#341).
+- Verified image preservation through the Responses gateway end to end (#253): integration coverage for mixed
+  text/image ordering, multiple images per turn, client-executed `view_image` tool output, `previous_response_id`
+  continuation, `conversation_id` rehydration, stateless `store: false` proxying, and compaction of retained
+  image-bearing user messages, over both the HTTP and WebSocket transports.
+- Recorded paired image cassettes — client → OpenAI as the reference and client → gateway → vLLM serving
+  `Qwen/Qwen2.5-VL-3B-Instruct` — for a text-and-image message, two interleaved images, a `previous_response_id`
+  follow-up, and a client-executed tool returning an image through a structured `function_call_output`, each
+  streaming and non-streaming. Replay coverage compares request shape, completed-response structure, the streaming
+  event lifecycle, and the history the gateway forwards on continuation; model wording is never compared (#253).
+  The cassette recorder accepts `--input-file` for the first of several turns and sends a tool handler's list of
+  content parts as a structured output array.
+- Added automated Docker Hub release and nightly container publishing, with optional 30-day nightly tag retention
+  when `DOCKERHUB_CLEANUP_ENABLED=true` and the credential has tag-read and tag-delete permissions (#322, #337).
+- Added typed per-model input-modality overrides to `config.toml`
+  (`[models."<served-model-id>"] input_modalities = ["text", "image"]`), validated at startup:
+  unknown modality names, empty lists, duplicates, and image-only lists are rejected with the
+  offending file and line (#252).
+- Added Brave Search as a selectable backend for the gateway-executed built-in `web_search` tool (#294, Phase 2 of #291).
+  Select it with `AGENTIC_WEB_SEARCH_PROVIDER=brave` or `[web_search] provider = "brave"` and supply `BRAVE_API_KEY`;
+  the endpoint defaults to `https://api.search.brave.com` and can be overridden with `AGENTIC_WEB_SEARCH_BASE_URL`
+  or `[web_search] base_url`. Web and news results come from one request per query. The gateway adapts the shared
+  tool contract: `allowed_domains` / `blocked_domains` and the model's `include_domains` / `exclude_domains` are
+  enforced client-side on a label boundary, `count` is clamped to Brave's maximum of 20, `freshness` is rendered in
+  Brave syntax, `language` maps to `search_lang`, and the You.com-specific `livecrawl`, `livecrawl_formats`,
+  `crawl_timeout`, and `boost_domains` arguments are ignored. Rejected credentials and HTTP 429 responses fail the
+  `web_search_call` without an automatic retry, naming the key variable or the upstream `Retry-After` value and never
+  echoing the secret. Each Brave `metadata[]` entry carries `"provider": "brave"`.
+- Added `[web_search] max_concurrent_queries` and `AGENTIC_WEB_SEARCH_MAX_CONCURRENT_QUERIES` to cap concurrent
+  provider requests inside one batched search. Brave defaults to `1` for its free-plan rate limit; You.com keeps
+  inheriting `max_concurrent_gateway_calls`. The effective ceiling is the smallest of the gateway limit, this
+  override, and the provider's own ceiling.
+
+### Changed
+
+- Bounded Tokio runtime shutdown to 1 second after request draining, followed by a separate 3-second telemetry
+  shutdown deadline. In-flight blocking work no longer keeps process exit waiting indefinitely (#341).
+- Modeled `refusal` as an assistant-history content part so OpenAI-style history replays through the typed
+  Responses executor instead of being rejected as unmodeled (#253).
+- Changed Rust input-content APIs (#263): `InputTextContent`, `InputImageContent`, and `InputFileContent` now retain
+  unmodeled fields in `extra`. Use `InputTextContent::new(text)` or supply `extra: Default::default()` when migrating
+  struct literals. `InputContent` gains `Refusal(RefusalContent)` and replaces the unit `Unknown` variant with
+  `Unknown(String)`; update exhaustive matches and constructors. `Unknown` cannot be serialized and typed execution
+  rejects it with the original content type in the error. Existing content-type re-export paths are preserved.
+- Rust `agentic_core::config::Config` struct literals must now provide `responses: ResponsesConfig::default()`
+  (or validated custom limits). `ExecutionContext::new` keeps its signature and defaults; use
+  `ExecutionContext::with_responses_config` to override them. `ExecuteRequest::with_max_stream_event_bytes` and
+  `GatewayStreamAccumulator::with_max_stream_event_bytes` add explicit delivery limits; existing constructors and
+  `call_inference` remain available, with `inference::call_inference_limited` exposing a custom SSE-line limit.
+- Response-size failures now use `ExecutorError::ResourceLimitExceeded { limit, max_bytes }`; `ResourceLimit` is
+  re-exported from `agentic_core::executor`. Callers classifying size failures should handle this typed variant
+  instead of inspecting error messages (#304).
+- Modeled the Codex model catalog and the upstream model listing as typed Rust structs instead of
+  untyped JSON, and reported an undecodable upstream `/v1/models` payload as `502` rather than
+  serving it as an empty catalog (#252).
+- `agentic run codex` and `agentic harness codex` now resolve the model and its input modalities
+  from a single gateway catalog snapshot before writing an isolated Codex home, retrying a warming
+  gateway and failing with an actionable error when the catalog cannot be fetched or does not list
+  the selected model. A gateway behind OIDC now requires `--api-key` for `agentic harness codex`.
+  `agentic_harness::prepare_codex_home` requires the resolved modalities and is no longer public
+  (#252).
+- `WebSearchProviderConfig` is now `#[non_exhaustive]` and gains `provider` and `max_concurrent_queries` fields;
+  construct it with `WebSearchProviderConfig::new(api_key, base_url)` plus the `with_provider` and
+  `with_max_concurrent_queries` builders. Downstream crates that built it with a struct literal must switch to the
+  constructor; field reads and `Default` are unchanged. `WebSearchProviderKind` gains a `Brave` variant, `FromStr`
+  (case-insensitive), `default_base_url`, `default_max_concurrent_queries`, and `config_name`;
+  `WebSearchHandler::from_config` builds the handler for the selected provider and `GatewayExecutors::from_config`
+  uses it. With `provider` unset, You.com behavior, configuration, and model-facing output are unchanged; a generated
+  `config.toml` now records `provider = "you"` and leaves `api_key_env` unset so provider switches select the matching
+  default credential variable.
+
+### Fixed
+
+- Reported accumulated token usage across all hidden gateway-executed Messages tool rounds instead of reporting
+  only the final inference round, for both JSON responses and streaming responses (#325).
+- Fixed Python release setup, fixture readiness, and portable wheel builds; validate Linux x86_64, macOS Intel,
+  and macOS Apple Silicon wheels in CI. Included the package description and documentation links in PyPI
+  metadata (#305, #307, #309).
+- Built public container dependencies before Docker Hub authentication so repository-scoped credentials can
+  publish releases, and skipped unchanged nightly publications using recorded successful commit status (#337).
+- Rejected message content the typed Responses executor cannot convey — unmodeled part types and empty part arrays,
+  alongside the existing `input_file` rejection — with a `400` naming the offending part, instead of forwarding a
+  synthetic `{"type": "unknown"}` part or silently dropping it. Modeled parts keep their unmodeled extension fields
+  through the typed path, so a message is never mutated in transit, never means something different on the typed
+  path than on the raw `store: false` path, and is never persisted with content the client did not send (#253).
+- Counted an image referenced by `file_id` as retained context during compaction, matching inline images (#253).
+- Followed MCP `tools/list` pagination to discover tools beyond the first page, including opaque empty cursors;
+  reject repeated cursors and bounded-pagination failures instead of exposing partial discovery (#311).
+- Accounted for unrestricted output role/type/status strings, empty web-search query entries, pending or late-bound
+  item identities, and terminal error details in response limits. Kept reasoning-part and shell-command completion
+  accounting linear for sequential multipart streams (#304).
+- Charged the Responses retained-byte budget for logical output (text, arguments, annotations, nested JSON, and one
+  structural charge per retained entry, including empty JSON values) instead of raw upstream SSE line bytes, so fine-grained
+  chunking, coarse chunking, and non-streaming JSON consume identical budget, and empty or done-only parts are charged as they arrive (#288, #304).
+- Replaced the fixed 1 MiB Responses WebSocket event ceiling with the configured `max_stream_event_bytes`; the
+  executor now validates the terminal `response.completed` event against the WebSocket transport limit, including
+  `stream_id` routing metadata, before persisting the response or publishing a session checkpoint (#304).
+- Added independent, validated `[responses]` limits for upstream JSON bodies, upstream SSE lines, retained output, and
+  client stream events, with a typed `ResourceLimitExceeded` error that maps upstream overflows to HTTP 502 (#288).
+- Resolved Codex image capabilities consistently: the HTTP model catalog and both launcher modes
+  now advertise the same resolved `input_modalities`, so a vision-capable model no longer has image
+  content stripped client-side because an isolated catalog hardcoded `["text"]`. Existing persistent
+  Codex session homes must be regenerated to pick this up (#252).
+
+### Testing
+
+- Extended the pinned Codex 0.149.1 smoke with actual PNG attachments through both launcher modes, exact upstream
+  image-byte assertions, and a text-only negative control. The smoke replays the committed vision recording without
+  live API credentials (#261).
+
 ## [0.7.0] - 2026-09-14
 
 ### Added
