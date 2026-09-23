@@ -28,6 +28,13 @@ impl MultiAgentRun {
         result: Option<CollaborationResult>,
         pipeline: &mut AgentPipeline,
     ) -> ExecutorResult<()> {
+        let outcome = match &result {
+            Some(CollaborationResult::Error { .. }) => "error",
+            Some(CollaborationResult::Wait { timed_out: true, .. }) => "timed_out",
+            _ => "completed",
+        };
+        tracing::info!(response_id = %self.payload.id, agent = %turn.agent,
+            turn = ?turn.turn, call_id, ?action, outcome, "agent action finished");
         let text = match result {
             Some(CollaborationResult::Wait {
                 message,
@@ -82,6 +89,8 @@ impl MultiAgentRun {
             })
             .collect::<Vec<_>>();
         for (turn, timed_out) in ready {
+            tracing::info!(response_id = %self.payload.id, agent = %turn.agent,
+                turn = ?turn.turn, timed_out, "agent mailbox wait released");
             let wait = self
                 .contexts
                 .get_mut(&turn.agent)
@@ -120,10 +129,18 @@ impl MultiAgentRun {
     ) -> Result<(), RegistryError> {
         let parent = self.registry.get(&turn.agent).and_then(|agent| agent.parent.cloned());
         self.registry.settle_turn(turn, completion)?;
+        let outcome = match completion {
+            AgentCompletion::Finished(_) => "finished",
+            AgentCompletion::Failed(_) => "failed",
+            AgentCompletion::Interrupted => "interrupted",
+        };
+        tracing::info!(response_id = %self.payload.id, agent = %turn.agent,
+            turn = ?turn.turn, parent = parent.as_ref().map(AgentIdentity::as_str),
+            outcome, "agent turn settled");
         if let Some(parent) = parent {
             self.contexts.get_mut(&parent).expect("parent exists").generation += 1;
         }
-        if self.registry.resume_queued_task(&turn.agent) {
+        if !self.root_finished && self.registry.resume_queued_task(&turn.agent) {
             let context = self.contexts.get_mut(&turn.agent).expect("agent exists");
             context.execution.restart();
             context.generation += 1;
@@ -139,6 +156,8 @@ impl MultiAgentRun {
         text: &str,
         pipeline: &mut AgentPipeline,
     ) -> ExecutorResult<()> {
+        tracing::info!(response_id = %self.payload.id, agent = %sender,
+            recipient = %recipient, "agent message published");
         self.publish(
             OutputItem::AgentMessage(AgentMessage {
                 id: uuid7_str("amsg_"),

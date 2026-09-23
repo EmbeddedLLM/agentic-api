@@ -423,13 +423,17 @@ impl EventFrame {
             None | Some(Value::Null) => None,
             Some(value) => Some(serde_json::from_value(value).ok()?),
         };
+        let output_index = match rest.remove("output_index") {
+            None | Some(Value::Null) => None,
+            Some(value) => Some(value.as_u64()?),
+        };
         Some(Self {
             event_type,
             payload: EventPayload::None,
             wire: WireEvent {
                 event_type: Some(event_type_name.to_owned()),
                 sequence_number: None,
-                output_index: None,
+                output_index,
                 agent,
                 rest,
             },

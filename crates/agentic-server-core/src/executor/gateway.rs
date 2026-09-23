@@ -1,4 +1,4 @@
-mod history;
+pub(super) mod history;
 pub(super) use history::{append_gateway_calls_to_new_input, append_output_items_to_input, append_tool_outputs};
 
 use std::future::Future;

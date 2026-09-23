@@ -1,9 +1,6 @@
 use crate::executor::{
     error::{ExecutorError, ExecutorResult},
-    multi_agent::{
-        AgentPhase, AgentState,
-        collaboration::{attribution, instructions},
-    },
+    multi_agent::{AgentPhase, AgentState, collaboration::attribution},
     pipeline::AgentPipeline,
 };
 use crate::types::{
@@ -25,6 +22,8 @@ impl MultiAgentRun {
         call: FunctionToolCall,
         pipeline: &mut AgentPipeline,
     ) -> ExecutorResult<()> {
+        tracing::info!(response_id = %self.payload.id, agent = %turn.agent,
+            turn = ?turn.turn, call_id = %call.call_id, ?action, "agent action requested");
         let command = AgentCommand::parse(action, &call.arguments);
         let arguments = command.as_ref().map_or_else(
             |_| self.sealer.seal(&call.arguments),
@@ -66,7 +65,7 @@ impl MultiAgentRun {
         pipeline: &mut AgentPipeline,
     ) -> ExecutorResult<Option<CollaborationResult>> {
         match command {
-            AgentCommand::Spawn(task) => self.spawn_agent(turn, task, pipeline),
+            AgentCommand::Spawn(task) => self.spawn_agent(turn, task),
             AgentCommand::Send(task) => {
                 let target = self.target(&turn.agent, &task.target)?;
                 self.registry
@@ -94,6 +93,8 @@ impl MultiAgentRun {
                 let context = self.contexts.get_mut(&target).expect("target was resolved");
                 context.generation += 1;
                 context.stored.last_task = task.message;
+                tracing::info!(response_id = %self.payload.id, agent = %turn.agent,
+                    target = %target, was_active = active, "agent follow-up queued");
                 if !active {
                     context.execution.restart();
                     context.stored.final_answer = None;
@@ -133,6 +134,9 @@ impl MultiAgentRun {
                 self.registry
                     .set_phase(turn, AgentPhase::WaitingForMailbox)
                     .map_err(registry_error)?;
+                tracing::info!(response_id = %self.payload.id, agent = %turn.agent,
+                    call_id, timeout_ms = wait.timeout_ms, "agent mailbox wait started");
+                self.log_tree("wait_started");
                 Ok(None)
             }
         }
@@ -142,7 +146,6 @@ impl MultiAgentRun {
         &mut self,
         turn: &AgentTurnKey,
         task: SpawnAgent,
-        pipeline: &AgentPipeline,
     ) -> ExecutorResult<Option<CollaborationResult>> {
         self.check_admission()?;
         if !task
@@ -171,12 +174,9 @@ impl MultiAgentRun {
             .registry
             .register_child(turn, &task.task_name, &task.message)
             .map_err(registry_error)?;
-        let mut child_request = request;
-        child_request.instructions = Some(format!(
-            "{}\n\n{}",
-            pipeline.request.enriched_request.instructions.as_deref().unwrap_or(""),
-            instructions(&child.agent, self.limit)
-        ));
+        tracing::info!(response_id = %self.payload.id, agent = %child.agent,
+            parent = %turn.agent, turn = ?child.turn, fork_turns = %task.fork_turns,
+            inherited_items = history.len(), "agent spawned");
         self.contexts.insert(
             child.agent.clone(),
             AgentContext {
@@ -198,7 +198,7 @@ impl MultiAgentRun {
                     wait: None,
                 },
                 execution,
-                request: child_request,
+                request,
                 tool_search,
             },
         );

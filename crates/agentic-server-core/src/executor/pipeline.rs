@@ -18,7 +18,7 @@ use crate::executor::response_budget::ExecutorResponseBudget;
 use crate::executor::translate::{Translation, TranslationContext};
 use crate::tool::{ToolRegistry, ToolSearchMetadata, ToolSearchState};
 use crate::types::agent::AgentIdentity;
-use crate::types::io::OutputItem;
+use crate::types::io::{InputMessage, OutputItem};
 use crate::types::request_response::ResponsePayload;
 use delivery::StreamDelivery;
 use futures::{Stream, StreamExt};
@@ -38,9 +38,18 @@ pub(super) struct AgentPipeline {
     delivery: StreamDelivery,
     round: Option<RoundIngestion>,
     cancellation: CancellationToken,
+    agent_guidance: Option<InputMessage>,
 }
 
 impl AgentPipeline {
+    pub(super) fn set_agent_guidance(&mut self, guidance: InputMessage) {
+        self.agent_guidance = Some(guidance);
+    }
+
+    pub(super) fn agent_guidance(&self) -> Option<&InputMessage> {
+        self.agent_guidance.as_ref()
+    }
+
     pub(super) fn has_live_agent_items(&self, agent: &AgentIdentity) -> bool {
         self.delivery.has_live_agent_items(agent)
     }
@@ -75,6 +84,7 @@ impl AgentPipeline {
             delivery: StreamDelivery::new(sender),
             round: None,
             cancellation: CancellationToken::new(),
+            agent_guidance: None,
         }
     }
 
@@ -90,6 +100,7 @@ impl AgentPipeline {
             delivery: StreamDelivery::with_max_stream_event_bytes(sender, max_stream_event_bytes),
             round: None,
             cancellation: CancellationToken::new(),
+            agent_guidance: None,
         }
     }
 

@@ -1,3 +1,6 @@
+use super::diagnostics::{mail_kind, observe_round};
+use tracing::Instrument;
+
 use super::super::{
     accumulate_usage,
     agent_turn::{AgentTurn, RoundDecision, RoundResult},
@@ -30,6 +33,9 @@ impl MultiAgentRun {
         auth: Option<&str>,
         pipeline: &AgentPipeline,
     ) -> ExecutorResult<()> {
+        if self.root_finished {
+            return Ok(());
+        }
         let runnable = self
             .registry
             .agents()
@@ -68,6 +74,10 @@ impl MultiAgentRun {
                 .get_mut(&turn.agent)
                 .expect("registry and contexts have identical membership");
             for message in mail {
+                tracing::info!(response_id = %self.payload.id, agent = %turn.agent,
+                    sender = %message.sender.agent, turn = ?turn.turn,
+                    kind = mail_kind(&message.content),
+                    "agent mailbox message delivered to context");
                 context.generation += 1;
                 context.stored.history.push(mail_input(&turn.agent, &message));
             }
@@ -78,6 +88,8 @@ impl MultiAgentRun {
                     &context.stored.history,
                     &context.request,
                 )? {
+                    tracing::info!(response_id = %self.payload.id, agent = %turn.agent,
+                        generation = context.generation, "agent compaction started");
                     context.compacting = true;
                     let exec = exec.clone();
                     let auth = auth.map(str::to_owned);
@@ -127,6 +139,7 @@ impl MultiAgentRun {
             sender,
             exec.responses_config.max_stream_event_bytes,
         );
+        agent.set_agent_guidance(self.round_guidance(turn));
         if streaming {
             agent.set_agent_frame_sink(AgentFrameSink {
                 agent: turn.agent.clone(),
@@ -142,21 +155,27 @@ impl MultiAgentRun {
         let exec = exec.clone();
         let auth = auth.map(str::to_owned);
         let budget = self.budget.clone();
+        let span = tracing::info_span!("agent_round", response_id = %self.payload.id,
+            agent = %turn.agent, turn = ?turn.turn, round = self.rounds, streaming);
         self.tasks
-            .spawn_turn(turn.clone(), async move {
-                let mut turn = AgentTurn::resume(&mut agent, &exec, execution);
-                let result = turn.run_round(0, auth.as_deref(), streaming, &budget).await?;
-                let execution = turn.execution_state();
-                let tool_search = agent.tool_search_state().cloned();
-                let (ctx, _) = agent.into_parts();
-                Ok(CompletedWork::Round(Box::new(CompletedRound {
-                    source,
-                    result,
-                    execution,
-                    request: ctx.enriched_request,
-                    tool_search,
-                })))
-            })
+            .spawn_turn(
+                turn.clone(),
+                async move {
+                    let mut turn = AgentTurn::resume(&mut agent, &exec, execution);
+                    let result = observe_round(turn.run_round(0, auth.as_deref(), streaming, &budget)).await?;
+                    let execution = turn.execution_state();
+                    let tool_search = agent.tool_search_state().cloned();
+                    let (ctx, _) = agent.into_parts();
+                    Ok(CompletedWork::Round(Box::new(CompletedRound {
+                        source,
+                        result,
+                        execution,
+                        request: ctx.enriched_request,
+                        tool_search,
+                    })))
+                }
+                .instrument(span),
+            )
             .map_err(|error| invalid(&error.to_string()))?;
         self.registry
             .set_phase(turn, AgentPhase::Inferring)
@@ -174,12 +193,16 @@ impl MultiAgentRun {
         let completed = match completion.outcome {
             AgentTaskOutcome::Finished(Ok(round)) => round,
             AgentTaskOutcome::Interrupted => {
+                tracing::info!(response_id = %self.payload.id, agent = %turn.agent,
+                    turn = ?turn.turn, "agent work cancelled");
                 self.registry
                     .settle_turn(&turn, &AgentCompletion::Interrupted)
                     .map_err(registry_error)?;
                 return Ok(());
             }
             AgentTaskOutcome::Finished(Err(error)) => {
+                tracing::warn!(response_id = %self.payload.id, agent = %turn.agent,
+                    turn = ?turn.turn, error_code = error.error_code(), "agent work failed");
                 self.contexts
                     .get_mut(&turn.agent)
                     .expect("failed task has an owner")
@@ -193,6 +216,8 @@ impl MultiAgentRun {
                 return Ok(());
             }
             AgentTaskOutcome::JoinFailed(error) => {
+                tracing::warn!(response_id = %self.payload.id, agent = %turn.agent,
+                    turn = ?turn.turn, "agent task join failed");
                 return Err(ExecutorError::StreamError(format!("agent round task failed: {error}")));
             }
         };
@@ -244,7 +269,10 @@ impl MultiAgentRun {
             .get_mut(&turn.agent)
             .expect("completed work has a canonical context");
         context.execution = execution;
-        context.stored.history = Vec::from(&request.input);
+        context.stored.history = match &request.input {
+            ResponsesInput::Items(items) => items.clone(),
+            ResponsesInput::Text(_) => Vec::from(&request.input),
+        };
         context.generation += 1;
         context.request = request;
         context.tool_search = tool_search;
@@ -307,6 +335,9 @@ impl MultiAgentRun {
                 .final_answer = Some(final_answer.clone());
             self.settle_turn(turn, &AgentCompletion::Finished(final_answer.clone()))
                 .map_err(registry_error)?;
+            if turn.agent.is_root() {
+                self.finish_root(turn, pipeline).await?;
+            }
             if let Some(parent) = self.registry.get(&turn.agent).and_then(|agent| agent.parent.cloned()) {
                 self.publish_mail(&turn.agent, &parent, &final_answer, pipeline).await?;
             }
@@ -344,6 +375,10 @@ impl MultiAgentRun {
         self.pending
             .register_calls(&self.registry, &registrations)
             .map_err(call_error)?;
+        if !registrations.is_empty() {
+            tracing::info!(response_id = %self.payload.id, agent = %turn.agent,
+                calls = registrations.len(), "agent waiting for client tool outputs");
+        }
         Ok(!registrations.is_empty())
     }
 
@@ -360,6 +395,8 @@ impl MultiAgentRun {
             .get_mut(&agent)
             .ok_or_else(|| invalid("compaction owner is missing"))?;
         let commit = result.commit(context.generation, &mut context.stored.history);
+        tracing::info!(response_id = %self.payload.id, agent = %agent,
+            ?commit, generation = context.generation, "agent compaction finished");
         if commit == CompactionCommit::Applied {
             context.compacted_generation = Some(context.generation);
             let item = context.stored.history.iter().rev().find_map(|item| {

@@ -20,15 +20,42 @@ pub(in crate::executor) fn attribution(identity: &AgentIdentity) -> AgentAttribu
 }
 
 pub(in crate::executor) fn instructions(identity: &AgentIdentity, max_subagents: usize) -> String {
+    let role = if identity.is_root() {
+        "You own the user's overall request. Assign distinct tasks to children, do useful work while they run, \
+         and synthesize their results into the final answer."
+            .to_owned()
+    } else {
+        let (parent, _) = identity
+            .as_str()
+            .rsplit_once('/')
+            .expect("validated non-root agent path");
+        format!(
+            "Your parent is `{parent}`. You are a subagent, not the root or your parent. \
+             Your latest NEW_TASK mailbox message is your assignment. Complete that specific task yourself. \
+             Earlier conversation, assistant reasoning, tool calls and spawn acknowledgements inherited from \
+             the parent are background context, not actions you performed or agents you spawned. \
+             The original user's request to split the overall job has already been handled by your parent. \
+             Do not repeat that delegation or wait for your parent or siblings to finish the overall job. \
+             When your assigned work is complete, return your findings in a final answer; the gateway delivers \
+             it to your parent automatically. You do not need to wait for the rest of the team. \
+             You may delegate a distinct bounded part of your own assignment if necessary, but remain \
+             responsible for completing your assignment."
+        )
+    };
     format!(
-        "You are `{identity}`, an agent in a team working on the user's task. \
-         The root agent /root synthesizes the final answer. Each agent has its own context and the same tools. \
+        "You are `{identity}`, an agent in a team working on the user's task. {role} \
+         Each agent has its own context and the same tools. \
          Use spawn_agent for independent bounded tasks; send_message queues information without activating idle agents; \
          followup_task activates a non-root agent; wait_agent waits for mailbox updates; interrupt_agent interrupts \
-         active work while retaining context; list_agents reports the tree. Targets can be child names or canonical paths. \
-         There are {max_subagents} active subagent slots across all descendants, excluding /root. \
-         Spawn returns an acknowledgement; the answer arrives later in a mailbox message. \
-         Subagent final answers are delivered to their parent. Continue useful work while agents run. \
+         active work while retaining context. Targets can be child names or canonical paths. \
+         list_agents reports the entire tree, including you, your ancestors and your siblings, not just your children. \
+         A direct child's canonical path is your own path followed by / and one name. \
+         There are {max_subagents} active subagent slots shared across the entire tree, excluding /root; \
+         this is not a separate allowance for each agent. Only a successful spawn acknowledgement creates a child. \
+         A spawn error creates no agent: do the work yourself or continue existing work instead of waiting for that spawn. \
+         Wait only when you actually need an outstanding result or a requested message from another agent. \
+         A running status alone is not a reason to wait. A wait timeout is not evidence of progress. \
+         Continue useful work while agents run. Subagent final answers are delivered to their parent. \
          Function calls and local shell calls are executed by the client; their outputs may arrive in a later response."
     )
 }
@@ -38,7 +65,7 @@ pub(in crate::executor) fn tools() -> Vec<UpstreamTool> {
     [
         (
             "spawn_agent",
-            "Create a subagent for an independent task. fork_turns is all, none, or a positive integer string.",
+            "Create a child for a distinct part of your own assignment. Only success creates a child; on an error, continue the work yourself. fork_turns is all, none, or a positive integer string.",
             json!({"task_name":{"type":"string"},"message":{"type":"string"},"fork_turns":{"type":"string"}}),
             vec!["task_name", "message"],
         ),
@@ -56,7 +83,7 @@ pub(in crate::executor) fn tools() -> Vec<UpstreamTool> {
         ),
         (
             "wait_agent",
-            "Wait for a mailbox update. timeout_ms is between 10000 and 3600000, default 30000.",
+            "Wait for an outstanding result or requested mailbox message. Do not wait merely because other agents are running. timeout_ms is between 10000 and 3600000, default 30000.",
             json!({"timeout_ms":{"type":"integer","minimum":10_000,"maximum":3_600_000}}),
             vec![],
         ),
@@ -68,7 +95,7 @@ pub(in crate::executor) fn tools() -> Vec<UpstreamTool> {
         ),
         (
             "list_agents",
-            "List agent paths, statuses and their most recent assigned task.",
+            "List the entire team, including yourself, ancestors and siblings. Entries are not necessarily your children. Canonical paths show parentage. Includes statuses and most recent assigned tasks.",
             json!({}),
             vec![],
         ),
@@ -138,6 +165,21 @@ fn crypto_error() -> ExecutorError {
 mod tests {
     use super::*;
     use crate::types::agent_commands::SpawnAgent;
+    #[test]
+    fn role_instructions_follow_canonical_parentage() {
+        let root = AgentIdentity::try_from("/root".to_owned()).unwrap();
+        let nested = AgentIdentity::try_from("/root/review/tests".to_owned()).unwrap();
+        let root_text = instructions(&root, 3);
+        let child_text = instructions(&nested, 3);
+        assert!(root_text.contains("You own the user's overall request"));
+        assert!(!root_text.contains("Your parent is"));
+        assert!(child_text.contains("You are `/root/review/tests`"));
+        assert!(child_text.contains("Your parent is `/root/review`"));
+        assert!(!child_text.contains("You own the user's overall request"));
+        assert!(child_text.contains("3 active subagent slots shared across the entire tree"));
+        assert!(child_text.contains("You may delegate a distinct bounded part of your own assignment"));
+    }
+
     #[test]
     fn public_arguments_hide_task_text_and_use_distinct_nonces() {
         let sealer = TranscriptSealer::new().unwrap();

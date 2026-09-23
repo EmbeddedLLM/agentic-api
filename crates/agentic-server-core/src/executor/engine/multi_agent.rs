@@ -4,14 +4,17 @@
 mod actions;
 mod context;
 mod delivery;
+mod diagnostics;
+mod guidance;
 mod rounds;
+mod shutdown;
 use context::{RestoredAgents, fork_history, mail_input, prepare_agent, restore_agents};
 
 use indexmap::IndexMap;
 use std::{
     collections::{BTreeMap, HashSet},
     num::NonZeroUsize,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::sync::mpsc;
 
@@ -78,6 +81,7 @@ pub(super) struct MultiAgentRun {
     pending: PendingClientCalls,
     tasks: RunOwner<CompletedWork>,
     interrupted: HashSet<AgentTurnKey>,
+    root_finished: bool,
     budget: ExecutorResponseBudget,
     sealer: TranscriptSealer,
     payload: ResponsePayload,
@@ -117,7 +121,7 @@ impl MultiAgentRun {
         }
         let mut contexts = IndexMap::new();
         for stored in agents {
-            let context = prepare_agent(stored, &pipeline.request, exec, &budget, limit).await?;
+            let context = prepare_agent(stored, &pipeline.request, exec, &budget).await?;
             contexts.insert(context.stored.identity.clone(), context);
         }
         let payload = ResponsePayload {
@@ -150,6 +154,7 @@ impl MultiAgentRun {
             pending,
             tasks: RunOwner::new(limit),
             interrupted: HashSet::new(),
+            root_finished: false,
             budget,
             sealer: TranscriptSealer::new()?,
             payload,
@@ -168,6 +173,10 @@ impl MultiAgentRun {
         exec: &ExecutionContext,
         auth: Option<&str>,
     ) -> ExecutorResult<ResponsePayload> {
+        let started = Instant::now();
+        tracing::info!(response_id = %self.payload.id, max_subagents = self.limit,
+            streaming = pipeline.stream_sender().is_some(), "multi-agent response started");
+        self.log_tree("response_start");
         let cancellation = pipeline.cancellation_token();
         let result = tokio::select! {
             result = tokio::time::timeout(Duration::from_secs(3600), self.drive(pipeline, exec, auth)) => {
@@ -182,7 +191,13 @@ impl MultiAgentRun {
         if result.is_ok() && !completions.is_empty() {
             return Err(invalid("multi-agent driver finished with live round work"));
         }
+        if let Err(error) = &result {
+            tracing::warn!(response_id = %self.payload.id, elapsed_ms = started.elapsed().as_millis(),
+                error_code = error.error_code(), "multi-agent response execution failed");
+            self.log_tree("response_error");
+        }
         result?;
+        self.log_tree("response_settled");
         let mut agents = Vec::with_capacity(self.contexts.len());
         for (_, mut context) in self.contexts {
             self.registry
@@ -200,6 +215,10 @@ impl MultiAgentRun {
             &CheckpointLimits::for_response(self.max_retained_bytes),
         )?);
         self.payload.output = self.completed_items.into_values().collect();
+        tracing::info!(response_id = %self.payload.id, elapsed_ms = started.elapsed().as_millis(),
+            rounds = self.rounds, output_items = self.payload.output.len(),
+            pending_client_calls = self.pending.pending().count(),
+            "multi-agent execution finished; response ready for persistence");
         Ok(self.payload)
     }
 
@@ -276,6 +295,7 @@ impl MultiAgentRun {
                     break;
                 }
                 if let Some(deadline) = waiting {
+                    self.log_tree("no_inflight_work_waiting_for_mail");
                     tokio::time::sleep(Duration::from_millis(
                         u64::try_from(deadline.saturating_sub(now_ms())).unwrap_or(0),
                     ))

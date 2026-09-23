@@ -1,5 +1,6 @@
 use crate::executor::accumulator::Validation;
 use crate::executor::error::{ExecutorError, ExecutorResult};
+use crate::executor::gateway::history::append_input_item;
 use crate::executor::gateway_accumulator::StreamEvent;
 use crate::executor::inference::{call_inference_limited, fetch_response_json_limited};
 use crate::executor::multi_agent::collaboration;
@@ -9,7 +10,7 @@ use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::executor::response_budget::ExecutorResponseBudget;
 use crate::executor::translate::TranslationContext;
 use crate::tool::{ToolRegistry, ToolSearchState};
-use crate::types::io::MultiAgentAction;
+use crate::types::io::{InputItem, InputMessage, MultiAgentAction};
 use crate::types::request_response::{ResponsePayload, UpstreamTool};
 use crate::types::tools::ResponsesTool;
 use crate::utils::common::serialize_to_string;
@@ -68,6 +69,14 @@ fn translation_context(registry: &ToolRegistry, agent: &AgentPipeline) -> Transl
 /// # Errors
 /// Unsupported message content, a tool-configuration error, or a serialization failure.
 pub fn upstream_request(ctx: &RequestContext, stream: bool) -> ExecutorResult<String> {
+    upstream_request_with_guidance(ctx, stream, None)
+}
+
+fn upstream_request_with_guidance(
+    ctx: &RequestContext,
+    stream: bool,
+    guidance: Option<&InputMessage>,
+) -> ExecutorResult<String> {
     // Composable callers may supply RequestContext without the rehydration step.
     validate_message_content(&ctx.enriched_request.input)?;
     let mut request = ctx.enriched_request.to_upstream_request(stream)?;
@@ -88,6 +97,9 @@ pub fn upstream_request(ctx: &RequestContext, stream: bool) -> ExecutorResult<St
             }
         }
         tools.extend(collaboration::tools());
+    }
+    if let Some(guidance) = guidance {
+        append_input_item(request.input.to_mut(), InputItem::Message(guidance.clone()));
     }
     serialize_to_string(&request).map_err(ExecutorError::JsonError)
 }
@@ -118,7 +130,7 @@ pub(super) async fn fetch_blocking_payload(
     response_budget: Option<&ExecutorResponseBudget>,
 ) -> ExecutorResult<ResponsePayload> {
     agent.ensure_request_prepared()?;
-    let upstream_json = upstream_request(&agent.request, false)?;
+    let upstream_json = upstream_request_with_guidance(&agent.request, false, agent.agent_guidance())?;
     let body = fetch_response_json_limited(
         upstream_json,
         &exec_ctx.responses_url(),
@@ -184,7 +196,7 @@ pub(super) async fn fetch_stream_payload(
     response_budget: &ExecutorResponseBudget,
 ) -> ExecutorResult<StreamPayload> {
     agent.ensure_request_prepared()?;
-    let upstream_json = upstream_request(&agent.request, true)?;
+    let upstream_json = upstream_request_with_guidance(&agent.request, true, agent.agent_guidance())?;
     let lines = call_inference_limited(
         upstream_json,
         exec_ctx.responses_url(),
@@ -216,6 +228,36 @@ pub(super) mod tests {
     use crate::types::io::ResponsesInput;
     use crate::types::request_response::RequestPayload;
     use serde_json::Value;
+
+    #[test]
+    fn agent_guidance_is_last_and_never_mutates_canonical_history() {
+        let mut ctx = request_context();
+        ctx.enriched_request.instructions = Some("caller instructions".into());
+        ctx.enriched_request.input = serde_json::from_value(serde_json::json!([
+            {"role":"developer","content":"caller developer message"},
+            {"role":"user","content":"review"},
+            {"role":"assistant","content":"parent delegation history"}
+        ]))
+        .unwrap();
+        let guidance: InputMessage = serde_json::from_value(serde_json::json!({
+            "role":"developer","content":"current child ownership"
+        }))
+        .unwrap();
+        let baseline: Value = serde_json::from_str(&upstream_request(&ctx, false).unwrap()).unwrap();
+        for stream in [false, true] {
+            let body: Value =
+                serde_json::from_str(&upstream_request_with_guidance(&ctx, stream, Some(&guidance)).unwrap()).unwrap();
+            assert_eq!(body["instructions"], "caller instructions");
+            let items = body["input"].as_array().unwrap();
+            assert_eq!(&items[..3], baseline["input"].as_array().unwrap());
+            assert_eq!(items.len(), 4);
+            assert_eq!(items[3]["role"], "developer");
+            assert_eq!(items[3]["content"], "current child ownership");
+        }
+        let after: Value = serde_json::from_str(&upstream_request(&ctx, false).unwrap()).unwrap();
+        assert_eq!(after, baseline);
+        assert!(ctx.new_input_items.is_empty());
+    }
 
     #[test]
     fn translation_snapshot_owns_prepared_availability_after_registry_is_dropped() {

@@ -1,5 +1,7 @@
 //! Synthetic inference integration; reference cassettes belong to integration qualification.
 use super::*;
+#[path = "multi_agent_tests/root_completion.rs"]
+mod root_completion;
 use crate::executor::{
     ExecuteRequest,
     modes::{ConversationHandler, ResponseHandler},
@@ -14,6 +16,7 @@ use axum::response::IntoResponse;
 use axum::{Json, Router, routing::post};
 use either::Either;
 use futures::StreamExt;
+use root_completion::root_completion_output;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use std::{collections::HashMap, fmt::Write};
@@ -30,6 +33,160 @@ fn message(text: &str) -> Value {
         "content":[{"type":"output_text","text":text,"annotations":[]}]})
 }
 
+// Check the actual upstream request on initial execution and stored continuation.
+fn assert_child_assignment(request: &Value, child: &str) {
+    let guidance = request["input"].as_array().unwrap().last().unwrap();
+    assert_eq!(guidance["role"], "developer");
+    let instructions = guidance["content"].as_str().unwrap();
+    assert!(instructions.contains(&format!("You are `/root/{child}`")));
+    assert!(instructions.contains("Your parent is `/root`"));
+    assert!(instructions.contains("You have no direct children"));
+    assert!(instructions.ends_with(&format!("Your current assignment:\nassess {child}")));
+    assert_eq!(
+        request["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|item| item["role"] == "developer")
+            .count(),
+        1,
+        "guidance must not accumulate or be forked"
+    );
+    assert!(instructions.contains("not actions you performed or agents you spawned"));
+    assert!(instructions.contains("including you, your ancestors and your siblings"));
+    let input = request["input"].as_array().unwrap();
+    // Forked context is preserved, while a separate assignment tells the child
+    // which work it owns. Disabling forks is not the fix.
+    assert!(input.iter().any(|item| {
+        item["content"]
+            .as_str()
+            .is_some_and(|text| text.starts_with("Compare proposals"))
+    }));
+    let task = input
+        .iter()
+        .rev()
+        .find_map(|item| {
+            item["content"]
+                .as_str()
+                .filter(|text| text.starts_with("Message Type: NEW_TASK"))
+        })
+        .expect("child receives a task after inherited history");
+    assert!(task.contains(&format!("You are /root/{child}.")));
+    assert!(task.ends_with(&format!("Payload:\nassess {child}")));
+    assert!(
+        request["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tool| tool["name"] == "spawn_agent")
+    );
+}
+
+fn shell_review_output(request: &Value) -> Option<Vec<Value>> {
+    let input = request["input"].as_array().unwrap();
+    if !input.iter().any(|item| item["content"] == "local shell review") {
+        return None;
+    }
+    let guidance = input.last().unwrap()["content"].as_str().unwrap();
+    let output = if guidance.contains("You are `/root/shell_worker`") {
+        if let Some(output) = input
+            .iter()
+            .find(|item| item["type"] == "function_call_output" && item["call_id"] == "shell_sum")
+        {
+            assert!(output["output"].as_str().unwrap().contains("55"));
+            vec![message("shell result is 55")]
+        } else {
+            vec![function("shell_sum", "shell", json!({"commands":["printf 55"]}))]
+        }
+    } else if input.iter().any(|item| {
+        item["content"]
+            .as_str()
+            .is_some_and(|text| text.starts_with("Message Type: FINAL_ANSWER"))
+    }) {
+        vec![message("combined shell result is 55")]
+    } else if input
+        .iter()
+        .any(|item| item["type"] == "function_call_output" && item["call_id"] == "spawn_shell")
+    {
+        vec![function(
+            &format!("wait_shell_{}", input.len()),
+            "wait_agent",
+            json!({"timeout_ms":10000}),
+        )]
+    } else {
+        vec![function(
+            "spawn_shell",
+            "spawn_agent",
+            json!({"task_name":"shell_worker","message":"run printf 55","fork_turns":"all"}),
+        )]
+    };
+    Some(output)
+}
+
+#[tokio::test]
+async fn child_shell_call_survives_checkpoint_and_client_continuation() {
+    for stream in [false, true] {
+        let (exec, server) = setup().await;
+        let work = async {
+            let first = response(
+                RequestPayload {
+                    model: "test".into(),
+                    store: true,
+                    stream,
+                    input: ResponsesInput::Text("local shell review".into()),
+                    multi_agent: Some(MultiAgentConfig {
+                        enabled: true,
+                        max_concurrent_subagents: Some(3),
+                    }),
+                    tools: Some(
+                        serde_json::from_value(json!([{"type":"shell","environment":{"type":"local"}}])).unwrap(),
+                    ),
+                    ..Default::default()
+                },
+                exec.clone(),
+            )
+            .await;
+            let call = first
+                .output
+                .iter()
+                .find_map(|item| match item {
+                    OutputItem::ShellCall(call) => Some(call),
+                    _ => None,
+                })
+                .expect("pending shell call");
+            assert_eq!(call.agent.as_ref().unwrap().agent_name, "/root/shell_worker");
+            let continuation = RequestPayload {
+                model: "test".into(),
+                store: true,
+                stream,
+                previous_response_id: Some(first.id),
+                input: serde_json::from_value(json!([{
+                    "type":"shell_call_output", "call_id":call.call_id,
+                    "output":[{"stdout":"55","stderr":"","outcome":{"type":"exit","exit_code":0}}]
+                }]))
+                .unwrap(),
+                ..Default::default()
+            };
+            // Both continuations restore the original pending shell ownership.
+            for request in [continuation.clone(), continuation] {
+                let completed = response(request, exec.clone()).await;
+                assert_eq!(completed.status, "completed");
+                assert!(
+                    completed
+                        .output
+                        .iter()
+                        .any(|item| matches!(item, OutputItem::Message(message)
+                    if message.agent.as_ref().is_some_and(|agent| agent.agent_name == "/root/shell_worker")
+                        && message.phase == Some(MessagePhase::FinalAnswer)))
+                );
+            }
+        };
+        let result = tokio::time::timeout(Duration::from_secs(15), work).await;
+        server.abort();
+        result.unwrap();
+    }
+}
+
 async fn setup() -> (Arc<ExecutionContext>, tokio::task::JoinHandle<()>) {
     setup_with_gate(None).await
 }
@@ -44,15 +201,20 @@ async fn setup_with_gate(gate: Option<Arc<Semaphore>>) -> (Arc<ExecutionContext>
             assert!(request["input"].as_array().unwrap().iter().all(|item| !matches!(
                 item["type"].as_str(), Some("multi_agent_call" | "multi_agent_call_output" | "agent_message"))));
             let input = request["input"].as_array().unwrap();
-            let instructions = request["instructions"].as_str().unwrap();
+            let instructions = input.last().and_then(|item| item["content"].as_str()).unwrap_or("");
             let child = if instructions.contains("You are `/root/alpha`") { Some("alpha") }
                 else if instructions.contains("You are `/root/beta`") { Some("beta") } else { None };
             let summarizing = input.last().is_some_and(|item| item["content"].as_str().is_some_and(|text| text.starts_with("You are performing a CONTEXT CHECKPOINT COMPACTION")));
             let output = if summarizing {
                 vec![message("Context summary")]
+            } else if let Some(output) = root_completion_output(&request) {
+                output
+            } else if let Some(output) = shell_review_output(&request) {
+                output
             } else if input.iter().any(|item| item["content"] == "simple compaction test") {
                 vec![message("finished")]
             } else if let Some(child) = child {
+                assert_child_assignment(&request, child);
                 let call_id = format!("proposal_{child}");
                 if input.iter().any(|item| item["type"] == "function_call_output" && item["call_id"] == call_id) {
                     vec![message(&format!("{child} assessment"))]

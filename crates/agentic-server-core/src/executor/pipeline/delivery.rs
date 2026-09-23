@@ -462,6 +462,61 @@ fn apply_context_response_ids(wire: &mut WireEvent, ctx: &RequestContext) {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn synthetic_gateway_items_share_public_indexes_with_upstream_items() {
+        let (sender, mut receiver) = tokio::sync::mpsc::channel(16);
+        let mut delivery = StreamDelivery::new(Some(sender));
+        for (index, name, kind) in [
+            (0, "root", "reasoning"),
+            (1, "mcp", "mcp_call"),
+            (2, "web", "web_search_call"),
+        ] {
+            let agent = if name == "root" {
+                AgentIdentity::root()
+            } else {
+                AgentIdentity::root().child(name).unwrap()
+            };
+            let source = AgentRoundId { agent, round: 0 };
+            let frame = EventFrame::synthetic(
+                SSEEventType::OutputItemAdded,
+                serde_json::json!({"output_index":1,"item":{"id":name,"type":kind}})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            )
+            .unwrap();
+            delivery.accept_agent_frame(&source, frame).await.unwrap();
+            let event = receiver.try_recv().unwrap();
+            let frame = event
+                .content
+                .lines()
+                .find_map(crate::events::normalize_sse_line)
+                .unwrap();
+            assert_eq!(frame.wire.output_index, Some(index));
+            assert_eq!(frame.wire.rest["item"]["agent"]["agent_name"], source.agent.as_str());
+            assert_eq!(
+                delivery.projection.take_item(source.agent.as_str(), name),
+                Some(usize::try_from(index).unwrap())
+            );
+            let frame = EventFrame::synthetic(
+                SSEEventType::McpCallInProgress,
+                serde_json::json!({"output_index":1,"item_id":name})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            )
+            .unwrap();
+            delivery.accept_agent_frame(&source, frame).await.unwrap();
+            let event = receiver.try_recv().unwrap();
+            let frame = event
+                .content
+                .lines()
+                .find_map(crate::events::normalize_sse_line)
+                .unwrap();
+            assert_eq!(frame.wire.output_index, Some(index));
+            delivery.finish_agent_source(&source);
+        }
+    }
     use super::*;
     use crate::events::EventPayload;
     use crate::executor::upstream::tests::request_context;

@@ -3,10 +3,7 @@ use std::{collections::HashSet, num::NonZeroUsize};
 use super::super::agent_turn::AgentTurn;
 use crate::executor::{
     error::{ExecutorError, ExecutorResult},
-    multi_agent::{
-        AgentPhase, AgentRegistry, AgentState, PendingClientCalls, RegistryLimits, ValidatedTreeCheckpoint,
-        collaboration::instructions,
-    },
+    multi_agent::{AgentPhase, AgentRegistry, AgentState, PendingClientCalls, RegistryLimits, ValidatedTreeCheckpoint},
     pipeline::AgentPipeline,
     request::{ExecutionContext, RequestContext},
     response_budget::ExecutorResponseBudget,
@@ -167,7 +164,10 @@ pub(super) fn restore_agents(
             turn: root.turn,
             state: AgentState::Active(AgentPhase::Runnable),
             mailbox: Vec::new(),
-            history: Vec::from(&request.enriched_request.input),
+            history: match &request.enriched_request.input {
+                ResponsesInput::Items(items) => items.clone(),
+                ResponsesInput::Text(_) => Vec::from(&request.enriched_request.input),
+            },
             loaded_tools: Vec::new(),
             last_task: String::new(),
             final_answer: None,
@@ -188,17 +188,11 @@ pub(super) async fn prepare_agent(
     parent: &RequestContext,
     exec: &ExecutionContext,
     budget: &ExecutorResponseBudget,
-    limit: usize,
 ) -> ExecutorResult<AgentContext> {
     let mut request = parent.enriched_request.clone();
     request.input = ResponsesInput::Items(stored.history.clone());
     request.previous_response_id = None;
     request.conversation_id = None;
-    request.instructions = Some(format!(
-        "{}\n\n{}",
-        parent.enriched_request.instructions.as_deref().unwrap_or(""),
-        instructions(&stored.identity, limit)
-    ));
     let management = request.context_management.get_or_insert_with(Vec::new);
     if let Some(entry) = management.iter_mut().find(|entry| entry.type_ == "compaction") {
         entry.compact_threshold.get_or_insert(DEFAULT_COMPACT_THRESHOLD);
@@ -296,7 +290,19 @@ pub(super) fn mail_input(recipient: &AgentIdentity, mail: &AgentMail) -> InputIt
         AgentMailContent::Message(text) | AgentMailContent::TurnFinished(AgentCompletion::Failed(text)) => {
             ("MESSAGE", text.as_str())
         }
-        AgentMailContent::Task(text) => ("NEW_TASK", text.as_str()),
+        AgentMailContent::Task(text) => {
+            return InputItem::Message(InputMessage {
+                role: "user".into(),
+                content: InputMessageContent::Text(format!(
+                    "Message Type: NEW_TASK\nTask name: {recipient}\nSender: {}\n\n\
+                     You are {recipient}. This is your assigned task, not a request to repeat your parent's delegation. \
+                     Use inherited conversation as background and return your own findings to your parent when done.\n\
+                     Payload:\n{text}",
+                    mail.sender.agent
+                )),
+                ..Default::default()
+            });
+        }
         AgentMailContent::TurnFinished(AgentCompletion::Finished(text)) => ("FINAL_ANSWER", text.as_str()),
         AgentMailContent::TurnFinished(AgentCompletion::Interrupted) => ("MESSAGE", "Agent was interrupted."),
     };

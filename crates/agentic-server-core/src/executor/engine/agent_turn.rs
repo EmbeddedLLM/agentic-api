@@ -13,6 +13,7 @@ use tracing::debug;
 use crate::events::EventFrame;
 use crate::executor::compaction::maybe_compact_context;
 use crate::executor::error::{ExecutorError, ExecutorResult};
+use crate::executor::gateway::history::append_input_item;
 use crate::executor::gateway::{
     GatewayCallResult, GatewayScheduler, append_gateway_calls_to_new_input, append_output_items_to_input,
     append_tool_outputs, emit_gateway_completed_events, emit_gateway_start_events, execute_and_emit_output_calls,
@@ -24,7 +25,7 @@ use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::executor::response_budget::ExecutorResponseBudget;
 use crate::executor::upstream::{fetch_blocking_payload, fetch_stream_payload};
 use crate::tool::{ShellHandler, ToolRegistry, mcp};
-use crate::types::io::{OutputItem, ResponsesInput, ToolChoice};
+use crate::types::io::{InputItem, OutputItem, ResponsesInput, ToolChoice};
 use crate::types::request_response::ResponsePayload;
 
 /// Outcome of inspecting one inference round's output, deciding whether the
@@ -341,7 +342,16 @@ impl<'a> AgentTurn<'a> {
                     item => Ok(item.clone()),
                 })
                 .collect::<ExecutorResult<Vec<_>>>()?;
-            append_output_items_to_input(&mut self.pipeline.request.enriched_request.input, &canonical);
+            for item in &canonical {
+                // Shell ownership must survive checkpointing; normalize only for upstream inference.
+                let input = match item {
+                    OutputItem::ShellCall(call) => Some(InputItem::ShellCall(call.clone())),
+                    item => item.to_input_item(),
+                };
+                if let Some(input) = input {
+                    append_input_item(&mut self.pipeline.request.enriched_request.input, input);
+                }
+            }
         } else {
             append_output_items_to_input(&mut self.pipeline.request.enriched_request.input, output);
         }
