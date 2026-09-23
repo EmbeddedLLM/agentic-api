@@ -562,15 +562,46 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+    use crate::tool::executors::GatewayExecutorRegistration;
+    use crate::tool::mcp::{McpDiscoveredHandler, McpHandler};
+    use crate::types::io::output::McpListTool;
+    use crate::types::tools::McpDiscoveredToolParam;
 
     #[test]
     fn code_interpreter_tool_type_is_inherently_gateway_owned() {
         assert!(ToolType::CodeInterpreter.is_gateway_owned());
     }
-    use crate::tool::executors::GatewayExecutorRegistration;
-    use crate::tool::mcp::{McpDiscoveredHandler, McpHandler};
-    use crate::types::io::output::McpListTool;
-    use crate::types::tools::McpDiscoveredToolParam;
+
+    #[cfg(feature = "embedded-code-interpreter")]
+    #[tokio::test]
+    async fn enabled_code_interpreter_registers_a_gateway_binding() {
+        let config = crate::config::ToolRuntimeConfig {
+            code_interpreter: crate::config::CodeInterpreterRuntimeConfig {
+                enabled: true,
+                ..crate::config::CodeInterpreterRuntimeConfig::default()
+            },
+            ..crate::config::ToolRuntimeConfig::default()
+        };
+        let mut executors = GatewayExecutors::from_config(Arc::new(reqwest::Client::new()), &config)
+            .expect("enabled code interpreter executor");
+        let mut tools = vec![
+            serde_json::from_value(serde_json::json!({
+                "type": "code_interpreter",
+                "execution": "gateway"
+            }))
+            .expect("code interpreter declaration"),
+        ];
+
+        let registry = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
+            .await
+            .expect("code interpreter registry");
+        let entry = registry
+            .lookup(super::super::code_interpreter::CODE_INTERPRETER_FUNCTION_NAME)
+            .expect("code interpreter registry entry");
+
+        assert_eq!(entry.tool_type, ToolType::CodeInterpreter);
+        assert!(matches!(entry.ownership, ToolOwnership::Gateway(Some(_))));
+    }
 
     fn declaration(server_label: &str) -> ResponsesTool {
         serde_json::from_value(serde_json::json!({
