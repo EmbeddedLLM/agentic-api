@@ -94,6 +94,7 @@ version = "0.8.0"
 dependencies = [
  "async-stream",
  "axum",
+ "base64",
  "bytes",
  "chrono",
  "criterion",
@@ -105,6 +106,7 @@ dependencies = [
  "percent-encoding",
  "reqwest 0.12.28",
  "reqwest 0.13.4",
+ "ring",
  "rmcp",
  "serde",
  "serde_json",

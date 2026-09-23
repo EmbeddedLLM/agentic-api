@@ -23,6 +23,8 @@ utoipa = { workspace = true, optional = true }
 
 async-stream.workspace = true
 bytes.workspace = true
+base64 = "0.22"
+ring = "0.17"
 dirs.workspace = true
 either.workspace = true
 futures.workspace = true

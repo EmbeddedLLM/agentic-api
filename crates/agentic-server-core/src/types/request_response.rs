@@ -4,9 +4,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-use super::io::{
-    FunctionTool, InputItem, InputMessage, InputMessageContent, OutputItem, ResponseUsage, ResponsesInput, ToolChoice,
-};
+use super::io::{FunctionTool, InputItem, MultiAgentConfig, OutputItem, ResponseUsage, ResponsesInput, ToolChoice};
 use super::tools::ResponsesTool;
 use crate::tool::{CodexNamespaceHandler, CustomHandler, ToolError};
 use crate::utils::common::serialize_to_string;
@@ -28,7 +26,7 @@ pub struct ReasoningConfig {
 }
 
 /// Responses text-generation settings forwarded to the upstream service.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ResponseTextConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -165,6 +163,12 @@ impl utoipa::PartialSchema for RequestPayload {
                 ObjectBuilder::new().schema_type(SchemaType::from_iter([Type::Object, Type::Null])),
             )
             .property("parallel_tool_calls", nullable_bool())
+            .property(
+                "multi_agent",
+                OneOfBuilder::new()
+                    .item(<MultiAgentConfig as utoipa::PartialSchema>::schema())
+                    .item(null_type()),
+            )
             .property("cache_salt", nullable_str())
             .property(
                 "context_management",
@@ -182,7 +186,10 @@ impl utoipa::ToSchema for RequestPayload {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// A Responses request. Rust's derived default uses `store: false`; JSON deserialization
+/// uses `store: true` when storage is not specified. Set `store` explicitly when constructing
+/// a stored request with struct update syntax.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(bound(serialize = "Box<T>: Serialize", deserialize = "Box<T>: Deserialize<'de>"))]
 pub struct RequestPayload<T: ?Sized = ResponseTextConfig> {
     pub model: String,
@@ -211,6 +218,10 @@ pub struct RequestPayload<T: ?Sized = ResponseTextConfig> {
     pub truncation: Option<String>,
     pub metadata: Option<Value>,
     pub parallel_tool_calls: Option<bool>,
+    /// Hosted collaboration configuration, interpreted by the gateway coordinator.
+    /// Independent of the model's `parallel_tool_calls` generation preference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multi_agent: Option<MultiAgentConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_salt: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -297,6 +308,9 @@ impl<T: ?Sized> RequestPayload<T> {
     /// can serve it.
     #[must_use]
     pub fn in_process_feature(&self) -> Option<&'static str> {
+        if self.multi_agent.as_ref().is_some_and(|config| config.enabled) {
+            return Some("multi_agent");
+        }
         if self.conversation_id.is_some() {
             return Some("conversation_id");
         }
@@ -352,6 +366,7 @@ impl<T: ?Sized> RequestPayload<T> {
             truncation: self.truncation,
             metadata: self.metadata,
             parallel_tool_calls: self.parallel_tool_calls,
+            multi_agent: self.multi_agent,
             cache_salt: self.cache_salt,
             context_management: self.context_management,
         })
@@ -530,59 +545,85 @@ impl ResponsePayload {
     }
 }
 
-impl From<&ResponsesInput> for Vec<InputItem> {
-    fn from(input: &ResponsesInput) -> Self {
-        match input {
-            ResponsesInput::Text(text) => vec![InputItem::Message(InputMessage {
-                id: None,
-                role: "user".into(),
-                status: None,
-                content: InputMessageContent::Text(text.clone()),
-            })],
-            ResponsesInput::Items(items) => items
-                .iter()
-                .filter_map(|item| match item {
-                    InputItem::Unknown => None,
-                    InputItem::ShellCall(call) => Some(InputItem::FunctionCall(call.clone().into())),
-                    InputItem::ShellCallOutput(output) => Some(InputItem::FunctionCallOutput(output.clone().into())),
-                    InputItem::CustomToolCall(call) => Some(InputItem::FunctionCall(call.clone().into())),
-                    InputItem::CustomToolCallOutput(output) => {
-                        Some(InputItem::FunctionCallOutput(output.clone().into()))
-                    }
-                    item => Some(item.clone()),
-                })
-                .collect(),
-        }
-    }
-}
-
-impl From<ResponsesInput> for Vec<InputItem> {
-    fn from(input: ResponsesInput) -> Self {
-        match input {
-            ResponsesInput::Text(text) => vec![InputItem::Message(InputMessage {
-                id: None,
-                role: "user".into(),
-                status: None,
-                content: InputMessageContent::Text(text),
-            })],
-            ResponsesInput::Items(items) => items
-                .into_iter()
-                .filter_map(|item| match item {
-                    InputItem::Unknown => None,
-                    InputItem::ShellCall(call) => Some(InputItem::FunctionCall(call.into())),
-                    InputItem::ShellCallOutput(output) => Some(InputItem::FunctionCallOutput(output.into())),
-                    InputItem::CustomToolCall(call) => Some(InputItem::FunctionCall(call.into())),
-                    InputItem::CustomToolCallOutput(output) => Some(InputItem::FunctionCallOutput(output.into())),
-                    item => Some(item),
-                })
-                .collect(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stored_struct_defaults_match_minimal_wire_request() {
+        let wire: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test-model", "input": "hello"
+        }))
+        .unwrap();
+        let fixture: RequestPayload = RequestPayload {
+            model: "test-model".into(),
+            input: ResponsesInput::Text("hello".into()),
+            store: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            serde_json::to_value(fixture).unwrap(),
+            serde_json::to_value(wire).unwrap()
+        );
+    }
+
+    #[test]
+    fn rust_defaults_do_not_make_required_wire_fields_optional() {
+        let default: RequestPayload = RequestPayload::default();
+        assert!(!default.store);
+        assert!(matches!(default.input, ResponsesInput::Items(items) if items.is_empty()));
+
+        for wire in [
+            serde_json::json!({"model": "test-model"}),
+            serde_json::json!({"input": "hello"}),
+        ] {
+            assert!(serde_json::from_value::<RequestPayload>(wire).is_err());
+        }
+    }
+
+    #[test]
+    fn request_preserves_multi_agent_independently_of_parallel_tool_calls() {
+        for enabled in [false, true] {
+            for parallel_tool_calls in [false, true] {
+                let config = serde_json::json!({"enabled": enabled, "max_concurrent_subagents": 3});
+                let payload: RequestPayload = serde_json::from_value(serde_json::json!({
+                    "model": "test-model",
+                    "input": "Review independent tasks.",
+                    "multi_agent": config,
+                    "parallel_tool_calls": parallel_tool_calls
+                }))
+                .unwrap();
+                let payload = payload.try_map_text(Ok::<_, std::convert::Infallible>).unwrap();
+
+                assert_eq!(
+                    payload.multi_agent,
+                    Some(MultiAgentConfig {
+                        enabled,
+                        max_concurrent_subagents: Some(3),
+                    })
+                );
+                assert_eq!(serde_json::to_value(&payload).unwrap()["multi_agent"], config);
+                assert_eq!(payload.in_process_feature(), enabled.then_some("multi_agent"));
+
+                for stream in [false, true] {
+                    let upstream = serde_json::to_value(payload.to_upstream_request(stream).unwrap()).unwrap();
+                    assert!(upstream.get("multi_agent").is_none());
+                    assert_eq!(upstream["parallel_tool_calls"], parallel_tool_calls);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn omitted_multi_agent_does_not_enable_collaboration() {
+        let payload: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test-model", "input": "hello"
+        }))
+        .unwrap();
+        assert!(payload.multi_agent.is_none());
+        assert!(serde_json::to_value(&payload).unwrap().get("multi_agent").is_none());
+        assert_eq!(payload.in_process_feature(), None);
+    }
 
     #[test]
     fn request_payload_preserves_ignore_eos_upstream() {

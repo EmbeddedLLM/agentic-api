@@ -1,8 +1,12 @@
+mod estimate;
+pub(crate) use estimate::{estimate_history_tokens, estimate_input_tokens};
+
 mod context;
 
 use context::item_has_meaningful_context;
 
 use crate::executor::error::{ExecutorError, ExecutorResult};
+use crate::executor::pending_calls::resolved_prefix_len;
 use crate::executor::persist::persist_prepared_turn;
 use crate::executor::prepare::prepare_request_tools;
 use crate::executor::rehydrate::rehydrate_conversation;
@@ -12,76 +16,12 @@ use crate::tool::ToolSearchState;
 use crate::types::event::MessageStatus;
 use crate::types::io::input::latest_compaction_window;
 use crate::types::io::{
-    CompactionItem, InputContent, InputFileContent, InputItem, InputMessage, InputMessageContent, OutputItem,
-    ResponseUsage, ResponsesInput, ToolCallOutput, ToolOutputContent,
+    CompactionItem, InputItem, InputMessage, InputMessageContent, OutputItem, ResponseUsage, ResponsesInput,
 };
 use crate::types::request_response::{CompactRequest, CompactedResponse, RequestPayload, ResponsePayload};
-use crate::types::tools::ResponsesTool;
-use crate::utils::common::{serialize_to_string, serialize_to_value, utcnow_str, uuid7_str};
+use crate::utils::common::{serialize_to_string, utcnow_str, uuid7_str};
 
 const COMPACTION_PROMPT: &str = "You are performing a CONTEXT CHECKPOINT COMPACTION. Create a concise handoff summary that preserves current progress, decisions, constraints, unresolved work, and critical references for the next model. Return only the summary.";
-const ESTIMATED_BYTES_PER_TOKEN: u64 = 4;
-const ESTIMATED_INPUT_OVERHEAD_TOKENS: u64 = 1;
-const ESTIMATED_ITEM_OVERHEAD_TOKENS: u64 = 12;
-const ESTIMATED_CONTENT_PART_OVERHEAD_TOKENS: u64 = 7;
-const ESTIMATED_JSON_VALUE_OVERHEAD_TOKENS: u64 = 1;
-
-/// Fixed model-agnostic allowance for one image, including its content-part framing.
-///
-/// Actual vision-token usage depends on the model, processor, image dimensions, and detail
-/// setting. A conservative fixed budget avoids treating images as free without mistaking their
-/// base64 transport encoding for model-visible text.
-const ESTIMATED_IMAGE_TOKENS: u64 = 1_024;
-
-#[derive(Default)]
-struct InputTokenEstimate {
-    text_bytes: u64,
-    fixed_tokens: u64,
-}
-
-impl InputTokenEstimate {
-    fn add_text(&mut self, text: &str) {
-        let bytes = u64::try_from(text.len()).unwrap_or(u64::MAX);
-        self.text_bytes = self.text_bytes.saturating_add(bytes);
-    }
-
-    fn add_optional_text(&mut self, text: Option<&str>) {
-        if let Some(text) = text {
-            self.add_text(text);
-        }
-    }
-
-    const fn add_tokens(&mut self, tokens: u64) {
-        self.fixed_tokens = self.fixed_tokens.saturating_add(tokens);
-    }
-
-    fn add_json_value(&mut self, value: &serde_json::Value) {
-        self.add_tokens(ESTIMATED_JSON_VALUE_OVERHEAD_TOKENS);
-        match value {
-            serde_json::Value::String(text) => self.add_text(text),
-            serde_json::Value::Number(number) => self.add_text(&number.to_string()),
-            serde_json::Value::Array(values) => {
-                for value in values {
-                    self.add_json_value(value);
-                }
-            }
-            serde_json::Value::Object(values) => {
-                for (key, value) in values {
-                    self.add_text(key);
-                    self.add_json_value(value);
-                }
-            }
-            serde_json::Value::Null | serde_json::Value::Bool(_) => {}
-        }
-    }
-
-    fn total_tokens(self) -> u64 {
-        let text_tokens =
-            self.text_bytes / ESTIMATED_BYTES_PER_TOKEN + u64::from(self.text_bytes % ESTIMATED_BYTES_PER_TOKEN != 0);
-        self.fixed_tokens.saturating_add(text_tokens)
-    }
-}
-
 fn retained_user_window(items: &[InputItem]) -> Vec<InputItem> {
     let window = latest_compaction_window(items);
     items
@@ -106,6 +46,7 @@ fn retained_user_window(items: &[InputItem]) -> Vec<InputItem> {
 
 fn finish_compacted_window(mut output: Vec<InputItem>, summary: String) -> Vec<InputItem> {
     output.push(InputItem::Compaction(CompactionItem {
+        agent: None,
         id: Some(uuid7_str("cmp_")),
         encrypted_content: summary,
     }));
@@ -125,7 +66,7 @@ fn response_output_text(output: &[OutputItem]) -> Option<String> {
             _ => None,
         })
         .flat_map(|message| message.content.iter())
-        .map(|content| content.text.trim())
+        .map(|content| content.text().trim())
         .filter(|text| !text.is_empty())
         .collect::<Vec<_>>()
         .join("\n");
@@ -156,163 +97,6 @@ fn completed_summary_text(response: &ResponsePayload) -> ExecutorResult<String> 
     })
 }
 
-fn add_message_content(estimate: &mut InputTokenEstimate, content: &InputMessageContent) {
-    match content {
-        InputMessageContent::Text(text) => estimate.add_text(text),
-        InputMessageContent::Parts(parts) => {
-            for part in parts {
-                match part {
-                    InputContent::InputText(text)
-                    | InputContent::OutputText(text)
-                    | InputContent::ReasoningText(text) => {
-                        estimate.add_tokens(ESTIMATED_CONTENT_PART_OVERHEAD_TOKENS);
-                        estimate.add_text(&text.text);
-                    }
-                    InputContent::Refusal(refusal) => {
-                        estimate.add_tokens(ESTIMATED_CONTENT_PART_OVERHEAD_TOKENS);
-                        estimate.add_text(&refusal.refusal);
-                    }
-                    InputContent::InputImage(_) => estimate.add_tokens(ESTIMATED_IMAGE_TOKENS),
-                    InputContent::InputFile(file) => add_file_content(estimate, file),
-                    InputContent::Unknown(_) => estimate.add_tokens(ESTIMATED_CONTENT_PART_OVERHEAD_TOKENS),
-                }
-            }
-        }
-    }
-}
-
-fn add_file_content(estimate: &mut InputTokenEstimate, file: &InputFileContent) {
-    estimate.add_tokens(ESTIMATED_CONTENT_PART_OVERHEAD_TOKENS);
-    estimate.add_optional_text(file.file_data.as_deref());
-    estimate.add_optional_text(file.file_id.as_deref());
-    estimate.add_optional_text(file.file_url.as_deref());
-    estimate.add_optional_text(file.filename.as_deref());
-    estimate.add_optional_text(file.detail.as_deref());
-}
-
-fn add_tool_definition(estimate: &mut InputTokenEstimate, tool: &ResponsesTool) {
-    // Serialize only declarations, preserving nested schemas and extra fields without
-    // copying image-bearing input. An unrepresentable declaration must not undercount.
-    match serialize_to_value(tool) {
-        Ok(value) => estimate.add_json_value(&value),
-        Err(_) => estimate.add_tokens(u64::MAX),
-    }
-}
-
-fn add_tool_call_output(estimate: &mut InputTokenEstimate, output: &ToolCallOutput) {
-    match output {
-        ToolCallOutput::Text(text) => estimate.add_text(text),
-        ToolCallOutput::Content(parts) => {
-            for part in parts {
-                match part {
-                    ToolOutputContent::InputText(text) => {
-                        estimate.add_tokens(ESTIMATED_CONTENT_PART_OVERHEAD_TOKENS);
-                        estimate.add_text(&text.text);
-                    }
-                    ToolOutputContent::InputImage(_) => estimate.add_tokens(ESTIMATED_IMAGE_TOKENS),
-                    ToolOutputContent::InputFile(file) => add_file_content(estimate, file),
-                }
-            }
-        }
-    }
-}
-
-fn add_input_item(estimate: &mut InputTokenEstimate, item: &InputItem) {
-    if matches!(item, InputItem::McpListTools(_) | InputItem::CompactionTrigger) {
-        return;
-    }
-    estimate.add_tokens(ESTIMATED_ITEM_OVERHEAD_TOKENS);
-
-    match item {
-        InputItem::Message(message) => {
-            estimate.add_optional_text(message.id.as_deref());
-            estimate.add_text(&message.role);
-            add_message_content(estimate, &message.content);
-        }
-        InputItem::FunctionCall(call) => {
-            estimate.add_optional_text(call.id.as_deref());
-            estimate.add_text(&call.call_id);
-            estimate.add_text(&call.name);
-            estimate.add_optional_text(call.namespace.as_deref());
-            estimate.add_text(&call.arguments);
-        }
-        InputItem::FunctionCallOutput(output) => {
-            estimate.add_text(&output.call_id);
-            add_tool_call_output(estimate, &output.output);
-        }
-        InputItem::ToolSearchCall(call) => {
-            estimate.add_text(&call.id);
-            estimate.add_text(&call.call_id);
-            estimate.add_json_value(&call.arguments);
-        }
-        InputItem::ToolSearchOutput(output) => {
-            estimate.add_text(&output.call_id);
-            for tool in &output.tools {
-                add_tool_definition(estimate, tool);
-            }
-        }
-        InputItem::CustomToolCall(call) => {
-            estimate.add_text(&call.id);
-            estimate.add_text(&call.call_id);
-            estimate.add_text(&call.name);
-            estimate.add_text(&call.input);
-        }
-        InputItem::CustomToolCallOutput(output) => {
-            estimate.add_text(&output.call_id);
-            estimate.add_optional_text(output.name.as_deref());
-            add_tool_call_output(estimate, &output.output);
-        }
-        InputItem::ShellCall(_) | InputItem::ShellCallOutput(_) => {
-            // Shell items carry textual commands and outputs, without image payloads.
-            match serialize_to_value(item) {
-                Ok(value) => estimate.add_json_value(&value),
-                Err(_) => estimate.add_tokens(u64::MAX),
-            }
-        }
-        InputItem::Reasoning(reasoning) => {
-            estimate.add_text(&reasoning.id);
-            estimate.add_optional_text(reasoning.status.as_deref());
-            for content in &reasoning.content {
-                estimate.add_tokens(ESTIMATED_CONTENT_PART_OVERHEAD_TOKENS);
-                estimate.add_text(&content.text);
-            }
-            for summary in &reasoning.summary {
-                estimate.add_json_value(summary);
-            }
-            if let Some(encrypted_content) = &reasoning.encrypted_content {
-                estimate.add_json_value(encrypted_content);
-            }
-        }
-        InputItem::Compaction(compaction) => {
-            // `model_input` presents the checkpoint as one assistant output-text message.
-            estimate.add_text("assistant");
-            estimate.add_tokens(ESTIMATED_CONTENT_PART_OVERHEAD_TOKENS);
-            estimate.add_text(&compaction.encrypted_content);
-        }
-        InputItem::Unknown | InputItem::McpListTools(_) | InputItem::CompactionTrigger => {}
-    }
-}
-
-/// Estimate the current model-facing context size without requiring a model-specific tokenizer.
-///
-/// Textual fields are aggregated at four UTF-8 bytes per token, with fixed allowances for
-/// Responses framing. Images receive [`ESTIMATED_IMAGE_TOKENS`] each; their URLs and inline bytes
-/// are deliberately excluded because vision-token usage is unrelated to base64 transport size.
-#[must_use]
-pub(crate) fn estimate_input_tokens(input: &ResponsesInput) -> u64 {
-    let mut estimate = InputTokenEstimate::default();
-    estimate.add_tokens(ESTIMATED_INPUT_OVERHEAD_TOKENS);
-    match input {
-        ResponsesInput::Text(text) => estimate.add_text(text),
-        ResponsesInput::Items(_) => {
-            for item in input.model_items() {
-                add_input_item(&mut estimate, item);
-            }
-        }
-    }
-    estimate.total_tokens()
-}
-
 fn request_payload(model: String, input: ResponsesInput, instructions: Option<String>) -> RequestPayload {
     RequestPayload {
         model,
@@ -335,6 +119,7 @@ fn request_payload(model: String, input: ResponsesInput, instructions: Option<St
         metadata: None,
         parallel_tool_calls: None,
         cache_salt: None,
+        multi_agent: None,
         context_management: None,
     }
 }
@@ -365,10 +150,9 @@ pub(crate) async fn compact_items(
         .filter(|item| !item.is_compaction_trigger())
         .collect();
     summary_items.push(InputItem::Message(InputMessage {
-        id: None,
         role: "user".to_owned(),
-        status: None,
         content: InputMessageContent::Text(COMPACTION_PROMPT.to_owned()),
+        ..Default::default()
     }));
     let instructions = instructions.map(str::to_owned);
     let original_request = request_payload(
@@ -378,6 +162,7 @@ pub(crate) async fn compact_items(
     );
     let enriched_request = request_payload(model.to_owned(), ResponsesInput::Items(summary_items), instructions);
     let ctx = RequestContext {
+        multi_agent_tree: None,
         original_request,
         enriched_request,
         new_input_items: Vec::new(),
@@ -433,8 +218,33 @@ pub(crate) async fn maybe_compact_context(
     );
     let model = ctx.enriched_request.model.clone();
     let instructions = ctx.enriched_request.instructions.clone();
-    let input = std::mem::replace(&mut ctx.enriched_request.input, ResponsesInput::Items(Vec::new()));
-    let (compacted, usage) = compact_items(&model, input, instructions.as_deref(), exec_ctx, auth).await?;
+    // Commit the replacement only after a usable summary is available.
+    let items = Vec::from(&ctx.enriched_request.input);
+    let multi_agent = ctx
+        .enriched_request
+        .multi_agent
+        .as_ref()
+        .is_some_and(|config| config.enabled);
+    let prefix = if multi_agent {
+        resolved_prefix_len(&items)?
+    } else {
+        items.len()
+    };
+    if !items[..prefix].iter().any(item_has_meaningful_context) {
+        return Ok(None);
+    }
+    let input = ResponsesInput::Items(items[..prefix].to_vec());
+    let (mut compacted, usage) = compact_items(&model, input, instructions.as_deref(), exec_ctx, auth).await?;
+    if multi_agent {
+        // Discovery state is protocol state, not disposable summary prose.
+        compacted.extend(
+            items[..prefix]
+                .iter()
+                .filter(|item| matches!(item, InputItem::McpListTools(_)))
+                .cloned(),
+        );
+        compacted.extend_from_slice(&items[prefix..]);
+    }
     ctx.enriched_request.input = ResponsesInput::Items(compacted.clone());
     ctx.new_input_items = compacted;
     if let Some(continuation) = &mut ctx.continuation {
@@ -501,6 +311,7 @@ pub async fn compact_response(
 
 #[cfg(test)]
 mod tests {
+    use super::estimate::ESTIMATED_IMAGE_TOKENS;
     use std::sync::Arc;
 
     use axum::Router;
@@ -517,16 +328,15 @@ mod tests {
     use crate::types::request_response::ContextManagement;
 
     use super::{
-        ESTIMATED_IMAGE_TOKENS, build_compacted_window, compact_response, completed_summary_text,
-        estimate_input_tokens, maybe_compact_context, request_payload,
+        build_compacted_window, compact_response, completed_summary_text, estimate_input_tokens, maybe_compact_context,
+        request_payload,
     };
 
     fn user_message(text: &str) -> InputItem {
         InputItem::Message(InputMessage {
-            id: None,
             role: "user".to_owned(),
-            status: None,
             content: InputMessageContent::Text(text.to_owned()),
+            ..Default::default()
         })
     }
 
@@ -540,10 +350,9 @@ mod tests {
 
     fn image_message(encoded_bytes: usize) -> InputItem {
         InputItem::Message(InputMessage {
-            id: None,
             role: "user".to_owned(),
-            status: None,
             content: InputMessageContent::Parts(vec![InputContent::InputImage(inline_image(encoded_bytes))]),
+            ..Default::default()
         })
     }
 
@@ -570,6 +379,7 @@ mod tests {
             compact_threshold: Some(threshold),
         }]);
         RequestContext {
+            multi_agent_tree: None,
             original_request,
             enriched_request,
             new_input_items: Vec::new(),
@@ -653,6 +463,7 @@ mod tests {
     fn compacted_window_retains_user_messages_and_replaces_old_compaction() {
         let items = vec![
             InputItem::Compaction(CompactionItem {
+                agent: None,
                 id: Some("cmp_old".to_owned()),
                 encrypted_content: "old summary".to_owned(),
             }),
@@ -813,10 +624,9 @@ mod tests {
     fn an_image_referenced_by_file_id_is_meaningful_context() {
         let image_by = |content: InputImageContent| {
             InputItem::Message(InputMessage {
-                id: None,
                 role: "user".to_owned(),
-                status: None,
                 content: InputMessageContent::Parts(vec![InputContent::InputImage(content)]),
+                ..Default::default()
             })
         };
 
@@ -837,10 +647,9 @@ mod tests {
         let estimate_with_images = |count| {
             let parts = (0..count).map(|_| InputContent::InputImage(inline_image(1))).collect();
             estimate_input_tokens(&ResponsesInput::Items(vec![InputItem::Message(InputMessage {
-                id: None,
                 role: "user".to_owned(),
-                status: None,
                 content: InputMessageContent::Parts(parts),
+                ..Default::default()
             })]))
         };
 
@@ -1019,6 +828,7 @@ mod tests {
             ResponsesInput::Items(vec![
                 user_message(&stale_text),
                 InputItem::Compaction(CompactionItem {
+                    agent: None,
                     id: Some("cmp_1".to_owned()),
                     encrypted_content: "durable summary".to_owned(),
                 }),
@@ -1051,10 +861,9 @@ mod tests {
         let expected_url = retained_image.image_url.clone().expect("inline image URL");
         let text_input = ResponsesInput::Items(vec![
             InputItem::Message(InputMessage {
-                id: None,
                 role: "user".to_owned(),
-                status: None,
                 content: InputMessageContent::Parts(vec![InputContent::InputImage(retained_image)]),
+                ..Default::default()
             }),
             user_message(&"genuine textual context ".repeat(1_000)),
         ]);
@@ -1262,6 +1071,7 @@ mod tests {
                 None,
                 vec![InOutItem::Input(user_message("remember banana"))],
                 &ResponseMetadata {
+                    multi_agent_tree: None,
                     model: "test-model".to_owned(),
                     previous_response_id: None,
                     effective_tools: None,

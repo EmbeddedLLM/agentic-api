@@ -2,13 +2,16 @@ use crate::executor::accumulator::Validation;
 use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::executor::gateway_accumulator::StreamEvent;
 use crate::executor::inference::{call_inference_limited, fetch_response_json_limited};
+use crate::executor::multi_agent::collaboration;
 use crate::executor::pipeline::{AgentPipeline, StreamPayload};
 use crate::executor::rehydrate::validate_message_content;
 use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::executor::response_budget::ExecutorResponseBudget;
 use crate::executor::translate::TranslationContext;
 use crate::tool::{ToolRegistry, ToolSearchState};
-use crate::types::request_response::ResponsePayload;
+use crate::types::io::MultiAgentAction;
+use crate::types::request_response::{ResponsePayload, UpstreamTool};
+use crate::types::tools::ResponsesTool;
 use crate::utils::common::serialize_to_string;
 use std::sync::Arc;
 
@@ -25,6 +28,14 @@ fn translation_context(registry: &ToolRegistry, agent: &AgentPipeline) -> Transl
             .unwrap_or_default(),
         state.is_some_and(ToolSearchState::is_active),
     )
+    .with_collaboration(
+        agent
+            .request
+            .enriched_request
+            .multi_agent
+            .as_ref()
+            .is_some_and(|config| config.enabled),
+    )
     .with_gateway_owned_names(
         registry
             .tool_classifications()
@@ -37,18 +48,14 @@ fn translation_context(registry: &ToolRegistry, agent: &AgentPipeline) -> Transl
         registry.custom_tool_map().cloned(),
         state
             .filter(|state| state.is_active())
-            .map(crate::tool::ToolSearchState::public_response_tools)
+            .map(ToolSearchState::public_response_tools)
             .or_else(|| {
                 agent
                     .request
                     .enriched_request
                     .tools
                     .as_ref()
-                    .filter(|tools| {
-                        tools
-                            .iter()
-                            .any(|tool| matches!(tool, crate::types::tools::ResponsesTool::Shell(_)))
-                    })
+                    .filter(|tools| tools.iter().any(|tool| matches!(tool, ResponsesTool::Shell(_))))
                     .cloned()
             }),
         agent.request.enriched_request.tool_choice.clone(),
@@ -63,7 +70,25 @@ fn translation_context(registry: &ToolRegistry, agent: &AgentPipeline) -> Transl
 pub fn upstream_request(ctx: &RequestContext, stream: bool) -> ExecutorResult<String> {
     // Composable callers may supply RequestContext without the rehydration step.
     validate_message_content(&ctx.enriched_request.input)?;
-    let request = ctx.enriched_request.to_upstream_request(stream)?;
+    let mut request = ctx.enriched_request.to_upstream_request(stream)?;
+    if ctx
+        .enriched_request
+        .multi_agent
+        .as_ref()
+        .is_some_and(|config| config.enabled)
+    {
+        let tools = request.tools.get_or_insert_with(Vec::new);
+        for tool in tools.iter() {
+            let UpstreamTool::Function(function) = tool;
+            if MultiAgentAction::from_tool_name(&function.name).is_some() {
+                return Err(ExecutorError::InvalidRequest(format!(
+                    "tool name '{}' is reserved for multi-agent collaboration",
+                    function.name
+                )));
+            }
+        }
+        tools.extend(collaboration::tools());
+    }
     serialize_to_string(&request).map_err(ExecutorError::JsonError)
 }
 
@@ -305,29 +330,14 @@ pub(super) mod tests {
 
     pub(in crate::executor) fn request_context() -> RequestContext {
         let request = RequestPayload {
-            model: "test".to_owned(),
+            model: "test".into(),
             input: ResponsesInput::Text("hi".to_owned()),
-            instructions: None,
-            previous_response_id: None,
-            conversation_id: None,
-            tools: None,
-            tool_choice: None,
             stream: true,
             store: false,
-            include: None,
-            reasoning: None,
-            text: None,
-            temperature: None,
-            top_p: None,
-            max_output_tokens: None,
-            ignore_eos: None,
-            truncation: None,
-            metadata: None,
-            parallel_tool_calls: None,
-            cache_salt: None,
-            context_management: None,
+            ..Default::default()
         };
         RequestContext {
+            multi_agent_tree: None,
             original_request: request.clone(),
             enriched_request: request,
             new_input_items: Vec::new(),
@@ -932,8 +942,8 @@ pub(super) mod tests {
         assert_eq!(result.payload.output.len(), 1);
         if let OutputItem::Message(msg) = &result.payload.output[0] {
             assert_eq!(msg.content.len(), 2);
-            assert_eq!(msg.content[0].text, "part 0 text ");
-            assert_eq!(msg.content[1].text, "part 1 text");
+            assert_eq!(msg.content[0].text(), "part 0 text ");
+            assert_eq!(msg.content[1].text(), "part 1 text");
         } else {
             panic!("expected OutputItem::Message");
         }

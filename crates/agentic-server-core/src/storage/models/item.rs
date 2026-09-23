@@ -441,6 +441,7 @@ mod tests {
     #[test]
     fn test_namespaced_function_call_rehydrates_without_storage_marker() {
         let stored = InOutItem::Output(OutputItem::FunctionCall(crate::types::io::FunctionToolCall {
+            agent: None,
             id: "fc_1".to_string(),
             call_id: "call_1".to_string(),
             name: "run".to_string(),
@@ -508,6 +509,7 @@ mod tests {
     fn test_multiple_namespaced_function_calls_rehydrate_without_storage_marker() {
         let stored_items = [
             InOutItem::Output(OutputItem::FunctionCall(crate::types::io::FunctionToolCall {
+                agent: None,
                 id: "fc_1".to_string(),
                 call_id: "call_1".to_string(),
                 name: "run".to_string(),
@@ -516,6 +518,7 @@ mod tests {
                 status: MessageStatus::Completed,
             })),
             InOutItem::Output(OutputItem::FunctionCall(crate::types::io::FunctionToolCall {
+                agent: None,
                 id: "fc_2".to_string(),
                 call_id: "call_2".to_string(),
                 name: "run".to_string(),
