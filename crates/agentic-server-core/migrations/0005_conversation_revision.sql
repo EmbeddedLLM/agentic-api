@@ -1,0 +1,1 @@
+ALTER TABLE conversations ADD COLUMN revision BIGINT NOT NULL DEFAULT 0;

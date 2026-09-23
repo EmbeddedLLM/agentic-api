@@ -147,14 +147,17 @@ Stored requests now fail if their response or conversation state cannot be persi
 
 `AGENTIC_API_SCHEMA_READY` keeps schema changes under supervisor control. Startup performs a read-only compatibility
 check and fails if required persistence columns, types, nullability, primary/foreign-key constraints, or the conversation
-sequence index are missing, or if the four integer columns still need widening. Apply this upgrade in one transaction
+sequence index are missing, or if persistence integer columns still need widening. The Conversations API also requires
+the `revision` column from migration `0005_conversation_revision.sql`. Apply this upgrade in one transaction
 with a DDL-capable migration role before starting the DML-only gateway role. When using `psql`, pass
 `-v ON_ERROR_STOP=1` so any statement failure stops the script:
 
 ```sql
 BEGIN;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS revision BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE conversations
-    ALTER COLUMN created_at TYPE BIGINT USING created_at::BIGINT;
+    ALTER COLUMN created_at TYPE BIGINT USING created_at::BIGINT,
+    ALTER COLUMN revision TYPE BIGINT USING revision::BIGINT;
 ALTER TABLE items
     ALTER COLUMN created_at TYPE BIGINT USING created_at::BIGINT,
     ALTER COLUMN seq TYPE BIGINT USING seq::BIGINT;

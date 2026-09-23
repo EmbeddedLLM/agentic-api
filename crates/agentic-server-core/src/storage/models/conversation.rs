@@ -1,5 +1,8 @@
 //! Conversation context and history.
 
+mod api;
+pub use api::{bump_revision_in_tx, create_with_metadata_in_tx, delete_in_tx, get_by_tenant, update_metadata};
+
 use super::super::pool::{DbPool, DbResult, DbTransaction};
 use super::item::Item;
 use crate::storage::backend::DatabaseBackend;
@@ -22,10 +25,17 @@ pub struct Conversation {
 
     /// Response that committed the latest conversation turn.
     pub latest_response_id: Option<String>,
+
+    /// Tenant identifier for multi-tenancy isolation.
+    pub tenant_id: Option<String>,
+
+    /// Revision incremented for every change to conversation items.
+    pub revision: i64,
 }
 
 #[derive(Debug, sqlx::FromRow)]
 struct ConversationSnapshotRow {
+    revision: i64,
     latest_response_id: Option<String>,
     item_id: Option<String>,
     item_data: Option<String>,
@@ -37,6 +47,7 @@ struct ConversationSnapshotRow {
 /// Item rows and the latest persisted response captured by one database statement.
 #[derive(Debug)]
 pub struct ConversationSnapshotRows {
+    pub revision: i64,
     pub latest_response_id: Option<String>,
     pub items: Vec<Item>,
 }
@@ -92,7 +103,7 @@ pub async fn get(pool: &DbPool, id: &str) -> DbResult<Option<Conversation>> {
 /// Returns `DbResult::Err` if the database query fails or a joined item row is malformed.
 pub async fn get_snapshot(pool: &DbPool, id: &str) -> DbResult<ConversationSnapshotRows> {
     let rows = sqlx::query_as::<_, ConversationSnapshotRow>(
-        "SELECT conversations.latest_response_id, \
+        "SELECT conversations.latest_response_id, conversations.revision, \
                 items.id AS item_id, \
                 items.data AS item_data, \
                 items.created_at AS item_created_at, \
@@ -107,6 +118,7 @@ pub async fn get_snapshot(pool: &DbPool, id: &str) -> DbResult<ConversationSnaps
     .fetch_all(pool)
     .await?;
 
+    let revision = rows.first().map_or(0, |row| row.revision);
     let latest_response_id = rows.first().and_then(|row| row.latest_response_id.clone());
     let mut items = Vec::with_capacity(rows.len());
     for row in rows {
@@ -122,6 +134,7 @@ pub async fn get_snapshot(pool: &DbPool, id: &str) -> DbResult<ConversationSnaps
                 created_at,
                 conversation_id: Some(conversation_id),
                 seq: row.item_sequence,
+                tenant_id: None,
             }),
             (None, None, None, None) => {}
             _ => {
@@ -133,6 +146,7 @@ pub async fn get_snapshot(pool: &DbPool, id: &str) -> DbResult<ConversationSnaps
     }
 
     Ok(ConversationSnapshotRows {
+        revision,
         latest_response_id,
         items,
     })
@@ -195,6 +209,8 @@ mod tests {
             metadata: None,
             created_at: 1_704_067_200,
             latest_response_id: None,
+            tenant_id: None,
+            revision: 0,
         };
 
         assert_eq!(conversation.id, "conv_1");

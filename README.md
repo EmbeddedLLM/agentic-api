@@ -54,7 +54,7 @@ flowchart LR
 ## ✨ Key Features
 
 - 🔄 **Stateful conversations**: the server manages history via `previous_response_id`. No client-side message tracking, no replaying full transcripts.
-- 🛠️ **Server-side tool execution**: an explicit tool-ownership model (gateway / client / provider) decides exactly what runs where. Web search ships today via [You.com](https://you.com), and the model executes multi-step tool chains automatically.
+- 🛠️ **Server-side tool execution**: an explicit tool-ownership model (gateway / client / provider) decides exactly what runs where. Web search ships today via [You.com](https://you.com) or [Brave Search](https://brave.com/search/api/), and the model executes multi-step tool chains automatically.
 - 📡 **Every transport**: non-streaming HTTP, server-sent events for token streaming, and full **WebSocket** support for interactive clients.
 - 🧰 **Codex-ready**: accepts Codex-shaped Responses traffic out of the box, preserving the tool declarations and response item shapes Codex depends on.
 - 🏃 **Background execution**: fire-and-forget requests that keep processing server-side.
@@ -122,16 +122,24 @@ permission checks and disables Codex approvals and sandboxing.
 
 ### Python distribution
 
-The `agentic-api` wheel packages the Rust gateway and a small Python launcher. This release produces wheel artifacts
-for 0.7.0 as a build-only release: download the wheel for your platform from the release workflow, then install that
-local file. It is not published on PyPI yet.
+The `agentic-api` Python package is [available on PyPI](https://pypi.org/project/agentic-api/0.8.0/). Version 0.8.0
+includes the Rust gateway, the `agentic` CLI, and a small Python launcher. Prebuilt wheels support Linux x86_64
+(glibc 2.17 or newer), macOS Intel, and macOS Apple Silicon; Python 3.10 or newer is required.
+
+With uv installed, run the packaged Rust CLI without a global installation:
 
 ```bash
-WHEEL_PATH=/absolute/path/to/agentic_api-PLATFORM.whl
-uv pip install "$WHEEL_PATH"
+uvx --from agentic-api==0.8.0 agentic --version
+uvx --from agentic-api==0.8.0 agentic serve --upstream http://existing-vllm:8000
+```
+
+Or install the Python launcher, with the optional local inference runtime:
+
+```bash
+python -m pip install agentic-api==0.8.0
 agentic-api serve --vllm-base-url http://existing-vllm:8000
 
-uv pip install "agentic-api[local] @ file://$WHEEL_PATH"
+python -m pip install "agentic-api[local]==0.8.0"
 agentic-api serve --model MODEL_ID
 ```
 
@@ -141,15 +149,15 @@ the launcher can manage a local vLLM process on supported Linux hosts.
 Use `agentic-api --version` for a quick install check and `agentic-api doctor --mode remote --json` when an agent or
 script needs machine-readable diagnostics.
 
-#### After PyPI publication
+#### Python launcher with uv
 
-These public-index and `uvx` examples apply only after the PyPI publication gate for a future release:
+Use uv to install the published package or run the Python launcher without a global installation:
 
 ```bash
-uv pip install agentic-api
-uv pip install "agentic-api[local]"
-uvx --from agentic-api agentic-api doctor
-uvx --from agentic-api agentic-api serve --vllm-base-url http://existing-vllm:8000
+uv pip install agentic-api==0.8.0
+uv pip install "agentic-api[local]==0.8.0"
+uvx --from agentic-api==0.8.0 agentic-api doctor
+uvx --from agentic-api==0.8.0 agentic-api serve --vllm-base-url http://existing-vllm:8000
 ```
 
 The Rust-native `agentic` CLI remains supported for `run codex`, `run claude`, `serve`, and `validate`. For the full
@@ -186,6 +194,13 @@ YOU_API_KEY=<your-you.com-api-key> YOU_API_BASE_URL=<you.com-api-base-url> \
   cargo run -p agentic-server -- --llm-api-base http://0.0.0.0:5050
 ```
 
+Prefer [Brave Search](https://brave.com/search/api/) (it has a free developer plan)? Select it instead:
+
+```bash
+AGENTIC_WEB_SEARCH_PROVIDER=brave BRAVE_API_KEY=<your-brave-api-key> \
+  cargo run -p agentic-server -- --llm-api-base http://0.0.0.0:5050
+```
+
 The default database is `~/.agentic-api/agentic_api.db`, so running an installed binary does not create state in the
 current directory. Set `AGENTIC_API_HOME` to an absolute directory to move both the default database and user
 configuration, or set `DATABASE_URL`/`--db-url` to select a different database.
@@ -219,8 +234,13 @@ llm_api_base = "http://127.0.0.1:5050"
 # database_url = "postgresql://agentic-api@localhost/agentic_api"
 
 [web_search]
+# Search backend for the gateway-owned web_search tool: "you" (default) or "brave".
+provider = "you"
 base_url = "https://api.ydc-index.io"
 api_key_env = "YOU_API_KEY"
+# Concurrent provider requests inside one batched web-search call; unset uses
+# the provider default (Brave: 1, You.com: max_concurrent_gateway_calls).
+# max_concurrent_queries = 1
 
 [mcp]
 allowed_hosts = ["mcp.example.com"]
@@ -236,11 +256,44 @@ max_request_body_size_bytes = 10485760
 # Must be greater than zero.
 max_concurrent_gateway_calls = 5
 
+[responses]
+# Cumulative logical retained response data across all rounds of a turn.
+# Defaults to 8 MiB (8388608).
+max_retained_bytes = 8388608
+
+# Maximum size for a single upstream JSON response body.
+# Defaults to 16 MiB (16777216).
+max_upstream_json_bytes = 16777216
+
+# Maximum size for a single upstream SSE line.
+# Defaults to 16 MiB (16777216).
+max_upstream_sse_line_bytes = 16777216
+
+# Maximum size for a single serialized outbound stream event.
+# Defaults to 16 MiB (16777216).
+max_stream_event_bytes = 16777216
+
+[models."Qwen/Qwen3-VL-8B-Instruct"]
+# Input modalities to advertise for this served model ID.
+# Accepted values are "text" and "text" + "image"; text is always required.
+input_modalities = ["text", "image"]
+
 [mcp_servers.counter]
 url = "https://mcp.example.com/mcp"
 allowed_tools = ["tool_1_name", "tool_2_name"]
 require_approval = "never"
 ```
+
+`[models."<served-model-id>"]` declares capabilities the gateway cannot infer. `input_modalities` resolves in this
+order: an explicit override here, then `capabilities: ["image"]` from the upstream `/v1/models` entry, then a
+conservative text-only fallback. Capabilities are never guessed from a model name, so a vision model served without
+capability metadata needs this override. An explicit `["text"]` wins over upstream image metadata, which pins a model
+to text. Unknown modality names, empty lists, duplicates, and image-only lists are rejected at startup with the
+offending file and line.
+
+This matters because Codex reads its local model catalog and strips image content from a request before sending it
+when the catalog says the model is text-only, so a missing override blocks image input even against a vision-capable
+upstream.
 
 `max_request_body_size_bytes` bounds the serialized request the gateway accepts on `/v1/responses`,
 `/v1/responses/compact`, `/v1/conversations`, the Anthropic Messages endpoints, and the Responses WebSocket. It counts
@@ -253,15 +306,80 @@ parsed. Order of precedence is `--max-request-body-size-bytes`, then `AGENTIC_MA
 file setting.
 
 `api_key_env` names the process environment variable containing the web-search credential; it does not contain the
-credential itself. `YOU_API_BASE_URL`, `AGENTIC_MCP_ALLOWED_HOSTS`, `AGENTIC_MAX_REQUEST_BODY_SIZE_BYTES`, and
-`AGENTIC_MAX_CONCURRENT_GATEWAY_CALLS` can override their typed file settings. The concurrency value is a sliding-window
-upper bound; handlers may further serialize calls to the same tool name. The MCP allowlist is used only for
-request-declared remote MCP URLs; configured `[mcp_servers]` entries are trusted operator configuration.
+credential itself. When it is unset, the selected provider's conventional variable is read (`YOU_API_KEY` or
+`BRAVE_API_KEY`). Newly generated files leave `api_key_env` unset so changing providers also changes the default
+credential variable. `AGENTIC_WEB_SEARCH_PROVIDER`, `AGENTIC_WEB_SEARCH_BASE_URL`, `AGENTIC_WEB_SEARCH_MAX_CONCURRENT_QUERIES`,
+`AGENTIC_MCP_ALLOWED_HOSTS`, `AGENTIC_MAX_REQUEST_BODY_SIZE_BYTES`, and `AGENTIC_MAX_CONCURRENT_GATEWAY_CALLS` can
+override their typed file settings; `YOU_API_BASE_URL` is still honored as the endpoint override when the provider is
+`you`. The concurrency values are sliding-window upper bounds; handlers may further serialize calls to the same tool
+name. The MCP allowlist is used only for request-declared remote MCP URLs; configured `[mcp_servers]` entries are trusted
+operator configuration.
+
+`[responses]` configures independent response resource limits across inference, transport, and client delivery:
+- `max_retained_bytes` (`AGENTIC_MAX_RETAINED_RESPONSE_BYTES`, default 8 MiB): bounds cumulative logical retained
+  response data across all rounds of a turn and gateway tool outputs. Unlike raw wire bytes, it is invariant to
+  upstream SSE chunking (1-byte deltas, coarse chunks, and non-streaming JSON consume identical logical budget).
+- `max_upstream_json_bytes` (`AGENTIC_MAX_UPSTREAM_JSON_BYTES`, default 16 MiB): bounds an individual upstream JSON body.
+- `max_upstream_sse_line_bytes` (`AGENTIC_MAX_UPSTREAM_SSE_LINE_BYTES`, default 16 MiB): bounds an individual upstream
+  SSE line buffer.
+- `max_stream_event_bytes` (`AGENTIC_MAX_STREAM_EVENT_BYTES`, default 16 MiB): bounds a single serialized SSE/WebSocket
+  event delivered to the client, including full `response.output_item.done` snapshots and terminal `response.completed`.
+  The WebSocket transport applies the same limit to each routed event (its `stream_id` member counts toward it), and
+  the executor validates the terminal event against that transport limit before persisting the response.
+
+Validation enforces that `max_stream_event_bytes`, `max_upstream_sse_line_bytes`, and `max_upstream_json_bytes` each
+exceed `max_retained_bytes` by proportional wire headroom (`max(64 KiB, max_retained_bytes / 4)`) to account for JSON
+serialization overhead, escaping, and message envelopes. When sizing gateway memory for concurrent streams, note that
+in-flight buffers multiply per active streaming request: a stream in flight may hold an upstream line buffer (up to
+`max_upstream_sse_line_bytes`), its parsed AST, an outbound channel event (up to `max_stream_event_bytes`), and retained
+turn state (`max_retained_bytes`).
 
 With that file in place, inject only the secret when starting the server:
 
 ```bash
 YOU_API_KEY="<your-you.com-api-key>" agentic-server
+```
+
+#### Web search providers
+
+The gateway-owned `web_search` tool runs against one configured backend; the model-facing tool schema is the same for
+every provider.
+
+| Setting | Environment variable | `config.toml` key | Default |
+| :--- | :--- | :--- | :--- |
+| Provider | `AGENTIC_WEB_SEARCH_PROVIDER` | `[web_search] provider` | `you` |
+| API key | variable named by `api_key_env` | `[web_search] api_key_env` | `YOU_API_KEY` / `BRAVE_API_KEY` |
+| Endpoint | `AGENTIC_WEB_SEARCH_BASE_URL` (or `YOU_API_BASE_URL` for You.com) | `[web_search] base_url` | none for You.com; `https://api.search.brave.com` for Brave |
+| Concurrent queries | `AGENTIC_WEB_SEARCH_MAX_CONCURRENT_QUERIES` | `[web_search] max_concurrent_queries` | You.com inherits `max_concurrent_gateway_calls`; Brave `1` |
+
+**You.com** (`provider = "you"`) is the default and behaves exactly as before: domain filters are applied by the
+provider, `count` accepts 1–100, and the You.com-specific `livecrawl`, `livecrawl_formats`, `crawl_timeout`, and
+`boost_domains` arguments are forwarded.
+
+**Brave Search** (`provider = "brave"`) needs only `BRAVE_API_KEY`; its [free plan](https://brave.com/search/api/)
+covers local and evaluation deployments. Web and news results come from one request per query. The gateway adapts
+the shared tool contract to Brave:
+
+- `allowed_domains` / `blocked_domains` (and the model's `include_domains` / `exclude_domains`) are enforced by the
+  gateway after the response arrives, since Brave has no server-side domain filter. An allowlist is a hard contract,
+  so a filtered search can return fewer than `count` results.
+- `count` is clamped to Brave's maximum of 20; `freshness` is translated to Brave's `pd`/`pw`/`pm`/`py` codes or
+  passed through as a date range; `language` maps to `search_lang`.
+- The You.com-specific arguments above are ignored (logged at debug level).
+- Each per-query `metadata[]` entry carries `"provider": "brave"` so the model can see which backend answered.
+- Brave's free plan allows roughly one request per second, so batched queries run one at a time by default. Raise
+  `max_concurrent_queries` on a paid plan. A rate-limited request (HTTP 429) fails that `web_search_call` without an
+  automatic retry and reports the upstream `Retry-After` value; a cap lowers, but cannot eliminate, 429s on a
+  per-second quota.
+
+If you switch an existing deployment to Brave, update `api_key_env` if an older `config.toml` pins it (or
+remove it) and drop a You.com `base_url`; a mismatched key variable is reported in the failed `web_search_call`
+message. Example:
+
+```toml
+[web_search]
+provider = "brave"
+api_key_env = "BRAVE_API_KEY"
 ```
 
 Restrict the file to the service account (for example, `chmod 600 ~/.agentic-api/config.toml`), especially if you add
@@ -362,8 +480,8 @@ Claude Code's own tools (Bash, Edit, Read, …) stay **client-owned** — Claude
 ### Running Claude Code's web search on the gateway
 
 Current Claude Code versions declare Anthropic's native `web_search_20250305` server tool. Agentic API translates that
-declaration for the upstream model and executes the resulting search server-side against the configured search backend;
-no MCP server or tool alias is required:
+declaration for the upstream model and executes the resulting search server-side against the configured search backend
+(You.com or Brave Search, see [Web search providers](#web-search-providers)); no MCP server or tool alias is required:
 
 ```bash
 YOU_API_KEY=<you.com-key> YOU_API_BASE_URL=<you.com-base-url> \

@@ -11,19 +11,23 @@ use agentic_core::config::{
     DEFAULT_POSTGRES_MAX_LIFETIME_SECONDS, DEFAULT_POSTGRES_MIGRATION_TIMEOUT_SECONDS,
     DEFAULT_POSTGRES_STATEMENT_TIMEOUT_SECONDS, DEFAULT_SQLITE_JOURNAL_SIZE_LIMIT_BYTES,
     DEFAULT_SQLITE_MAX_CONNECTIONS, DEFAULT_SQLITE_MMAP_SIZE_BYTES, PostgresConfig, SqliteConfig, SqliteTempStore,
-    ToolRuntimeConfig, WebSearchProviderConfig, default_database_url, ensure_agentic_api_home, normalize_base_url,
+    ToolRuntimeConfig, default_database_url, ensure_agentic_api_home, normalize_base_url,
 };
 use agentic_core::error::Error;
 use agentic_server::app::DEFAULT_MAX_REQUEST_BODY_SIZE;
 use agentic_server::auth::OidcConfig;
+use agentic_server::telemetry::{self, DEFAULT_SHUTDOWN_TIMEOUT, TelemetryConfig, TelemetryError, TelemetryGuard};
+use tracing::warn;
 
 mod config_file;
+mod responses_config;
 mod server;
+mod web_search_config;
+use responses_config::{generated_responses_file_config, resolve_responses_config};
 
-use config_file::{
-    FileConfig, McpFileConfig, MessagesGatewayFileConfig, ServerFileConfig, ToolsFileConfig, WebSearchFileConfig,
-};
+use config_file::{FileConfig, McpFileConfig, MessagesGatewayFileConfig, ServerFileConfig, ToolsFileConfig};
 use server::GatewayOptions;
+use web_search_config::{generated_web_search_file_config, resolve_web_search_config};
 
 /// Environment override for the serialized request-size ceiling.
 const MAX_REQUEST_BODY_SIZE_ENV: &str = "AGENTIC_MAX_REQUEST_BODY_SIZE_BYTES";
@@ -303,8 +307,7 @@ fn build_config(llm_api_base: String, common: &CommonArgs, file: &FileConfig) ->
         .or_else(|| file.database_url.clone())
         .map_or_else(default_database_url, Ok)?;
     let (postgres, sqlite) = database_configs_from_env(&db_url)?;
-    let web_search_api_key = file.web_search.api_key_env.as_deref().and_then(environment_value);
-    let web_search_base_url = environment_value("YOU_API_BASE_URL").or_else(|| file.web_search.base_url.clone());
+    let web_search = resolve_web_search_config(&file.web_search, environment_value)?;
     let mcp_allowed_hosts = environment_value("AGENTIC_MCP_ALLOWED_HOSTS")
         .map_or_else(|| file.mcp.allowed_hosts.clone(), |value| parse_comma_separated(&value));
     let max_concurrent_gateway_calls_default = file
@@ -315,6 +318,7 @@ fn build_config(llm_api_base: String, common: &CommonArgs, file: &FileConfig) ->
         "AGENTIC_MAX_CONCURRENT_GATEWAY_CALLS",
         max_concurrent_gateway_calls_default,
     )?;
+    let responses_config = resolve_responses_config(&file.responses)?;
     Ok(Config {
         llm_api_base,
         openai_api_key: common.openai_api_key.clone(),
@@ -325,12 +329,13 @@ fn build_config(llm_api_base: String, common: &CommonArgs, file: &FileConfig) ->
         postgres,
         sqlite,
         tools: ToolRuntimeConfig {
-            web_search: WebSearchProviderConfig::new(web_search_api_key, web_search_base_url),
+            web_search,
             mcp_servers: file.mcp_servers.clone(),
             mcp_allowed_hosts,
             messages_gateway_tool_aliases: file.messages_gateway.tool_aliases.clone(),
             max_concurrent_gateway_calls,
         },
+        responses: responses_config,
     })
 }
 
@@ -340,6 +345,7 @@ fn gateway_options<'a>(
     oidc: Option<OidcConfig>,
 ) -> Result<GatewayOptions<'a>, Error> {
     Ok(GatewayOptions {
+        model_capabilities: file.model_capabilities(),
         host: &common.gateway_host,
         port: common.gateway_port,
         max_request_body_size: resolve_max_request_body_size(
@@ -353,10 +359,7 @@ fn gateway_options<'a>(
 fn generated_file_config(llm_api_base: String) -> FileConfig {
     FileConfig {
         llm_api_base: Some(llm_api_base),
-        web_search: WebSearchFileConfig {
-            base_url: environment_value("YOU_API_BASE_URL"),
-            api_key_env: Some("YOU_API_KEY".to_owned()),
-        },
+        web_search: generated_web_search_file_config(environment_value),
         mcp: McpFileConfig {
             allowed_hosts: environment_value("AGENTIC_MCP_ALLOWED_HOSTS")
                 .map_or_else(Vec::new, |value| parse_comma_separated(&value)),
@@ -372,6 +375,7 @@ fn generated_file_config(llm_api_base: String) -> FileConfig {
         messages_gateway: MessagesGatewayFileConfig {
             tool_aliases: environment_value("MESSAGES_GATEWAY_TOOL_ALIASES"),
         },
+        responses: generated_responses_file_config(),
         mcp_servers: HashMap::new(),
         ..FileConfig::default()
     }
@@ -396,20 +400,42 @@ fn parse_comma_separated(value: &str) -> Vec<String> {
         .collect()
 }
 
-#[tokio::main]
-async fn main() -> Result<(), server::ServerError> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "agentic_server=info,agentic_core=info".parse().expect("valid filter")),
-        )
-        .init();
+/// Upper bound for stopping the runtime once the gateway has drained. Request
+/// tasks the drain deadline abandoned are dropped here, which finalizes their
+/// spans and metrics; only in-flight blocking work can hold this up.
+const RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
 
+fn main() -> Result<(), server::ServerError> {
+    // Parse first so `--help`/`--version` never build exporters.
+    let cli = Cli::parse();
+    // Providers and the subscriber are created outside the runtime so the
+    // guard outlives every task.
+    let telemetry_config = TelemetryConfig::from_env().map_err(TelemetryError::from)?;
+    let telemetry = telemetry::init(&telemetry_config)?;
+    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+    let result = runtime.block_on(run(cli));
+    // Stop the runtime before flushing telemetry: connection tasks that outlived
+    // the gateway drain are dropped now, so their final measurements land in
+    // providers that are still accepting them.
+    runtime.shutdown_timeout(RUNTIME_SHUTDOWN_TIMEOUT);
+    shutdown_telemetry(telemetry);
+    result
+}
+
+/// Flush exported telemetry after the runtime has stopped; failures are
+/// logged rather than surfaced because the gateway result is what matters.
+fn shutdown_telemetry(telemetry: TelemetryGuard) {
+    if let Err(error) = telemetry.shutdown_blocking(DEFAULT_SHUTDOWN_TIMEOUT) {
+        warn!(%error, "telemetry shutdown incomplete");
+    }
+}
+
+async fn run(cli: Cli) -> Result<(), server::ServerError> {
     let Cli {
         command,
         llm_api_base,
         common,
-    } = Cli::parse();
+    } = cli;
     let agentic_home = ensure_agentic_api_home()?;
     let loaded_file_config = FileConfig::load(&agentic_home)?;
     let config_file_missing = loaded_file_config.is_none();

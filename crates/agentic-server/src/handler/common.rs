@@ -81,11 +81,33 @@ pub(super) async fn read_json<T: DeserializeOwned>(body: Body, limit: NonZeroUsi
     serde_json::from_slice::<T>(&bytes).map_err(|error| executor_error_response(ExecutorError::from(error)))
 }
 
+// Currently unused after Conversations API rewrite, but kept for potential future use
+#[allow(dead_code)]
 pub(super) fn extract_store(bytes: &[u8]) -> bool {
     serde_json::from_slice::<serde_json::Value>(bytes)
         .ok()
         .and_then(|j| j.get("store").and_then(serde_json::Value::as_bool))
         .unwrap_or(true)
+}
+
+#[allow(clippy::result_large_err)]
+pub(super) fn extract_json<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, Response> {
+    serde_json::from_slice::<T>(bytes).map_err(|error| executor_error_response(ExecutorError::from(error)))
+}
+
+pub(super) fn error_response(status: StatusCode, error_type: &str, message: &str) -> Response {
+    let body = serde_json::json!({
+        "type": "error",
+        "error": {
+            "type": error_type,
+            "message": message
+        }
+    });
+    Response::builder()
+        .status(status)
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .expect("valid error response")
 }
 
 pub(super) fn extract_bearer(headers: &HeaderMap, config_key: Option<&str>) -> Option<String> {

@@ -31,7 +31,7 @@ jobs:
           set -euo pipefail
           permission="$(gh api \
             "repos/${{ github.repository }}/collaborators/${{ github.actor }}/permission" \
-            --jq '.permission')"
+            --jq '.role_name')"
 
           case "$permission" in
             admin|maintain)
