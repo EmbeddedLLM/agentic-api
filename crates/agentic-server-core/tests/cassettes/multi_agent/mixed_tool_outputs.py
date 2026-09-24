@@ -9,17 +9,23 @@ COMMAND = "python3 -c 'print(sum(range(1, 11)))'"
 
 
 def shell(action: dict) -> dict:
-    """Return one structured output per supported command, in request order."""
+    """Return success or an explicit fixture failure per command, in request order."""
     commands = action.get("commands")
     if not isinstance(commands, list) or not commands:
         raise ValueError("Expected a nonempty shell commands array")
-    for command in commands:
-        if command != COMMAND:
-            raise ValueError(f"No simulated shell output for command: {command!r}")
     result = {
         "output": [
             {"stdout": "55\n", "stderr": "", "outcome": {"type": "exit", "exit_code": 0}}
-            for _ in commands
+            if command == COMMAND
+            else {
+                "stdout": "",
+                "stderr": (
+                    f"Simulated shell fixture: unsupported command {command!r}; nothing was executed. "
+                    f"Each commands entry must be a complete shell command. Supported command: {COMMAND}\n"
+                ),
+                "outcome": {"type": "exit", "exit_code": 1},
+            }
+            for command in commands
         ]
     }
     if action.get("max_output_length") is not None:

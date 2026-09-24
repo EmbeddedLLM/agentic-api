@@ -66,3 +66,48 @@ async fn root_final_answer_settles_child_mailbox_wait_json_and_sse() {
                 && message.agent.as_ref().is_some_and(|agent| agent.agent_name == "/root"))));
     }
 }
+
+// A completed upstream round with only reasoning is not a final agent answer.
+pub(super) fn reasoning_only_recovery_output(request: &Value) -> Option<Vec<Value>> {
+    let input = request["input"].as_array().unwrap();
+    if !input.iter().any(|item| item["content"] == "reasoning-only recovery") {
+        return None;
+    }
+    if input.iter().any(|item| item["type"] == "reasoning") {
+        Some(vec![message("actual final answer")])
+    } else {
+        Some(vec![json!({"type":"reasoning", "id":uuid7_str("rs_"),
+            "content":[{"type":"reasoning_text","text":"still thinking"}],
+            "summary":[],"encrypted_content":null,"status":"completed"})])
+    }
+}
+
+#[tokio::test]
+async fn reasoning_only_round_does_not_finish_root_json_and_sse() {
+    for stream in [false, true] {
+        let (exec, server) = setup().await;
+        let work = response(
+            RequestPayload {
+                model: "test".into(),
+                store: true,
+                stream,
+                input: ResponsesInput::Text("reasoning-only recovery".into()),
+                multi_agent: Some(MultiAgentConfig {
+                    enabled: true,
+                    max_concurrent_subagents: Some(1),
+                }),
+                ..Default::default()
+            },
+            exec,
+        );
+        let result = tokio::time::timeout(Duration::from_secs(5), work).await;
+        server.abort();
+        let completed = result.expect("reasoning-only round must continue to a final answer");
+        assert_eq!(completed.status, "completed");
+        assert!(completed.output.iter().any(|item| matches!(item,
+            OutputItem::Reasoning(reasoning) if reasoning.agent.as_ref().is_some_and(|agent| agent.agent_name == "/root"))));
+        assert!(completed.output.iter().any(|item| matches!(item,
+            OutputItem::Message(message) if message.phase == Some(MessagePhase::FinalAnswer)
+                && message.agent.as_ref().is_some_and(|agent| agent.agent_name == "/root"))));
+    }
+}

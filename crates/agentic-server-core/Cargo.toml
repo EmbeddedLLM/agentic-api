@@ -53,6 +53,7 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v7", "serde"] }
 
 [dev-dependencies]
+flate2 = "1.1"
 axum.workspace = true
 criterion = { workspace = true }
 serde_yaml = "0.9"

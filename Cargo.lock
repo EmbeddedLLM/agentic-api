@@ -100,6 +100,7 @@ dependencies = [
  "criterion",
  "dirs",
  "either",
+ "flate2",
  "futures",
  "http",
  "indexmap",

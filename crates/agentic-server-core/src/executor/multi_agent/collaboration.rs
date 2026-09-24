@@ -22,7 +22,9 @@ pub(in crate::executor) fn attribution(identity: &AgentIdentity) -> AgentAttribu
 pub(in crate::executor) fn instructions(identity: &AgentIdentity, max_subagents: usize) -> String {
     let role = if identity.is_root() {
         "You own the user's overall request. Assign distinct tasks to children, do useful work while they run, \
-         and synthesize their results into the final answer."
+         and synthesize their results into the final answer. Give each child a bounded assignment and the \
+         facts it needs, rather than repeating the overall request to organize a team. \
+         Reuse completed findings; do not spawn another agent to repeat work already assigned or completed."
             .to_owned()
     } else {
         let (parent, _) = identity
@@ -38,14 +40,21 @@ pub(in crate::executor) fn instructions(identity: &AgentIdentity, max_subagents:
              Do not repeat that delegation or wait for your parent or siblings to finish the overall job. \
              When your assigned work is complete, return your findings in a final answer; the gateway delivers \
              it to your parent automatically. You do not need to wait for the rest of the team. \
-             You may delegate a distinct bounded part of your own assignment if necessary, but remain \
-             responsible for completing your assignment."
+             Complete a bounded assignment directly by default. Delegate only a strictly smaller, \
+             non-overlapping subtask when doing so is necessary and you have other useful work to do yourself. \
+             Never hand your entire assignment to another agent or recreate the parent's team. \
+             For example, a correctness reviewer should review correctness, not spawn another correctness \
+             reviewer plus security and testing reviewers. Those sibling assignments belong to the parent."
         )
     };
     format!(
         "You are `{identity}`, an agent in a team working on the user's task. {role} \
          Each agent has its own context and the same tools. \
-         Use spawn_agent for independent bounded tasks; send_message queues information without activating idle agents; \
+         Collaboration actions are function tools. Invoke them as actual function calls; \
+         writing a tool name, JSON arguments, or a <to=...> block in a message does not execute an action. \
+         You may call more than one function tool in a model round. \
+         spawn_agent creates a child; its availability is not an instruction to delegate. \
+         send_message queues information without activating idle agents; \
          followup_task activates a non-root agent; wait_agent waits for mailbox updates; interrupt_agent interrupts \
          active work while retaining context. Targets can be child names or canonical paths. \
          list_agents reports the entire tree, including you, your ancestors and your siblings, not just your children. \
@@ -65,7 +74,7 @@ pub(in crate::executor) fn tools() -> Vec<UpstreamTool> {
     [
         (
             "spawn_agent",
-            "Create a child for a distinct part of your own assignment. Only success creates a child; on an error, continue the work yourself. fork_turns is all, none, or a positive integer string.",
+            "Create a child for a strictly smaller, non-overlapping part of your assignment while you do other useful work. Do not delegate your whole assignment or repeat work already assigned or completed. Only success creates a child; on an error, continue the work yourself. fork_turns controls inherited prior user turns, not how long the child runs: all, none, or a positive integer string.",
             json!({"task_name":{"type":"string"},"message":{"type":"string"},"fork_turns":{"type":"string"}}),
             vec!["task_name", "message"],
         ),
@@ -177,7 +186,14 @@ mod tests {
         assert!(child_text.contains("Your parent is `/root/review`"));
         assert!(!child_text.contains("You own the user's overall request"));
         assert!(child_text.contains("3 active subagent slots shared across the entire tree"));
-        assert!(child_text.contains("You may delegate a distinct bounded part of your own assignment"));
+        assert!(child_text.contains("Complete a bounded assignment directly by default"));
+        assert!(child_text.contains("Never hand your entire assignment to another agent"));
+        assert!(child_text.contains("Delegate only a strictly smaller"));
+        assert!(root_text.contains("writing a tool name, JSON arguments, or a <to=...> block"));
+        assert!(child_text.contains("You may call more than one function tool in a model round"));
+        let spawn = tools().into_iter().next().unwrap();
+        let UpstreamTool::Function(spawn) = spawn;
+        assert!(spawn.description.unwrap().contains("not how long the child runs"));
     }
 
     #[test]

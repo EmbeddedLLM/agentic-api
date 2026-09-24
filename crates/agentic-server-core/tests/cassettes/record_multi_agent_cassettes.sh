@@ -9,8 +9,8 @@ usage() {
 Usage: bash record_multi_agent_cassettes.sh [--dry-run | --help]
 
 Record OpenAI first, review the observations, then implement and compare gateway behavior.
-Records delegated review (one request), proposal comparison (two requests), and
-three separate web/MCP/shell tasks (two requests), each over HTTP JSON and SSE.
+Records delegated review (one request), proposal comparison (bounded continuations), and
+three separate web/MCP/shell tasks (bounded continuations), each over HTTP JSON and SSE.
 All scenarios enable multi-agent with store:true and the multi-agent beta header.
 Proposal and mixed-tools continuations use previous_response_id and matching tool outputs.
 
@@ -18,6 +18,7 @@ Environment:
   MULTI_AGENT_RECORD_SET  openai (default), gateway, or all
   MULTI_AGENT_SUITE       all (default), workflows, review, proposals, or mixed-tools
   MULTI_AGENT_STREAM_MODE both (default), streaming, or nonstreaming
+  MULTI_AGENT_MAX_CONTINUATIONS  Extra client-tool requests per scenario (default: 10; max: 100)
   HTTP_READ_TIMEOUT      Upstream read inactivity timeout in seconds (default: 300)
   OPENAI_API_KEY         Required for live OpenAI recording; never written to logs
   OPENAI_MODEL           Default: gpt-5.6-sol
@@ -47,7 +48,7 @@ Runtime edge cases, failures, and compaction still need dedicated scenarios.
 Recordings use stable filenames containing provider, group/scenario, model, and mode.
 Re-running replaces those cassettes. A failed recording is retained for inspection.
 Scenario inputs are fixed fixture files; no scripts or run directories are copied.
-The proposal and mixed-tools drivers make two requests; inspect pending calls and completion
+The proposal and mixed-tools drivers continue pending client calls within the configured limit; inspect pending calls and completion
 after recording. Capture does not enforce agent counts or a particular answer.
 
 mixed-tools is included in all/workflows and can be selected alone. It records one initial
@@ -155,17 +156,15 @@ record_workflows() {
     turns=1
     tool_args=()
     if [[ "$scenario" == proposals ]]; then
-      turns=2
-      tool_args=(--tools "$FIXTURES_DIR/tools.json" --tool-outputs "$FIXTURES_DIR/tool_outputs.py")
+      tool_args=(--auto-tool-continuations "${MULTI_AGENT_MAX_CONTINUATIONS:-10}" --tools "$FIXTURES_DIR/tools.json" --tool-outputs "$FIXTURES_DIR/tool_outputs.py")
     elif [[ "$scenario" == mixed-tools ]]; then
-      turns=2
-      tool_args=(--tools "$FIXTURES_DIR/mixed_tools.json" --tool-outputs "$FIXTURES_DIR/mixed_tool_outputs.py")
+      tool_args=(--auto-tool-continuations "${MULTI_AGENT_MAX_CONTINUATIONS:-10}" --tools "$FIXTURES_DIR/mixed_tools.json" --tool-outputs "$FIXTURES_DIR/mixed_tool_outputs.py")
     fi
     prompts="$FIXTURES_DIR/$scenario.txt"
     for mode in nonstreaming streaming; do
       if [[ "$STREAM_MODE" != both && "$mode" != "$STREAM_MODE" ]]; then continue; fi
       output="$BASE_DIR/multi-agent-$provider-$scenario-$model_slug-$mode.yaml"
-      command=("$PYTHON" "$RECORDER" --mode responses --transport http --turns "$turns"
+      command=("$PYTHON" -u "$RECORDER" --mode responses --transport http --turns "$turns"
         --model "$model" "$endpoint_flag" "$endpoint" --proxy-port "$PROXY_PORT"
         --multi-agent "$MULTI_AGENT_CONFIG" --openai-beta responses_multi_agent=v1
         --http-read-timeout "$HTTP_READ_TIMEOUT"

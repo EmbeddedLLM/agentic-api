@@ -9,8 +9,9 @@ The suite writes six YAML files per provider/model: one JSON and one SSE
 cassette for each of `review`, `proposals`, and `mixed-tools`.
 Filenames include the provider, scenario, model, and transport mode.
 
-The proposal and mixed-tools workflows use two requests linked by `previous_response_id`.
-Review uses one request. Each scenario starts with separate delegated tasks.
+The proposal and mixed-tools workflows continue pending client tool calls using
+requests linked by `previous_response_id`, up to `MULTI_AGENT_MAX_CONTINUATIONS`
+(default: 10). Review uses one request. Each scenario starts with separate delegated tasks.
 
 The existing `multi-agent-openai-reference-review-gpt-5.6-sol-nonstreaming.yaml`
 is the accepted behavioral baseline. The old `edge-cases`, `failure-cases`, and
@@ -38,9 +39,9 @@ local-shell outputs from fixed fixtures. OpenAI owns agent creation, task assign
 collaboration, and scheduling. The proxy does not implement those decisions or
 change a response to match the scenario's expectations.
 
-The proposal and mixed-tools drivers currently make two requests. That is the recording budget,
-not proof that the agent tree has finished; inspect pending function calls and
-terminal events afterward. A complete continuation driver is separate work.
+The continuation limit is a recording budget, not proof that the agent tree has
+finished. Reaching it with pending client calls fails the driver and retains the
+captured exchanges for inspection.
 
 ## Three separate tasks: web search, MCP, and shell
 
@@ -77,18 +78,18 @@ Following `record_shell_cassettes.sh` and `shell/scenarios.py`, this scenario su
 simulated client output rather than executing the command. The first prompt requests
 the exact command `python3 -c 'print(sum(range(1, 11)))'`. The callback in
 `mixed_tool_outputs.py` checks each returned command and supplies stdout `55\n`,
-empty stderr, and exit code 0. Unsupported commands stop the driver, preserving
-the response already captured.
+empty stderr, and exit code 0. Unsupported commands receive explicit simulated exit-code-1 outputs; no command
+is executed. The model can then request a supported command.
 
-The second request submits `shell_call_output` using each actual call's `call_id`,
-with `previous_response_id` pointing to the first response. Its blank prompt adds
+Continuation requests submit `shell_call_output` using each actual call's `call_id`,
+with `previous_response_id` pointing to the preceding response. Continuations add
 no new user message. These are fixture inputs sent to the API; OpenAI's responses
 are recorded without fabrication. Tool availability is shared across agents; the
 prompt requests separate responsibilities without creating per-agent tool permissions.
 
 This scenario writes two `multi-agent-<provider>-mixed-tools-<model>-<mode>.yaml`
 files and is included in `all`/`workflows`. It requires access to the remote MCP server
-and local-shell tool support. Each file captures the two HTTP exchanges, including
+and local-shell tool support. Each file captures the HTTP exchanges, including
 the client-supplied shell output and OpenAI's response to it. The selected model may reject this tool combination; preserve and
 inspect that outcome. Confirm actual delegation and tool use afterward from the
 recorded items; a prompt requesting three agents is not proof that three ran.
@@ -136,5 +137,52 @@ evidence, not a successful multi-agent response cassette.
 
 For non-streaming requests, the recorder prints elapsed-time updates while
 waiting for the HTTP response. Reading a prompt from a redirected file does not
-require terminal input. A blank second line in `proposals.txt` or `mixed-tools.txt` submits only the
-pending function outputs on continuation. A missing line is a recorder error.
+require terminal input. The proposals and mixed-tools scenarios submit pending tool outputs automatically
+after the initial prompt, without requiring additional scripted prompt lines.
+
+## Recorded integration comparison
+
+These integration tests read captures without making live API calls.
+
+Run the comparison suite:
+
+```bash
+cargo test --locked -p agentic-server-core --test multi_agent_contract_test
+```
+
+Five Nemotron captures pass the session contract comparison: review in both
+transports, mixed-tools in both transports, and streaming proposals. Each session
+must preserve call/result identity, attribution, continuation chaining, and SSE
+item lifecycle. The gateway must exercise the reference's tool kinds and finish
+with a root final answer and no pending client calls. Model-generated wording,
+identifiers, action counts, and the number of client-tool continuation requests
+may differ. These checks do not grade answer quality or prove inference concurrency.
+
+The nonstreaming proposals capture is a known failed scenario: the model emits
+`<to=spawn_agent>` as message text and never retrieves either proposal. Its test
+asserts rejection, not successful parity. Keep it as evidence until a new live
+recording replaces it; do not edit the captured response into a passing example.
+
+## Large streaming capture
+
+The Nemotron review stream has 52,112 events and 53,281 reported output tokens.
+Its original 16,513,908-byte YAML is stored as a 730,223-byte `.yaml.gz` file.
+Compression is lossless; no deltas, reasoning, or terminal snapshots were removed.
+The integration loader accepts both `.yaml` and `.yaml.gz`.
+
+SHA-256 of the uncompressed review YAML:
+
+```text
+37a70274d2458f135452e6d9e2701848e390267442f1f03bd2aed0236bb99632
+```
+
+To inspect it without changing the tracked capture:
+
+```bash
+gzip -dc multi-agent-gateway-review-nvidia-NVIDIA-Nemotron-3-Nano-30B-A3B-BF16-streaming.yaml.gz | less
+```
+
+The recorder still writes ordinary YAML and logs. After re-recording review
+streaming, replace the compressed artifact with a losslessly compressed copy,
+update the size/hash above, and rerun the integration suite. Do not retain both
+the old compressed capture and a new uncompressed capture as competing fixtures.

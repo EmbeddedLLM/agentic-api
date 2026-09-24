@@ -1,9 +1,11 @@
 //! Integration-only comparison of independently recorded provider exchanges.
+use flate2::read::GzDecoder;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::io::Read;
 use std::path::Path;
 
 use agentic_core::events::{SSEEventType, normalize_sse_line};
-use agentic_core::types::io::{InputItem, MultiAgentAction, OutputItem};
+use agentic_core::types::io::{InputItem, MessagePhase, MultiAgentAction, OutputItem};
 use agentic_core::types::request_response::ResponsePayload;
 use serde_json::Value;
 
@@ -13,11 +15,23 @@ pub struct RecordedSession {
     exchanges: Vec<RecordedExchange>,
 }
 
+impl RecordedSession {
+    fn delegated_agents(&self) -> HashSet<&str> {
+        self.exchanges
+            .iter()
+            .flat_map(|exchange| &exchange.response.output)
+            .filter_map(|item| item.agent().map(|agent| agent.agent_name.as_str()))
+            .filter(|name| name.strip_prefix("/root/").is_some_and(|child| !child.contains('/')))
+            .collect()
+    }
+}
+
 struct RecordedExchange {
     response: ResponsePayload,
     previous_response_id: Option<String>,
     input: Vec<InputItem>,
     stream: bool,
+    max_concurrent_subagents: Option<u64>,
     kinds: HashSet<String>,
 }
 
@@ -37,7 +51,16 @@ fn mismatch(message: impl Into<String>) -> ContractMismatch {
 
 impl RecordedSession {
     pub fn load(path: &Path) -> Result<Self, ContractMismatch> {
-        let content = std::fs::read_to_string(path).map_err(|error| mismatch(error.to_string()))?;
+        let content = if path.extension().is_some_and(|extension| extension == "gz") {
+            let file = std::fs::File::open(path).map_err(|error| mismatch(error.to_string()))?;
+            let mut content = String::new();
+            GzDecoder::new(file)
+                .read_to_string(&mut content)
+                .map_err(|error| mismatch(error.to_string()))?;
+            content
+        } else {
+            std::fs::read_to_string(path).map_err(|error| mismatch(error.to_string()))?
+        };
         let cassette: Cassette = serde_yaml::from_str(&content).map_err(|error| mismatch(error.to_string()))?;
         let mut exchanges = Vec::new();
         for turn in responses_turns(&cassette) {
@@ -65,6 +88,7 @@ impl RecordedSession {
                 previous_response_id: turn.request.body.previous_response_id.clone(),
                 input,
                 stream: turn.request.body.stream,
+                max_concurrent_subagents: turn.request.body.extra["multi_agent"]["max_concurrent_subagents"].as_u64(),
                 kinds,
             });
         }
@@ -246,26 +270,71 @@ pub fn assert_multi_agent_contract(
     gateway: &RecordedSession,
     policy: &ComparisonPolicy,
 ) -> Result<(), ContractMismatch> {
-    if reference.exchanges.len() != gateway.exchanges.len() {
-        return Err(mismatch("exchange counts differ"));
+    let transport = reference.exchanges[0].stream;
+    let reference_limit = reference.exchanges[0].max_concurrent_subagents.unwrap_or(3);
+    let gateway_limit = gateway.exchanges[0].max_concurrent_subagents.unwrap_or(3);
+    if gateway_limit != reference_limit {
+        return Err(mismatch("max_concurrent_subagents differs from reference"));
     }
-    for (reference, gateway) in reference.exchanges.iter().zip(&gateway.exchanges) {
-        if reference.stream != gateway.stream || reference.response.status != gateway.response.status {
+    let required_agents = reference
+        .delegated_agents()
+        .len()
+        .min(usize::try_from(reference_limit).unwrap_or(usize::MAX));
+    if gateway.delegated_agents().len() < required_agents {
+        return Err(mismatch(
+            "gateway delegated fewer independent child tasks than reference",
+        ));
+    }
+    for exchange in &gateway.exchanges {
+        if exchange.stream != transport || exchange.response.status != "completed" {
             return Err(mismatch("transport or terminal status differs"));
         }
-        if policy.require_reference_tool_kinds {
-            for kind in [
-                "function_call",
-                "shell_call",
-                "web_search_call",
-                "mcp_call",
-                "multi_agent_call",
-            ] {
-                if reference.kinds.contains(kind) && !gateway.kinds.contains(kind) {
-                    return Err(mismatch(format!("gateway did not exercise {kind}")));
-                }
+    }
+    // Compare capabilities across the complete session: the model may request
+    // extra batches of client outputs without changing the ownership contract.
+    if policy.require_reference_tool_kinds {
+        let reference_kinds = reference
+            .exchanges
+            .iter()
+            .flat_map(|exchange| &exchange.kinds)
+            .collect::<HashSet<_>>();
+        let gateway_kinds = gateway
+            .exchanges
+            .iter()
+            .flat_map(|exchange| &exchange.kinds)
+            .collect::<HashSet<_>>();
+        for kind in [
+            "function_call",
+            "shell_call",
+            "web_search_call",
+            "mcp_call",
+            "multi_agent_call",
+        ] {
+            if reference_kinds.iter().any(|value| value.as_str() == kind)
+                && !gateway_kinds.iter().any(|value| value.as_str() == kind)
+            {
+                return Err(mismatch(format!("gateway did not exercise {kind}")));
             }
         }
+    }
+    let last = &gateway
+        .exchanges
+        .last()
+        .ok_or_else(|| mismatch("empty gateway session"))?
+        .response;
+    if last
+        .output
+        .iter()
+        .any(|item| matches!(item, OutputItem::FunctionCall(_) | OutputItem::ShellCall(_)))
+    {
+        return Err(mismatch("gateway session ends with pending client calls"));
+    }
+    if !last.output.iter().any(|item| {
+        matches!(item, OutputItem::Message(message)
+        if message.agent.as_ref().is_some_and(|agent| agent.agent_name == "/root")
+            && message.phase == Some(MessagePhase::FinalAnswer))
+    }) {
+        return Err(mismatch("gateway session has no root final answer"));
     }
     Ok(())
 }

@@ -16,7 +16,7 @@ use axum::response::IntoResponse;
 use axum::{Json, Router, routing::post};
 use either::Either;
 use futures::StreamExt;
-use root_completion::root_completion_output;
+use root_completion::{reasoning_only_recovery_output, root_completion_output};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use std::{collections::HashMap, fmt::Write};
@@ -40,7 +40,11 @@ fn assert_child_assignment(request: &Value, child: &str) {
     let instructions = guidance["content"].as_str().unwrap();
     assert!(instructions.contains(&format!("You are `/root/{child}`")));
     assert!(instructions.contains("Your parent is `/root`"));
+    assert!(instructions.contains("2 of 2 slots are occupied; 0 are free right now"));
+    assert!(instructions.contains("call spawn_agent at most 0 times"));
     assert!(instructions.contains("You have no direct children"));
+    assert!(instructions.contains("Never hand your entire assignment to another agent"));
+    assert!(instructions.contains("Your parent's delegation request is already fulfilled by your existence"));
     assert!(instructions.ends_with(&format!("Your current assignment:\nassess {child}")));
     assert_eq!(
         request["input"]
@@ -208,6 +212,8 @@ async fn setup_with_gate(gate: Option<Arc<Semaphore>>) -> (Arc<ExecutionContext>
             let output = if summarizing {
                 vec![message("Context summary")]
             } else if let Some(output) = root_completion_output(&request) {
+                output
+            } else if let Some(output) = reasoning_only_recovery_output(&request) {
                 output
             } else if let Some(output) = shell_review_output(&request) {
                 output

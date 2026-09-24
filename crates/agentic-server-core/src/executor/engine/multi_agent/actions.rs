@@ -22,8 +22,6 @@ impl MultiAgentRun {
         call: FunctionToolCall,
         pipeline: &mut AgentPipeline,
     ) -> ExecutorResult<()> {
-        tracing::info!(response_id = %self.payload.id, agent = %turn.agent,
-            turn = ?turn.turn, call_id = %call.call_id, ?action, "agent action requested");
         let command = AgentCommand::parse(action, &call.arguments);
         let arguments = command.as_ref().map_or_else(
             |_| self.sealer.seal(&call.arguments),
@@ -93,8 +91,6 @@ impl MultiAgentRun {
                 let context = self.contexts.get_mut(&target).expect("target was resolved");
                 context.generation += 1;
                 context.stored.last_task = task.message;
-                tracing::info!(response_id = %self.payload.id, agent = %turn.agent,
-                    target = %target, was_active = active, "agent follow-up queued");
                 if !active {
                     context.execution.restart();
                     context.stored.final_answer = None;
@@ -134,9 +130,6 @@ impl MultiAgentRun {
                 self.registry
                     .set_phase(turn, AgentPhase::WaitingForMailbox)
                     .map_err(registry_error)?;
-                tracing::info!(response_id = %self.payload.id, agent = %turn.agent,
-                    call_id, timeout_ms = wait.timeout_ms, "agent mailbox wait started");
-                self.log_tree("wait_started");
                 Ok(None)
             }
         }
@@ -174,9 +167,6 @@ impl MultiAgentRun {
             .registry
             .register_child(turn, &task.task_name, &task.message)
             .map_err(registry_error)?;
-        tracing::info!(response_id = %self.payload.id, agent = %child.agent,
-            parent = %turn.agent, turn = ?child.turn, fork_turns = %task.fork_turns,
-            inherited_items = history.len(), "agent spawned");
         self.contexts.insert(
             child.agent.clone(),
             AgentContext {

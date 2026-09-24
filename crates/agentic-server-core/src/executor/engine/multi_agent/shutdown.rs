@@ -10,7 +10,6 @@ impl MultiAgentRun {
         pipeline: &mut AgentPipeline,
     ) -> ExecutorResult<()> {
         self.root_finished = true;
-        tracing::info!(response_id = %self.payload.id, "root finished; settling remaining agent work");
         let active = self
             .registry
             .agents()

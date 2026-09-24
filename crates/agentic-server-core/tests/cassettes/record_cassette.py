@@ -1181,6 +1181,7 @@ def run_responses(
     parallel_tool_calls: bool | None = None,
     multi_agent: dict | None = None,
     request_overrides: dict | None = None,
+    auto_tool_continuations: int = 0,
 ) -> None:
     response_ids: dict[int, str] = {}
     responses: dict[int, dict] = {}
@@ -1196,7 +1197,10 @@ def run_responses(
     last_response: dict | None = None
     search_tools_loaded = False
     manual_history: list[dict] = []
-    for turn in range(1, turns + 1):
+    for turn in range(1, turns + auto_tool_continuations + 1):
+        automatic = turn > turns
+        if automatic and not _extract_tool_calls(last_response):
+            break
         if turn in branch_map:
             branch_from = branch_map[turn]
             if branch_from not in response_ids:
@@ -1215,7 +1219,9 @@ def run_responses(
             # input_image item array) can still be continued by previous_response_id.
             input_value: Any = preset_input
         else:
-            prompt = _prompt(f"Turn {turn}/{turns} — enter prompt: ")
+            prompt = "" if automatic else _prompt(f"Turn {turn}/{turns} — enter prompt: ")
+            if automatic:
+                click.echo(f"  [automatic client-tool continuation {turn - turns}/{auto_tool_continuations}]")
 
             # Inject matching client-tool outputs before the user message.
             has_output_fixtures = (
@@ -1301,6 +1307,12 @@ def run_responses(
             response_ids[turn] = response_id
             responses[turn] = response_data
 
+    if auto_tool_continuations and _extract_tool_calls(last_response):
+        raise click.ClickException(
+            f"Client-tool continuation limit ({auto_tool_continuations}) reached; "
+            "pending calls remain. Captured responses are retained; the task is unfinished."
+        )
+
     for b_idx, branch_from in enumerate(extra_branches, start=1):
         if branch_from not in response_ids:
             raise click.UsageError(
@@ -1353,6 +1365,8 @@ def run_responses(
 
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
+@click.option("--auto-tool-continuations", type=click.IntRange(0, 100), default=0,
+              help="Maximum additional tool-output-only Responses requests after scripted turns.")
 @click.option(
     "--turns", "-n", required=True, type=int, help="Number of turns to record."
 )
@@ -1558,6 +1572,7 @@ def run_responses(
 )
 def main(
     turns: int,
+    auto_tool_continuations: int,
     output: str,
     mode: str,
     branch_from: tuple[int, ...],
@@ -1589,6 +1604,14 @@ def main(
 ) -> None:
     """Interactive multi-turn cassette recorder (proxy embedded)."""
     global HTTP_READ_TIMEOUT
+    if auto_tool_continuations and (
+        mode != "responses" or transport != "http" or no_store or not tool_outputs_file
+        or branch_from or branch_turn_number or tool_choice_sequence_file or request_overrides_raw
+    ):
+        raise click.UsageError(
+            "--auto-tool-continuations requires stored HTTP Responses with --tool-outputs, "
+            "without branches, tool-choice sequences, or request overrides."
+        )
     if http_read_timeout != TIMEOUT and (mode != "responses" or transport != "http"):
         raise click.UsageError("--http-read-timeout requires HTTP --mode responses.")
     HTTP_READ_TIMEOUT = http_read_timeout
@@ -1881,6 +1904,7 @@ def main(
                         parallel_tool_calls=parallel_tool_calls,
                         multi_agent=multi_agent,
                         request_overrides=request_overrides,
+                        auto_tool_continuations=auto_tool_continuations,
                     )
                 elif mode == "messages":
                     run_messages(
