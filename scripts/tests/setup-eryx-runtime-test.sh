@@ -131,6 +131,7 @@ for installer in install binstall; do
   env \
     PATH="${shadow_dir}:/usr/bin:/bin" \
     CARGO_HOME="$install_root" \
+    ERYX_PRECOMPILE_INSTALL_ROOT="$install_root" \
     FAKE_BINSTALL_AVAILABLE="$binstall_available" \
     FAKE_INSTALLER_LOG="$installer_log" \
     FAKE_INSTALLED_PRECOMPILER="$installed_precompiler" \
