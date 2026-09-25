@@ -403,14 +403,36 @@ mod embedded {
             let code = CodeInterpreterCallArguments::from_json(&call.arguments, self.config.max_source_bytes)
                 .map(CodeInterpreterCallArguments::into_code)
                 .unwrap_or_default();
+            let suffix = call_output_id_suffix(call);
             OutputItem::CodeInterpreterCall(CodeInterpreterCall {
-                id: call.id.clone(),
-                container_id: format!("cntr_{}", call.id),
+                id: format!("ci_{suffix}"),
+                container_id: format!("cntr_{suffix}"),
                 code,
                 status,
                 outputs,
             })
         }
+    }
+
+    fn call_output_id_suffix(call: &FunctionToolCall) -> String {
+        if let Some(suffix) = call
+            .id
+            .strip_prefix("fc_")
+            .filter(|suffix| !suffix.is_empty() && !suffix.starts_with("fc_"))
+        {
+            return suffix.to_owned();
+        }
+        // Fallbacks have a separate suffix namespace so an unrelated call_123
+        // cannot collide with the public ID derived from fc_123.
+        let hash = call
+            .id
+            .bytes()
+            .chain(std::iter::once(0))
+            .chain(call.call_id.bytes())
+            .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+                (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+            });
+        format!("h{hash:016x}")
     }
 
     async fn supervise(
@@ -535,6 +557,70 @@ mod embedded {
                 max_aggregate_guest_memory_bytes: NonZeroUsize::new(128 * 1024 * 1024).expect("nonzero"),
                 ..CodeInterpreterRuntimeConfig::default()
             }
+        }
+
+        #[test]
+        fn gateway_code_interpreter_ids_match_across_started_and_completed_items() {
+            let executor = EryxCodeInterpreterExecutor {
+                config: test_config(),
+                guest_permits: Arc::new(Semaphore::new(1)),
+            };
+            let params: CodeInterpreterToolParam =
+                serde_json::from_value(serde_json::json!({"container": {"type": "auto"}}))
+                    .expect("valid code interpreter declaration");
+            let mut public_ids = Vec::new();
+            for (id, call_id, expected_suffix) in [
+                ("fc_123", "call_456", Some("123")),
+                ("fc_fc_123", "call_456", None),
+                ("provider-item", "call_123", None),
+                ("provider-item", "provider-call", None),
+            ] {
+                let call = FunctionToolCall {
+                    id: id.to_owned(),
+                    call_id: call_id.to_owned(),
+                    name: super::super::CODE_INTERPRETER_FUNCTION_NAME.to_owned(),
+                    namespace: None,
+                    arguments: r#"{"code":"print(42)"}"#.to_owned(),
+                    status: crate::types::event::MessageStatus::Completed,
+                };
+                let OutputItem::CodeInterpreterCall(started) = executor
+                    .plan_gateway_events(&call, &params)
+                    .into_started_output()
+                    .expect("started code interpreter item")
+                else {
+                    panic!("expected code interpreter item");
+                };
+                let output = ToolOutput {
+                    call_id: call.call_id.clone(),
+                    output: r#"{"status":"completed","stdout":"42\n","stderr":""}"#.to_owned(),
+                };
+                let OutputItem::CodeInterpreterCall(completed) = executor
+                    .public_output(&call, &output, GatewayCallStatus::Completed, &params)
+                    .expect("completed code interpreter item")
+                else {
+                    panic!("expected code interpreter item");
+                };
+
+                assert_eq!(started.id, completed.id);
+                assert_eq!(started.container_id, completed.container_id);
+                assert_eq!(started.code, completed.code);
+                assert!(started.id.starts_with("ci_"));
+                assert!(started.container_id.starts_with("cntr_"));
+                assert!(!started.container_id.starts_with("cntr_fc_"));
+                if let Some(suffix) = expected_suffix {
+                    assert_eq!(started.id, format!("ci_{suffix}"));
+                    assert_eq!(started.container_id, format!("cntr_{suffix}"));
+                } else {
+                    assert!(started.id.starts_with("ci_h"));
+                    assert_eq!(
+                        started.id.strip_prefix("ci_"),
+                        completed.container_id.strip_prefix("cntr_")
+                    );
+                }
+                public_ids.push(started.id);
+            }
+            assert_ne!(public_ids[0], public_ids[1]);
+            assert_ne!(public_ids[0], public_ids[2]);
         }
 
         #[tokio::test]

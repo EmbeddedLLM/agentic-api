@@ -173,6 +173,52 @@ fn done_only_code_interpreter_call_accumulates_in_lenient_stream() {
 }
 
 #[test]
+fn done_only_code_interpreter_stream_and_final_share_backfilled_id() {
+    use serde_json::json;
+
+    let mut acc = ResponseAccumulator::with_validation("resp_1".to_owned(), None, Validation::Lenient);
+    let mut translator = TranslationDispatcher::new(TranslationContext::default());
+    let done = json!({
+        "type": "response.output_item.done",
+        "output_index": 0,
+        "item": {
+            "type": "code_interpreter_call",
+            "id": "",
+            "container_id": "cntr_1",
+            "code": "print(42)",
+            "status": "completed",
+            "outputs": [{"type": "logs", "logs": "42\n"}]
+        }
+    });
+    let translated =
+        RoundIngestion::translate_line(&mut acc, SseLine::parse(&format!("data: {done}")), &mut translator)
+            .expect("valid done-only event")
+            .expect("emitted done-only event");
+    let emitted_id = translated.frames[0].wire.rest["item"]["id"]
+        .as_str()
+        .expect("emitted item ID");
+    assert!(emitted_id.starts_with("ci_"));
+    assert!(!emitted_id.strip_prefix("ci_").expect("ci prefix").is_empty());
+    let emitted_id = emitted_id.to_owned();
+    let EventPayload::OutputItemDone { item_id, item, .. } = &translated.frames[0].payload else {
+        panic!("expected typed completed item");
+    };
+    assert_eq!(item_id, &emitted_id);
+    assert_eq!(item["id"], emitted_id);
+    assert!(
+        RoundIngestion::translate_line(&mut acc, SseLine::parse(&format!("data: {done}")), &mut translator)
+            .expect("identical done-only event is valid")
+            .is_none()
+    );
+
+    acc.finalize_all().expect("finalize done-only item");
+    let OutputItem::CodeInterpreterCall(call) = &acc.output[0] else {
+        panic!("expected code interpreter call");
+    };
+    assert_eq!(call.id, emitted_id);
+}
+
+#[test]
 fn completed_slots_cannot_be_reopened_by_id_or_index() {
     use serde_json::json;
 

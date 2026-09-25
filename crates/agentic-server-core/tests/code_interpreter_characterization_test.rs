@@ -96,8 +96,14 @@ fn normalize_terminal(response: &Value) -> SemanticResult {
         .as_str()
         .expect("code call should have a container ID");
     let code = call["code"].as_str().expect("code call should contain code");
-    assert!(!id.trim().is_empty());
-    assert!(!container_id.trim().is_empty());
+    assert!(
+        id.starts_with("ci_"),
+        "code-interpreter item ID should have a ci_ prefix"
+    );
+    assert!(
+        container_id.starts_with("cntr_") && !container_id.starts_with("cntr_fc_"),
+        "container ID should have a cntr_ prefix without the internal function-call prefix"
+    );
     assert!(!code.trim().is_empty());
 
     let semantic = SemanticResult {

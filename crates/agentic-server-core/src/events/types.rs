@@ -495,6 +495,22 @@ impl EventFrame {
         }
     }
 
+    /// Keeps a completed item's typed and wire IDs aligned after ingestion backfills one.
+    pub(crate) fn set_done_item_id(&mut self, id: &str) {
+        let (EventPayload::OutputItemDone { item_id, item, .. }, Some(wire_item)) =
+            (&mut self.payload, self.wire.rest.get_mut("item"))
+        else {
+            return;
+        };
+        let (Some(item), Some(wire_item)) = (item.as_object_mut(), wire_item.as_object_mut()) else {
+            return;
+        };
+        item_id.clear();
+        item_id.push_str(id);
+        item.insert("id".to_owned(), Value::String(id.to_owned()));
+        wire_item.insert("id".to_owned(), Value::String(id.to_owned()));
+    }
+
     #[must_use]
     pub fn synthetic(event_type: SSEEventType, rest: Map<String, Value>) -> Option<Self> {
         let event_type_name = <&str>::try_from(event_type).ok()?;
