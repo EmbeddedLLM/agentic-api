@@ -107,8 +107,9 @@ use utoipa::OpenApi;
         agentic_core::types::tools::WebSearchFilters,
         agentic_core::types::tools::WebSearchUserLocation,
         agentic_core::types::tools::FileSearchToolParam,
-        agentic_core::types::tools::CodeInterpreterExecution,
         agentic_core::types::tools::CodeInterpreterToolParam,
+        agentic_core::types::tools::params::CodeInterpreterAutoContainer,
+        agentic_core::types::tools::params::CodeInterpreterAutoContainerType,
         agentic_core::types::tools::ShellToolParam,
         agentic_core::types::tools::ShellEnvironment,
         agentic_core::types::tools::LocalShellEnvironment,
@@ -591,13 +592,50 @@ mod tests {
             serde_json::json!({"type": "mcp", "server_label": "s"}),
             serde_json::json!({"type": "web_search_preview"}),
             serde_json::json!({"type": "file_search"}),
-            serde_json::json!({"type": "code_interpreter", "execution": "gateway"}),
+            serde_json::json!({"type": "code_interpreter", "container": {"type": "auto"}}),
             serde_json::json!({"type": "shell", "environment": {"type": "local"}}),
             serde_json::json!({"type": "namespace", "name": "ns", "tools": []}),
             serde_json::json!({"type": "custom", "name": "c"}),
         ];
         for fixture in &tools {
             validate("ResponsesTool", fixture);
+        }
+
+        let containerless_code_interpreter = serde_json::json!({"type": "code_interpreter"});
+        let tool_schema = serde_json::json!({
+            "components": { "schemas": schemas },
+            "$ref": "#/components/schemas/ResponsesTool"
+        });
+        let tool_validator = jsonschema::validator_for(&tool_schema).expect("valid ResponsesTool schema");
+        assert!(
+            tool_validator
+                .iter_errors(&containerless_code_interpreter)
+                .next()
+                .is_some(),
+            "schema must require a code-interpreter container"
+        );
+        assert!(
+            serde_json::from_value::<agentic_core::types::tools::ResponsesTool>(containerless_code_interpreter)
+                .is_err(),
+            "serde must require a code-interpreter container"
+        );
+
+        for unsupported in [
+            serde_json::json!({"type": "code_interpreter", "execution": "gateway"}),
+            serde_json::json!({
+                "type": "code_interpreter",
+                "container": {"type": "auto"},
+                "execution": "gateway"
+            }),
+        ] {
+            assert!(
+                tool_validator.iter_errors(&unsupported).next().is_some(),
+                "schema must reject the unsupported gateway selector: {unsupported}"
+            );
+            assert!(
+                serde_json::from_value::<agentic_core::types::tools::ResponsesTool>(unsupported).is_err(),
+                "serde must reject the unsupported gateway selector"
+            );
         }
 
         // -- ToolChoice: all accepted forms including legacy --

@@ -295,25 +295,31 @@ pub struct FileSearchToolParam {
     pub vector_store_ids: Option<Vec<String>>,
 }
 
-/// Selects the required execution location for the code interpreter.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// The only `OpenAI` container selector supported by the gateway.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[serde(deny_unknown_fields)]
+pub struct CodeInterpreterAutoContainer {
+    #[serde(rename = "type")]
+    pub kind: CodeInterpreterAutoContainerType,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(rename_all = "snake_case")]
-pub enum CodeInterpreterExecution {
-    #[default]
-    Gateway,
+pub enum CodeInterpreterAutoContainerType {
+    Auto,
 }
 
 /// Parameters for the gateway-executed code interpreter built-in tool.
 ///
-/// The first release deliberately accepts no container selectors, client
-/// runtime configuration, or extension fields. `deny_unknown_fields` keeps a
-/// misspelled or unsupported selector from being silently ignored.
+/// Accepts only the `OpenAI` auto-container declaration. The gateway selects
+/// the executor; clients cannot supply a container ID or runtime settings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
 pub struct CodeInterpreterToolParam {
-    pub execution: CodeInterpreterExecution,
+    pub container: CodeInterpreterAutoContainer,
 }
 
 /// Parameters for the shell built-in tool.
@@ -452,11 +458,8 @@ impl utoipa::PartialSchema for ResponsesTool {
                 .into()
         }
 
-        // `CodeInterpreterToolParam` denies unknown fields. Referencing that
-        // closed component through an `allOf` would make its
-        // `additionalProperties: false` reject the sibling `type` field.
-        // Keep the tagged declaration in one object so the OpenAPI schema has
-        // the same closed shape as serde's tagged enum variant.
+        // Keep the tagged declaration in one closed object so its schema
+        // matches the serde tagged enum variant.
         fn code_interpreter_tagged() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
             ObjectBuilder::new()
                 .property(
@@ -465,9 +468,9 @@ impl utoipa::PartialSchema for ResponsesTool {
                         .schema_type(SchemaType::new(Type::String))
                         .enum_values(Some(["code_interpreter"])),
                 )
-                .property("execution", Ref::from_schema_name("CodeInterpreterExecution"))
+                .property("container", Ref::from_schema_name("CodeInterpreterAutoContainer"))
                 .required("type")
-                .required("execution")
+                .required("container")
                 .additional_properties(Some(AdditionalProperties::FreeForm(false)))
                 .into()
         }
@@ -865,17 +868,29 @@ mod tests {
 
     #[test]
     fn responses_tool_code_interpreter_round_trips() {
-        let json = serde_json::json!({"type": "code_interpreter", "execution": "gateway"});
-        let tool: ResponsesTool = serde_json::from_value(json.clone()).unwrap();
+        let declaration = serde_json::json!({"type": "code_interpreter", "container": {"type": "auto"}});
+        let tool: ResponsesTool = serde_json::from_value(declaration.clone()).unwrap();
         assert!(matches!(tool, ResponsesTool::CodeInterpreter(_)));
-        assert_eq!(serde_json::to_value(&tool).unwrap(), json);
+        assert_eq!(serde_json::to_value(&tool).unwrap(), declaration);
+    }
+
+    #[test]
+    fn code_interpreter_openai_reference_declaration_parses() {
+        let tools: Vec<ResponsesTool> = serde_json::from_str(include_str!(
+            "../../../tests/cassettes/code_interpreter/openai_tools.json"
+        ))
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(&tools).unwrap(),
+            serde_json::json!([{"type": "code_interpreter", "container": {"type": "auto"}}])
+        );
     }
 
     #[test]
     fn code_interpreter_declaration_rejects_unknown_fields() {
         let error = serde_json::from_value::<ResponsesTool>(serde_json::json!({
             "type": "code_interpreter",
-            "execution": "gateway",
+            "container": {"type": "auto"},
             "misspelled_execution": "gateway"
         }))
         .expect_err("closed declaration must reject unknown fields");
@@ -884,46 +899,42 @@ mod tests {
     }
 
     #[test]
-    fn code_interpreter_declaration_rejects_container_fields() {
-        for field in [
-            serde_json::json!({"container": "auto"}),
-            serde_json::json!({"container_id": "cntr_client"}),
-            serde_json::json!({"container": {"id": "cntr_client"}}),
-            serde_json::json!({"container_reuse": "cntr_client"}),
-            serde_json::json!({"runtime": {"packages": ["untrusted"]}}),
+    fn code_interpreter_declaration_rejects_client_container_settings() {
+        for declaration in [
+            serde_json::json!({"type": "code_interpreter", "container": "cntr_client"}),
+            serde_json::json!({"type": "code_interpreter", "container": "auto"}),
+            serde_json::json!({"type": "code_interpreter", "container": {"id": "cntr_client"}}),
+            serde_json::json!({"type": "code_interpreter", "container": {"type": "auto", "file_ids": ["file_1"]}}),
+            serde_json::json!({"type": "code_interpreter", "container": {"type": "auto", "memory_limit": "4g"}}),
+            serde_json::json!({"type": "code_interpreter", "container": {"type": "auto"}, "container_id": "cntr_client"}),
+            serde_json::json!({"type": "code_interpreter", "container": {"type": "auto"}, "container_reuse": "cntr_client"}),
+            serde_json::json!({"type": "code_interpreter", "container": {"type": "auto"}, "runtime": {"packages": ["untrusted"]}}),
         ] {
-            let mut declaration = serde_json::json!({
-                "type": "code_interpreter",
-                "execution": "gateway"
-            });
-            declaration
-                .as_object_mut()
-                .expect("object declaration")
-                .extend(field.as_object().expect("object field").clone());
-
             assert!(
-                serde_json::from_value::<ResponsesTool>(declaration).is_err(),
-                "client container or runtime fields must not deserialize"
+                serde_json::from_value::<ResponsesTool>(declaration.clone()).is_err(),
+                "client container or runtime settings must not deserialize: {declaration}"
             );
         }
     }
 
     #[test]
-    fn code_interpreter_declaration_requires_gateway_execution() {
+    fn code_interpreter_declaration_requires_auto_container() {
         let missing = serde_json::from_value::<ResponsesTool>(serde_json::json!({
             "type": "code_interpreter"
         }))
-        .expect_err("execution is required");
-        assert!(missing.to_string().contains("missing field `execution`"));
+        .expect_err("container is required");
+        assert!(missing.to_string().contains("missing field `container`"));
 
         for declaration in [
+            serde_json::json!({"type": "code_interpreter", "execution": "gateway"}),
             serde_json::json!({"type": "code_interpreter", "execution": "client"}),
-            serde_json::json!({"type": "code_interpreter", "execution": "container"}),
-            serde_json::json!({"type": "code_interpreter", "execution": null}),
+            serde_json::json!({"type": "code_interpreter", "container": null}),
+            serde_json::json!({"type": "code_interpreter", "execution": null, "container": {"type": "auto"}}),
+            serde_json::json!({"type": "code_interpreter", "execution": "gateway", "container": {"type": "auto"}}),
         ] {
             assert!(
                 serde_json::from_value::<ResponsesTool>(declaration).is_err(),
-                "only explicit execution='gateway' is accepted"
+                "only the auto-container declaration is accepted"
             );
         }
     }

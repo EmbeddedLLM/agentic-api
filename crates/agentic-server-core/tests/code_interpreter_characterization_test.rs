@@ -283,7 +283,7 @@ fn openai_reference_and_gateway_blocking_responses_have_semantic_parity() {
     );
     assert_request_contract(
         gateway_turn,
-        json!({"type": "code_interpreter", "execution": "gateway"}),
+        json!({"type": "code_interpreter", "container": {"type": "auto"}}),
         false,
         false,
     );
@@ -315,7 +315,7 @@ fn openai_and_gateway_streams_follow_the_reference_code_call_lifecycle() {
     );
     assert_request_contract(
         &gateway.turns[0],
-        json!({"type": "code_interpreter", "execution": "gateway"}),
+        json!({"type": "code_interpreter", "container": {"type": "auto"}}),
         false,
         true,
     );
@@ -337,7 +337,7 @@ fn gateway_http_sse_and_websocket_have_transport_parity() {
 
     assert_request_contract(
         &websocket.turns[0],
-        json!({"type": "code_interpreter", "execution": "gateway"}),
+        json!({"type": "code_interpreter", "container": {"type": "auto"}}),
         true,
         false,
     );

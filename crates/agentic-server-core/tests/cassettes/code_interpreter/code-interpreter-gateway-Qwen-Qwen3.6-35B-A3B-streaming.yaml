@@ -12,7 +12,8 @@ turns:
       stream: true
       tool_choice: required
       tools:
-      - execution: gateway
+      - container:
+          type: auto
         type: code_interpreter
     headers:
       accept: '*/*'
@@ -28,7 +29,7 @@ turns:
     - 'event: response.created
 
       '
-    - 'data: {"type":"response.created","sequence_number":0,"response":{"background":false,"completed_at":null,"conversation":null,"created_at":1790011308,"error":null,"id":"resp_01a0c4fc-f8ed-7b91-87d5-db2c092dea00","incomplete_details":null,"instructions":null,"max_output_tokens":2048,"max_tool_calls":null,"metadata":{},"model":"Qwen/Qwen3.6-35B-A3B","object":"response","output":[],"parallel_tool_calls":false,"previous_response_id":null,"prompt":null,"prompt_cache_key":null,"prompt_cache_retention":null,"reasoning":{"effort":"medium","summary":null},"safety_identifier":null,"service_tier":"default","store":true,"status":"in_progress","temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"required","tools":[{"name":"code_interpreter","parameters":{"type":"object","properties":{"code":{"type":"string","description":"Python
+    - 'data: {"type":"response.created","sequence_number":0,"response":{"background":false,"completed_at":null,"conversation":null,"created_at":1790318790,"error":null,"id":"resp_01a0d750-c89c-7cd0-84ab-4608cfa137d2","incomplete_details":null,"instructions":null,"max_output_tokens":2048,"max_tool_calls":null,"metadata":{},"model":"Qwen/Qwen3.6-35B-A3B","object":"response","output":[],"parallel_tool_calls":false,"previous_response_id":null,"prompt":null,"prompt_cache_key":null,"prompt_cache_retention":null,"reasoning":{"effort":"medium","summary":null},"safety_identifier":null,"service_tier":"default","store":true,"status":"in_progress","temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"required","tools":[{"name":"code_interpreter","parameters":{"type":"object","properties":{"code":{"type":"string","description":"Python
       source to execute. Use print(...) to emit the answer."}},"required":["code"],"additionalProperties":false},"strict":true,"type":"function","description":"Execute
       Python in a fresh, network-isolated sandbox. Use print(...) to return text."}],"presence_penalty":0.0,"frequency_penalty":0.0,"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":null,"user":null}}
 
@@ -39,7 +40,7 @@ turns:
     - 'event: response.in_progress
 
       '
-    - 'data: {"type":"response.in_progress","sequence_number":1,"response":{"background":false,"completed_at":null,"conversation":null,"created_at":1790011308,"error":null,"id":"resp_01a0c4fc-f8ed-7b91-87d5-db2c092dea00","incomplete_details":null,"instructions":null,"max_output_tokens":2048,"max_tool_calls":null,"metadata":{},"model":"Qwen/Qwen3.6-35B-A3B","object":"response","output":[],"parallel_tool_calls":false,"previous_response_id":null,"prompt":null,"prompt_cache_key":null,"prompt_cache_retention":null,"reasoning":{"effort":"medium","summary":null},"safety_identifier":null,"service_tier":"default","store":true,"status":"in_progress","temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"required","tools":[{"name":"code_interpreter","parameters":{"type":"object","properties":{"code":{"type":"string","description":"Python
+    - 'data: {"type":"response.in_progress","sequence_number":1,"response":{"background":false,"completed_at":null,"conversation":null,"created_at":1790318790,"error":null,"id":"resp_01a0d750-c89c-7cd0-84ab-4608cfa137d2","incomplete_details":null,"instructions":null,"max_output_tokens":2048,"max_tool_calls":null,"metadata":{},"model":"Qwen/Qwen3.6-35B-A3B","object":"response","output":[],"parallel_tool_calls":false,"previous_response_id":null,"prompt":null,"prompt_cache_key":null,"prompt_cache_retention":null,"reasoning":{"effort":"medium","summary":null},"safety_identifier":null,"service_tier":"default","store":true,"status":"in_progress","temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"required","tools":[{"name":"code_interpreter","parameters":{"type":"object","properties":{"code":{"type":"string","description":"Python
       source to execute. Use print(...) to emit the answer."}},"required":["code"],"additionalProperties":false},"strict":true,"type":"function","description":"Execute
       Python in a fresh, network-isolated sandbox. Use print(...) to return text."}],"presence_penalty":0.0,"frequency_penalty":0.0,"top_logprobs":0,"top_p":1.0,"truncation":"disabled","usage":null,"user":null}}
 
@@ -50,7 +51,7 @@ turns:
     - 'event: response.output_item.added
 
       '
-    - 'data: {"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","summary":[],"type":"reasoning","content":[]}}
+    - 'data: {"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","summary":[],"type":"reasoning","content":[]}}
 
       '
     - '
@@ -59,7 +60,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":3,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"The"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":3,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"The"}
 
       '
     - '
@@ -68,8 +69,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":4,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      user wants to"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":4,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      user wants me"}
 
       '
     - '
@@ -78,8 +79,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":5,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      calculate the sum"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":5,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      to use"}
 
       '
     - '
@@ -88,8 +89,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":6,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      of the squares"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":6,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      the Python"}
 
       '
     - '
@@ -98,8 +99,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":7,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      of the integers"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":7,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      tool to calculate"}
 
       '
     - '
@@ -108,229 +109,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":8,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      from 1"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":9,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      through 1"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":10,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"0
-      using the"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":11,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      python"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":12,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      tool.\n"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":13,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"The
-      code"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":14,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      must print exactly"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":15,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      \""}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":16,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"CODE_INTERPRE"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":17,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"TER_OK="}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":18,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"385"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":19,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"\".\nAfter"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":20,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      it"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":21,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      runs, I"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":22,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      must answer exactly"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":23,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      \"CODE_INTER"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":24,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"PRETER_OK"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":25,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"=38"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":26,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"5\".\n\n"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":27,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"First"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":28,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":",
-      I''ll"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":29,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      write a Python"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":30,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      script to calculate"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":31,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":8,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
       the sum of"}
 
       '
@@ -340,8 +119,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":32,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      squares from"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":9,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      squares"}
 
       '
     - '
@@ -350,7 +129,17 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":33,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":10,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      of integers from"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":11,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
       1 to"}
 
       '
@@ -360,7 +149,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":34,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":12,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
       10"}
 
       '
@@ -370,7 +159,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":35,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":".\nSum"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":13,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":".\nThen"}
 
       '
     - '
@@ -379,8 +168,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":36,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      of squares formula"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":14,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":",
+      print"}
 
       '
     - '
@@ -389,8 +178,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":37,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":":
-      $"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":15,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      exactly `"}
 
       '
     - '
@@ -399,7 +188,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":38,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"n"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":16,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"CODE_INTERPRE"}
 
       '
     - '
@@ -408,7 +197,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":39,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"(n+1"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":17,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"TER_OK="}
 
       '
     - '
@@ -417,7 +206,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":40,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":")(2n"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":18,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"385"}
 
       '
     - '
@@ -426,7 +215,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":41,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"+1)/"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":19,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"`.\nFinally"}
 
       '
     - '
@@ -435,8 +224,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":42,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"6$
-      for"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":20,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":",
+      I need"}
 
       '
     - '
@@ -445,8 +234,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":43,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      $n="}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":21,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      to answer exactly"}
 
       '
     - '
@@ -455,7 +244,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":44,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"10$."}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":22,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      `CODE_INTER"}
 
       '
     - '
@@ -464,7 +254,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":45,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"\n$1"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":23,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"PRETER_OK"}
 
       '
     - '
@@ -473,7 +263,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":46,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"0("}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":24,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"=38"}
 
       '
     - '
@@ -482,7 +272,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":47,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"11)("}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":25,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"5`.\n\n"}
 
       '
     - '
@@ -491,7 +281,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":48,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"21)/"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":26,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"Let''s
+      write"}
 
       '
     - '
@@ -500,8 +291,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":49,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"6
-      = "}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":27,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      the"}
 
       '
     - '
@@ -510,7 +301,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":50,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"10("}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":28,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      Python code to"}
 
       '
     - '
@@ -519,7 +311,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":51,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"11)("}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":29,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      do this."}
 
       '
     - '
@@ -528,7 +321,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":52,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"3.5"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":30,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"\nSum"}
 
       '
     - '
@@ -537,8 +330,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":53,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":")
-      = "}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":31,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      of squares from"}
 
       '
     - '
@@ -547,7 +340,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":54,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"3"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":32,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      1 to"}
 
       '
     - '
@@ -556,7 +350,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":55,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"85"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":33,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      10"}
 
       '
     - '
@@ -565,7 +360,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":56,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"$.\nThe"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":34,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":":\n$"}
 
       '
     - '
@@ -574,8 +369,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":57,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      Python"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":35,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"1^2"}
 
       '
     - '
@@ -584,8 +378,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":58,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      code should print"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":36,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      + 2"}
 
       '
     - '
@@ -594,7 +388,369 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":59,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":37,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"^2
+      +"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":38,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      3^"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":39,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"2
+      + "}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":40,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"4^2"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":41,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      + 5"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":42,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"^2
+      +"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":43,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      6^"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":44,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"2
+      + "}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":45,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"7^2"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":46,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      + 8"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":47,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"^2
+      +"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":48,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      9^"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":49,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"2
+      + "}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":50,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"10^"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":51,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"2$\n"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":52,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"$=
+      "}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":53,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"1
+      + "}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":54,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"4
+      + "}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":55,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"9
+      + "}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":56,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"16
+      +"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":57,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      25"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":58,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      + 3"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":59,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"6
+      + "}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":60,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"49
+      +"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":61,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      64"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":62,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      + 8"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":63,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"1
+      + "}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":64,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"100"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":65,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"$"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":66,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"\n$="}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":67,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      38"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":68,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"5$."}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":69,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"\n\nI
+      will"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":70,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      write a Python"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":71,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      script that"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":72,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      calculates this sum"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":73,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      and prints exactly"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":74,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
       \""}
 
       '
@@ -604,7 +760,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":60,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"CODE_INTERPRE"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":75,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"CODE_INTERPRE"}
 
       '
     - '
@@ -613,7 +769,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":61,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"TER_OK="}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":76,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"TER_OK="}
 
       '
     - '
@@ -622,7 +778,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":62,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"385"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":77,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"385"}
 
       '
     - '
@@ -631,7 +787,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":63,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"\".\n\nLet"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":78,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"\".\nThen"}
 
       '
     - '
@@ -640,8 +796,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":64,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"''s
-      write the"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":79,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      I will output"}
 
       '
     - '
@@ -650,8 +806,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":65,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      python"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":80,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      the exact"}
 
       '
     - '
@@ -660,8 +816,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":66,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      code.\n"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":81,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      string as"}
 
       '
     - '
@@ -670,7 +826,115 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":67,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"```python\n"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":82,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","delta":"
+      requested.\n"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.done
+
+      '
+    - 'data: {"type":"response.reasoning_text.done","sequence_number":83,"output_index":0,"content_index":0,"item_id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","text":"The
+      user wants me to use the Python tool to calculate the sum of squares of integers
+      from 1 to 10.\nThen, print exactly `CODE_INTERPRETER_OK=385`.\nFinally, I need
+      to answer exactly `CODE_INTERPRETER_OK=385`.\n\nLet''s write the Python code
+      to do this.\nSum of squares from 1 to 10:\n$1^2 + 2^2 + 3^2 + 4^2 + 5^2 + 6^2
+      + 7^2 + 8^2 + 9^2 + 10^2$\n$= 1 + 4 + 9 + 16 + 25 + 36 + 49 + 64 + 81 + 100$\n$=
+      385$.\n\nI will write a Python script that calculates this sum and prints exactly
+      \"CODE_INTERPRETER_OK=385\".\nThen I will output the exact string as requested.\n"}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.done
+
+      '
+    - 'data: {"type":"response.output_item.done","sequence_number":84,"output_index":0,"item":{"id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","summary":[],"type":"reasoning","content":[{"text":"The
+      user wants me to use the Python tool to calculate the sum of squares of integers
+      from 1 to 10.\nThen, print exactly `CODE_INTERPRETER_OK=385`.\nFinally, I need
+      to answer exactly `CODE_INTERPRETER_OK=385`.\n\nLet''s write the Python code
+      to do this.\nSum of squares from 1 to 10:\n$1^2 + 2^2 + 3^2 + 4^2 + 5^2 + 6^2
+      + 7^2 + 8^2 + 9^2 + 10^2$\n$= 1 + 4 + 9 + 16 + 25 + 36 + 49 + 64 + 81 + 100$\n$=
+      385$.\n\nI will write a Python script that calculates this sum and prints exactly
+      \"CODE_INTERPRETER_OK=385\".\nThen I will output the exact string as requested.\n","type":"reasoning_text"}]}}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.added
+
+      '
+    - 'data: {"type":"response.output_item.added","sequence_number":85,"output_index":1,"item":{"type":"code_interpreter_call","id":"fc_01a0d750-cee8-7080-8c25-b4f699cd2c2d","container_id":"cntr_fc_01a0d750-cee8-7080-8c25-b4f699cd2c2d","code":"","status":"in_progress","outputs":null}}
+
+      '
+    - '
+
+      '
+    - 'event: response.code_interpreter_call.in_progress
+
+      '
+    - 'data: {"type":"response.code_interpreter_call.in_progress","sequence_number":86,"output_index":1,"item_id":"fc_01a0d750-cee8-7080-8c25-b4f699cd2c2d"}
+
+      '
+    - '
+
+      '
+    - 'event: response.code_interpreter_call_code.delta
+
+      '
+    - 'data: {"type":"response.code_interpreter_call_code.delta","sequence_number":87,"output_index":1,"item_id":"fc_01a0d750-cee8-7080-8c25-b4f699cd2c2d","delta":"result
+      = sum(i**2 for i in range(1, 11))\nprint(f\"CODE_INTERPRETER_OK={result}\")"}
+
+      '
+    - '
+
+      '
+    - 'event: response.code_interpreter_call_code.done
+
+      '
+    - 'data: {"type":"response.code_interpreter_call_code.done","sequence_number":88,"output_index":1,"item_id":"fc_01a0d750-cee8-7080-8c25-b4f699cd2c2d","code":"result
+      = sum(i**2 for i in range(1, 11))\nprint(f\"CODE_INTERPRETER_OK={result}\")"}
+
+      '
+    - '
+
+      '
+    - 'event: response.code_interpreter_call.interpreting
+
+      '
+    - 'data: {"type":"response.code_interpreter_call.interpreting","sequence_number":89,"output_index":1,"item_id":"fc_01a0d750-cee8-7080-8c25-b4f699cd2c2d"}
+
+      '
+    - '
+
+      '
+    - 'event: response.code_interpreter_call.completed
+
+      '
+    - 'data: {"type":"response.code_interpreter_call.completed","sequence_number":90,"output_index":1,"item_id":"fc_01a0d750-cee8-7080-8c25-b4f699cd2c2d"}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.done
+
+      '
+    - 'data: {"type":"response.output_item.done","sequence_number":91,"output_index":1,"item":{"type":"code_interpreter_call","id":"fc_01a0d750-cee8-7080-8c25-b4f699cd2c2d","container_id":"cntr_fc_01a0d750-cee8-7080-8c25-b4f699cd2c2d","code":"result
+      = sum(i**2 for i in range(1, 11))\nprint(f\"CODE_INTERPRETER_OK={result}\")","status":"completed","outputs":[{"type":"logs","logs":"CODE_INTERPRETER_OK=385\n"}]}}
+
+      '
+    - '
+
+      '
+    - 'event: response.output_item.added
+
+      '
+    - 'data: {"type":"response.output_item.added","sequence_number":92,"output_index":2,"item":{"id":"rs_01a0d750-da79-79e0-b7b7-944b2bbe4fb3","summary":[],"type":"reasoning","content":[]}}
 
       '
     - '
@@ -679,7 +943,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":68,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"print"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":93,"output_index":2,"content_index":0,"item_id":"rs_01a0d750-da79-79e0-b7b7-944b2bbe4fb3","delta":"The"}
 
       '
     - '
@@ -688,92 +952,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":69,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"(\"CODE_INTER"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":70,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"PRETER_OK"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":71,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"=38"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":72,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"5\")\n"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":73,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"```\nI"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":74,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      don"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":75,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"''t
-      need to"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":76,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      actually calculate it"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":77,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      in"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":78,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":94,"output_index":2,"content_index":0,"item_id":"rs_01a0d750-da79-79e0-b7b7-944b2bbe4fb3","delta":"
       Python"}
 
       '
@@ -783,8 +962,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":79,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      since"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":95,"output_index":2,"content_index":0,"item_id":"rs_01a0d750-da79-79e0-b7b7-944b2bbe4fb3","delta":"
+      tool"}
 
       '
     - '
@@ -793,7 +972,74 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":80,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":96,"output_index":2,"content_index":0,"item_id":"rs_01a0d750-da79-79e0-b7b7-944b2bbe4fb3","delta":"
+      successfully"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":97,"output_index":2,"content_index":0,"item_id":"rs_01a0d750-da79-79e0-b7b7-944b2bbe4fb3","delta":"
+      calculated the sum"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":98,"output_index":2,"content_index":0,"item_id":"rs_01a0d750-da79-79e0-b7b7-944b2bbe4fb3","delta":"
+      of squares and"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":99,"output_index":2,"content_index":0,"item_id":"rs_01a0d750-da79-79e0-b7b7-944b2bbe4fb3","delta":"
+      printed \"CODE"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":100,"output_index":2,"content_index":0,"item_id":"rs_01a0d750-da79-79e0-b7b7-944b2bbe4fb3","delta":"_INTERPRETER"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":101,"output_index":2,"content_index":0,"item_id":"rs_01a0d750-da79-79e0-b7b7-944b2bbe4fb3","delta":"_OK=3"}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":102,"output_index":2,"content_index":0,"item_id":"rs_01a0d750-da79-79e0-b7b7-944b2bbe4fb3","delta":"85\"."}
+
+      '
+    - '
+
+      '
+    - 'event: response.reasoning_text.delta
+
+      '
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":103,"output_index":2,"content_index":0,"item_id":"rs_01a0d750-da79-79e0-b7b7-944b2bbe4fb3","delta":"\nNow
       I"}
 
       '
@@ -803,8 +1049,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":81,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      know it"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":104,"output_index":2,"content_index":0,"item_id":"rs_01a0d750-da79-79e0-b7b7-944b2bbe4fb3","delta":"
+      need to answer"}
 
       '
     - '
@@ -813,8 +1059,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":82,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"''s
-      3"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":105,"output_index":2,"content_index":0,"item_id":"rs_01a0d750-da79-79e0-b7b7-944b2bbe4fb3","delta":"
+      exactly \""}
 
       '
     - '
@@ -823,7 +1069,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":83,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"85,"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":106,"output_index":2,"content_index":0,"item_id":"rs_01a0d750-da79-79e0-b7b7-944b2bbe4fb3","delta":"CODE_INTERPRE"}
 
       '
     - '
@@ -832,8 +1078,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":84,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      but I will"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":107,"output_index":2,"content_index":0,"item_id":"rs_01a0d750-da79-79e0-b7b7-944b2bbe4fb3","delta":"TER_OK="}
 
       '
     - '
@@ -842,8 +1087,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":85,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      write the"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":108,"output_index":2,"content_index":0,"item_id":"rs_01a0d750-da79-79e0-b7b7-944b2bbe4fb3","delta":"385"}
 
       '
     - '
@@ -852,8 +1096,8 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":86,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      script"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":109,"output_index":2,"content_index":0,"item_id":"rs_01a0d750-da79-79e0-b7b7-944b2bbe4fb3","delta":"\"
+      as requested"}
 
       '
     - '
@@ -862,143 +1106,7 @@ turns:
     - 'event: response.reasoning_text.delta
 
       '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":87,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      to verify"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":88,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      or"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":89,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      just print the"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":90,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      exact"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":91,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      string as requested"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":92,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":".
-      The"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":93,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      prompt says \""}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":94,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"The
-      code must"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":95,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      print exactly CODE"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":96,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"_INTERPRETER"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":97,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"_OK=3"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":98,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"85.\""}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":99,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"\n\nLet''s"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":100,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":"
-      execute the tool"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":101,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","delta":".\n"}
+    - 'data: {"type":"response.reasoning_text.delta","sequence_number":110,"output_index":2,"content_index":0,"item_id":"rs_01a0d750-da79-79e0-b7b7-944b2bbe4fb3","delta":".\n"}
 
       '
     - '
@@ -1007,18 +1115,9 @@ turns:
     - 'event: response.reasoning_text.done
 
       '
-    - 'data: {"type":"response.reasoning_text.done","sequence_number":102,"output_index":0,"content_index":0,"item_id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","text":"The
-      user wants to calculate the sum of the squares of the integers from 1 through
-      10 using the python tool.\nThe code must print exactly \"CODE_INTERPRETER_OK=385\".\nAfter
-      it runs, I must answer exactly \"CODE_INTERPRETER_OK=385\".\n\nFirst, I''ll
-      write a Python script to calculate the sum of squares from 1 to 10.\nSum of
-      squares formula: $n(n+1)(2n+1)/6$ for $n=10$.\n$10(11)(21)/6 = 10(11)(3.5) =
-      385$.\nThe Python code should print \"CODE_INTERPRETER_OK=385\".\n\nLet''s write
-      the python code.\n```python\nprint(\"CODE_INTERPRETER_OK=385\")\n```\nI don''t
-      need to actually calculate it in Python since I know it''s 385, but I will write
-      the script to verify or just print the exact string as requested. The prompt
-      says \"The code must print exactly CODE_INTERPRETER_OK=385.\"\n\nLet''s execute
-      the tool.\n"}
+    - 'data: {"type":"response.reasoning_text.done","sequence_number":111,"output_index":2,"content_index":0,"item_id":"rs_01a0d750-da79-79e0-b7b7-944b2bbe4fb3","text":"The
+      Python tool successfully calculated the sum of squares and printed \"CODE_INTERPRETER_OK=385\".\nNow
+      I need to answer exactly \"CODE_INTERPRETER_OK=385\" as requested.\n"}
 
       '
     - '
@@ -1027,18 +1126,9 @@ turns:
     - 'event: response.output_item.done
 
       '
-    - 'data: {"type":"response.output_item.done","sequence_number":103,"output_index":0,"item":{"id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","summary":[],"type":"reasoning","content":[{"text":"The
-      user wants to calculate the sum of the squares of the integers from 1 through
-      10 using the python tool.\nThe code must print exactly \"CODE_INTERPRETER_OK=385\".\nAfter
-      it runs, I must answer exactly \"CODE_INTERPRETER_OK=385\".\n\nFirst, I''ll
-      write a Python script to calculate the sum of squares from 1 to 10.\nSum of
-      squares formula: $n(n+1)(2n+1)/6$ for $n=10$.\n$10(11)(21)/6 = 10(11)(3.5) =
-      385$.\nThe Python code should print \"CODE_INTERPRETER_OK=385\".\n\nLet''s write
-      the python code.\n```python\nprint(\"CODE_INTERPRETER_OK=385\")\n```\nI don''t
-      need to actually calculate it in Python since I know it''s 385, but I will write
-      the script to verify or just print the exact string as requested. The prompt
-      says \"The code must print exactly CODE_INTERPRETER_OK=385.\"\n\nLet''s execute
-      the tool.\n","type":"reasoning_text"}]}}
+    - 'data: {"type":"response.output_item.done","sequence_number":112,"output_index":2,"item":{"id":"rs_01a0d750-da79-79e0-b7b7-944b2bbe4fb3","summary":[],"type":"reasoning","content":[{"text":"The
+      Python tool successfully calculated the sum of squares and printed \"CODE_INTERPRETER_OK=385\".\nNow
+      I need to answer exactly \"CODE_INTERPRETER_OK=385\" as requested.\n","type":"reasoning_text"}]}}
 
       '
     - '
@@ -1047,225 +1137,7 @@ turns:
     - 'event: response.output_item.added
 
       '
-    - 'data: {"type":"response.output_item.added","sequence_number":104,"output_index":1,"item":{"type":"code_interpreter_call","id":"fc_01a0c4fd-0080-7900-9e49-ea13def32914","container_id":"cntr_fc_01a0c4fd-0080-7900-9e49-ea13def32914","code":"","status":"in_progress","outputs":null}}
-
-      '
-    - '
-
-      '
-    - 'event: response.code_interpreter_call.in_progress
-
-      '
-    - 'data: {"type":"response.code_interpreter_call.in_progress","sequence_number":105,"output_index":1,"item_id":"fc_01a0c4fd-0080-7900-9e49-ea13def32914"}
-
-      '
-    - '
-
-      '
-    - 'event: response.code_interpreter_call_code.delta
-
-      '
-    - 'data: {"type":"response.code_interpreter_call_code.delta","sequence_number":106,"output_index":1,"item_id":"fc_01a0c4fd-0080-7900-9e49-ea13def32914","delta":"#
-      Calculate sum of squares from 1 to 10\nresult = sum(i**2 for i in range(1, 11))\nprint(f\"CODE_INTERPRETER_OK={result}\")"}
-
-      '
-    - '
-
-      '
-    - 'event: response.code_interpreter_call_code.done
-
-      '
-    - 'data: {"type":"response.code_interpreter_call_code.done","sequence_number":107,"output_index":1,"item_id":"fc_01a0c4fd-0080-7900-9e49-ea13def32914","code":"#
-      Calculate sum of squares from 1 to 10\nresult = sum(i**2 for i in range(1, 11))\nprint(f\"CODE_INTERPRETER_OK={result}\")"}
-
-      '
-    - '
-
-      '
-    - 'event: response.code_interpreter_call.interpreting
-
-      '
-    - 'data: {"type":"response.code_interpreter_call.interpreting","sequence_number":108,"output_index":1,"item_id":"fc_01a0c4fd-0080-7900-9e49-ea13def32914"}
-
-      '
-    - '
-
-      '
-    - 'event: response.code_interpreter_call.completed
-
-      '
-    - 'data: {"type":"response.code_interpreter_call.completed","sequence_number":109,"output_index":1,"item_id":"fc_01a0c4fd-0080-7900-9e49-ea13def32914"}
-
-      '
-    - '
-
-      '
-    - 'event: response.output_item.done
-
-      '
-    - 'data: {"type":"response.output_item.done","sequence_number":110,"output_index":1,"item":{"type":"code_interpreter_call","id":"fc_01a0c4fd-0080-7900-9e49-ea13def32914","container_id":"cntr_fc_01a0c4fd-0080-7900-9e49-ea13def32914","code":"#
-      Calculate sum of squares from 1 to 10\nresult = sum(i**2 for i in range(1, 11))\nprint(f\"CODE_INTERPRETER_OK={result}\")","status":"completed","outputs":[{"type":"logs","logs":"CODE_INTERPRETER_OK=385\n"}]}}
-
-      '
-    - '
-
-      '
-    - 'event: response.output_item.added
-
-      '
-    - 'data: {"type":"response.output_item.added","sequence_number":111,"output_index":2,"item":{"id":"rs_01a0c4fd-0aa6-78d3-bc82-c6f40470473f","summary":[],"type":"reasoning","content":[]}}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":112,"output_index":2,"content_index":0,"item_id":"rs_01a0c4fd-0aa6-78d3-bc82-c6f40470473f","delta":"The"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":113,"output_index":2,"content_index":0,"item_id":"rs_01a0c4fd-0aa6-78d3-bc82-c6f40470473f","delta":"
-      code executed successfully"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":114,"output_index":2,"content_index":0,"item_id":"rs_01a0c4fd-0aa6-78d3-bc82-c6f40470473f","delta":"
-      and printed \""}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":115,"output_index":2,"content_index":0,"item_id":"rs_01a0c4fd-0aa6-78d3-bc82-c6f40470473f","delta":"CODE_INTERPRE"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":116,"output_index":2,"content_index":0,"item_id":"rs_01a0c4fd-0aa6-78d3-bc82-c6f40470473f","delta":"TER_OK="}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":117,"output_index":2,"content_index":0,"item_id":"rs_01a0c4fd-0aa6-78d3-bc82-c6f40470473f","delta":"385"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":118,"output_index":2,"content_index":0,"item_id":"rs_01a0c4fd-0aa6-78d3-bc82-c6f40470473f","delta":"\".\nNow"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":119,"output_index":2,"content_index":0,"item_id":"rs_01a0c4fd-0aa6-78d3-bc82-c6f40470473f","delta":"
-      I need to"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":120,"output_index":2,"content_index":0,"item_id":"rs_01a0c4fd-0aa6-78d3-bc82-c6f40470473f","delta":"
-      answer exactly \""}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":121,"output_index":2,"content_index":0,"item_id":"rs_01a0c4fd-0aa6-78d3-bc82-c6f40470473f","delta":"CODE_INTERPRE"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":122,"output_index":2,"content_index":0,"item_id":"rs_01a0c4fd-0aa6-78d3-bc82-c6f40470473f","delta":"TER_OK="}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":123,"output_index":2,"content_index":0,"item_id":"rs_01a0c4fd-0aa6-78d3-bc82-c6f40470473f","delta":"385"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.delta
-
-      '
-    - 'data: {"type":"response.reasoning_text.delta","sequence_number":124,"output_index":2,"content_index":0,"item_id":"rs_01a0c4fd-0aa6-78d3-bc82-c6f40470473f","delta":"\".\n"}
-
-      '
-    - '
-
-      '
-    - 'event: response.reasoning_text.done
-
-      '
-    - 'data: {"type":"response.reasoning_text.done","sequence_number":125,"output_index":2,"content_index":0,"item_id":"rs_01a0c4fd-0aa6-78d3-bc82-c6f40470473f","text":"The
-      code executed successfully and printed \"CODE_INTERPRETER_OK=385\".\nNow I need
-      to answer exactly \"CODE_INTERPRETER_OK=385\".\n"}
-
-      '
-    - '
-
-      '
-    - 'event: response.output_item.done
-
-      '
-    - 'data: {"type":"response.output_item.done","sequence_number":126,"output_index":2,"item":{"id":"rs_01a0c4fd-0aa6-78d3-bc82-c6f40470473f","summary":[],"type":"reasoning","content":[{"text":"The
-      code executed successfully and printed \"CODE_INTERPRETER_OK=385\".\nNow I need
-      to answer exactly \"CODE_INTERPRETER_OK=385\".\n","type":"reasoning_text"}]}}
-
-      '
-    - '
-
-      '
-    - 'event: response.output_item.added
-
-      '
-    - 'data: {"type":"response.output_item.added","sequence_number":127,"output_index":3,"item":{"role":"assistant","type":"message","content":[],"id":"msg_01a0c4fd-0aae-7b02-90dc-5c81598db8ab","status":"in_progress"}}
+    - 'data: {"type":"response.output_item.added","sequence_number":113,"output_index":3,"item":{"role":"assistant","type":"message","content":[],"id":"msg_01a0d750-da81-7072-94a9-bc46dc3152f0","status":"in_progress"}}
 
       '
     - '
@@ -1274,7 +1146,7 @@ turns:
     - 'event: response.content_part.added
 
       '
-    - 'data: {"type":"response.content_part.added","sequence_number":128,"output_index":3,"content_index":0,"item_id":"msg_01a0c4fd-0aae-7b02-90dc-5c81598db8ab","part":{"annotations":[],"logprobs":[],"text":"","type":"output_text"}}
+    - 'data: {"type":"response.content_part.added","sequence_number":114,"output_index":3,"content_index":0,"item_id":"msg_01a0d750-da81-7072-94a9-bc46dc3152f0","part":{"annotations":[],"logprobs":[],"text":"","type":"output_text"}}
 
       '
     - '
@@ -1283,7 +1155,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":129,"output_index":3,"content_index":0,"item_id":"msg_01a0c4fd-0aae-7b02-90dc-5c81598db8ab","delta":"\n\nCODE_INTER","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":115,"output_index":3,"content_index":0,"item_id":"msg_01a0d750-da81-7072-94a9-bc46dc3152f0","delta":"\n\nCODE_INTER","logprobs":[]}
 
       '
     - '
@@ -1292,7 +1164,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":130,"output_index":3,"content_index":0,"item_id":"msg_01a0c4fd-0aae-7b02-90dc-5c81598db8ab","delta":"PRETER_OK","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":116,"output_index":3,"content_index":0,"item_id":"msg_01a0d750-da81-7072-94a9-bc46dc3152f0","delta":"PRETER_OK","logprobs":[]}
 
       '
     - '
@@ -1301,7 +1173,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":131,"output_index":3,"content_index":0,"item_id":"msg_01a0c4fd-0aae-7b02-90dc-5c81598db8ab","delta":"=38","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":117,"output_index":3,"content_index":0,"item_id":"msg_01a0d750-da81-7072-94a9-bc46dc3152f0","delta":"=38","logprobs":[]}
 
       '
     - '
@@ -1310,7 +1182,7 @@ turns:
     - 'event: response.output_text.delta
 
       '
-    - 'data: {"type":"response.output_text.delta","sequence_number":132,"output_index":3,"content_index":0,"item_id":"msg_01a0c4fd-0aae-7b02-90dc-5c81598db8ab","delta":"5","logprobs":[]}
+    - 'data: {"type":"response.output_text.delta","sequence_number":118,"output_index":3,"content_index":0,"item_id":"msg_01a0d750-da81-7072-94a9-bc46dc3152f0","delta":"5","logprobs":[]}
 
       '
     - '
@@ -1319,7 +1191,7 @@ turns:
     - 'event: response.output_text.done
 
       '
-    - 'data: {"type":"response.output_text.done","sequence_number":133,"output_index":3,"content_index":0,"item_id":"msg_01a0c4fd-0aae-7b02-90dc-5c81598db8ab","text":"\n\nCODE_INTERPRETER_OK=385","logprobs":[]}
+    - 'data: {"type":"response.output_text.done","sequence_number":119,"output_index":3,"content_index":0,"item_id":"msg_01a0d750-da81-7072-94a9-bc46dc3152f0","text":"\n\nCODE_INTERPRETER_OK=385","logprobs":[]}
 
       '
     - '
@@ -1328,7 +1200,7 @@ turns:
     - 'event: response.content_part.done
 
       '
-    - 'data: {"type":"response.content_part.done","sequence_number":134,"output_index":3,"content_index":0,"item_id":"msg_01a0c4fd-0aae-7b02-90dc-5c81598db8ab","part":{"annotations":[],"logprobs":[],"text":"\n\nCODE_INTERPRETER_OK=385","type":"output_text"}}
+    - 'data: {"type":"response.content_part.done","sequence_number":120,"output_index":3,"content_index":0,"item_id":"msg_01a0d750-da81-7072-94a9-bc46dc3152f0","part":{"annotations":[],"logprobs":[],"text":"\n\nCODE_INTERPRETER_OK=385","type":"output_text"}}
 
       '
     - '
@@ -1337,7 +1209,7 @@ turns:
     - 'event: response.output_item.done
 
       '
-    - 'data: {"type":"response.output_item.done","sequence_number":135,"output_index":3,"item":{"role":"assistant","type":"message","content":[{"annotations":[],"logprobs":[],"text":"\n\nCODE_INTERPRETER_OK=385","type":"output_text"}],"id":"msg_01a0c4fd-0aae-7b02-90dc-5c81598db8ab","status":"completed"}}
+    - 'data: {"type":"response.output_item.done","sequence_number":121,"output_index":3,"item":{"role":"assistant","type":"message","content":[{"annotations":[],"logprobs":[],"text":"\n\nCODE_INTERPRETER_OK=385","type":"output_text"}],"id":"msg_01a0d750-da81-7072-94a9-bc46dc3152f0","status":"completed"}}
 
       '
     - '
@@ -1346,21 +1218,17 @@ turns:
     - 'event: response.completed
 
       '
-    - 'data: {"type":"response.completed","sequence_number":136,"response":{"id":"resp_01a0c4fc-f8ed-7b91-87d5-db2c092dea00","object":"response","created_at":1790011312,"model":"Qwen/Qwen3.6-35B-A3B","status":"completed","output":[{"type":"reasoning","id":"rs_01a0c4fd-003e-7731-a6d6-732e212626c2","content":[{"type":"reasoning_text","text":"The
-      user wants to calculate the sum of the squares of the integers from 1 through
-      10 using the python tool.\nThe code must print exactly \"CODE_INTERPRETER_OK=385\".\nAfter
-      it runs, I must answer exactly \"CODE_INTERPRETER_OK=385\".\n\nFirst, I''ll
-      write a Python script to calculate the sum of squares from 1 to 10.\nSum of
-      squares formula: $n(n+1)(2n+1)/6$ for $n=10$.\n$10(11)(21)/6 = 10(11)(3.5) =
-      385$.\nThe Python code should print \"CODE_INTERPRETER_OK=385\".\n\nLet''s write
-      the python code.\n```python\nprint(\"CODE_INTERPRETER_OK=385\")\n```\nI don''t
-      need to actually calculate it in Python since I know it''s 385, but I will write
-      the script to verify or just print the exact string as requested. The prompt
-      says \"The code must print exactly CODE_INTERPRETER_OK=385.\"\n\nLet''s execute
-      the tool.\n"}],"summary":[],"encrypted_content":null,"status":null},{"type":"code_interpreter_call","id":"fc_01a0c4fd-0080-7900-9e49-ea13def32914","container_id":"cntr_fc_01a0c4fd-0080-7900-9e49-ea13def32914","code":"#
-      Calculate sum of squares from 1 to 10\nresult = sum(i**2 for i in range(1, 11))\nprint(f\"CODE_INTERPRETER_OK={result}\")","status":"completed","outputs":[{"type":"logs","logs":"CODE_INTERPRETER_OK=385\n"}]},{"type":"reasoning","id":"rs_01a0c4fd-0aa6-78d3-bc82-c6f40470473f","content":[{"type":"reasoning_text","text":"The
-      code executed successfully and printed \"CODE_INTERPRETER_OK=385\".\nNow I need
-      to answer exactly \"CODE_INTERPRETER_OK=385\".\n"}],"summary":[],"encrypted_content":null,"status":null},{"type":"message","id":"msg_01a0c4fd-0aae-7b02-90dc-5c81598db8ab","role":"assistant","status":"completed","content":[{"type":"output_text","text":"\n\nCODE_INTERPRETER_OK=385","annotations":[]}]}],"usage":{"input_tokens":1080,"output_tokens":368,"total_tokens":1448,"input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":285}},"incomplete_details":null,"error":null,"previous_response_id":null,"conversation_id":null,"instructions":null}}
+    - 'data: {"type":"response.completed","sequence_number":122,"response":{"id":"resp_01a0d750-c89c-7cd0-84ab-4608cfa137d2","object":"response","created_at":1790318795,"model":"Qwen/Qwen3.6-35B-A3B","status":"completed","output":[{"type":"reasoning","id":"rs_01a0d750-ceb9-76e0-8eae-474a29e6293f","content":[{"type":"reasoning_text","text":"The
+      user wants me to use the Python tool to calculate the sum of squares of integers
+      from 1 to 10.\nThen, print exactly `CODE_INTERPRETER_OK=385`.\nFinally, I need
+      to answer exactly `CODE_INTERPRETER_OK=385`.\n\nLet''s write the Python code
+      to do this.\nSum of squares from 1 to 10:\n$1^2 + 2^2 + 3^2 + 4^2 + 5^2 + 6^2
+      + 7^2 + 8^2 + 9^2 + 10^2$\n$= 1 + 4 + 9 + 16 + 25 + 36 + 49 + 64 + 81 + 100$\n$=
+      385$.\n\nI will write a Python script that calculates this sum and prints exactly
+      \"CODE_INTERPRETER_OK=385\".\nThen I will output the exact string as requested.\n"}],"summary":[],"encrypted_content":null,"status":null},{"type":"code_interpreter_call","id":"fc_01a0d750-cee8-7080-8c25-b4f699cd2c2d","container_id":"cntr_fc_01a0d750-cee8-7080-8c25-b4f699cd2c2d","code":"result
+      = sum(i**2 for i in range(1, 11))\nprint(f\"CODE_INTERPRETER_OK={result}\")","status":"completed","outputs":[{"type":"logs","logs":"CODE_INTERPRETER_OK=385\n"}]},{"type":"reasoning","id":"rs_01a0d750-da79-79e0-b7b7-944b2bbe4fb3","content":[{"type":"reasoning_text","text":"The
+      Python tool successfully calculated the sum of squares and printed \"CODE_INTERPRETER_OK=385\".\nNow
+      I need to answer exactly \"CODE_INTERPRETER_OK=385\" as requested.\n"}],"summary":[],"encrypted_content":null,"status":null},{"type":"message","id":"msg_01a0d750-da81-7072-94a9-bc46dc3152f0","role":"assistant","status":"completed","content":[{"type":"output_text","text":"\n\nCODE_INTERPRETER_OK=385","annotations":[]}]}],"usage":{"input_tokens":1039,"output_tokens":335,"total_tokens":1374,"input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":265}},"incomplete_details":null,"error":null,"previous_response_id":null,"conversation_id":null,"instructions":null}}
 
       '
     - '

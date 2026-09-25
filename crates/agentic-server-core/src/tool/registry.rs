@@ -587,7 +587,7 @@ mod tests {
         let mut tools = vec![
             serde_json::from_value(serde_json::json!({
                 "type": "code_interpreter",
-                "execution": "gateway"
+                "container": {"type": "auto"}
             }))
             .expect("code interpreter declaration"),
         ];
@@ -972,7 +972,7 @@ mod tests {
         let mut tools = vec![
             serde_json::from_value(serde_json::json!({
                 "type": "code_interpreter",
-                "execution": "gateway"
+                "container": {"type": "auto"}
             }))
             .expect("code interpreter declaration"),
         ];
@@ -995,7 +995,7 @@ mod tests {
             serde_json::json!({"type": "custom", "name": "code_interpreter"}),
         ] {
             let mut tools = serde_json::from_value::<Vec<ResponsesTool>>(serde_json::json!([
-                {"type": "code_interpreter", "execution": "gateway"},
+                {"type": "code_interpreter", "container": {"type": "auto"}},
                 conflicting_tool
             ]))
             .expect("individual declarations parse");

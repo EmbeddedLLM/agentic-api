@@ -1,7 +1,7 @@
 //! Gateway-executed Python code interpreter backed by Eryx.
 
 use crate::types::io::FunctionTool;
-use crate::types::tools::{CodeInterpreterExecution, CodeInterpreterToolParam, ResponsesTool};
+use crate::types::tools::{CodeInterpreterToolParam, ResponsesTool};
 
 use super::{ToolError, ToolHandler, ToolType};
 
@@ -68,12 +68,7 @@ impl ToolHandler for CodeInterpreterHandler {
         ToolType::CodeInterpreter
     }
 
-    fn validate(&self, params: &Self::ToolParams) -> Result<(), ToolError> {
-        if params.execution != CodeInterpreterExecution::Gateway {
-            return Err(ToolError::Config(
-                "code_interpreter supports only execution='gateway'".to_owned(),
-            ));
-        }
+    fn validate(&self, _params: &Self::ToolParams) -> Result<(), ToolError> {
         Ok(())
     }
 

@@ -466,7 +466,7 @@ mod tests {
     fn request_validation_rejects_code_interpreter_without_a_ready_executor() {
         let tools = [serde_json::from_value::<ResponsesTool>(serde_json::json!({
             "type": "code_interpreter",
-            "execution": "gateway"
+            "container": {"type": "auto"}
         }))
         .expect("valid declaration")];
 

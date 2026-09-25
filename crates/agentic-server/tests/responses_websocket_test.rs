@@ -2477,7 +2477,7 @@ async fn websocket_generate_false_rejects_code_interpreter_before_rehydration_or
             "model": "test-model",
             "previous_response_id": "resp_missing",
             "input": [],
-            "tools": [{"type": "code_interpreter", "execution": "gateway"}],
+            "tools": [{"type": "code_interpreter", "container": {"type": "auto"}}],
             "generate": false,
             "store": false,
             "stream": true
@@ -2518,7 +2518,7 @@ async fn websocket_generate_false_rejects_rehydrated_code_interpreter_before_per
         effective_tools: Some(vec![
             serde_json::from_value(json!({
                 "type": "code_interpreter",
-                "execution": "gateway"
+                "container": {"type": "auto"}
             }))
             .expect("code interpreter declaration"),
         ]),

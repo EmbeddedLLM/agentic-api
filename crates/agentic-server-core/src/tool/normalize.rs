@@ -140,7 +140,7 @@ mod tests {
     fn unavailable_code_interpreter_does_not_create_a_model_visible_function() {
         let tool: ResponsesTool = serde_json::from_value(serde_json::json!({
             "type": "code_interpreter",
-            "execution": "gateway"
+            "container": {"type": "auto"}
         }))
         .expect("tool parses");
 
@@ -152,7 +152,7 @@ mod tests {
     fn enabled_code_interpreter_exposes_its_fixed_function_contract() {
         let tool: ResponsesTool = serde_json::from_value(serde_json::json!({
             "type": "code_interpreter",
-            "execution": "gateway"
+            "container": {"type": "auto"}
         }))
         .expect("tool parses");
 

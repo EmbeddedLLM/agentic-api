@@ -766,7 +766,7 @@ async fn code_interpreter_disabled_rejects_before_http_upstream_inference() {
             "model": "test",
             "input": "test input",
             "store": false,
-            "tools": [{"type": "code_interpreter", "execution": "gateway"}]
+            "tools": [{"type": "code_interpreter", "container": {"type": "auto"}}]
         }))
         .send()
         .await
@@ -799,7 +799,7 @@ async fn code_interpreter_name_collision_fails_before_inference() {
             "store": false,
             "tools": [
                 {"type": "function", "name": "code_interpreter"},
-                {"type": "code_interpreter", "execution": "gateway"}
+                {"type": "code_interpreter", "container": {"type": "auto"}}
             ]
         }))
         .send()

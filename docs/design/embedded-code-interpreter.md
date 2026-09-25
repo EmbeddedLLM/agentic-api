@@ -6,15 +6,17 @@
 
 The Responses API accepts a gateway-executed built-in tool that runs Python in Eryx 0.8.x. Availability has two independent gates: the server binary must be compiled with the `embedded-code-interpreter` Cargo feature, and the operator must enable the executor with `code_interpreter.enabled = true` or `AGENTIC_CODE_INTERPRETER_ENABLED=true`. A request that declares the tool is rejected before upstream inference if either gate is absent or the executor did not pass startup readiness checks.
 
-The public declaration is:
+The gateway accepts the OpenAI Responses API declaration used by SDK clients:
 
 ```json
-{"type":"code_interpreter","execution":"gateway"}
+{"type":"code_interpreter","container":{"type":"auto"}}
 ```
 
-The explicit `execution: "gateway"` selector is required. Omitting it, selecting another execution location, or including unknown fields is rejected instead of being silently ignored.
+The auto container is required. The `execution` field, explicit container IDs, `file_ids`, `memory_limit`, and unknown fields are rejected. The public response and stored metadata retain the accepted declaration.
 
-For model inference, the gateway normalizes this declaration to a strict function named `code_interpreter` with one required string argument, `code`, and no additional properties. The model must use `print()` to produce returned text. Implicit expression display, structured result variables, persistent sessions, file or artifact exchange, networking, callbacks, and client-selected containers are not exposed by this integration. Each call constructs a fresh sandbox.
+The `container: {"type":"auto"}` selector chooses gateway execution, but the gateway creates a fresh sandbox for every call. OpenAI's auto mode may reuse a container from prior context; this integration does not provide container reuse. The container selector does not grant the client control over the gateway runtime.
+
+For model inference, the gateway normalizes the declaration to a strict function named `code_interpreter` with one required string argument, `code`, and no additional properties. The model must use `print()` to produce returned text. Implicit expression display, structured result variables, persistent sessions, file or artifact exchange, networking, callbacks, and client-selected containers are not exposed by this integration.
 
 ## Integration
 
@@ -105,6 +107,6 @@ Consequently both the Cargo feature and operator setting remain disabled by defa
 
 ## Verification
 
-Default-feature tests cover the closed request shape, typed normalization, name collisions, fail-closed HTTP and WebSocket declaration handling, accumulator support for native upstream items, and the gateway-generated lifecycle. Recorder-generated cassettes characterize the public non-streaming, HTTP/SSE, and WebSocket shapes against an OpenAI reference and a gateway execution.
+Default-feature tests cover the OpenAI request shape and rejection of unsupported container settings, typed normalization, name collisions, fail-closed HTTP and WebSocket declaration handling, accumulator support for native upstream items, and the gateway-generated lifecycle. Recorder-generated cassettes characterize the public non-streaming, HTTP/SSE, and WebSocket request declarations and response shapes against an OpenAI reference and a gateway execution. The gateway captures exercise the auto-container declaration through real Eryx execution.
 
 The dedicated `Embedded code interpreter` CI job prepares the runtime with `scripts/setup-eryx-runtime.sh`, creates a fresh private `TMPDIR`, and runs feature-enabled linting and tests for both server crates. The real-Eryx test executes a successful program, a Python exception, filesystem isolation probes, and output overflow through `eryx::Sandbox`. The setup-script test itself uses a fake precompiler to verify version matching and the `cargo install`/`cargo binstall` branches without downloading a runtime.

@@ -1,6 +1,6 @@
 [
   {
     "type": "code_interpreter",
-    "execution": "gateway"
+    "container": {"type": "auto"}
   }
 ]

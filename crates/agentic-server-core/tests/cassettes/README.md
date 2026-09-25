@@ -400,10 +400,10 @@ bash crates/agentic-server-core/tests/cassettes/record_tool_search_cassettes.sh
 ### Code interpreter (OpenAI reference and gateway)
 
 The recorder captures one deterministic calculation in exactly five profiles: OpenAI blocking and HTTP/SSE as the
-wire-contract reference, plus gateway blocking, HTTP/SSE, and Responses WebSocket. OpenAI receives its native
-`{"type":"code_interpreter","container":{"type":"auto"}}` declaration. The gateway receives the public
-`{"type":"code_interpreter","execution":"gateway"}` declaration and executes the generated Python in its local
-Eryx sandbox.
+wire-contract reference, plus gateway blocking, HTTP/SSE, and Responses WebSocket. Both providers receive the
+`{"type":"code_interpreter","container":{"type":"auto"}}` declaration. The gateway executes generated Python in its
+local Eryx sandbox. The captured requests and responses verify the public declaration and lifecycle across all five
+profiles.
 
 The characterization test requires the OpenAI event names and lifecycle order, folds provider-dependent code-delta
 chunking, checks stable item IDs and output indexes, and rejects events after `response.output_item.done`. It also

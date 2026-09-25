@@ -25,14 +25,15 @@ turns:
     query_params: {}
   response:
     body:
+      access_programs: null
       background: false
       billing:
         payer: developer
-      completed_at: 1790010464
-      created_at: 1790010453
+      completed_at: 1790318520
+      created_at: 1790318517
       error: null
       frequency_penalty: 0.0
-      id: resp_0aa256ea5764aadd016ab16455546487d0b26e6ba7c87aec92
+      id: resp_020ffaaa85f1ecf6016ab617b5044087d18b3ed82566403c0c
       incomplete_details: null
       instructions: null
       max_output_tokens: 2048
@@ -42,11 +43,11 @@ turns:
       moderation: null
       object: response
       output:
-      - code: 'print(f"CODE_INTERPRETER_OK={sum(i*i for i in range(1, 11))}")
+      - code: 'print(f"CODE_INTERPRETER_OK={sum(i**2 for i in range(1, 11))}")
 
           '
-        container_id: cntr_6ab16455ba9481989d7a3f27099d660f0c22d872f074bba7
-        id: ci_0aa256ea5764aadd016ab1645abe6c87d0bae36746e384474d
+        container_id: cntr_6ab617b594c4819382eee217438ef95a0f2c410c10efc2e0
+        id: ci_020ffaaa85f1ecf6016ab617b64c4c87d1b4d893d7936f5244
         outputs: null
         status: completed
         type: code_interpreter_call
@@ -55,7 +56,7 @@ turns:
           logprobs: []
           text: CODE_INTERPRETER_OK=385
           type: output_text
-        id: msg_0aa256ea5764aadd016ab1646062a487d0981a23d9f06bf45e
+        id: msg_020ffaaa85f1ecf6016ab617b7bd7487d1968233eda02e0739
         phase: final_answer
         role: assistant
         status: completed
@@ -101,14 +102,14 @@ turns:
       top_p: 0.98
       truncation: disabled
       usage:
-        input_tokens: 1315
+        input_tokens: 1316
         input_tokens_details:
           cache_write_tokens: 1143
           cached_tokens: 0
-        output_tokens: 43
+        output_tokens: 44
         output_tokens_details:
-          reasoning_tokens: 32
-        total_tokens: 1358
+          reasoning_tokens: 33
+        total_tokens: 1360
       user: null
     headers:
       content-type: application/json
