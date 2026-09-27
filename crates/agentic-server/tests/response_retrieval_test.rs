@@ -2,8 +2,8 @@
 #[allow(dead_code)]
 mod common;
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use agentic_core::executor::ExecutionContext;
 use agentic_core::storage::{ResponseMetadata, ResponseStore};
@@ -30,14 +30,18 @@ async fn assert_retrieval_requires_valid_key(client: &reqwest::Client, url: &str
     }
 }
 
-fn response_retrieval_upstream() -> Router {
+/// Mock inference upstream that records every request body it receives.
+fn response_retrieval_upstream() -> (Router, Arc<Mutex<Vec<Value>>>) {
     let next_message_id = Arc::new(AtomicUsize::new(0));
-    Router::new().route(
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let router = Router::new().route(
         "/v1/responses",
         post({
             let next_message_id = Arc::clone(&next_message_id);
-            move || {
+            let requests = Arc::clone(&requests);
+            move |Json(body): Json<Value>| {
                 let message_id = next_message_id.fetch_add(1, Ordering::Relaxed);
+                requests.lock().unwrap().push(body);
                 async move {
                     Json(json!({"id":"resp_upstream", "object":"response", "created_at":123,
                     "model":"test-model", "status":"completed", "output":[{
@@ -47,12 +51,29 @@ fn response_retrieval_upstream() -> Router {
                 }
             }
         }),
-    )
+    );
+    (router, requests)
+}
+
+fn input_texts(request: &Value) -> Vec<&str> {
+    request["input"]
+        .as_array()
+        .expect("upstream input is an item array")
+        .iter()
+        .map(|item| {
+            item["content"]
+                .as_array()
+                .and_then(|content| content.first())
+                .and_then(|part| part["text"].as_str())
+                .or_else(|| item["content"].as_str())
+                .expect("text item")
+        })
+        .collect()
 }
 
 #[tokio::test]
 async fn retrieval_preserves_each_turn_and_rejects_unstored_or_legacy_ids() {
-    let upstream = response_retrieval_upstream();
+    let (upstream, _requests) = response_retrieval_upstream();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let mut config = common::test_config(&format!("http://{}", listener.local_addr().unwrap()));
     let upstream = tokio::spawn(async move { axum::serve(listener, upstream).await.unwrap() });
@@ -136,6 +157,76 @@ async fn retrieval_preserves_each_turn_and_rejects_unstored_or_legacy_ids() {
         .unwrap();
     assert_eq!(missing.status(), StatusCode::NOT_FOUND);
     assert!(missing.json::<Value>().await.unwrap().get("error").is_some());
+    gateway.abort();
+    let _ = gateway.await;
+    exec.storage_pool().unwrap().close().await;
+}
+
+#[tokio::test]
+async fn store_false_continuation_of_a_stored_response_is_not_retained() {
+    let (upstream, requests) = response_retrieval_upstream();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut config = common::test_config(&format!("http://{}", listener.local_addr().unwrap()));
+    let upstream = tokio::spawn(async move { axum::serve(listener, upstream).await.unwrap() });
+    config.db_url = Some("sqlite://?mode=memory".into());
+    let exec = Arc::new(ExecutionContext::from_config(&config).await.unwrap());
+    let mut state = common::test_state(&config);
+    state.exec_ctx = Arc::clone(&exec);
+    let (url, gateway) = common::spawn_gateway(state).await;
+    let client = reqwest::Client::new();
+    let create = |body: Value| {
+        let client = &client;
+        let url = &url;
+        async move {
+            client
+                .post(format!("{url}/v1/responses"))
+                .json(&body)
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    let retrieve = |id: &str| {
+        let request = client.get(format!("{url}/v1/responses/{id}")).bearer_auth("test-key");
+        async move { request.send().await.unwrap() }
+    };
+
+    let parent = create(json!({"model":"test-model", "input":"first", "store":true})).await;
+    assert_eq!(parent.status(), StatusCode::OK);
+    let parent: Value = parent.json().await.unwrap();
+    let parent_id = parent["id"].as_str().unwrap();
+    let child = create(json!({"model":"test-model", "input":"second", "store":false,
+        "previous_response_id":parent_id}))
+    .await;
+    assert_eq!(child.status(), StatusCode::OK);
+    let child: Value = child.json().await.unwrap();
+    let child_id = child["id"].as_str().unwrap();
+    assert_ne!(child_id, parent_id);
+    // The child was hydrated from the stored parent...
+    assert_eq!(input_texts(&requests.lock().unwrap()[1]), ["first", "answer", "second"]);
+    // ...but it is not retained: neither retrieval nor continuation finds it.
+    assert_eq!(retrieve(child_id).await.status(), StatusCode::NOT_FOUND);
+    let orphaned = create(json!({"model":"test-model", "input":"third", "store":true,
+        "previous_response_id":child_id}))
+    .await;
+    assert_eq!(orphaned.status(), StatusCode::NOT_FOUND);
+    assert!(orphaned.json::<Value>().await.unwrap().get("error").is_some());
+    assert_eq!(
+        requests.lock().unwrap().len(),
+        2,
+        "no inference may run from an unstored response"
+    );
+    // The stored parent is unaffected: still retrievable and continuable.
+    let retrieved = retrieve(parent_id).await;
+    assert_eq!(retrieved.status(), StatusCode::OK);
+    assert_eq!(retrieved.json::<Value>().await.unwrap(), parent);
+    let sibling = create(json!({"model":"test-model", "input":"third", "store":true,
+        "previous_response_id":parent_id}))
+    .await;
+    assert_eq!(sibling.status(), StatusCode::OK);
+    assert_eq!(input_texts(&requests.lock().unwrap()[2]), ["first", "answer", "third"]);
+    upstream.abort();
+    let _ = upstream.await;
     gateway.abort();
     let _ = gateway.await;
     exec.storage_pool().unwrap().close().await;

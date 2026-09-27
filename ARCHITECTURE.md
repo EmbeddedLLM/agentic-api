@@ -510,9 +510,10 @@ call inference, run the tool loop, persist. `agentic-server` never reaches past 
   `run_blocking`, and `run_stream` (spawns the loop, forwards events as SSE, persists
   before yielding the terminal event). `engine/streaming.rs` owns the streaming task's
   cancellation, failure delivery, and terminal validation before persistence.
-- **`persist.rs`** — `persist_response`/`persist_turn`, which route to
-  `ConversationHandler` or `ResponseHandler` in `modes/` depending on whether the turn
-  is conversation-scoped or response-scoped.
+- **`persist.rs`** — `persist_response`/`persist_turn`, which apply the request's
+  storage policy (`should_persist`: a no-session `store: false` turn is not written) and
+  route to `ConversationHandler` or `ResponseHandler` in `modes/` depending on whether the
+  turn is conversation-scoped or response-scoped.
 - **`compaction.rs`** — `compact_response()` (the explicit `/v1/responses/compact`
   path) and `maybe_compact_context()` (automatic, threshold-triggered, called from the
   round loop before each inference call).
