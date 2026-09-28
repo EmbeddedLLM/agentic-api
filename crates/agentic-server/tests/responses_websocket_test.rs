@@ -2932,6 +2932,7 @@ async fn test_websocket_continuation_rehydrates_previous_response() {
             "model": "test-model",
             "input": [{"type": "message", "role": "user", "content": "hi"}],
             "text": {"verbosity": "low"},
+            "prompt_cache_key": "workspace-a",
             "store": true,
             "stream": true
         }),
@@ -2984,6 +2985,7 @@ async fn test_websocket_continuation_rehydrates_previous_response() {
             "model": "test-model",
             "previous_response_id": second_response_id,
             "input": [{"type": "message", "role": "user", "content": "again"}],
+            "prompt_cache_key": "workspace-b",
             "store": true,
             "stream": true
         }),
@@ -3000,6 +3002,9 @@ async fn test_websocket_continuation_rehydrates_previous_response() {
     assert_eq!(requests[0]["text"], json!({"verbosity": "low"}));
     assert_eq!(requests[1]["text"], json!({"verbosity": "high"}));
     assert!(requests[2].get("text").is_none());
+    assert_eq!(requests[0]["prompt_cache_key"], "workspace-a");
+    assert!(requests[1].get("prompt_cache_key").is_none());
+    assert_eq!(requests[2]["prompt_cache_key"], "workspace-b");
     assert!(requests[1].get("previous_response_id").is_none());
     assert_eq!(requests[1]["input"][0]["content"], "hi");
     assert_eq!(requests[1]["input"][1]["role"], "assistant");

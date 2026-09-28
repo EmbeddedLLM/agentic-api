@@ -1,3 +1,4 @@
+// Runs only with the Linux code-interpreter worker feature.
 #![cfg(all(feature = "embedded-code-interpreter", target_os = "linux"))]
 
 #[allow(dead_code)]

@@ -512,9 +512,10 @@ call inference, run the tool loop, persist. `agentic-server` never reaches past 
   `run_blocking`, and `run_stream` (spawns the loop, forwards events as SSE, persists
   before yielding the terminal event). `engine/streaming.rs` owns the streaming task's
   cancellation, failure delivery, and terminal validation before persistence.
-- **`persist.rs`** — `persist_response`/`persist_turn`, which route to
-  `ConversationHandler` or `ResponseHandler` in `modes/` depending on whether the turn
-  is conversation-scoped or response-scoped.
+- **`persist.rs`** — `persist_response`/`persist_turn`, which apply the request's
+  storage policy (`should_persist`: a no-session `store: false` turn is not written) and
+  route to `ConversationHandler` or `ResponseHandler` in `modes/` depending on whether the
+  turn is conversation-scoped or response-scoped.
 - **`compaction.rs`** — `compact_response()` (the explicit `/v1/responses/compact`
   path) and `maybe_compact_context()` (automatic, threshold-triggered, called from the
   round loop before each inference call).
@@ -880,7 +881,8 @@ round that omits `usage` still reports the hidden rounds' counters.
   here.
 - **`types/`** — the conversion layer from those raw rows into business types, via
   `From`/`TryFrom` impls: `ConversationData`/`ConversationSnapshot`, `ResponseData`/
-  `ResponseMetadata` (parses the JSON metadata column into a typed struct),
+  `ResponseMetadata` (parses the JSON metadata column into a typed struct, including an optional
+  terminal `ResponsePayload` snapshot for GET retrieval),
   `InOutItem` (parses an `Item.data` JSON blob back into a typed `InputItem` or
   `OutputItem`), and `StorageError`. `InOutItem::into_input_items` turns a full
   history into the `Vec<InputItem>` used for continuation processing: stored
@@ -909,6 +911,12 @@ round that omits `usage` still reports the hidden rounds' counters.
   `executor/modes/response.rs`, described above. (Integration tests and benches import
   them directly for fixtures — that's expected and fine; production code paths should
   not.)
+
+Stored Responses snapshots are written in the same transaction as response history. Retrieval goes through
+`ResponseHandler::retrieve`, independently of upstream availability. Continuation checkpoints omit the
+snapshot to avoid retaining a duplicate response; they continue to use canonical history and effective
+settings. Legacy history-only records remain usable for continuation, but GET retrieval reports a conflict
+rather than fabricating status, usage, or output.
 
 ### `tool/` — the tool framework
 
@@ -1015,8 +1023,8 @@ the operator enables it, and Eryx runtime readiness succeeds.
     (`CodexNamespaceHandler`), and `tool_search.rs` (`ToolSearchHandler`). Their calls
     are returned for the client to resolve; the gateway does not execute them.
   - **Gateway-owned / built-in** tools implement both traits: see `web_search/mod.rs`
-    (`WebSearchHandler`, backed by the configured `WebSearchProvider` in `web_search/you.rs`
-    or `web_search/brave.rs`) and `mcp/handler.rs` (`McpHandler`, backed
+    (`WebSearchHandler`, backed by the configured `WebSearchProvider` in `web_search/you.rs`,
+    `web_search/brave.rs`, or `web_search/tavily.rs`) and `mcp/handler.rs` (`McpHandler`, backed
     by `mcp/client.rs`'s MCP protocol client and `mcp/pool.rs`'s connection pool). They
     have no client translator association because the gateway owns their execution and
     public lifecycle.

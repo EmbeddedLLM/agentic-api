@@ -2,19 +2,18 @@
   "version": 1,
   "baseline": {
     "crates/agentic-server-core/src/executor/accumulator/mod.rs": 666,
-    "crates/agentic-server-core/src/executor/engine.rs": 651,
-    "crates/agentic-server-core/src/executor/gateway.rs": 653,
-    "crates/agentic-server-core/src/executor/messages_stream.rs": 501,
+    "crates/agentic-server-core/src/executor/engine.rs": 522,
+    "crates/agentic-server-core/src/executor/gateway.rs": 612,
     "crates/agentic-server-core/src/executor/session.rs": 508,
     "crates/agentic-server-core/src/tool/registry.rs": 515,
     "crates/agentic-server-core/src/tool/tool_search.rs": 1764,
     "crates/agentic-server-core/src/types/io/input.rs": 629,
-    "crates/agentic-server-core/src/types/io/output.rs": 1110,
-    "crates/agentic-server-core/src/types/request_response.rs": 582,
+    "crates/agentic-server-core/src/types/io/output.rs": 1092,
+    "crates/agentic-server-core/src/types/request_response.rs": 518,
     "crates/agentic-server-core/src/types/tools/params.rs": 537,
     "crates/agentic-server/src/agentic_process.rs": 557,
-    "crates/agentic-server/src/auth.rs": 799,
-    "crates/agentic-server/src/handler/websocket/responses.rs": 841
+    "crates/agentic-server/src/auth.rs": 791,
+    "crates/agentic-server/src/handler/websocket/responses.rs": 784
   },
   "exceptions": {
     "crates/agentic-server-core/src/executor/accumulator/mod.rs": {
@@ -22,23 +21,23 @@
       "reason": "Code-interpreter done-only completion projects its generated item ID into the emitted event in the existing ingestion path."
     },
     "crates/agentic-server-core/src/config.rs": {
-      "limit": 622,
-      "reason": "Operator-owned code-interpreter guest and worker cgroup memory limits, aggregate admission budgets, and cross-field validation extend shared runtime configuration."
+      "limit": 629,
+      "reason": "Operator-owned code-interpreter worker limits and admission validation share runtime configuration with the Tavily web-search provider settings."
     },
     "crates/agentic-server-core/src/events/types.rs": {
       "limit": 534,
       "reason": "Code-interpreter SSE lifecycle variants and completed-item ID synchronization extend the shared event frame mappings."
     },
     "crates/agentic-server-core/src/executor/gateway.rs": {
-      "limit": 759,
-      "reason": "Gateway-owned code-interpreter calls use the existing tool loop and emit their public lifecycle there."
+      "limit": 718,
+      "reason": "Gateway-owned code-interpreter calls emit their public SSE lifecycle through the existing scheduler after policy extraction."
     },
     "crates/agentic-server-core/src/tool/registry.rs": {
       "limit": 530,
       "reason": "The code interpreter follows the existing registry validation and executor registration flow."
     },
     "crates/agentic-server-core/src/types/io/output.rs": {
-      "limit": 1116,
+      "limit": 1097,
       "reason": "The shared output-item enum and exhaustive helpers include the typed code-interpreter output item."
     },
     "crates/agentic-server-core/src/types/tools/params.rs": {
