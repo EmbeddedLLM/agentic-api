@@ -65,6 +65,7 @@ impl Cgroup {
         fs::create_dir(&path)?;
         let group = Self { path };
         fs::write(group.path.join("memory.max"), memory_bytes.to_string())?;
+        fs::write(group.path.join("memory.swap.max"), "0")?;
         fs::write(group.path.join("memory.oom.group"), "1")?;
         fs::write(group.path.join("pids.max"), "64")?;
         if !group.path.join("cgroup.kill").exists() {
@@ -98,6 +99,13 @@ impl Cgroup {
             return Err(io::Error::new(
                 ErrorKind::PermissionDenied,
                 "worker memory limit was not confirmed",
+            ));
+        }
+        let swap = fs::read_to_string(self.path.join("memory.swap.max"))?;
+        if swap.trim() != "0" {
+            return Err(io::Error::new(
+                ErrorKind::PermissionDenied,
+                "worker swap limit was not confirmed",
             ));
         }
         Ok(())
@@ -366,6 +374,13 @@ fn cgroup_memory_is_bounded(expected_limit: usize) -> io::Result<()> {
             "worker memory cgroup is too large",
         ));
     }
+    let swap_limit = fs::read_to_string(current.join("memory.swap.max"))?;
+    if swap_limit.trim() != "0" {
+        return Err(io::Error::new(
+            ErrorKind::PermissionDenied,
+            "worker memory cgroup permits swap",
+        ));
+    }
     Ok(())
 }
 
@@ -462,8 +477,9 @@ mod tests {
         let group = Cgroup::new(LIMIT).expect("delegated memory cgroup");
         let mut command = Command::new("python3");
         command
+            .arg("-S")
             .arg("-c")
-            .arg("import sys; sys.stdin.buffer.read(1); data = bytearray(128 * 1024 * 1024); data[::4096] = b'X' * (len(data) // 4096)")
+            .arg("import sys\nsys.stdin.buffer.read(1)\nchunks = []\nfor _ in range(64):\n    chunks.append(bytearray(b'X' * (4 * 1024 * 1024)))")
             .env_clear()
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
