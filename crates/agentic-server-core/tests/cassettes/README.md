@@ -411,22 +411,25 @@ checks blocking/streaming transport parity and that the WebSocket messages exact
 SSE. OpenAI currently returns `outputs: null` for the completed call; the gateway intentionally returns its local
 `logs` output containing `CODE_INTERPRETER_OK=385`.
 
-Start an embedded-code-interpreter gateway with a fresh database and the Eryx runtime artifact, then record the full
-matrix. Every selected recording is staged, checked for unmasked authorization data, and semantically validated
-before it replaces a checked-in cassette.
+Start an embedded-code-interpreter gateway with a fresh database and the Eryx runtime artifact inside a delegated
+Linux cgroup v2 scope, then record the full matrix. This local recipe requires a running systemd user manager. Every
+selected recording is staged, checked for unmasked authorization data, and semantically validated before it replaces
+a checked-in cassette.
 
 ```bash
 install -d -m 700 /tmp/agentic-api-code-interpreter
 
-ERYX_RUNTIME_CWASM=/path/to/runtime.cwasm \
-TMPDIR=/tmp/agentic-api-code-interpreter \
-AGENTIC_CODE_INTERPRETER_ENABLED=true \
-DATABASE_URL=sqlite:///tmp/agentic_api_code_interpreter_matrix.db \
-cargo run -p agentic-server --features embedded-code-interpreter -- \
-  --gateway-host 127.0.0.1 \
-  --gateway-port 3098 \
-  --llm-api-base http://127.0.0.1:8000 \
-  --skip-llm-ready-check
+systemd-run --user --scope --quiet --property=Delegate=yes \
+  bash scripts/tests/with-code-interpreter-cgroup.sh \
+  env ERYX_RUNTIME_CWASM=/path/to/runtime.cwasm \
+    TMPDIR=/tmp/agentic-api-code-interpreter \
+    AGENTIC_CODE_INTERPRETER_ENABLED=true \
+    DATABASE_URL=sqlite:///tmp/agentic_api_code_interpreter_matrix.db \
+    cargo run -p agentic-server --features embedded-code-interpreter -- \
+      --gateway-host 127.0.0.1 \
+      --gateway-port 3098 \
+      --llm-api-base http://127.0.0.1:8000 \
+      --skip-llm-ready-check
 ```
 
 ```bash

@@ -222,6 +222,8 @@ struct CodeInterpreterEnvironmentValues {
     max_stderr_bytes: Result<String, std::env::VarError>,
     max_concurrent_guests: Result<String, std::env::VarError>,
     max_aggregate_guest_memory_bytes: Result<String, std::env::VarError>,
+    max_worker_memory_bytes: Result<String, std::env::VarError>,
+    max_aggregate_worker_memory_bytes: Result<String, std::env::VarError>,
 }
 
 impl CodeInterpreterEnvironmentValues {
@@ -238,6 +240,10 @@ impl CodeInterpreterEnvironmentValues {
             max_aggregate_guest_memory_bytes: std::env::var(
                 "AGENTIC_CODE_INTERPRETER_MAX_AGGREGATE_GUEST_MEMORY_BYTES",
             ),
+            max_worker_memory_bytes: std::env::var("AGENTIC_CODE_INTERPRETER_MAX_WORKER_MEMORY_BYTES"),
+            max_aggregate_worker_memory_bytes: std::env::var(
+                "AGENTIC_CODE_INTERPRETER_MAX_AGGREGATE_WORKER_MEMORY_BYTES",
+            ),
         }
     }
 
@@ -253,6 +259,8 @@ impl CodeInterpreterEnvironmentValues {
             max_stderr_bytes: Err(std::env::VarError::NotPresent),
             max_concurrent_guests: Err(std::env::VarError::NotPresent),
             max_aggregate_guest_memory_bytes: Err(std::env::VarError::NotPresent),
+            max_worker_memory_bytes: Err(std::env::VarError::NotPresent),
+            max_aggregate_worker_memory_bytes: Err(std::env::VarError::NotPresent),
         }
     }
 }
@@ -425,6 +433,16 @@ fn code_interpreter_config_from_operator_values(
             values.max_aggregate_guest_memory_bytes,
             defaults.max_aggregate_guest_memory_bytes,
         )?,
+        max_worker_memory_bytes: parse_env_nonzero_usize_value(
+            "AGENTIC_CODE_INTERPRETER_MAX_WORKER_MEMORY_BYTES",
+            values.max_worker_memory_bytes,
+            defaults.max_worker_memory_bytes,
+        )?,
+        max_aggregate_worker_memory_bytes: parse_env_nonzero_usize_value(
+            "AGENTIC_CODE_INTERPRETER_MAX_AGGREGATE_WORKER_MEMORY_BYTES",
+            values.max_aggregate_worker_memory_bytes,
+            defaults.max_aggregate_worker_memory_bytes,
+        )?,
     };
     config
         .validate()
@@ -544,6 +562,22 @@ fn parse_comma_separated(value: &str) -> Vec<String> {
 const RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
 
 fn main() -> Result<(), server::ServerError> {
+    #[cfg(feature = "embedded-code-interpreter")]
+    {
+        use std::ffi::OsStr;
+        let mut args = std::env::args_os();
+        let _executable = args.next();
+        if args.next().as_deref() == Some(OsStr::new("--agentic-code-interpreter-worker")) {
+            let socket = args.next().ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidInput, "worker socket path is required")
+            })?;
+            if args.next().is_some() {
+                return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "unexpected worker argument").into());
+            }
+            return agentic_core::tool::code_interpreter::run_embedded_worker(std::path::Path::new(&socket))
+                .map_err(Into::into);
+        }
+    }
     // Parse first so `--help`/`--version` never build exporters.
     let cli = Cli::parse();
     // Providers and the subscriber are created outside the runtime so the

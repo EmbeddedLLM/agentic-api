@@ -83,6 +83,10 @@ pub(crate) struct CodeInterpreterFileConfig {
     pub max_concurrent_guests: Option<NonZeroUsize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_aggregate_guest_memory_bytes: Option<NonZeroUsize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_worker_memory_bytes: Option<NonZeroUsize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_aggregate_worker_memory_bytes: Option<NonZeroUsize>,
 }
 
 impl CodeInterpreterFileConfig {
@@ -96,6 +100,8 @@ impl CodeInterpreterFileConfig {
             && self.max_stderr_bytes.is_none()
             && self.max_concurrent_guests.is_none()
             && self.max_aggregate_guest_memory_bytes.is_none()
+            && self.max_worker_memory_bytes.is_none()
+            && self.max_aggregate_worker_memory_bytes.is_none()
     }
 
     /// Apply file values to safe, disabled defaults. Environment precedence is
@@ -118,6 +124,10 @@ impl CodeInterpreterFileConfig {
             max_aggregate_guest_memory_bytes: self
                 .max_aggregate_guest_memory_bytes
                 .unwrap_or(defaults.max_aggregate_guest_memory_bytes),
+            max_worker_memory_bytes: self.max_worker_memory_bytes.unwrap_or(defaults.max_worker_memory_bytes),
+            max_aggregate_worker_memory_bytes: self
+                .max_aggregate_worker_memory_bytes
+                .unwrap_or(defaults.max_aggregate_worker_memory_bytes),
         }
     }
 }

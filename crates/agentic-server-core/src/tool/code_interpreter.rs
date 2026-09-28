@@ -22,6 +22,9 @@ impl CodeInterpreterHandler {
                 "code_interpreter may be declared only once".to_owned(),
             ));
         }
+        if declarations == 0 {
+            return Ok(());
+        }
         for tool in tools {
             let conflicts = match tool {
                 ResponsesTool::Function(function) => function.name.as_str() == CODE_INTERPRETER_FUNCTION_NAME,
@@ -79,6 +82,22 @@ impl ToolHandler for CodeInterpreterHandler {
 
 #[cfg(feature = "embedded-code-interpreter")]
 mod eryx;
+#[cfg(feature = "embedded-code-interpreter")]
+mod isolation;
+
+/// Internal entry point for the resource-limited Eryx worker process.
+///
+/// The server executable dispatches here before loading telemetry, secrets,
+/// configuration, or request handlers.
+///
+/// # Errors
+///
+/// Returns an I/O error if the worker control socket, cgroup verification,
+/// runtime initialization, or result transfer fails.
+#[cfg(feature = "embedded-code-interpreter")]
+pub fn run_embedded_worker(socket_path: &std::path::Path) -> std::io::Result<()> {
+    isolation::worker_main(socket_path)
+}
 mod provider;
 
 use std::future::Future;
@@ -130,11 +149,13 @@ impl CodeInterpreterExecutor {
             .map_err(|error| ToolError::Config(error.to_string()))?;
         provider.check_ready()?;
         let aggregate_slots = config.max_aggregate_guest_memory_bytes.get() / config.max_guest_memory_bytes.get();
+        let worker_slots = config.max_aggregate_worker_memory_bytes.get() / config.max_worker_memory_bytes.get();
         let guest_slots = config
             .max_concurrent_guests
             .get()
             .min(provider.max_concurrency().get())
-            .min(aggregate_slots);
+            .min(aggregate_slots)
+            .min(worker_slots);
         let guest_permits = Arc::new(Semaphore::new(guest_slots));
         Ok(Self {
             config,

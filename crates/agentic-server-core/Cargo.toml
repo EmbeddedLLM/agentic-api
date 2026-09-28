@@ -19,7 +19,7 @@ default = []
 openapi = ["dep:utoipa"]
 # Opt-in embedded Eryx runtime. It is additionally operator-gated at startup;
 # default builds retain no Eryx dependency or code-interpreter registration.
-embedded-code-interpreter = ["dep:async-trait", "dep:eryx"]
+embedded-code-interpreter = ["dep:async-trait", "dep:eryx", "dep:nix"]
 
 [dependencies]
 utoipa = { workspace = true, optional = true }
@@ -54,6 +54,9 @@ url.workspace = true
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "any", "migrate", "sqlite", "postgres"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v7", "serde"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+nix = { version = "0.31.3", default-features = false, features = ["socket"], optional = true }
 
 [dev-dependencies]
 axum.workspace = true

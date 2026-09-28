@@ -129,6 +129,11 @@ jobs:
       - name: Create private Eryx temporary directory
         run: install -d -m 700 "${RUNNER_TEMP}/eryx-tmp"
 
+      - name: Verify delegated cgroup v2 support
+        run: |
+          systemd-run --user --scope --quiet --property=Delegate=yes \
+            bash scripts/tests/with-code-interpreter-cgroup.sh /bin/true
+
       - name: Run feature-enabled clippy
         env:
           TMPDIR: ${{ runner.temp }}/eryx-tmp
@@ -136,13 +141,35 @@ jobs:
           cargo clippy -p agentic-server-core --all-targets --features embedded-code-interpreter -- -D warnings
           cargo clippy -p agentic-server --all-targets --features embedded-code-interpreter -- -D warnings
 
-      - name: Run feature-enabled tests
+      - name: Build Eryx worker executable
+        env:
+          TMPDIR: ${{ runner.temp }}/eryx-tmp
+        run: cargo build --locked -p agentic-server --bin agentic-server --features embedded-code-interpreter
+
+      - name: Run feature-enabled tests in a delegated scope
         env:
           TMPDIR: ${{ runner.temp }}/eryx-tmp
         run: |
-          cargo test -p agentic-server-core --lib --features embedded-code-interpreter
-          cargo test -p agentic-server-core --test code_interpreter_characterization_test --features embedded-code-interpreter
-          cargo test -p agentic-server --bin agentic-server --features embedded-code-interpreter code_interpreter
+          worker_binary="${PWD}/target/debug/agentic-server"
+          systemd-run --user --scope --quiet --property=Delegate=yes \
+            bash scripts/tests/with-code-interpreter-cgroup.sh \
+            env AGENTIC_CODE_INTERPRETER_WORKER_EXECUTABLE="$worker_binary" \
+            cargo test --locked -p agentic-server-core --lib --features embedded-code-interpreter
+          systemd-run --user --scope --quiet --property=Delegate=yes \
+            bash scripts/tests/with-code-interpreter-cgroup.sh \
+            env AGENTIC_CODE_INTERPRETER_WORKER_EXECUTABLE="$worker_binary" \
+            cargo test --locked -p agentic-server-core --lib --features embedded-code-interpreter \
+              tool::code_interpreter:: -- --ignored --test-threads=1
+          cargo test --locked -p agentic-server-core --test code_interpreter_characterization_test --features embedded-code-interpreter
+          systemd-run --user --scope --quiet --property=Delegate=yes \
+            bash scripts/tests/with-code-interpreter-cgroup.sh \
+            env AGENTIC_CODE_INTERPRETER_WORKER_EXECUTABLE="$worker_binary" \
+            cargo test --locked -p agentic-server --bin agentic-server --features embedded-code-interpreter code_interpreter
+          systemd-run --user --scope --quiet --property=Delegate=yes \
+            bash scripts/tests/with-code-interpreter-cgroup.sh \
+            env AGENTIC_CODE_INTERPRETER_WORKER_EXECUTABLE="$worker_binary" \
+            cargo test --locked -p agentic-server --test code_interpreter_worker_http_test \
+              --features embedded-code-interpreter -- --ignored --test-threads=1
 
   postgres:
     runs-on: ubuntu-latest

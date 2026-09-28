@@ -6,7 +6,6 @@ use std::future::{Future, ready};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
-use super::ToolHandler;
 use super::code_interpreter::CodeInterpreterHandler;
 use super::codex::insert_namespace_entries;
 use super::custom::{CustomHandler, CustomToolMap, insert_custom_entry};
@@ -159,7 +158,6 @@ fn insert_code_interpreter_entry(
     executors: &GatewayExecutors,
     param: &CodeInterpreterToolParam,
 ) -> Result<(), ToolError> {
-    CodeInterpreterHandler.validate(param)?;
     let executor = executors
         .code_interpreter_executor()
         .ok_or_else(code_interpreter_unavailable_error)?;
@@ -975,6 +973,22 @@ mod tests {
             error,
             ToolError::Config(message) if message.contains("code_interpreter")
         ));
+    }
+
+    #[tokio::test]
+    async fn build_with_handlers_accepts_client_tools_named_code_interpreter_without_builtin() {
+        for declaration in [
+            serde_json::json!({"type": "function", "name": "code_interpreter"}),
+            serde_json::json!({"type": "custom", "name": "code_interpreter"}),
+        ] {
+            let mut tools = vec![serde_json::from_value::<ResponsesTool>(declaration).expect("client declaration")];
+            let mut executors = GatewayExecutors::default();
+
+            let registry = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
+                .await
+                .expect("client tool name remains available without the built-in");
+            assert!(registry.lookup("code_interpreter").is_some());
+        }
     }
 
     #[tokio::test]

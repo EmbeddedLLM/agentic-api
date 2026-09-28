@@ -12,6 +12,7 @@ use eryx::{CancellationToken, Error as EryxError, OutputHandler, ResourceLimits,
 use crate::config::CodeInterpreterRuntimeConfig;
 use crate::tool::ToolError;
 
+use super::isolation::{self, WorkerRequest, WorkerResponse};
 use super::provider::{CodeInterpreterProvider, ExecutionCancellation, ExecutionOutput, ExecutionStatus};
 
 const TRUNCATION_MARKER: &str = "\n[output truncated]";
@@ -127,11 +128,14 @@ impl EryxProvider {
 
 impl CodeInterpreterProvider for EryxProvider {
     fn check_ready(&self) -> Result<(), ToolError> {
-        // Fail startup before registration if the operator did not provide
-        // an Eryx 0.8-compatible precompiled runtime.
-        build_sandbox(self.config, None)
-            .map(|_| ())
-            .map_err(|error| map_initialization_error(&error))
+        // Exercise runtime initialization inside a memory-limited worker.
+        match isolation::run_isolated(self.config, None, None) {
+            Ok(WorkerResponse::Ready) => Ok(()),
+            Ok(_) => Err(ToolError::Config(
+                "code interpreter isolated worker failed readiness".to_owned(),
+            )),
+            Err(error) => Err(ToolError::Config(error.to_string())),
+        }
     }
 
     fn max_concurrency(&self) -> NonZeroUsize {
@@ -144,7 +148,37 @@ impl CodeInterpreterProvider for EryxProvider {
         cancellation: Arc<ExecutionCancellation>,
     ) -> Pin<Box<dyn Future<Output = Result<ExecutionOutput, ToolError>> + Send + '_>> {
         let config = self.config;
-        Box::pin(async move { supervise(config, code, cancellation).await })
+        Box::pin(async move {
+            let response =
+                tokio::task::spawn_blocking(move || isolation::run_isolated(config, Some(code), Some(cancellation)))
+                    .await
+                    .map_err(|_| ToolError::Execution("code interpreter worker supervisor failed".to_owned()))??;
+            match response {
+                WorkerResponse::Output(output) => Ok(output),
+                WorkerResponse::Ready | WorkerResponse::Failed => Err(ToolError::Execution(
+                    "code interpreter isolated worker failed".to_owned(),
+                )),
+            }
+        })
+    }
+}
+
+pub(super) async fn run_worker_request(config: CodeInterpreterRuntimeConfig, request: WorkerRequest) -> WorkerResponse {
+    match request {
+        WorkerRequest::Probe(_) => {
+            // Readiness must prove that the runtime executes within the hard
+            // worker memory limit, not merely that its lazy builder succeeds.
+            match supervise(config, "pass".to_owned(), Arc::new(ExecutionCancellation::default())).await {
+                Ok(output) if matches!(output.status, ExecutionStatus::Completed) => WorkerResponse::Ready,
+                _ => WorkerResponse::Failed,
+            }
+        }
+        WorkerRequest::Run { code, .. } => {
+            match supervise(config, code, Arc::new(ExecutionCancellation::default())).await {
+                Ok(output) => WorkerResponse::Output(output),
+                Err(_) => WorkerResponse::Failed,
+            }
+        }
     }
 }
 
@@ -252,7 +286,7 @@ fn map_initialization_error(error: &EryxError) -> ToolError {
     ToolError::Config("code interpreter embedded runtime failed to initialize".to_owned())
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use std::num::NonZeroU64;
     use std::time::Duration;
@@ -273,8 +307,16 @@ mod tests {
         }
     }
 
+    fn require_worker_executable() {
+        let path = std::env::var_os("AGENTIC_CODE_INTERPRETER_WORKER_EXECUTABLE")
+            .expect("set AGENTIC_CODE_INTERPRETER_WORKER_EXECUTABLE to the built server binary");
+        assert!(std::path::Path::new(&path).is_file(), "worker executable must exist");
+    }
+
     #[tokio::test]
+    #[ignore = "requires a delegated cgroup and a built agentic-server worker executable"]
     async fn embedded_runtime_executes_python_and_classifies_failures_and_limits() {
+        require_worker_executable();
         let executor = CodeInterpreterExecutor::from_config(test_config()).expect("embedded runtime starts");
 
         let success = executor
@@ -310,5 +352,94 @@ mod tests {
         assert!(matches!(oversized.status, ExecutionStatus::Incomplete));
         assert!(oversized.stdout.len() <= test_config().max_stdout_bytes.get());
         assert!(oversized.stdout.contains("[output truncated]"));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a delegated cgroup and a built agentic-server worker executable"]
+    async fn isolated_worker_contains_raw_descriptor_output_and_recovers_from_timeout() {
+        require_worker_executable();
+        let config = test_config();
+        let executor = CodeInterpreterExecutor::from_config(config).expect("isolated worker starts");
+        let raw = executor
+            .execute_call(
+                r#"{"code":"import os\nos.write(1, b'x' * 1000000)\nos.write(2, b'y' * 1000000)\nprint('safe')"}"#,
+            )
+            .await
+            .expect("raw descriptor writes remain inside worker");
+        assert!(matches!(raw.status, ExecutionStatus::Completed));
+        assert_eq!(raw.stdout.trim(), "safe");
+        assert!(raw.stderr.is_empty());
+        assert!(raw.stdout.len() <= config.max_stdout_bytes.get());
+        assert!(raw.stderr.len() <= config.max_stderr_bytes.get());
+        assert!(!raw.stdout.contains("xxxxxxxx"));
+        assert!(!raw.stderr.contains("yyyyyyyy"));
+
+        let timeout_config = CodeInterpreterRuntimeConfig {
+            execution_wall_time: Duration::from_secs(2),
+            ..test_config()
+        };
+        let timeout_executor = CodeInterpreterExecutor::from_config(timeout_config).expect("timeout worker starts");
+        let timeout = timeout_executor
+            .execute_call(r#"{"code":"while True: pass"}"#)
+            .await
+            .expect("timeout produces typed result");
+        assert!(matches!(timeout.status, ExecutionStatus::Incomplete));
+        let after = timeout_executor
+            .execute_call(r#"{"code":"print('still-ready')"}"#)
+            .await
+            .expect("worker permit released after timeout");
+        assert_eq!(after.stdout.trim(), "still-ready");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a delegated cgroup and a built agentic-server worker executable"]
+    async fn cancellation_kills_and_reaps_worker_before_releasing_capacity() {
+        require_worker_executable();
+        let executor = Arc::new(CodeInterpreterExecutor::from_config(test_config()).expect("worker starts"));
+        let before = isolation::active_worker_cgroups().expect("list worker cgroups");
+        let running = Arc::clone(&executor);
+        let task = tokio::spawn(async move { running.execute_call(r#"{"code":"while True: pass"}"#).await });
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        let worker_group = loop {
+            let groups = isolation::active_worker_cgroups().expect("list active worker cgroups");
+            if let Some(path) = groups.into_iter().find(|path| !before.contains(path)) {
+                if std::fs::read_to_string(path.join("cgroup.procs")).is_ok_and(|pids| !pids.trim().is_empty()) {
+                    break path;
+                }
+            }
+            assert!(tokio::time::Instant::now() < deadline, "worker did not start");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        };
+        let worker_pid = std::fs::read_to_string(worker_group.join("cgroup.procs"))
+            .expect("worker PID")
+            .trim()
+            .to_owned();
+        task.abort();
+        let _ = task.await;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            if !worker_group.exists() {
+                break;
+            }
+            assert!(tokio::time::Instant::now() < deadline, "worker cgroup was not removed");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(
+            !std::path::Path::new(&format!("/proc/{worker_pid}")).exists(),
+            "worker was not reaped"
+        );
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            match executor.execute_call(r#"{"code":"print('reaped')"}"#).await {
+                Ok(result) => {
+                    assert_eq!(result.stdout.trim(), "reaped");
+                    break;
+                }
+                Err(error) if error.to_string().contains("capacity") && tokio::time::Instant::now() < deadline => {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+                Err(error) => panic!("worker capacity did not recover: {error}"),
+            }
+        }
     }
 }

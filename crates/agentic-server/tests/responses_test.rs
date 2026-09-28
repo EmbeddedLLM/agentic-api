@@ -787,6 +787,30 @@ async fn code_interpreter_disabled_rejects_before_http_upstream_inference() {
 }
 
 #[tokio::test]
+async fn lone_client_code_interpreter_function_reaches_upstream() {
+    let (llm_url, requests, _llm) = spawn_mock_vllm_json_capture().await;
+    let (gateway_url, _gateway) = spawn_gateway(test_state(&test_config(&llm_url))).await;
+
+    let response = reqwest::Client::new()
+        .post(format!("{gateway_url}/v1/responses"))
+        .json(&serde_json::json!({
+            "model": "test",
+            "input": "test input",
+            "store": false,
+            "tools": [{"type": "function", "name": "code_interpreter"}]
+        }))
+        .send()
+        .await
+        .expect("gateway response");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let requests = requests.lock().await;
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0]["tools"][0]["type"], "function");
+    assert_eq!(requests[0]["tools"][0]["name"], "code_interpreter");
+}
+
+#[tokio::test]
 async fn code_interpreter_name_collision_fails_before_inference() {
     let (llm_url, requests, _llm) = spawn_mock_vllm_json_capture().await;
     let (gateway_url, _gateway) = spawn_gateway(test_state(&test_config(&llm_url))).await;

@@ -936,10 +936,10 @@ RequestPayload::to_upstream_request
 tools for vLLM. New callers must use it rather than rebuilding function schemas or
 normalizing declarations in the executor. Declared placeholders that are not yet
 supported, currently file search, produce no upstream function declaration until they
-have a complete handler and execution path. Code interpreter is an opt-in gateway
-executor: it normalizes only in builds with the `embedded-code-interpreter` feature,
-and requests fail closed unless operator enablement and Eryx runtime readiness also
-succeed.
+have a complete handler and execution path. Code interpreter has a fixed
+normalization contract in every build. Requests that declare it fail before
+inference unless the binary includes the `embedded-code-interpreter` feature,
+the operator enables it, and Eryx runtime readiness succeeds.
 
 | Component | Responsibility |
 | --- | --- |
