@@ -27,12 +27,13 @@ pub enum CodeInterpreterCallStatus {
     Incomplete,
 }
 
-/// Captured output produced by a code-interpreter call.
+/// Text or image output produced by a code-interpreter call.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CodeInterpreterCallOutput {
     Logs { logs: String },
+    Image { url: String },
 }
 
 impl CodeInterpreterCallOutput {
@@ -89,16 +90,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn call_round_trips_with_a_closed_typed_output() {
+    fn call_round_trips_with_logs_and_image_outputs() {
         let call = CodeInterpreterCall {
             id: "ci_1".to_owned(),
             container_id: "cntr_1".to_owned(),
             code: "print(42)".to_owned(),
             status: CodeInterpreterCallStatus::Completed,
-            outputs: Some(vec![CodeInterpreterCallOutput::logs("42\n".to_owned())]),
+            outputs: Some(vec![
+                CodeInterpreterCallOutput::logs("42\n".to_owned()),
+                CodeInterpreterCallOutput::Image {
+                    url: "https://example.test/plot.png".to_owned(),
+                },
+            ]),
         };
         let wire = serde_json::to_value(&call).expect("serialize call");
         assert_eq!(wire["outputs"][0]["type"], "logs");
+        assert_eq!(wire["outputs"][1]["type"], "image");
+        assert_eq!(wire["outputs"][1]["url"], "https://example.test/plot.png");
         assert_eq!(
             serde_json::from_value::<CodeInterpreterCall>(wire).expect("deserialize call"),
             call

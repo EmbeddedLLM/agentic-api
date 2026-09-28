@@ -12,8 +12,7 @@ use super::{GatewayExecutor, ToolError};
 use crate::config::ToolRuntimeConfig;
 use crate::types::tools::{McpToolParam, ResponsesTool};
 
-#[cfg(feature = "embedded-code-interpreter")]
-use super::code_interpreter::EryxCodeInterpreterExecutor;
+use super::code_interpreter::CodeInterpreterExecutor;
 
 pub enum GatewayExecutorRegistration {
     WebSearch(Arc<WebSearchExecutor>),
@@ -54,10 +53,8 @@ pub struct GatewayExecutors {
     mcp_discovered: Arc<RwLock<HashMap<String, Vec<McpDiscoveredHandler>>>>,
     mcp_allowed_hosts: Vec<String>,
     web_search: Option<Arc<WebSearchExecutor>>,
-    /// Present only after an opted-in Eryx runtime has eagerly initialized its
-    /// embedded assets and passed deployment readiness checks.
-    #[cfg(feature = "embedded-code-interpreter")]
-    code_interpreter: Option<Arc<EryxCodeInterpreterExecutor>>,
+    /// Present only after an opted-in provider passes startup readiness checks.
+    code_interpreter: Option<Arc<CodeInterpreterExecutor>>,
 }
 
 impl GatewayExecutors {
@@ -70,7 +67,6 @@ impl GatewayExecutors {
             mcp_discovered: Arc::new(RwLock::new(HashMap::new())),
             mcp_allowed_hosts: super::mcp::pool::allowed_hosts_from_env(),
             web_search: Some(Arc::new(WebSearchHandler::from_env(client))),
-            #[cfg(feature = "embedded-code-interpreter")]
             code_interpreter: None,
         }
     }
@@ -93,10 +89,12 @@ impl GatewayExecutors {
         let code_interpreter = config
             .code_interpreter
             .enabled
-            .then(|| EryxCodeInterpreterExecutor::from_config(config.code_interpreter))
+            .then(|| CodeInterpreterExecutor::from_config(config.code_interpreter))
             .transpose()
             .map(|executor| executor.map(Arc::new))
             .map_err(|error| ToolError::Config(error.to_string()))?;
+        #[cfg(not(feature = "embedded-code-interpreter"))]
+        let code_interpreter = None;
         let executors = Self {
             mcp: HashMap::new(),
             mcp_configs: config.mcp_servers.clone(),
@@ -112,7 +110,6 @@ impl GatewayExecutors {
                 &config.web_search,
                 config.max_concurrent_gateway_calls,
             ))),
-            #[cfg(feature = "embedded-code-interpreter")]
             code_interpreter,
         };
         if config.mcp_servers.is_empty() {
@@ -166,8 +163,6 @@ impl GatewayExecutors {
     /// This runs before request state may be persisted, and again after
     /// conversation settings are rehydrated, so an inherited declaration
     /// cannot bypass operator gating.
-    // `self` supplies runtime readiness only in feature-enabled builds.
-    #[allow(clippy::unused_self)]
     pub(crate) fn validate_declarations(&self, tools: Option<&[ResponsesTool]>) -> Result<(), ToolError> {
         let Some(tools) = tools else {
             return Ok(());
@@ -180,10 +175,7 @@ impl GatewayExecutors {
             .iter()
             .any(|tool| matches!(tool, ResponsesTool::CodeInterpreter(_)))
         {
-            #[cfg(feature = "embedded-code-interpreter")]
             let ready = self.code_interpreter.is_some();
-            #[cfg(not(feature = "embedded-code-interpreter"))]
-            let ready = false;
             if !ready {
                 return Err(code_interpreter_unavailable_error());
             }
@@ -191,11 +183,10 @@ impl GatewayExecutors {
         Ok(())
     }
 
-    /// Return the shared, eagerly-ready Eryx executor when an operator opted
-    /// in and the feature was selected.
-    #[cfg(feature = "embedded-code-interpreter")]
+    /// Return the shared, eagerly-ready code interpreter when an operator
+    /// enabled a registered provider.
     #[must_use]
-    pub(crate) fn code_interpreter_executor(&self) -> Option<Arc<EryxCodeInterpreterExecutor>> {
+    pub(crate) fn code_interpreter_executor(&self) -> Option<Arc<CodeInterpreterExecutor>> {
         self.code_interpreter.clone()
     }
 
@@ -370,7 +361,6 @@ impl std::fmt::Debug for GatewayExecutors {
             .field("mcp_discovered", &Arc::strong_count(&self.mcp_discovered))
             .field("mcp_allowed_hosts", &self.mcp_allowed_hosts)
             .field("web_search", &self.web_search.is_some());
-        #[cfg(feature = "embedded-code-interpreter")]
         debug.field("code_interpreter", &self.code_interpreter.is_some());
         debug.finish()
     }
@@ -477,7 +467,6 @@ mod tests {
         assert!(matches!(error, ToolError::Config(message) if message.contains("code_interpreter")));
     }
 
-    #[cfg(feature = "embedded-code-interpreter")]
     #[test]
     fn from_env_never_registers_the_operator_gated_code_interpreter() {
         let executors = GatewayExecutors::from_env(Arc::new(reqwest::Client::new()));

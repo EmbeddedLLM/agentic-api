@@ -145,6 +145,55 @@ fn lifecycle_accumulator(strict: bool) -> ResponseAccumulator {
 }
 
 #[test]
+fn native_code_interpreter_image_output_survives_json_and_stream_ingestion() {
+    use serde_json::json;
+
+    let done = json!({
+        "type": "code_interpreter_call",
+        "id": "ci_image",
+        "container_id": "cntr_image",
+        "code": "plot()",
+        "status": "completed",
+        "outputs": [{"type": "image", "url": "https://example.test/plot.png"}]
+    });
+    let body = json!({"id": "resp_1", "status": "completed", "output": [done.clone()]});
+    let from_json = ResponseAccumulator::from_json(&body.to_string(), None).expect("native JSON response");
+    assert_eq!(
+        serde_json::to_value(from_json.output).expect("serialize output"),
+        json!([done])
+    );
+
+    for strict in [false, true] {
+        let mut acc = lifecycle_accumulator(strict);
+        let added = json!({
+            "type": "code_interpreter_call",
+            "id": "ci_image",
+            "container_id": "cntr_image",
+            "code": "plot()",
+            "status": "in_progress",
+            "outputs": null
+        });
+        push_lifecycle_event(
+            &mut acc,
+            &json!({"type": "response.output_item.added", "output_index": 0, "item": added}),
+            strict,
+        )
+        .expect("native image call added");
+        push_lifecycle_event(
+            &mut acc,
+            &json!({"type": "response.output_item.done", "output_index": 0, "item": done}),
+            strict,
+        )
+        .expect("native image call completed");
+        acc.finalize_all().expect("finalize image call");
+        assert_eq!(
+            serde_json::to_value(acc.output).expect("serialize output"),
+            json!([done])
+        );
+    }
+}
+
+#[test]
 fn done_only_code_interpreter_call_accumulates_in_lenient_stream() {
     use serde_json::json;
 
@@ -154,7 +203,10 @@ fn done_only_code_interpreter_call_accumulates_in_lenient_stream() {
         "container_id": "cntr_1",
         "code": "print(42)",
         "status": "completed",
-        "outputs": [{"type": "logs", "logs": "42\n"}]
+        "outputs": [
+            {"type": "logs", "logs": "42\n"},
+            {"type": "image", "url": "https://example.test/plot.png"}
+        ]
     });
     let acc = from_sse_lines(
         [

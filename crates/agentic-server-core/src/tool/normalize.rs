@@ -38,10 +38,7 @@ impl ResponsesTool {
             Self::Mcp(param) => McpHandler::spec_from_param(param).validate(param),
             Self::ToolSearch(param) => ToolSearchHandler.validate(param),
             Self::WebSearch(_) | Self::FileSearch(_) | Self::Unknown => Ok(()),
-            // The declaration shape is validated in every build. A default build
-            // has no Eryx dependency and cannot normalize or register it, so
-            // feature-enabled availability is decided by the Responses registry
-            // after startup readiness.
+            // Runtime availability is checked before the request is normalized.
             Self::CodeInterpreter(param) => CodeInterpreterHandler.validate(param),
             Self::Shell(param) => ShellHandler.validate(param),
             Self::Namespace(param) => CodexNamespaceHandler.validate(param),
@@ -82,10 +79,9 @@ impl ResponsesTool {
     /// - Unformatted `Custom` variants become function tools with one string
     ///   `input` parameter; formatted declarations are rejected by the request
     ///   path because normalization cannot preserve constrained decoding.
-    /// - The default build keeps `CodeInterpreter` out of model-visible
-    ///   normalization. Feature-enabled builds expose its fixed function
-    ///   contract for typed contract tests, but request validation remains
-    ///   fail-closed until a ready runtime exists.
+    /// - `CodeInterpreter` lowers to its fixed function contract in every build;
+    ///   supported request flows reject an unavailable runtime before calling
+    ///   this conversion.
     /// - Unimplemented `FileSearch` variants return an empty list and emit a
     ///   `tracing::debug!`.
     ///
@@ -104,13 +100,7 @@ impl ResponsesTool {
                 tracing::debug!("file_search tool skipped in normalize - handler not yet registered");
                 vec![]
             }
-            #[cfg(feature = "embedded-code-interpreter")]
             Self::CodeInterpreter(param) => CodeInterpreterHandler.normalize(param),
-            #[cfg(not(feature = "embedded-code-interpreter"))]
-            Self::CodeInterpreter(_) => {
-                tracing::debug!("code_interpreter tool cannot normalize without an available handler");
-                vec![]
-            }
             Self::Shell(param) => ShellHandler.normalize(param),
             Self::Namespace(param) => CodexNamespaceHandler.normalize(param),
             Self::Custom(param) => CustomHandler.normalize(param),
@@ -135,21 +125,8 @@ impl From<ToolOutput> for FunctionToolResultMessage {
 mod tests {
     use super::*;
 
-    #[cfg(not(feature = "embedded-code-interpreter"))]
     #[test]
-    fn unavailable_code_interpreter_does_not_create_a_model_visible_function() {
-        let tool: ResponsesTool = serde_json::from_value(serde_json::json!({
-            "type": "code_interpreter",
-            "container": {"type": "auto"}
-        }))
-        .expect("tool parses");
-
-        assert!(tool.to_function_tools().is_empty());
-    }
-
-    #[cfg(feature = "embedded-code-interpreter")]
-    #[test]
-    fn enabled_code_interpreter_exposes_its_fixed_function_contract() {
+    fn code_interpreter_normalizes_to_its_fixed_function_contract() {
         let tool: ResponsesTool = serde_json::from_value(serde_json::json!({
             "type": "code_interpreter",
             "container": {"type": "auto"}
@@ -159,7 +136,7 @@ mod tests {
         let [function] = tool
             .to_function_tools()
             .try_into()
-            .expect("feature-enabled normalization emits exactly one function");
+            .expect("normalization emits exactly one function");
         assert_eq!(function.name, "code_interpreter");
         assert_eq!(function.strict, Some(true));
     }

@@ -6,7 +6,6 @@ use std::future::{Future, ready};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "embedded-code-interpreter")]
 use super::ToolHandler;
 use super::code_interpreter::CodeInterpreterHandler;
 use super::codex::insert_namespace_entries;
@@ -155,7 +154,6 @@ fn insert_file_search_entry(entries: &mut HashMap<String, ToolEntry>, _params: &
     );
 }
 
-#[cfg(feature = "embedded-code-interpreter")]
 fn insert_code_interpreter_entry(
     entries: &mut HashMap<String, ToolEntry>,
     executors: &GatewayExecutors,
@@ -175,15 +173,6 @@ fn insert_code_interpreter_entry(
             ),
         );
     })
-}
-
-#[cfg(not(feature = "embedded-code-interpreter"))]
-fn insert_code_interpreter_entry(
-    _entries: &mut HashMap<String, ToolEntry>,
-    _executors: &GatewayExecutors,
-    _param: &CodeInterpreterToolParam,
-) -> Result<(), ToolError> {
-    Err(code_interpreter_unavailable_error())
 }
 
 /// Request-scoped registry built from `RequestPayload.tools`.

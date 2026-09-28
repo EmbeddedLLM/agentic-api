@@ -361,8 +361,9 @@ access happen — those live in `tool/`, `executor/`, and `storage/` respectivel
   namespace tool members to model-visible names, validates every declared tool
   (`ResponsesTool::validate()`), and normalizes each supported model-visible tool to
   `UpstreamTool::Function` (`ResponsesTool::to_function_tools()`). File search and
-  unknown typed declarations normalize to no upstream tool; a feature-enabled,
-  runtime-ready code interpreter normalizes to a fixed function contract. Every
+  unknown typed declarations normalize to no upstream tool; a code interpreter
+  declaration normalizes to a fixed function contract. The server request path
+  checks runtime availability before it calls this conversion. Every
   declaration that does reach vLLM is `type: "function"`, because that's the only
   tool type it speaks. The conversion also resolves/validates `tool_choice`
   and applies `ResponsesInput::model_input()`. It's called from
@@ -958,8 +959,9 @@ succeed.
   per-declaration normalization state. The method name is plural because namespace and
   MCP declarations may expand to several model-visible function tools.
   `FileSearch` remains an unsupported placeholder and normalizes to nothing. The
-  code interpreter normalizes to one fixed function contract only in feature-enabled
-  builds and is bound to `EryxCodeInterpreterExecutor` after startup readiness checks.
+  code interpreter normalizes to one fixed function contract in every build, while
+  request validation rejects unavailable runtimes before upstream inference.
+  Feature-enabled builds bind the ready private `CodeInterpreterExecutor` to the provider.
 - **`handler.rs`** — the two traits every tool type reasons about:
   ```rust
   pub trait ToolHandler: Send + Sync {

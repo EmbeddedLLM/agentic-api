@@ -215,6 +215,7 @@ impl RetainedSize for CodeInterpreterCallOutput {
         RETAINED_CONTAINER_OVERHEAD_BYTES
             + match self {
                 Self::Logs { logs } => logs.len(),
+                Self::Image { url } => url.len(),
             }
     }
 }
@@ -424,7 +425,9 @@ mod tests {
             status: CodeInterpreterCallStatus::Completed,
             outputs: Some(vec![
                 CodeInterpreterCallOutput::logs("42\n".to_owned()),
-                CodeInterpreterCallOutput::logs("warning\n".to_owned()),
+                CodeInterpreterCallOutput::Image {
+                    url: "https://example.test/plot.png".to_owned(),
+                },
             ]),
         });
 
@@ -435,7 +438,7 @@ mod tests {
                 + "cntr_1".len()
                 + "print(42)".len()
                 + "42\n".len()
-                + "warning\n".len()
+                + "https://example.test/plot.png".len()
         );
     }
 
