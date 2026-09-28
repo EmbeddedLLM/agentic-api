@@ -417,11 +417,13 @@ Enable the compiled executor in `~/.agentic-api/config.toml`:
 enabled = true
 ```
 
-Alternatively, set `AGENTIC_CODE_INTERPRETER_ENABLED=true`, which takes precedence over the file. The Cargo feature and the runtime setting are both required. Before starting the server, create a private temporary directory for Eryx:
+Alternatively, set `AGENTIC_CODE_INTERPRETER_ENABLED=true`, which takes precedence over the file. The Cargo feature and the runtime setting are both required. The worker also requires Linux cgroup v2 with delegated `memory` and `pids` controllers. For local testing with a running systemd user manager, create a private temporary directory and start the server inside a delegated scope:
 
 ```bash
 install -d -m 700 "$HOME/.agentic-api/tmp"
-TMPDIR="$HOME/.agentic-api/tmp" ./target/release/agentic-server
+systemd-run --user --scope --quiet --property=Delegate=yes \
+  bash scripts/tests/with-code-interpreter-cgroup.sh \
+  env TMPDIR="$HOME/.agentic-api/tmp" ./target/release/agentic-server
 ```
 
 See the [embedded code interpreter design](docs/design/embedded-code-interpreter.md) for resource limits, request
