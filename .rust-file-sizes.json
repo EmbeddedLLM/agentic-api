@@ -16,14 +16,6 @@
     "crates/agentic-server/src/handler/websocket/responses.rs": 784
   },
   "exceptions": {
-    "crates/agentic-server-core/src/executor/accumulator/mod.rs": {
-      "limit": 683,
-      "reason": "Code-interpreter done-only completion projects its generated item ID into the emitted event in the existing ingestion path."
-    },
-    "crates/agentic-server-core/src/executor/compaction.rs": {
-      "limit": 501,
-      "reason": "Native code-interpreter call history contributes code, logs, and images to the existing context token estimate."
-    },
     "crates/agentic-server-core/src/config.rs": {
       "limit": 629,
       "reason": "Operator-owned code-interpreter worker limits and admission validation share runtime configuration with the Tavily web-search provider settings."
@@ -32,9 +24,21 @@
       "limit": 534,
       "reason": "Code-interpreter SSE lifecycle variants and completed-item ID synchronization extend the shared event frame mappings."
     },
+    "crates/agentic-server-core/src/executor/accumulator/mod.rs": {
+      "limit": 683,
+      "reason": "Code-interpreter done-only completion projects its generated item ID into the emitted event in the existing ingestion path."
+    },
+    "crates/agentic-server-core/src/executor/compaction.rs": {
+      "limit": 501,
+      "reason": "Native code-interpreter call history contributes code, logs, and images to the existing context token estimate."
+    },
     "crates/agentic-server-core/src/executor/gateway.rs": {
       "limit": 718,
       "reason": "Gateway-owned code-interpreter calls emit their public SSE lifecycle through the existing scheduler after policy extraction."
+    },
+    "crates/agentic-server-core/src/executor/messages_stream.rs": {
+      "limit": 532,
+      "reason": "Streaming lifecycle validation must stay with the single accumulator transition path."
     },
     "crates/agentic-server-core/src/tool/registry.rs": {
       "limit": 528,
