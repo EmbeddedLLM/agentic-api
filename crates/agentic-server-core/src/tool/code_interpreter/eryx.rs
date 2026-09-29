@@ -256,22 +256,86 @@ fn build_sandbox(
 }
 
 fn ensure_private_temp_directory(temp_dir: &Path) -> Result<(), ToolError> {
-    std::fs::create_dir_all(temp_dir)
-        .map_err(|_| ToolError::Config("code interpreter TMPDIR is not writable".to_owned()))?;
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::fs::DirBuilderExt;
+        use std::path::Component;
 
-        let mode = std::fs::metadata(temp_dir)
-            .map_err(|_| ToolError::Config("code interpreter TMPDIR cannot be inspected".to_owned()))?
-            .permissions()
-            .mode()
-            & 0o777;
-        if mode != 0o700 {
+        if !temp_dir.is_absolute() || temp_dir.components().any(|part| matches!(part, Component::ParentDir)) {
             return Err(ToolError::Config(
-                "code interpreter requires an operator-owned TMPDIR with mode 0700".to_owned(),
+                "code interpreter TMPDIR must be an absolute path without '..'".to_owned(),
             ));
         }
+        let path: std::path::PathBuf = temp_dir.components().collect();
+        #[cfg(target_os = "linux")]
+        let effective_uid = nix::unistd::geteuid().as_raw();
+        let ancestors: Vec<_> = path.ancestors().collect();
+        for (index, component_path) in ancestors.iter().rev().enumerate() {
+            if let Err(error) = std::fs::symlink_metadata(component_path) {
+                if error.kind() != std::io::ErrorKind::NotFound {
+                    return Err(ToolError::Config(
+                        "code interpreter TMPDIR cannot be inspected".to_owned(),
+                    ));
+                }
+                let mut builder = std::fs::DirBuilder::new();
+                builder.mode(0o700);
+                if let Err(error) = builder.create(component_path)
+                    && error.kind() != std::io::ErrorKind::AlreadyExists
+                {
+                    return Err(ToolError::Config("code interpreter TMPDIR is not writable".to_owned()));
+                }
+            }
+            let metadata = std::fs::symlink_metadata(component_path)
+                .map_err(|_| ToolError::Config("code interpreter TMPDIR cannot be inspected".to_owned()))?;
+            if metadata.file_type().is_symlink() {
+                return Err(ToolError::Config(
+                    "code interpreter TMPDIR path must not contain symlinks".to_owned(),
+                ));
+            }
+            if index + 1 == ancestors.len() {
+                #[cfg(target_os = "linux")]
+                validate_private_temp_directory(&metadata, Some(effective_uid))?;
+                #[cfg(not(target_os = "linux"))]
+                validate_private_temp_directory(&metadata, None)?;
+            } else {
+                #[cfg(target_os = "linux")]
+                validate_trusted_temp_parent(&metadata, effective_uid)?;
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    std::fs::create_dir_all(temp_dir)
+        .map_err(|_| ToolError::Config("code interpreter TMPDIR is not writable".to_owned()))?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn validate_private_temp_directory(metadata: &std::fs::Metadata, effective_uid: Option<u32>) -> Result<(), ToolError> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    if !metadata.is_dir()
+        || effective_uid.is_some_and(|uid| metadata.uid() != uid)
+        || metadata.permissions().mode() & 0o777 != 0o700
+    {
+        return Err(ToolError::Config(
+            "code interpreter requires an operator-owned TMPDIR with mode 0700".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn validate_trusted_temp_parent(metadata: &std::fs::Metadata, effective_uid: u32) -> Result<(), ToolError> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    let mode = metadata.permissions().mode();
+    if !metadata.is_dir()
+        || (metadata.uid() != effective_uid && metadata.uid() != 0)
+        || (mode & 0o022 != 0 && mode & 0o1000 == 0)
+    {
+        return Err(ToolError::Config(
+            "code interpreter TMPDIR parent is not trusted".to_owned(),
+        ));
     }
     Ok(())
 }
@@ -305,6 +369,59 @@ mod tests {
             max_aggregate_guest_memory_bytes: NonZeroUsize::new(128 * 1024 * 1024).expect("nonzero"),
             ..CodeInterpreterRuntimeConfig::default()
         }
+    }
+
+    #[test]
+    fn private_temp_directory_requires_owner_and_rejects_symlink() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
+
+        let root = std::env::temp_dir().join(format!("agentic-eryx-tmpdir-test-{}", uuid::Uuid::now_v7()));
+        std::fs::create_dir(&root).expect("create test root");
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).expect("set test root permissions");
+        let private = root.join("private");
+        std::fs::create_dir(&private).expect("create private directory");
+        std::fs::set_permissions(&private, std::fs::Permissions::from_mode(0o700))
+            .expect("set private directory permissions");
+
+        ensure_private_temp_directory(&private).expect("owned private directory is valid");
+        let metadata = std::fs::symlink_metadata(&private).expect("private directory metadata");
+        let other_uid = metadata.uid().wrapping_add(1);
+        assert!(validate_private_temp_directory(&metadata, Some(other_uid)).is_err());
+        std::fs::set_permissions(&private, std::fs::Permissions::from_mode(0o750))
+            .expect("set overly broad permissions");
+        assert!(ensure_private_temp_directory(&private).is_err());
+        std::fs::set_permissions(&private, std::fs::Permissions::from_mode(0o700))
+            .expect("restore private permissions");
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o777))
+            .expect("make parent writable without sticky bit");
+        assert!(ensure_private_temp_directory(&private).is_err());
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o1777)).expect("make parent sticky");
+        ensure_private_temp_directory(&private).expect("sticky parent protects the private directory");
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).expect("restore test root permissions");
+        let fresh_parent = root.join("fresh");
+        let fresh_private = fresh_parent.join("private");
+        ensure_private_temp_directory(&fresh_private).expect("create missing private path");
+        for directory in [&fresh_parent, &fresh_private] {
+            let metadata = std::fs::symlink_metadata(directory).expect("created directory metadata");
+            assert_eq!(metadata.uid(), nix::unistd::geteuid().as_raw());
+            assert_eq!(metadata.permissions().mode() & 0o777, 0o700);
+        }
+
+        let link = root.join("link");
+        symlink(&private, &link).expect("create symlink to private directory");
+        assert!(ensure_private_temp_directory(&link).is_err());
+        let nested = private.join("nested");
+        std::fs::create_dir(&nested).expect("create nested private directory");
+        std::fs::set_permissions(&nested, std::fs::Permissions::from_mode(0o700))
+            .expect("set nested private permissions");
+        assert!(ensure_private_temp_directory(&link.join("nested")).is_err());
+
+        std::fs::remove_dir(nested).expect("remove nested private directory");
+        std::fs::remove_file(link).expect("remove symlink");
+        std::fs::remove_dir(private).expect("remove private directory");
+        std::fs::remove_dir(fresh_private).expect("remove created private directory");
+        std::fs::remove_dir(fresh_parent).expect("remove created parent directory");
+        std::fs::remove_dir(root).expect("remove test root");
     }
 
     fn require_worker_executable() {

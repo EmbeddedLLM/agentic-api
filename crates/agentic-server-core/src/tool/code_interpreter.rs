@@ -328,6 +328,7 @@ fn output_item(
         code,
         status,
         outputs,
+        origin: crate::types::io::code_interpreter::CodeInterpreterCallOrigin::Gateway,
     })
 }
 
@@ -444,12 +445,27 @@ mod tests {
                 arguments: r#"{"code":"print(42)"}"#.to_owned(),
                 status: crate::types::event::MessageStatus::Completed,
             };
-            let OutputItem::CodeInterpreterCall(started) = output_item(
+            let started_output = output_item(
                 &call,
                 config.max_source_bytes,
                 CodeInterpreterCallStatus::InProgress,
                 None,
-            ) else {
+            );
+            assert!(
+                started_output.to_input_item().is_none(),
+                "gateway projection must not replay"
+            );
+            let stored = String::try_from(&crate::storage::InOutItem::Output(started_output.clone()))
+                .expect("serialize gateway projection for history");
+            let stored: serde_json::Value = serde_json::from_str(&stored).expect("stored gateway projection");
+            assert_eq!(stored["_agentic_code_interpreter_origin"], "gateway");
+            assert!(
+                serde_json::to_value(&started_output)
+                    .expect("public projection serializes")
+                    .get("_agentic_code_interpreter_origin")
+                    .is_none()
+            );
+            let OutputItem::CodeInterpreterCall(started) = started_output else {
                 panic!("expected code interpreter item");
             };
             let OutputItem::CodeInterpreterCall(completed) = output_item(

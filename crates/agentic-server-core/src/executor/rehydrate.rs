@@ -859,6 +859,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn native_code_interpreter_call_rehydrates_for_previous_response_and_conversation()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let native_call: OutputItem = serde_json::from_value(serde_json::json!({
+            "type": "code_interpreter_call",
+            "id": "ci_native",
+            "container_id": "cntr_native",
+            "code": "print(7)",
+            "status": "completed",
+            "outputs": [{"type": "logs", "logs": "7\n"}]
+        }))?;
+        let response_pool = create_pool_with_schema(Some("sqlite://?mode=memory")).await?;
+        let conversation_pool = create_pool_with_schema(Some("sqlite://?mode=memory")).await?;
+        let response_store = ResponseStore::new(response_pool);
+        let conversation_store = ConversationStore::new(conversation_pool);
+        response_store
+            .persist(
+                "resp_native",
+                None,
+                vec![InOutItem::Output(native_call.clone())],
+                &ResponseMetadata::default(),
+            )
+            .await?;
+        let conversation = conversation_store.create().await?;
+        conversation_store
+            .persist(
+                &conversation.conversation_id,
+                "resp_conversation_native",
+                None,
+                vec![InOutItem::Output(native_call)],
+                &ResponseMetadata::default(),
+            )
+            .await?;
+        let exec_ctx = execution_context(conversation_store, response_store);
+
+        for request in [
+            request(None, Some("resp_native")),
+            request(Some(&conversation.conversation_id), None),
+        ] {
+            let ctx = rehydrate_conversation(request, &exec_ctx).await?;
+            let model_input = serde_json::to_value(ctx.enriched_request.input.model_input())?;
+            assert_eq!(model_input[0]["type"], "code_interpreter_call");
+            assert_eq!(model_input[0]["id"], "ci_native");
+            assert_eq!(model_input[0]["outputs"][0]["logs"], "7\n");
+            assert_eq!(model_input[1]["role"], "user");
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn previous_response_rehydration_has_no_conversation_version() -> Result<(), Box<dyn std::error::Error>> {
         let pool = create_pool_with_schema(Some("sqlite://?mode=memory")).await?;
         let response_store = ResponseStore::new(pool);

@@ -204,6 +204,21 @@ fn add_input_item(estimate: &mut InputTokenEstimate, item: &InputItem) {
             estimate.add_text(&output.call_id);
             add_tool_call_output(estimate, &output.output);
         }
+        InputItem::CodeInterpreterCall(call) => {
+            estimate.add_text(&call.id);
+            estimate.add_text(&call.container_id);
+            estimate.add_text(&call.code);
+            if let Some(outputs) = &call.outputs {
+                for output in outputs {
+                    match output {
+                        crate::types::io::CodeInterpreterCallOutput::Logs { logs } => estimate.add_text(logs),
+                        crate::types::io::CodeInterpreterCallOutput::Image { .. } => {
+                            estimate.add_tokens(ESTIMATED_IMAGE_TOKENS);
+                        }
+                    }
+                }
+            }
+        }
         InputItem::ToolSearchCall(call) => {
             estimate.add_text(&call.id);
             estimate.add_text(&call.call_id);

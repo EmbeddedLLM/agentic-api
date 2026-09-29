@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// One code-interpreter call exposed in a response.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CodeInterpreterCall {
     pub id: String,
@@ -13,6 +13,53 @@ pub struct CodeInterpreterCall {
     /// Execution outputs. `OpenAI` emits `null` while a call is in progress;
     /// gateway completion uses `Some`, including an empty output list.
     pub outputs: Option<Vec<CodeInterpreterCallOutput>>,
+    /// Internal provenance for continuation. This is stored separately from
+    /// the public item and cannot be selected through the Responses wire.
+    #[serde(skip)]
+    pub(crate) origin: CodeInterpreterCallOrigin,
+}
+
+impl PartialEq for CodeInterpreterCall {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.container_id == other.container_id
+            && self.code == other.code
+            && self.status == other.status
+            && self.outputs == other.outputs
+    }
+}
+
+impl Eq for CodeInterpreterCall {}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum CodeInterpreterCallOrigin {
+    #[default]
+    Upstream,
+    Gateway,
+}
+
+impl CodeInterpreterCall {
+    /// Construct a code-interpreter call received from an upstream provider.
+    ///
+    /// The public wire does not carry execution origin. Gateway projections
+    /// set their internal origin when they are created by the tool handler.
+    #[must_use]
+    pub fn new(
+        id: String,
+        container_id: String,
+        code: String,
+        status: CodeInterpreterCallStatus,
+        outputs: Option<Vec<CodeInterpreterCallOutput>>,
+    ) -> Self {
+        Self {
+            id,
+            container_id,
+            code,
+            status,
+            outputs,
+            origin: CodeInterpreterCallOrigin::Upstream,
+        }
+    }
 }
 
 /// Public lifecycle state for a code-interpreter call.
@@ -102,6 +149,7 @@ mod tests {
                     url: "https://example.test/plot.png".to_owned(),
                 },
             ]),
+            origin: CodeInterpreterCallOrigin::Upstream,
         };
         let wire = serde_json::to_value(&call).expect("serialize call");
         assert_eq!(wire["outputs"][0]["type"], "logs");
@@ -110,6 +158,14 @@ mod tests {
         assert_eq!(
             serde_json::from_value::<CodeInterpreterCall>(wire).expect("deserialize call"),
             call
+        );
+        let mut gateway = call.clone();
+        gateway.origin = CodeInterpreterCallOrigin::Gateway;
+        let public = serde_json::to_value(&gateway).expect("serialize gateway call");
+        assert_eq!(
+            serde_json::from_value::<CodeInterpreterCall>(public).expect("deserialize public call"),
+            gateway,
+            "internal origin must not affect public item equality"
         );
     }
 

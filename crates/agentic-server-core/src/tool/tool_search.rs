@@ -1125,6 +1125,7 @@ fn prepare_history(
             }
             InputItem::CompactionTrigger => {}
             InputItem::Message(_)
+            | InputItem::CodeInterpreterCall(_)
             | InputItem::McpListTools(_)
             | InputItem::FunctionCallOutput(_)
             | InputItem::CustomToolCall(_)

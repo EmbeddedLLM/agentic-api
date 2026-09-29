@@ -9,6 +9,7 @@ impl InputItem {
         match self {
             Self::Message(item) => item.id.as_deref(),
             Self::FunctionCall(item) => item.id.as_deref(),
+            Self::CodeInterpreterCall(item) => Some(&item.id),
             Self::ToolSearchCall(item) => Some(&item.id),
             Self::CustomToolCall(item) => Some(&item.id),
             Self::ShellCall(item) => item.id.as_deref(),
@@ -31,6 +32,7 @@ impl InputItem {
         match self {
             Self::Message(_) => Some("msg_"),
             Self::FunctionCall(_) => Some("fc_"),
+            Self::CodeInterpreterCall(_) => Some("ci_"),
             Self::ToolSearchCall(_) => Some("tsc_"),
             Self::CustomToolCall(_) => Some("ctc_"),
             Self::ShellCall(_) => Some("sh_"),

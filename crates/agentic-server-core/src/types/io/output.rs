@@ -1090,6 +1090,11 @@ impl OutputItem {
             Self::ShellCall(call) => Some(InputItem::FunctionCall(call.clone().into())),
             Self::McpListTools(list_tools) => Some(InputItem::McpListTools(list_tools.clone())),
             Self::Compaction(item) => Some(InputItem::Compaction(item.clone())),
+            Self::CodeInterpreterCall(call)
+                if call.origin == super::code_interpreter::CodeInterpreterCallOrigin::Upstream =>
+            {
+                Some(InputItem::CodeInterpreterCall(call.clone()))
+            }
             Self::CodeInterpreterCall(_) | Self::WebSearchCall(_) | Self::McpCall(_) | Self::Unknown => None,
         }
     }

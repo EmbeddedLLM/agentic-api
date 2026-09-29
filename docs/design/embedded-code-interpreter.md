@@ -34,6 +34,8 @@ For a gateway-executed call, streaming responses synthesize this OpenAI Response
 
 The model sees the normalized declaration as a function and therefore emits a canonical `function_call` lifecycle. After the translation dispatcher resolves that function name to a gateway-executed binding, it suppresses those canonical upstream frames; the gateway-generated `code_interpreter_call` lifecycle is public instead. If an upstream provider emits a native `code_interpreter_call`, typed ingestion validates and assembles it before the dispatcher sends its frames through the ordinary wire-restoration path without suppressing them. In strict mode, ingestion rejects an item-ID or item-kind conflict at one output index. In lenient mode, it may ignore a mismatched intermediate update, but still rejects a contradictory item opening or authoritative completion.
 
+Native upstream `code_interpreter_call` items remain typed continuation input across inference rounds and stored response or conversation history. Gateway-generated public calls carry private origin metadata in storage and are omitted from continuation input because their model-facing `function_call` and `function_call_output` are retained separately. The origin metadata is not exposed in the public item.
+
 ## Runtime provisioning
 
 ### Opt-in source build
@@ -92,13 +94,13 @@ The feature is not part of the repository's default build. A user-built opt-in b
 
 The locked Eryx version is 0.8.0, which declares `rust-version = "1.98.1"`. The checked-in development toolchain is therefore pinned to Rust 1.98.1 so feature builds pass Cargo's version check. This toolchain pin is distinct from the project's Rust 1.85 MSRV policy for default-feature builds.
 
-At runtime, set `TMPDIR` to a dedicated operator-owned directory. On Unix it must have mode `0700`:
+At runtime, set `TMPDIR` to a dedicated operator-owned directory. On Linux it must be a directory owned by the gateway’s effective user with mode `0700`; its path must contain no symlinks:
 
 ```console
 install -d -m 700 "$HOME/.agentic-api/tmp"
 ```
 
-The server resolves `std::env::temp_dir()` at executor construction. It creates the directory if absent and, on Unix, requires its permission bits to be exactly `0700`. The worker receives the operator-owned `TMPDIR`; each call also creates a mode-`0700` subdirectory for its control socket. An enabled server also needs a delegated cgroup v2 parent with `memory` and `pids` enabled for child groups, with the gateway already running in a separate leaf. Startup fails if the directory, cgroup controls, worker executable, or limited Eryx readiness probe is unavailable.
+The server resolves `std::env::temp_dir()` at executor construction. It creates the directory if absent and, on Unix, rejects symlinks in the path and requires mode `0700`; on Linux, it also verifies ownership by the gateway’s effective user and rejects parent directories controlled by another user or writable without sticky-bit protection. The worker receives the operator-owned `TMPDIR`; each call also creates a mode-`0700` subdirectory for its control socket. An enabled server also needs a delegated cgroup v2 parent with `memory` and `pids` enabled for child groups, with the gateway already running in a separate leaf. Startup fails if the directory, cgroup controls, worker executable, or limited Eryx readiness probe is unavailable.
 
 For local verification under a running systemd user manager, `scripts/tests/with-code-interpreter-cgroup.sh` performs this setup before the gateway starts. It must itself run inside a transient delegated scope:
 

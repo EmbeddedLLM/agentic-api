@@ -11,6 +11,7 @@ use crate::types::event::MessageStatus;
 use crate::types::tools::{ResponsesTool, ToolSearchExecution, ToolSearchStatus};
 use crate::utils::common::deserialize_from_value;
 
+use super::code_interpreter::CodeInterpreterCall;
 use super::output::{CustomToolCall, FunctionToolCall, McpListTools, ReasoningOutput, ToolSearchCall};
 use super::shell::{ShellCall, ShellCallOutputMessage, ShellCallStatus};
 
@@ -202,6 +203,7 @@ mod openapi_schemas {
                 .discriminator(Some(utoipa::openapi::schema::Discriminator::new("type")))
                 .item(message_branch)
                 .item(tagged_ref("function_call", "InputFunctionToolCall"))
+                .item(tagged_ref("code_interpreter_call", "CodeInterpreterCall"))
                 .item(tagged_ref("function_call_output", "FunctionToolResultMessage"))
                 .item(tagged_ref("tool_search_call", "InputToolSearchCall"))
                 .item(tagged_ref("tool_search_output", "ToolSearchOutputMessage"))
@@ -422,6 +424,8 @@ pub enum InputItem {
     /// the full call/output pair across turns.
     #[serde(rename = "function_call")]
     FunctionCall(InputFunctionToolCall),
+    #[serde(rename = "code_interpreter_call")]
+    CodeInterpreterCall(CodeInterpreterCall),
     #[serde(rename = "function_call_output")]
     FunctionCallOutput(FunctionToolResultMessage),
     #[serde(rename = "tool_search_call")]
@@ -465,6 +469,7 @@ impl<'de> Deserialize<'de> for InputItem {
         let item = match kind.as_ref().and_then(Value::as_str) {
             None | Some("message") => deserialize_from_value(value).map(Self::Message),
             Some("function_call") => deserialize_from_value(value).map(Self::FunctionCall),
+            Some("code_interpreter_call") => deserialize_from_value(value).map(Self::CodeInterpreterCall),
             Some("function_call_output") => deserialize_from_value(value).map(Self::FunctionCallOutput),
             Some("tool_search_call") => deserialize_from_value(value).map(Self::ToolSearchCall),
             Some("tool_search_output") => deserialize_from_value(value).map(Self::ToolSearchOutput),
@@ -630,6 +635,32 @@ fn function_call_item_id(item_id: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn code_interpreter_input_cannot_set_internal_origin() {
+        let input: InputItem = serde_json::from_value(serde_json::json!({
+            "type": "code_interpreter_call",
+            "id": "ci_native",
+            "container_id": "cntr_native",
+            "code": "print(7)",
+            "status": "completed",
+            "outputs": [{"type": "logs", "logs": "7\n"}],
+            "_agentic_code_interpreter_origin": "gateway"
+        }))
+        .expect("code interpreter replay input");
+        let InputItem::CodeInterpreterCall(call) = &input else {
+            panic!("expected code interpreter call");
+        };
+        assert_eq!(
+            call.origin,
+            super::super::code_interpreter::CodeInterpreterCallOrigin::Upstream
+        );
+        let model_input =
+            serde_json::to_value(ResponsesInput::Items(vec![input]).model_input()).expect("model input serializes");
+        assert_eq!(model_input[0]["type"], "code_interpreter_call");
+        assert_eq!(model_input[0]["code"], "print(7)");
+        assert!(model_input[0].get("_agentic_code_interpreter_origin").is_none());
+    }
 
     #[test]
     fn structured_input_without_message_type() {

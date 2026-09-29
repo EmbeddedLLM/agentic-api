@@ -435,6 +435,8 @@ so converting the public projection would duplicate the call or lose result deta
 Gateway tool results are already `InputItem`s and are appended through
 `append_tool_outputs`; they do not need an output-to-input conversion.
 
+Native upstream `code_interpreter_call` output items convert to typed continuation input. A gateway-executed code-interpreter call is marked internally and omitted by the same conversion because its model-facing function call and output are retained separately; storage preserves that origin outside the public wire shape.
+
 ### `events/` — parsing upstream SSE, and how to add a new event type
 
 This module normalizes raw upstream SSE lines into typed frames, decoupled from the

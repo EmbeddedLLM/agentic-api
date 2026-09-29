@@ -58,7 +58,7 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v7", "serde"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-nix = { version = "0.31.3", default-features = false, features = ["socket"], optional = true }
+nix = { version = "0.31.3", default-features = false, features = ["socket", "user"], optional = true }
 
 [dev-dependencies]
 axum.workspace = true

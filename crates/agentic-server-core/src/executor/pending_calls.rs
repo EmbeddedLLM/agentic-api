@@ -72,6 +72,7 @@ pub(super) fn pending_calls(items: &[InputItem]) -> ExecutorResult<Vec<PendingCa
                 resolve_call(&output.call_id, CallKind::Shell, &mut pending)?;
             }
             InputItem::Message(_)
+            | InputItem::CodeInterpreterCall(_)
             | InputItem::Reasoning(_)
             | InputItem::ToolSearchCall(_)
             | InputItem::ToolSearchOutput(_)
