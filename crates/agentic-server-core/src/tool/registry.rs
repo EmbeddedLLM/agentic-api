@@ -175,7 +175,7 @@ fn insert_code_interpreter_entry(
 
 /// Request-scoped registry built from `RequestPayload.tools`.
 /// Maps the name the LLM sees → routing metadata.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ToolRegistry {
     entries: HashMap<String, ToolEntry>,
 

@@ -7,6 +7,9 @@ impl InputItem {
     #[must_use]
     pub(crate) fn id(&self) -> Option<&str> {
         match self {
+            Self::MultiAgentCall(item) => item.id.as_deref(),
+            Self::MultiAgentCallOutput(item) => item.id.as_deref(),
+            Self::AgentMessage(item) => item.id.as_deref(),
             Self::Message(item) => item.id.as_deref(),
             Self::FunctionCall(item) => item.id.as_deref(),
             Self::CodeInterpreterCall(item) => Some(&item.id),
@@ -30,6 +33,9 @@ impl InputItem {
     #[must_use]
     pub(crate) fn id_prefix(&self) -> Option<&'static str> {
         match self {
+            Self::MultiAgentCall(_) => Some("mac_"),
+            Self::MultiAgentCallOutput(_) => Some("maco_"),
+            Self::AgentMessage(_) => Some("amsg_"),
             Self::Message(_) => Some("msg_"),
             Self::FunctionCall(_) => Some("fc_"),
             Self::CodeInterpreterCall(_) => Some("ci_"),
@@ -54,6 +60,9 @@ impl OutputItem {
     #[must_use]
     pub fn id(&self) -> Option<&str> {
         match self {
+            Self::MultiAgentCall(item) => Some(&item.id),
+            Self::MultiAgentCallOutput(item) => Some(&item.id),
+            Self::AgentMessage(item) => Some(&item.id),
             Self::Message(item) => Some(&item.id),
             Self::FunctionCall(item) => Some(&item.id),
             Self::CodeInterpreterCall(item) => Some(&item.id),
@@ -74,6 +83,9 @@ impl OutputItem {
     #[must_use]
     pub(crate) fn id_prefix(&self) -> Option<&'static str> {
         match self {
+            Self::MultiAgentCall(_) => Some("mac_"),
+            Self::MultiAgentCallOutput(_) => Some("maco_"),
+            Self::AgentMessage(_) => Some("amsg_"),
             Self::Message(_) => Some("msg_"),
             Self::FunctionCall(_) => Some("fc_"),
             Self::CodeInterpreterCall(_) => Some("ci_"),

@@ -323,6 +323,7 @@ fn output_item(
         .unwrap_or_default();
     let suffix = call_output_id_suffix(call);
     OutputItem::CodeInterpreterCall(CodeInterpreterCall {
+        agent: call.agent.clone(),
         id: format!("ci_{suffix}"),
         container_id: format!("cntr_{suffix}"),
         code,
@@ -401,6 +402,9 @@ mod tests {
         let params: CodeInterpreterToolParam =
             serde_json::from_value(serde_json::json!({"container": {"type": "auto"}})).expect("valid declaration");
         let call = FunctionToolCall {
+            agent: Some(crate::types::io::AgentAttribution {
+                agent_name: "/root/worker".to_owned(),
+            }),
             id: "fc_123".to_owned(),
             call_id: "call_123".to_owned(),
             name: CODE_INTERPRETER_FUNCTION_NAME.to_owned(),
@@ -423,6 +427,10 @@ mod tests {
             panic!("expected code interpreter call");
         };
         assert_eq!(item.id, "ci_123");
+        assert_eq!(
+            item.agent.as_ref().map(|agent| agent.agent_name.as_str()),
+            Some("/root/worker")
+        );
         assert!(matches!(item.status, CodeInterpreterCallStatus::Incomplete));
         assert_eq!(item.outputs.expect("output").len(), 1);
     }
@@ -438,6 +446,7 @@ mod tests {
             ("provider-item", "provider-call", None),
         ] {
             let call = FunctionToolCall {
+                agent: None,
                 id: id.to_owned(),
                 call_id: call_id.to_owned(),
                 name: CODE_INTERPRETER_FUNCTION_NAME.to_owned(),

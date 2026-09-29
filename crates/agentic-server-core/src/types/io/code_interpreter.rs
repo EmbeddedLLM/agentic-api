@@ -2,10 +2,14 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::multi_agent::AgentAttribution;
+
 /// One code-interpreter call exposed in a response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CodeInterpreterCall {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<AgentAttribution>,
     pub id: String,
     pub container_id: String,
     pub code: String,
@@ -21,7 +25,8 @@ pub struct CodeInterpreterCall {
 
 impl PartialEq for CodeInterpreterCall {
     fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
+        self.agent == other.agent
+            && self.id == other.id
             && self.container_id == other.container_id
             && self.code == other.code
             && self.status == other.status
@@ -52,6 +57,7 @@ impl CodeInterpreterCall {
         outputs: Option<Vec<CodeInterpreterCallOutput>>,
     ) -> Self {
         Self {
+            agent: None,
             id,
             container_id,
             code,
@@ -139,6 +145,7 @@ mod tests {
     #[test]
     fn call_round_trips_with_logs_and_image_outputs() {
         let call = CodeInterpreterCall {
+            agent: None,
             id: "ci_1".to_owned(),
             container_id: "cntr_1".to_owned(),
             code: "print(42)".to_owned(),
@@ -155,9 +162,20 @@ mod tests {
         assert_eq!(wire["outputs"][0]["type"], "logs");
         assert_eq!(wire["outputs"][1]["type"], "image");
         assert_eq!(wire["outputs"][1]["url"], "https://example.test/plot.png");
+        assert!(wire.get("agent").is_none());
         assert_eq!(
             serde_json::from_value::<CodeInterpreterCall>(wire).expect("deserialize call"),
             call
+        );
+        let mut attributed = call.clone();
+        attributed.agent = Some(AgentAttribution {
+            agent_name: "/root/worker".to_owned(),
+        });
+        let attributed_wire = serde_json::to_value(&attributed).expect("serialize attributed call");
+        assert_eq!(attributed_wire["agent"]["agent_name"], "/root/worker");
+        assert_eq!(
+            serde_json::from_value::<CodeInterpreterCall>(attributed_wire).expect("deserialize attributed call"),
+            attributed
         );
         let mut gateway = call.clone();
         gateway.origin = CodeInterpreterCallOrigin::Gateway;
