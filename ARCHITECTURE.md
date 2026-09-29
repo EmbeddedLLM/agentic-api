@@ -68,7 +68,7 @@ Responses API — this project owns the state, vLLM owns tokenization and genera
 (see ADR-01 §1.1).
 
 One Responses turn may contain several inference rounds, but it is exposed and
-persisted as one response:
+persisted as one response. The single-agent path is:
 
 ```
 rehydrate history
@@ -108,7 +108,9 @@ finalize one public response + persist one turn
 A mixed round may contain both ownership classes. Gateway-owned calls still execute
 and are recorded, while the response returns the unresolved client-owned calls for the
 client to resolve. Streaming uses the same round loop and projects it through one
-continuous SSE lifecycle.
+continuous SSE lifecycle. With `multi_agent.enabled: true`, a response-level coordinator
+schedules separate agent contexts through the same inference, tool, and delivery
+boundaries; see [HTTP multi-agent execution](#http-multi-agent-execution).
 
 ## `agentic-server` — the transport layer
 
@@ -154,6 +156,7 @@ what stops the HTTP catalog and a launcher catalog from disagreeing about image 
 | Route | Handler | File |
 |---|---|---|
 | `POST /v1/responses` | `responses` | `handler/http/responses.rs` |
+| `GET /v1/responses/{response_id}` | `retrieve_response` | `handler/http/responses.rs` |
 | `POST /v1/responses/compact` | `compact_response` | `handler/http/responses.rs` |
 | `POST /v1/conversations` | `create_conversation` | `handler/http/conversations.rs` |
 | `GET/POST/DELETE /v1/conversations/{id}` | Conversation CRUD | `handler/http/conversations.rs` |
@@ -190,6 +193,13 @@ requests without a `stream_id` share a default FIFO lane. The session admits at 
 force `stream: true` and honor the requested `store` value. Because axum's built-in graceful shutdown
 doesn't wait for upgraded connections, `AppState` carries a separate
 `WebSocketTracker` so shutdown can drain in-flight sessions.
+
+Multi-agent execution is currently HTTP-only. The shared session rehydration path
+rejects enabled multi-agent configuration both before and after restoring effective
+settings. This covers ordinary WebSocket execution, `generate: false`, and requests
+that inherit configuration from a stored agent tree. The rejection occurs before
+inference or local completion; WebSocket multi-agent support and its lifecycle tests
+remain follow-up work.
 
 Executor streams propagate downstream backpressure through a bounded event channel.
 `[responses]` configures separate ceilings for upstream JSON bodies, upstream SSE
@@ -509,16 +519,38 @@ call inference, run the tool loop, persist. `agentic-server` never reaches past 
   both response body formats. `RoundIngestion` owns the synchronous per-round semantic
   core; `StreamDelivery` owns awaited, ordered client delivery across rounds.
 - **`engine.rs`** — the top-level orchestrator: `ExecuteRequest`/`execute()`,
-  `create_conversation()`, and `EngineOrchestration`, which owns the request-scoped
-  `ToolRegistry`, response budget, and mutable `AgentPipeline` while running the
-  multi-round loop. Its local `classify_round`/`LoopDecision` decides whether to loop
-  again, finish, hand back to the client, or return an incomplete response (capped at
-  `MAX_GATEWAY_TOOL_ROUNDS = 10`). It accumulates output and token usage across rounds,
-  changes continuation `tool_choice` to `auto`, and persists gateway calls plus their
-  outputs as model-facing `InputItem`s. Also home to `run_compaction_trigger`,
+  `create_conversation()`, and `EngineOrchestration`, which owns the response byte
+  budget, accumulated output/usage, and root `AgentTurn`. It advances the turn and
+  applies response completion policy to its typed `RoundResult`/`RoundDecision`.
+  The current single-agent path supplies `MAX_GATEWAY_TOOL_ROUNDS = 10` as a per-turn
+  limit, not a future tree-wide collaboration limit. Also home to `run_compaction_trigger`,
   `run_blocking`, and `run_stream` (spawns the loop, forwards events as SSE, persists
   before yielding the terminal event). `engine/streaming.rs` owns the streaming task's
   cancellation, failure delivery, and terminal validation before persistence.
+- **`engine/agent_turn.rs`** — execution for one agent: `AgentTurn` owns the tool
+  registry and round counter and exclusively borrows its `AgentPipeline`. The response
+  adapter retains the pipeline so error handling can recover its context and delivery
+  state. `run_round` performs compaction, inference and built-in tool execution using
+  the engine's shared budget, records canonical call/output history, and reports a
+  typed outcome. It does not spawn agents or finalize/persist a public response.
+- **`multi_agent.rs`** — scoped task ownership for engine-owned tree coordination.
+  `RunOwner` bounds root/descendant tasks, supports interruption, and joins teardown.
+  `multi_agent/registry.rs` holds parentage, current turn identity, logical phases and
+  bounded canonical mailboxes. It reserves bytes through the shared response budget
+  before mutation and settles turns with exactly one parent notification. Registry
+  operations are synchronous; the coordinator must reconcile/join work before settlement.
+  `multi_agent/pending_calls.rs` retains each client call's originating agent, turn and
+  kind. It validates output batches before mutation, retains accepted outputs until
+  transfer to canonical context, and keeps resolved IDs for duplicate detection.
+  Acceptance does not resume an agent or decide visibility for superseded turns.
+  This table complements the existing single-history rehydration validator; neither
+  public error mapping nor transport-specific batch policy is defined by it.
+  `engine/multi_agent.rs` coordinates these components for stored HTTP responses.
+  Canonical histories and pending calls remain owned by the coordinator; the pipeline never
+  spawns subagents. Its `context`, `actions`, `rounds`, `delivery`, and `compaction`
+  modules separate restoration, collaboration commands, scheduling, public output and
+  explicit root compaction. The run owner cancels and joins tasks during teardown.
+  Interruption takes effect at the current round boundary. The contracts are described below.
 - **`persist.rs`** — `persist_response`/`persist_turn`, which apply the request's
   storage policy (`should_persist`: a no-session `store: false` turn is not written) and
   route to `ConversationHandler` or `ResponseHandler` in `modes/` depending on whether the
@@ -532,11 +564,114 @@ call inference, run the tool loop, persist. `agentic-server` never reaches past 
   `StorageError` into `ExecutorError`. **This is the sanctioned boundary between the
   executor and the storage stores** — nothing above this layer touches
   `storage::conversation`/`storage::response` directly. Today they only cover what the
-  pipeline needs (`get`, `get_or_create`, `create`, `rehydrate[_snapshot]`,
-  `execute_turn`, `validate_exists`); **any new CRUD operation beyond persist/rehydrate
-  belongs here**, added as a new method that delegates to the corresponding store.
+  pipeline and retrieval need (`get`, `get_or_create`, `create`, `rehydrate[_snapshot]`,
+  `execute_turn`, `commit_tree`, `retrieve`, `validate_exists`); **any new CRUD operation
+  beyond persist/rehydrate belongs here**, added as a new method that delegates to the corresponding store.
 - **`error.rs`** — `ExecutorError`, with the mapping methods (`http_status()`,
   `error_type()`, `into_response_body()`, ...) handlers use to render errors.
+
+#### HTTP multi-agent execution
+
+`multi_agent.enabled` selects gateway orchestration; it is not forwarded to the
+upstream model. Enabled requests require `store: true`; the current validator also
+rejects `reasoning.summary` and `reasoning.generate_summary`. These are gateway
+validation rules, not a claim that every upstream provider has the same restrictions.
+New requests without multi-agent configuration use single-agent execution;
+continuations of a stored agent tree inherit its configuration.
+
+```text
+EngineOrchestration — one public response and persistence boundary
+└─ MultiAgentRun — tree, admission, mailboxes, canonical histories, completion policy
+   ├─ RunOwner — scoped round/compaction tasks, cancellation and joining
+   └─ Per-agent execution
+      ├─ AgentPipeline — context, tool-search state and round ingestion
+      └─ AgentTurn / AgentExecutionState — registry, round progress and run_round
+```
+
+Parallel tool execution runs multiple calls within one agent's inference round.
+Multi-agent execution gives each agent its own history, assignment, tool registry,
+loaded tool definitions and round progress. The model requests collaboration through
+canonical function tools; `actions.rs` handles spawning, messages, follow-up tasks,
+waiting, interruption and listing. `max_concurrent_subagents` limits active descendant
+turns across the whole tree, excluding the root; it does not fix the total number of
+agents or collaboration calls in a response. Finished turns release capacity.
+`guidance.rs` adds current identity, assignment, direct-child states and available
+slots to each model round without storing that guidance in canonical history.
+
+The coordinator alone mutates canonical agent state. Workers receive snapshots and
+return typed outcomes. `AgentRegistry` records logical phases and mailbox contents;
+waiting agents resume on mail or a wait deadline, without holding an inference task
+open. Child completion notifies its parent once. A root final answer settles only the
+root's turn: descendants continue until they finish or pause for client tool outputs.
+Mail to an idle root is retained without restarting it. Root completion does not
+implicitly interrupt descendants; interruption remains an explicit collaboration action.
+The run shares a retained-data budget and accumulates inference/compaction usage, while separate retention, round
+and runtime limits bound work. Teardown cancels and joins scoped tasks before the
+terminal response decision is exposed.
+
+**Client tool continuations.** Function, local shell, custom and tool-search calls
+can suspend an agent for client execution. `PendingClientCalls` records each call ID,
+item kind and owning agent turn outside the replaceable history prefix. A continuation
+must supply outputs for every outstanding call; the batch is validated before any
+agent history changes. Each accepted output goes only to its owner and resumes that
+agent. A parent parked waiting for children stays asleep until mailbox delivery wakes
+it; a new user message resumes the root.
+
+Tool-search outputs restore discovered definitions into the requesting agent's
+`ToolSearchState` before its next registry and upstream request are built. Namespace
+and custom declarations still use the existing canonical function normalization and
+public-shape translators. MCP and web search execute in the gateway and append their
+canonical call/output pairs during the round, so they require no client output
+continuation. Tool search retains its normal `parallel_tool_calls` validation; enabling
+multi-agent execution does not bypass that rule.
+
+**Compaction.** Automatic compaction is per agent. `prepare_agent` supplies a default
+compaction threshold of 100,000 estimated tokens when none is configured. A
+`CompactionPlan` owns a resolved-prefix snapshot, agent identity and context generation.
+Its completion replaces that prefix only when the generation still matches
+(`CompactionCommit::Applied`); a stale result leaves current history intact. The
+coordinator accounts for completed compaction work once even when the result is stale.
+Pending calls, unresolved suffixes and new mail are not discarded by prefix replacement.
+
+An explicit `compaction_trigger` in a Responses request uses
+`MultiAgentRun::compact_root`: it restores the tree, applies supplied continuation
+input and compacts the root's resolved prefix while preserving child histories and
+pending calls. No agent tasks run during this operation. The resulting tree passes
+through the same validation and persistence boundary as a normal multi-agent response.
+This is distinct from the standalone `/v1/responses/compact` endpoint.
+
+**Persistence and public output.** A versioned `StoredTreeSnapshot` contains agent
+histories, phases, mailboxes, loaded tools and pending client calls.
+`ValidatedTreeCheckpoint` checks its limits, identities and references before live
+state is constructed or committed. `persist.rs` calls the existing mode handler's
+`commit_tree`; transport handlers do not write storage directly, and tree persistence
+uses the existing response/conversation stores.
+`ResponseMetadata.multi_agent_tree` restores execution state, while
+`response_snapshot` retains the exact terminal public response for GET retrieval.
+Continuation restoration discards the latter duplicate but retains the tree.
+
+The public transcript contains attributed `multi_agent_call` (`mac_`),
+`multi_agent_call_output` (`maco_`) and `agent_message` (`amsg_`) items alongside each
+agent's reasoning, messages and tool calls. Public collaboration items are not replayed
+as model input; the coordinator retains canonical function calls, outputs and delivered
+mail in private agent histories. `ResponsesInput::model_input` removes the public
+collaboration items at the upstream boundary.
+
+Both JSON and SSE use this coordinator. Streaming workers feed a bounded,
+acknowledged channel into the existing response-wide `StreamDelivery`.
+`AgentRoundId` scopes source indexes; delivery's public-position mapping is shared
+with final output assembly. The coordinator emits one response lifecycle and completes
+items after canonical registration and public projection. Delivery does not become a
+second response assembler.
+
+**Recorded contract checks.** `tests/multi_agent_contract_test.rs` loads independently
+recorded OpenAI and gateway YAML for review, proposals, mixed tools and client-executed
+tools in both streaming and non-streaming modes. The typed comparison helper checks
+call/agent relationships, lifecycle consistency and required tool kinds; the client
+scenario also checks tool-search, discovered functions and custom tool continuations.
+It permits model-dependent names, text, identifiers and action counts rather than
+requiring byte-for-byte output equality. Unit tests use synthetic values; cassette
+capture remains in the Python recorder and scenario shell script.
 
 #### Responses pipeline and ownership boundaries
 
@@ -582,13 +717,20 @@ inference rounds → gateway execution → terminal policy → persistence
 | Request pipeline (`pipeline.rs`) | Hold one request context, tool-search state, cross-round delivery state, and the JSON/SSE body entry points. |
 | Round ingestion (`pipeline/ingest.rs`) | Process one body with one `ResponseAccumulator`, one `TranslationDispatcher`, and final response normalization. |
 | Stream delivery (`pipeline/delivery.rs`) | Provide awaited sender delivery, gateway-event deferral and release, response IDs, and cross-round stream accumulation. |
-| Orchestration (`engine.rs`) | Own the request-scoped registry and response budget, round decisions, gateway execution, terminal policy, and persistence. |
+| Agent execution (`engine/agent_turn.rs`) | Own the per-agent registry and round progress; perform inference/tool work and return typed round outcomes. |
+| Orchestration (`engine.rs`) | Own agent execution, the shared response budget, response assembly, terminal policy, and persistence coordination. |
 
-`AgentPipeline` lives for the complete public response. `EngineOrchestration` creates
-one registry and one response budget around it, then asks `upstream.rs` to run each
+`AgentPipeline` currently lives for the complete public response. `EngineOrchestration`
+creates the shared response budget and an `AgentTurn` that retains its own registry
+and exclusively borrows the pipeline. Each turn step asks `upstream.rs` to run the
 inference body through `run_with_json_body` or live `run_with_stream_body`. A new
 `RoundIngestion` is created for every body and consumed by finalization, while
 `StreamDelivery` and `GatewayStreamAccumulator` survive across inference rounds.
+
+For multi-agent execution, the engine owns tree coordination and schedules separate
+agent execution contexts. Per-agent ingestion feeds typed frames through a bounded,
+acknowledged channel into one response-wide `StreamDelivery`. Its source-scoped index
+mapping is shared with the engine's final response assembly; delivery does not assemble items.
 
 The live runner polls one framed line, performs synchronous ingestion and translation,
 then awaits delivery before polling the next line. This propagates bounded sender
@@ -894,7 +1036,8 @@ round that omits `usage` still reports the hidden rounds' counters.
 - **`types/`** — the conversion layer from those raw rows into business types, via
   `From`/`TryFrom` impls: `ConversationData`/`ConversationSnapshot`, `ResponseData`/
   `ResponseMetadata` (parses the JSON metadata column into a typed struct, including an optional
-  terminal `ResponsePayload` snapshot for GET retrieval),
+  terminal `ResponsePayload` snapshot for GET retrieval and a versioned multi-agent
+  tree checkpoint for continuation),
   `InOutItem` (parses an `Item.data` JSON blob back into a typed `InputItem` or
   `OutputItem`), and `StorageError`. `InOutItem::into_input_items` turns a full
   history into the `Vec<InputItem>` used for continuation processing: stored
@@ -912,8 +1055,8 @@ round that omits `usage` still reports the hidden rounds' counters.
   upstream request, `RequestPayload::to_upstream_request` calls
   `ResponsesInput::model_input()`: the latest compaction checkpoint is converted to an
   assistant summary and supersedes older context, while compaction triggers and MCP
-  list-tools records are removed. In particular, MCP list-tools remains available long
-  enough for the registry to remember which server labels have already been listed,
+  list-tools records and public collaboration items are removed. In particular, MCP
+  list-tools remains available long enough for the registry to remember which server labels have already been listed,
   but it is never serialized to vLLM.
 - **`conversation.rs`, `response.rs`** — `ConversationStore` and `ResponseStore`: the
   CRUD-with-transactions layer (`create`, `get`, `get_or_create`, `rehydrate[_snapshot]`,
@@ -1131,6 +1274,7 @@ router, reusing the same core logic in-process.
 | Support a new upstream SSE event | `events/types.rs` → `events/normalize.rs` → `executor/accumulator/` → `executor/translate/` when the event needs public tool-shape translation |
 | Add a new tool type | `tool/handler.rs` impl(s) → `tool/normalize.rs` → `tool/registry.rs` → `executor/translate/client.rs` for client-executed function shapes → `tool/executors.rs` for lazy gateway setup |
 | Change gateway-round concurrency or lifecycle ordering | `executor/gateway.rs` (`GatewayScheduler`/event plans) + `executor/engine.rs` (round decision/ordered streaming) + `tool/ownership.rs` (typed binding and same-tool safety) |
+| Change agent admission, mailbox wakeups or client continuation routing | `executor/engine/multi_agent/` + `executor/multi_agent/`; keep tree persistence in the existing mode handlers |
 | Change client streaming order, buffering, or backpressure | `executor/pipeline/delivery.rs`; keep parsing in `events/` and response assembly in `executor/accumulator/` |
 | Move streaming ingestion to a worker | Benchmark the equivalent inline and worker paths under [#245](https://github.com/vllm-project/agentic-api/issues/245) before changing executor placement |
 | Feed response output into the next inference round | `types/io/output.rs::OutputItem::to_input_item`; use `executor/gateway.rs::append_output_items_to_input` only to append those converted items |

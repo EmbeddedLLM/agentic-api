@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use super::io::{FunctionTool, InputItem, OutputItem, ResponseUsage, ResponsesInput, ToolChoice};
+use super::io::{FunctionTool, InputItem, MultiAgentConfig, OutputItem, ResponseUsage, ResponsesInput, ToolChoice};
 use super::tools::ResponsesTool;
 use crate::tool::{CodexNamespaceHandler, CustomHandler, ToolError};
 
@@ -159,6 +159,7 @@ impl utoipa::PartialSchema for RequestPayload {
             .property("temperature", nullable_num())
             .property("top_p", nullable_num())
             .property("max_output_tokens", nullable_int())
+            .property("max_tool_calls", nullable_int())
             .property("ignore_eos", nullable_bool())
             .property("truncation", nullable_str())
             .property(
@@ -167,6 +168,12 @@ impl utoipa::PartialSchema for RequestPayload {
             )
             .property("parallel_tool_calls", nullable_bool())
             .property("prompt_cache_key", nullable_str())
+            .property(
+                "multi_agent",
+                OneOfBuilder::new()
+                    .item(<MultiAgentConfig as utoipa::PartialSchema>::schema())
+                    .item(null_type()),
+            )
             .property("cache_salt", nullable_str())
             .property(
                 "context_management",
@@ -211,12 +218,19 @@ pub struct RequestPayload<T: ?Sized = ResponseTextConfig> {
     pub temperature: Option<f64>,
     pub top_p: Option<f64>,
     pub max_output_tokens: Option<u32>,
+    /// Parsed for admission checks; unsupported when multi-agent execution is enabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tool_calls: Option<u32>,
     /// vLLM extension: continue generation past the end-of-sequence token.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ignore_eos: Option<bool>,
     pub truncation: Option<String>,
     pub metadata: Option<Value>,
     pub parallel_tool_calls: Option<bool>,
+    /// Hosted collaboration configuration, interpreted by the gateway coordinator.
+    /// Independent of the model's `parallel_tool_calls` generation preference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multi_agent: Option<MultiAgentConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_cache_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -284,6 +298,9 @@ impl<T: ?Sized> RequestPayload<T> {
     /// can serve it.
     #[must_use]
     pub fn in_process_feature(&self) -> Option<&'static str> {
+        if self.multi_agent.as_ref().is_some_and(|config| config.enabled) {
+            return Some("multi_agent");
+        }
         if self.conversation_id.is_some() {
             return Some("conversation_id");
         }
@@ -318,7 +335,6 @@ impl<T: ?Sized> RequestPayload<T> {
         self,
         map: impl FnOnce(Box<T>) -> Result<Box<U>, E>,
     ) -> Result<RequestPayload<U>, E> {
-        let text = self.text.map(map).transpose()?;
         Ok(RequestPayload {
             model: self.model,
             input: self.input,
@@ -331,15 +347,17 @@ impl<T: ?Sized> RequestPayload<T> {
             store: self.store,
             include: self.include,
             reasoning: self.reasoning,
-            text,
+            text: self.text.map(map).transpose()?,
             temperature: self.temperature,
             top_p: self.top_p,
             max_output_tokens: self.max_output_tokens,
+            max_tool_calls: self.max_tool_calls,
             ignore_eos: self.ignore_eos,
             truncation: self.truncation,
             metadata: self.metadata,
             parallel_tool_calls: self.parallel_tool_calls,
             prompt_cache_key: self.prompt_cache_key,
+            multi_agent: self.multi_agent,
             cache_salt: self.cache_salt,
             context_management: self.context_management,
         })
@@ -514,6 +532,67 @@ mod tests {
         ] {
             assert!(serde_json::from_value::<RequestPayload>(wire).is_err());
         }
+    }
+
+    #[test]
+    fn request_preserves_multi_agent_independently_of_parallel_tool_calls() {
+        for enabled in [false, true] {
+            for parallel_tool_calls in [false, true] {
+                let config = serde_json::json!({"enabled": enabled, "max_concurrent_subagents": 3});
+                let payload: RequestPayload = serde_json::from_value(serde_json::json!({
+                    "model": "test-model",
+                    "input": "Review independent tasks.",
+                    "multi_agent": config,
+                    "parallel_tool_calls": parallel_tool_calls
+                }))
+                .unwrap();
+                let payload = payload.try_map_text(Ok::<_, std::convert::Infallible>).unwrap();
+
+                assert_eq!(
+                    payload.multi_agent,
+                    Some(MultiAgentConfig {
+                        enabled,
+                        max_concurrent_subagents: Some(3),
+                    })
+                );
+                assert_eq!(serde_json::to_value(&payload).unwrap()["multi_agent"], config);
+                assert_eq!(payload.in_process_feature(), enabled.then_some("multi_agent"));
+
+                for stream in [false, true] {
+                    let upstream = serde_json::to_value(payload.to_upstream_request(stream).unwrap()).unwrap();
+                    assert!(upstream.get("multi_agent").is_none());
+                    assert_eq!(upstream["parallel_tool_calls"], parallel_tool_calls);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn request_preserves_max_tool_calls_for_admission() {
+        for limit in [None, Some(0), Some(5)] {
+            let mut wire = serde_json::json!({"model": "test-model", "input": "hello"});
+            if let Some(limit) = limit {
+                wire["max_tool_calls"] = limit.into();
+            }
+            let request: RequestPayload = serde_json::from_value(wire).unwrap();
+            let request = request.try_map_text(Ok::<_, std::convert::Infallible>).unwrap();
+            assert_eq!(request.max_tool_calls, limit);
+            assert_eq!(
+                serde_json::to_value(request).unwrap().get("max_tool_calls"),
+                limit.map(serde_json::Value::from).as_ref()
+            );
+        }
+    }
+
+    #[test]
+    fn omitted_multi_agent_does_not_enable_collaboration() {
+        let payload: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test-model", "input": "hello"
+        }))
+        .unwrap();
+        assert!(payload.multi_agent.is_none());
+        assert!(serde_json::to_value(&payload).unwrap().get("multi_agent").is_none());
+        assert_eq!(payload.in_process_feature(), None);
     }
 
     #[test]
