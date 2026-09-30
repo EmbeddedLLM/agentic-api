@@ -951,7 +951,7 @@ scheduler switch. It is forwarded to vLLM for all supported declaration mixtures
 defaults to `false` when omitted. Whatever calls the model emits are executed under
 the per-round execution permit limit and each handler's same-tool safety policy.
 
-#### `messages_context.rs` / `messages_loop.rs` / `messages_request.rs` / `messages_stream.rs`
+#### `messages_context.rs` / `messages_loop.rs` / `messages_request.rs` / `messages_stream.rs` / `messages_tools.rs`
 
 A **parallel, independent implementation** of the same shape of loop for the Anthropic
 Messages API. `messages_stream.rs`'s own header comment describes it as "structurally
@@ -963,6 +963,20 @@ pieces: `ToolRegistry::dispatch` and `types::messages::tool_seam`. The round/tim
 constants (`MAX_GATEWAY_TOOL_ROUNDS`, `GATEWAY_TOOL_TIMEOUT`) are duplicated and
 manually kept in sync with the Responses-side ones rather than shared — a known seam,
 not an oversight, per the future-consolidation note.
+
+The JSON and SSE loops read a model turn differently but dispatch its gateway calls
+through one function, `messages_tools.rs`'s `execute_gateway_calls`, so admission,
+execution, and the fed-back `tool_result`s cannot differ between them. Calls are
+admitted sequentially in model order before any of them starts, then run concurrently
+under the per-call timeout.
+
+A native `web_search_20250305` declaration's `max_uses` is a request-wide budget of
+searches, not of calls. The normalized tool sent upstream lets one call batch several
+`queries`, so a call is charged for every query the handler would run, counted by the
+handler's own argument parser. A call the remaining budget cannot cover is refused
+whole with an error `tool_result` and leaves the budget untouched, so a later call that
+fits still runs. A call whose arguments cannot be parsed performs no search and is not
+charged.
 
 Both loops take a `MessagesRequestContext` (`messages_context.rs`), the per-request
 type that replaced a bare `serde_json::Value` at that boundary. It holds two views of

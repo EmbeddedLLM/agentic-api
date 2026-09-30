@@ -42,9 +42,7 @@ use crate::types::messages::tool_seam;
 use crate::utils::common::deserialize_from_str;
 
 // Shared with the non-streaming loop so the two Messages loops can't drift.
-use crate::executor::messages_loop::{
-    GATEWAY_TOOL_TIMEOUT, MAX_GATEWAY_TOOL_ROUNDS, MessagesResponse, MessagesUpstream,
-};
+use crate::executor::messages_loop::{MAX_GATEWAY_TOOL_ROUNDS, MessagesResponse, MessagesUpstream};
 
 /// Drive the streaming Messages-native loop, yielding Anthropic SSE lines for
 /// the client. Owns the multi-round → single-message accumulation.
@@ -209,12 +207,11 @@ fn messages_stream_body(
             // the gateway tool_use (F3, streaming half). The gateway calls are
             // derived from the same buffered blocks for dispatch.
             let (assistant_content, calls) = acc.take_round();
-            let allowed_searches = ctx.reserve_searches(calls.len());
             let tool_results = execute_gateway_calls(
                 &calls,
+                &mut ctx,
                 &registry,
                 &exec_ctx.messages_gateway_tools,
-                allowed_searches,
             ).await;
             if let Err(e) = ctx.append_round(&assistant_content, tool_results) {
                 execution.failed(&e);
@@ -994,9 +991,9 @@ mod tests {
         // reconstructed call is flagged invalid rather than silently dispatchable.
         let resolved = execute_gateway_calls(
             &calls,
+            &mut context(),
             &no_op_registry().await,
             &tool_seam::GatewayToolMap::default(),
-            calls.len(),
         )
         .await;
         let content = &resolved[0].content;

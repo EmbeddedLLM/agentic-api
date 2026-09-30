@@ -9,6 +9,7 @@ pub mod messages_context;
 pub mod messages_loop;
 mod messages_request;
 pub mod messages_stream;
+mod messages_tools;
 mod messages_usage;
 pub mod modes;
 pub mod multi_agent;

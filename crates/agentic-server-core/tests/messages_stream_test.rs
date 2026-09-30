@@ -20,6 +20,7 @@ use agentic_core::storage::{ConversationStore, ResponseStore};
 use agentic_core::tool::{ToolRegistry, WebSearchHandler};
 use agentic_core::types::messages::{GatewayToolMap, ToolParam, registry_tools};
 use axum::extract::State;
+use axum::http::Uri;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -431,6 +432,229 @@ async fn messages_stream_hides_a_gateway_call_on_a_terminal_round() {
     for kind in ["message_start", "message_delta", "message_stop"] {
         assert_eq!(sse.matches(&format!("event: {kind}")).count(), 1, "one {kind}");
     }
+}
+
+/// One upstream SSE round whose assistant turn is the gateway calls `calls`
+/// (`tool_use` id and input), or the final answer when there are none.
+fn round_stream(calls: &[(&str, Value)]) -> String {
+    let mut events = vec![serde_json::json!({"type":"message_start", "message":{
+        "id":"m", "type":"message", "role":"assistant", "model":"qwen3", "content":[],
+        "stop_reason":null, "usage":{"input_tokens":5, "output_tokens":0}}})];
+    for (index, (id, input)) in calls.iter().enumerate() {
+        events.extend([
+            serde_json::json!({"type":"content_block_start", "index":index,
+                "content_block":{"type":"tool_use", "id":id, "name":"web_search", "input":{}}}),
+            serde_json::json!({"type":"content_block_delta", "index":index,
+                "delta":{"type":"input_json_delta", "partial_json":input.to_string()}}),
+            serde_json::json!({"type":"content_block_stop", "index":index}),
+        ]);
+    }
+    if calls.is_empty() {
+        events.extend([
+            serde_json::json!({"type":"content_block_start", "index":0, "content_block":{"type":"text", "text":""}}),
+            serde_json::json!({"type":"content_block_delta", "index":0, "delta":{"type":"text_delta", "text":"Done."}}),
+            serde_json::json!({"type":"content_block_stop", "index":0}),
+        ]);
+    }
+    events.extend([
+        serde_json::json!({"type":"message_delta", "usage":{"output_tokens":3},
+            "delta":{"stop_reason":if calls.is_empty() { "end_turn" } else { "tool_use" }}}),
+        serde_json::json!({"type":"message_stop"}),
+    ]);
+    events.iter().fold(String::new(), |mut body, event| {
+        write!(body, "data: {event}\n\n").unwrap();
+        body
+    })
+}
+
+/// Streaming half of the JSON loop's native web-search budget tests. Returns the
+/// queries the search backend received, sorted, and for every tool round the
+/// error text of each fed-back result (`None` for a search that ran).
+async fn streamed_search_outcomes(
+    max_uses: Option<u64>,
+    turns: &[Vec<(&str, Value)>],
+) -> (Vec<String>, Vec<Vec<Option<String>>>) {
+    let mut streams: Vec<String> = turns.iter().map(|calls| round_stream(calls)).collect();
+    streams.push(round_stream(&[]));
+    let (vllm_url, upstream, _v) = spawn_mock_vllm_stream(streams).await;
+    let searched = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let recorded = Arc::clone(&searched);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let search_url = format!("http://{}", listener.local_addr().unwrap());
+    let app = Router::new().route(
+        "/v1/search",
+        get(move |uri: Uri| {
+            let query = url::form_urlencoded::parse(uri.query().unwrap_or_default().as_bytes())
+                .find(|(key, _)| key == "query")
+                .map(|(_, value)| value.into_owned())
+                .expect("query");
+            recorded.lock().unwrap().push(query);
+            async { Json(serde_json::json!({"results":{"web":[],"news":[]}})) }
+        }),
+    );
+    let _search = tokio::spawn(async move {
+        axum::serve(listener, app).await.ok();
+    });
+    let exec_ctx = build_exec_ctx(&vllm_url, &search_url).await;
+    let mut request = serde_json::json!({
+        "model": "qwen3", "max_tokens": 1024, "stream": true,
+        "messages": [{"role": "user", "content": "Search."}],
+        "tools": [{"type": "web_search_20250305", "name": "web_search"}]
+    });
+    if let Some(max_uses) = max_uses {
+        request["tools"][0]["max_uses"] = max_uses.into();
+    }
+    let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
+    let mut params = registry_tools(Some(&tools), &GatewayToolMap::default());
+    let mut executors = exec_ctx.gateway_executors.clone();
+    let registry = Arc::new(
+        ToolRegistry::build_with_handlers(&mut params, &mut executors)
+            .await
+            .unwrap(),
+    );
+
+    let sse = run_test_messages_stream(request, registry, Arc::clone(&exec_ctx))
+        .await
+        .collect::<Vec<_>>()
+        .await
+        .join("");
+    assert!(sse.contains("Done."), "final answer reaches the client:\n{sse}");
+    assert!(!sse.contains("event: error"), "the turn completes:\n{sse}");
+    assert!(
+        !sse.contains(r#""type":"tool_use""#),
+        "gateway calls stay hidden:\n{sse}"
+    );
+    for kind in ["message_start", "message_delta", "message_stop"] {
+        assert_eq!(sse.matches(&format!("event: {kind}")).count(), 1, "one {kind}");
+    }
+
+    let mut searched = searched.lock().unwrap().clone();
+    searched.sort();
+    let requests = upstream.requests.lock().await;
+    assert_eq!(
+        requests.len(),
+        turns.len() + 1,
+        "one inference follows every tool round"
+    );
+    let outcomes = requests[1..]
+        .iter()
+        .map(|request| {
+            request["messages"]
+                .as_array()
+                .and_then(|messages| messages.last())
+                .and_then(|message| message["content"].as_array())
+                .expect("tool results fed back")
+                .iter()
+                .map(|result| {
+                    result["is_error"]
+                        .as_bool()
+                        .expect("is_error")
+                        .then(|| result["content"].as_str().expect("error text").to_owned())
+                })
+                .collect()
+        })
+        .collect();
+    (searched, outcomes)
+}
+
+const MAX_USES_EXCEEDED: &str = "web_search max_uses exceeded; search was not run";
+
+/// `max_uses` limits the searches performed on the streaming path too: a
+/// batched call is charged for every query and refused whole when the budget
+/// cannot cover it, while a later call that fits still runs.
+#[tokio::test]
+async fn messages_stream_max_uses_counts_every_batched_query() {
+    let (searched, outcomes) = streamed_search_outcomes(
+        Some(2),
+        &[
+            vec![
+                ("t1", serde_json::json!({"queries": ["a one", "a two", "a three"]})),
+                ("t2", serde_json::json!({"query": "b one"})),
+                ("t3", serde_json::json!({"queries": ["c one", "c two"]})),
+            ],
+            vec![("t4", serde_json::json!({"query": "d one"}))],
+            vec![("t5", serde_json::json!({"query": "e one"}))],
+        ],
+    )
+    .await;
+
+    assert_eq!(searched, ["b one", "d one"], "max_uses=2 allows exactly two searches");
+    let exceeded = Some(MAX_USES_EXCEEDED.to_owned());
+    assert_eq!(
+        outcomes,
+        [
+            vec![exceeded.clone(), None, exceeded.clone()],
+            vec![None],
+            vec![exceeded]
+        ]
+    );
+}
+
+/// The streaming path had no `max_uses` coverage: one search per call is
+/// limited exactly as on the JSON path.
+#[tokio::test]
+async fn messages_stream_enforces_max_uses() {
+    let (searched, outcomes) = streamed_search_outcomes(
+        Some(1),
+        &[vec![
+            ("t1", serde_json::json!({"query": "rust one"})),
+            ("t2", serde_json::json!({"query": "rust two"})),
+        ]],
+    )
+    .await;
+    assert_eq!(searched, ["rust one"]);
+    assert_eq!(outcomes, [vec![None, Some(MAX_USES_EXCEEDED.to_owned())]]);
+}
+
+/// A call with malformed arguments performs no search, so it must not use up
+/// the budget of one that can run.
+#[tokio::test]
+async fn messages_stream_malformed_calls_do_not_use_the_budget() {
+    let (searched, outcomes) = streamed_search_outcomes(
+        Some(1),
+        &[vec![
+            ("t1", serde_json::json!({"queries": []})),
+            ("t2", serde_json::json!("not an object")),
+            ("t3", serde_json::json!({"query": "kept"})),
+        ]],
+    )
+    .await;
+    assert_eq!(searched, ["kept"]);
+    assert_eq!(
+        outcomes,
+        [vec![
+            Some(
+                "tool execution failed: invalid tool config: web_search requires a non-empty query or queries"
+                    .to_owned()
+            ),
+            Some("tool arguments must be a JSON object; tool was not run".to_owned()),
+            None
+        ]]
+    );
+}
+
+/// Controls: a batch the budget covers runs in full, and a request without
+/// `max_uses` is not limited.
+#[tokio::test]
+async fn messages_stream_budget_admits_what_fits() {
+    let (searched, outcomes) = streamed_search_outcomes(
+        Some(3),
+        &[vec![("t1", serde_json::json!({"queries": ["a", "b", "c"]}))]],
+    )
+    .await;
+    assert_eq!(searched, ["a", "b", "c"]);
+    assert_eq!(outcomes, [vec![None]]);
+
+    let (searched, outcomes) = streamed_search_outcomes(
+        None,
+        &[vec![
+            ("t1", serde_json::json!({"queries": ["a", "b", "c", "d", "e"]})),
+            ("t2", serde_json::json!({"query": "f"})),
+        ]],
+    )
+    .await;
+    assert_eq!(searched, ["a", "b", "c", "d", "e", "f"]);
+    assert_eq!(outcomes, [vec![None, None]]);
 }
 
 #[tokio::test]

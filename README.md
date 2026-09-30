@@ -571,6 +571,10 @@ The gateway supports the basic `web_search_20250305` contract, including `max_us
 `blocked_domains`, and the country in `user_location`. Other versioned native web-search declarations are rejected rather
 than forwarded in a shape the upstream cannot execute.
 
+`max_uses` limits the searches performed across the whole request, not the number of tool calls. The model may batch
+several queries into one call, and every query counts as one search. A call that the remaining budget cannot cover is
+not run, and the model is told the limit was reached; a later call that fits still runs.
+
 Older clients that declare a function tool named `WebSearch` can still opt in with
 `MESSAGES_GATEWAY_TOOL_ALIASES="WebSearch=web_search"`. This variable maps a client tool name to a gateway executor
 (`name=executor`, comma-separated) and remains empty by default. The gateway adapts the older `WebSearch` function's
