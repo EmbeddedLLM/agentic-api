@@ -23,15 +23,20 @@ vLLM Agentic API provides the stateful APIs needed for real-world agentic applic
 
     This project is in early development. Follow along and contribute on [GitHub](https://github.com/vllm-project/agentic-api).
 
-## Responses API
+## Agentic APIs
 
-Our first milestone is implementing the [Responses API](https://platform.openai.com/docs/api-reference/responses), bringing stateful, agentic capabilities to vLLM. We validate our implementation against the [Open Responses](https://www.openresponses.org/) compatibility test suite.
+Agentic API implements the OpenAI-compatible [Responses API](https://platform.openai.com/docs/api-reference/responses)
+and serves the Anthropic Messages API for Claude Code. We validate the Responses implementation against the
+[Open Responses](https://www.openresponses.org/) compatibility test suite.
 
-- **Stateful conversations** — The server manages conversation history via `previous_response_id`, eliminating client-side message tracking
-- **Built-in tool use** — Web search, file search, and function calling handled within the API, with the model automatically executing multi-step tool chains
-- **Streaming** — Server-sent events for real-time token streaming with structured lifecycle events
-- **Background execution** — Fire-and-forget requests that continue processing server-side
-- **Compatibility tested** — Validated against the open Responses API compatibility test suite
+- **Stateful conversations** — The server manages conversation history via `previous_response_id` or the Conversations API, eliminating client-side message tracking
+- **Server-side tool execution** — Web search, MCP tools, and an opt-in embedded code interpreter run inside the gateway, with the model automatically executing multi-step tool chains
+- **Multi-agent orchestration** — Stored HTTP Responses requests can spawn and coordinate subagents server-side
+- **Streaming** — Server-sent events and WebSocket transports with structured lifecycle events
+- **Compaction** — Automatic and explicit context compaction for long-running sessions
+- **Compatibility tested** — Validated against the open Responses API compatibility test suite and replay recordings of vLLM, SGLang, and NVIDIA Dynamo traffic
+
+See the [API reference](api/index.md) for the full endpoint list.
 
 ## Python Distribution
 
