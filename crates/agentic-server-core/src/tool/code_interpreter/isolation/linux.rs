@@ -23,7 +23,9 @@ use super::{
 };
 
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
-const CGROUP_ROOT: &str = "/sys/fs/cgroup";
+mod cgroup;
+
+pub use cgroup::prepare;
 
 struct Cgroup {
     path: PathBuf,
@@ -31,34 +33,20 @@ struct Cgroup {
 
 impl Cgroup {
     fn current_path() -> io::Result<PathBuf> {
-        let content = fs::read_to_string("/proc/self/cgroup")?;
-        let suffix = content
-            .lines()
-            .find_map(|line| line.strip_prefix("0::"))
-            .ok_or_else(|| io::Error::new(ErrorKind::Unsupported, "cgroup v2 is required"))?;
-        Ok(Path::new(CGROUP_ROOT).join(suffix.trim_start_matches('/')))
+        cgroup::current_cgroup()
     }
 
     fn new(memory_bytes: usize) -> io::Result<Self> {
-        // The service manager must place the gateway in a leaf below a
-        // delegated parent before startup. Never migrate a running process.
+        // Server startup or the service manager places the gateway in a leaf
+        // below a delegated parent. Never migrate a running executor.
         let current = Self::current_path()?;
         let parent = current
             .parent()
             .ok_or_else(|| io::Error::new(ErrorKind::PermissionDenied, "gateway needs a delegated parent cgroup"))?;
-        if !parent.starts_with(CGROUP_ROOT) {
+        if !cgroup::is_delegated_parent(parent) {
             return Err(io::Error::new(
                 ErrorKind::PermissionDenied,
-                "gateway cgroup is outside cgroup v2",
-            ));
-        }
-        let controls = fs::read_to_string(parent.join("cgroup.subtree_control"))?;
-        if !controls.split_whitespace().any(|name| name == "memory")
-            || !controls.split_whitespace().any(|name| name == "pids")
-        {
-            return Err(io::Error::new(
-                ErrorKind::PermissionDenied,
-                "gateway parent needs delegated memory and pids controllers",
+                "gateway parent must be delegated with memory and pids controllers, not a systemd slice",
             ));
         }
         let path = parent.join(format!("agentic-eryx-{}", uuid::Uuid::now_v7().simple()));
@@ -77,12 +65,7 @@ impl Cgroup {
     fn attach(&self, child: &Child, memory_bytes: usize) -> io::Result<()> {
         fs::write(self.path.join("cgroup.procs"), child.id().to_string())?;
         let membership = fs::read_to_string(format!("/proc/{}/cgroup", child.id()))?;
-        let relative = self
-            .path
-            .strip_prefix(CGROUP_ROOT)
-            .map_err(|_| io::Error::new(ErrorKind::InvalidData, "worker cgroup path is invalid"))?;
-        let expected = format!("/{}", relative.display());
-        if membership.lines().find_map(|line| line.strip_prefix("0::")) != Some(expected.as_str()) {
+        if cgroup::parse_membership(&membership)? != self.path {
             return Err(io::Error::new(
                 ErrorKind::PermissionDenied,
                 "worker cgroup attachment was not confirmed",
@@ -146,8 +129,8 @@ struct PrivateSocket {
 }
 
 impl PrivateSocket {
-    fn new() -> io::Result<Self> {
-        let directory = std::env::temp_dir().join(format!("agentic-eryx-{}", uuid::Uuid::now_v7().simple()));
+    fn new(temp_dir: &Path) -> io::Result<Self> {
+        let directory = temp_dir.join(format!("agentic-eryx-{}", uuid::Uuid::now_v7().simple()));
         DirBuilder::new().mode(0o700).create(&directory)?;
         let path = directory.join("control.sock");
         let listener = UnixListener::bind(&path)?;
@@ -219,10 +202,11 @@ fn worker_executable() -> io::Result<PathBuf> {
 
 pub(in crate::tool::code_interpreter) fn run_isolated(
     config: CodeInterpreterRuntimeConfig,
+    temp_dir: &Path,
     code: Option<String>,
     cancellation: Option<Arc<ExecutionCancellation>>,
 ) -> Result<WorkerResponse, ToolError> {
-    run_isolated_inner(config, code, cancellation).map_err(|error| {
+    run_isolated_inner(config, temp_dir, code, cancellation).map_err(|error| {
         tracing::error!(%error, "code interpreter isolated worker failed");
         if error.kind() == ErrorKind::OutOfMemory {
             ToolError::Execution("code interpreter worker exceeded its memory limit".to_owned())
@@ -234,6 +218,7 @@ pub(in crate::tool::code_interpreter) fn run_isolated(
 
 fn run_isolated_inner(
     config: CodeInterpreterRuntimeConfig,
+    temp_dir: &Path,
     code: Option<String>,
     cancellation: Option<Arc<ExecutionCancellation>>,
 ) -> io::Result<WorkerResponse> {
@@ -244,7 +229,7 @@ fn run_isolated_inner(
     };
     let is_probe = matches!(request, WorkerRequest::Probe(_));
     let group = Cgroup::new(limits.worker_memory_bytes())?;
-    let socket = PrivateSocket::new()?;
+    let socket = PrivateSocket::new(temp_dir)?;
     let cancelled = Arc::new(AtomicBool::new(false));
     if let Some(cancellation) = cancellation {
         let path = group.path.clone();
@@ -262,7 +247,7 @@ fn run_isolated_inner(
         .arg(super::WORKER_MARKER)
         .arg(&socket.path)
         .env_clear()
-        .env("TMPDIR", std::env::temp_dir())
+        .env("TMPDIR", temp_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());

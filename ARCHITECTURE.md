@@ -620,10 +620,19 @@ it; a new user message resumes the root.
 Tool-search outputs restore discovered definitions into the requesting agent's
 `ToolSearchState` before its next registry and upstream request are built. Namespace
 and custom declarations still use the existing canonical function normalization and
-public-shape translators. MCP and web search execute in the gateway and append their
+public-shape translators. MCP, web search and operator-enabled code interpreter execute in the gateway and append their
 canonical call/output pairs during the round, so they require no client output
 continuation. Tool search retains its normal `parallel_tool_calls` validation; enabling
 multi-agent execution does not bypass that rule.
+
+Code interpreter uses the same canonical function/tool loop in every agent. Agents
+share the ready executor and its process-wide guest permits through `ExecutionContext`;
+`max_concurrent_subagents` does not increase interpreter capacity. Its public
+`code_interpreter_call` items and streaming events are attributed to the executing
+agent and use the response-wide output indexes. Canonical call/output pairs survive
+stored tree continuation, so submitting a sibling's client tool output does not
+execute completed Python calls again. Feature, operator and readiness gates apply
+before inference, including when the tool declaration is inherited from storage.
 
 **Compaction.** Automatic compaction is per agent. `prepare_agent` supplies a default
 compaction threshold of 100,000 estimated tokens when none is configured. A
@@ -951,7 +960,7 @@ scheduler switch. It is forwarded to vLLM for all supported declaration mixtures
 defaults to `false` when omitted. Whatever calls the model emits are executed under
 the per-round execution permit limit and each handler's same-tool safety policy.
 
-#### `messages_context.rs` / `messages_loop.rs` / `messages_request.rs` / `messages_stream.rs`
+#### `messages_context.rs` / `messages_loop.rs` / `messages_request.rs` / `messages_stream.rs` / `messages_tools.rs`
 
 A **parallel, independent implementation** of the same shape of loop for the Anthropic
 Messages API. `messages_stream.rs`'s own header comment describes it as "structurally
@@ -963,6 +972,20 @@ pieces: `ToolRegistry::dispatch` and `types::messages::tool_seam`. The round/tim
 constants (`MAX_GATEWAY_TOOL_ROUNDS`, `GATEWAY_TOOL_TIMEOUT`) are duplicated and
 manually kept in sync with the Responses-side ones rather than shared — a known seam,
 not an oversight, per the future-consolidation note.
+
+The JSON and SSE loops read a model turn differently but dispatch its gateway calls
+through one function, `messages_tools.rs`'s `execute_gateway_calls`, so admission,
+execution, and the fed-back `tool_result`s cannot differ between them. Calls are
+admitted sequentially in model order before any of them starts, then run concurrently
+under the per-call timeout.
+
+A native `web_search_20250305` declaration's `max_uses` is a request-wide budget of
+searches, not of calls. The normalized tool sent upstream lets one call batch several
+`queries`, so a call is charged for every query the handler would run, counted by the
+handler's own argument parser. A call the remaining budget cannot cover is refused
+whole with an error `tool_result` and leaves the budget untouched, so a later call that
+fits still runs. A call whose arguments cannot be parsed performs no search and is not
+charged.
 
 Both loops take a `MessagesRequestContext` (`messages_context.rs`), the per-request
 type that replaced a bare `serde_json::Value` at that boundary. It holds two views of
