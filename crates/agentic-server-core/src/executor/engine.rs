@@ -189,7 +189,7 @@ async fn run_compaction_trigger(
 ) -> ExecutorResult<ResponsePayload> {
     let model = ctx.enriched_request.model.clone();
     let instructions = ctx.enriched_request.instructions.clone();
-    let (compaction, usage) = if ctx
+    let (compaction, usage, service_tier) = if ctx
         .enriched_request
         .multi_agent
         .as_ref()
@@ -198,7 +198,7 @@ async fn run_compaction_trigger(
         MultiAgentRun::compact_root(ctx, exec_ctx, auth).await?
     } else {
         let input = std::mem::replace(&mut ctx.enriched_request.input, ResponsesInput::Items(Vec::new()));
-        let (mut compacted, usage) = compact_items(&ctx.enriched_request, input, exec_ctx, auth).await?;
+        let (mut compacted, usage, service_tier) = compact_items(&ctx.enriched_request, input, exec_ctx, auth).await?;
         let Some(InputItem::Compaction(compaction)) = compacted.pop() else {
             unreachable!("compact_items always appends a compaction item");
         };
@@ -206,7 +206,7 @@ async fn run_compaction_trigger(
         if let Some(continuation) = &mut ctx.continuation {
             continuation.mark_history_replaced();
         }
-        (compaction, usage)
+        (compaction, usage, service_tier)
     };
     let mut payload = ResponsePayload {
         id: ctx.response_id.clone(),
@@ -221,6 +221,7 @@ async fn run_compaction_trigger(
         previous_response_id: ctx.original_request.previous_response_id.clone(),
         conversation_id: ctx.conversation_id.clone(),
         instructions,
+        service_tier,
         tools: None,
         tool_choice: None,
     };
@@ -325,6 +326,7 @@ mod tests {
             "object": "response",
             "created_at": 0,
             "model": "test-model",
+            "service_tier": "default",
             "status": "completed",
             "output": [{
                 "id": "msg_upstream",
@@ -583,6 +585,7 @@ mod tests {
 
         let payload: RequestPayload = serde_json::from_value(serde_json::json!({
             "model": "test-model",
+            "service_tier": "priority",
             "stream": false,
             "store": false,
             "input": [
@@ -599,6 +602,7 @@ mod tests {
             panic!("non-streaming trigger request must return a payload");
         };
 
+        assert_eq!(response.service_tier.as_deref(), Some("default"));
         assert_eq!(response.status, "completed");
         assert_eq!(response.output.len(), 1);
         let OutputItem::Compaction(item) = &response.output[0] else {
@@ -609,6 +613,7 @@ mod tests {
         assert_eq!(response.usage.as_ref().map(|usage| usage.total_tokens), Some(15));
 
         let upstream = captured.lock().await.take().expect("summary inference ran");
+        assert_eq!(upstream["service_tier"], "priority");
         assert!(
             !upstream.to_string().contains("compaction_trigger"),
             "trigger must never reach the upstream model"
@@ -854,6 +859,7 @@ mod tests {
 
         let payload: RequestPayload = serde_json::from_value(serde_json::json!({
             "model": "test-model",
+            "service_tier": "priority",
             "stream": true,
             "store": false,
             "input": [
@@ -888,6 +894,9 @@ mod tests {
                 assert_eq!(event["response"]["output"], serde_json::json!([]));
                 assert!(event["response"]["usage"].is_null());
             }
+            if event_type == "response.completed" {
+                assert_eq!(event["response"]["service_tier"], "default");
+            }
             if event_type == "response.output_item.done" && event["item"]["type"] == "compaction" {
                 compaction_done_count += 1;
                 assert_eq!(event["item"]["encrypted_content"], "durable summary");
@@ -905,6 +914,10 @@ mod tests {
             ]
         );
         assert_eq!(compaction_done_count, 1);
+        assert_eq!(
+            captured.lock().await.as_ref().expect("summary inference ran")["service_tier"],
+            "priority"
+        );
         assert!(
             !captured
                 .lock()

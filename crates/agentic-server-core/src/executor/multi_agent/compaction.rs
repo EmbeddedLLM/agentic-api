@@ -14,6 +14,7 @@ pub struct CompactionPlan {
     model: String,
     instructions: Option<String>,
     prompt_cache_key: Option<String>,
+    service_tier: Option<String>,
 }
 
 pub struct CompactionResult {
@@ -22,6 +23,7 @@ pub struct CompactionResult {
     pub(super) prefix_len: usize,
     pub(super) replacement: Vec<InputItem>,
     pub(super) usage: ResponseUsage,
+    pub(in crate::executor) service_tier: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,6 +73,7 @@ impl CompactionPlan {
             model: request.model.clone(),
             instructions: request.instructions.clone(),
             prompt_cache_key: request.prompt_cache_key.clone(),
+            service_tier: request.service_tier.clone(),
         }))
     }
 
@@ -90,9 +93,11 @@ impl CompactionPlan {
             model: self.model,
             instructions: self.instructions,
             prompt_cache_key: self.prompt_cache_key,
+            service_tier: self.service_tier,
             ..Default::default()
         };
-        let (mut replacement, usage) = compact_items(&request, ResponsesInput::Items(self.prefix), exec, auth).await?;
+        let (mut replacement, usage, service_tier) =
+            compact_items(&request, ResponsesInput::Items(self.prefix), exec, auth).await?;
         replacement.extend(discovery);
         Ok(CompactionResult {
             agent: self.agent,
@@ -100,6 +105,7 @@ impl CompactionPlan {
             prefix_len,
             replacement,
             usage,
+            service_tier,
         })
     }
 }
@@ -132,6 +138,7 @@ mod tests {
             prefix_len: 1,
             replacement: vec![],
             usage: ResponseUsage::default(),
+            service_tier: None,
         };
         let mut history = vec![InputItem::Unknown, InputItem::CompactionTrigger];
         assert_eq!(result().commit(8, &mut history), CompactionCommit::Stale);

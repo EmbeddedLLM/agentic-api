@@ -20,7 +20,7 @@ impl MultiAgentRun {
         ctx: &mut RequestContext,
         exec: &ExecutionContext,
         auth: Option<&str>,
-    ) -> ExecutorResult<(CompactionItem, ResponseUsage)> {
+    ) -> ExecutorResult<(CompactionItem, ResponseUsage, Option<String>)> {
         let budget = ExecutorResponseBudget::with_limit(exec.responses_config.max_retained_bytes);
         let mut restored = restore_agents(ctx, exec, &budget)?;
         ctx.new_input_items.retain(|item| !item.is_compaction_trigger());
@@ -37,6 +37,7 @@ impl MultiAgentRun {
             .ok_or_else(|| invalid("no resolved root context available for compaction"))?;
         let result = plan.execute(exec, auth).await?;
         let usage = result.usage();
+        let service_tier = result.service_tier.clone();
         if result.commit(0, &mut root.history) != CompactionCommit::Applied {
             return Err(invalid("root context changed during explicit compaction"));
         }
@@ -68,6 +69,6 @@ impl MultiAgentRun {
             },
             &CheckpointLimits::for_response(exec.responses_config.max_retained_bytes),
         )?);
-        Ok((compaction, usage))
+        Ok((compaction, usage, service_tier))
     }
 }

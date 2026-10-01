@@ -1,7 +1,7 @@
 {
   "version": 1,
   "baseline": {
-    "crates/agentic-server-core/src/executor/accumulator/mod.rs": 666,
+    "crates/agentic-server-core/src/executor/accumulator/mod.rs": 590,
     "crates/agentic-server-core/src/executor/gateway.rs": 580,
     "crates/agentic-server-core/src/executor/session.rs": 508,
     "crates/agentic-server-core/src/tool/registry.rs": 515,
@@ -23,8 +23,8 @@
       "reason": "Code-interpreter call state shares the typed item lifecycle dispatcher with multi-agent call and agent-message states."
     },
     "crates/agentic-server-core/src/executor/accumulator/mod.rs": {
-      "limit": 683,
-      "reason": "Code-interpreter done-only completion projects its generated item ID into the emitted event in the existing ingestion path."
+      "limit": 607,
+      "reason": "Merge the main branch multi-agent and code-interpreter ingestion into the existing accumulator while preserving service-tier accounting."
     },
     "crates/agentic-server-core/src/executor/accumulator/slot.rs": {
       "limit": 518,
@@ -35,8 +35,8 @@
       "reason": "Gateway-owned code-interpreter calls emit their public SSE lifecycle through the existing scheduler after policy extraction."
     },
     "crates/agentic-server-core/src/executor/response_budget.rs": {
-      "limit": 505,
-      "reason": "Code-interpreter outputs and optional agent attribution are charged in the shared retained-item budget."
+      "limit": 512,
+      "reason": "The shared retained-item budget accounts for code-interpreter outputs, agent attribution, and the response service tier."
     },
     "crates/agentic-server-core/src/tool/registry.rs": {
       "limit": 528,

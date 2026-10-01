@@ -744,6 +744,54 @@ fn pending_identity_is_not_charged_again_at_completion() {
 }
 
 #[test]
+fn service_tier_is_charged_and_bounded_on_both_ingestion_paths() {
+    for validation in [Validation::Lenient, Validation::Strict] {
+        let mut terminal = completed(&[]);
+        terminal["response"]["service_tier"] = json!("priority");
+        let events = [
+            created(),
+            json!({"type": "response.in_progress", "response": {"id": "resp_1", "status": "in_progress"}}),
+            terminal.clone(),
+        ];
+        let (mut stream, stream_budget) = budgeted(4096, validation);
+        feed(&mut stream, &events).unwrap();
+        let (mut json_acc, json_budget) = budgeted(4096, validation);
+        json_acc.load_json_body(&terminal["response"].to_string()).unwrap();
+        assert_eq!(stream_budget.used(), json_budget.used());
+        assert_eq!(stream.service_tier.as_deref(), Some("priority"));
+
+        let limit = stream_budget.used() - 1;
+        let (mut stream, _) = budgeted(limit, validation);
+        assert_budget_exceeded(&feed(&mut stream, &events).unwrap_err());
+        let (mut json_acc, _) = budgeted(limit, validation);
+        assert_budget_exceeded(&json_acc.load_json_body(&terminal["response"].to_string()).unwrap_err());
+    }
+}
+
+#[test]
+fn repeated_terminal_service_tiers_reconcile_retained_memory() {
+    let charge = RETAINED_CONTAINER_OVERHEAD_BYTES + "priority".len();
+    let (mut acc, budget) = budgeted(
+        "resp_1".len() + RETAINED_CONTAINER_OVERHEAD_BYTES + charge + 1,
+        Validation::Lenient,
+    );
+    feed(&mut acc, &[created()]).unwrap();
+    let base = budget.used();
+    for tier in [json!("priority"), json!("priority"), json!("flex"), Value::Null] {
+        let mut event = completed(&[]);
+        event["response"]["service_tier"] = tier.clone();
+        feed(&mut acc, &[event]).unwrap();
+        assert_eq!(budget.used(), base + charge);
+        assert_eq!(acc.service_tier.as_deref(), tier.as_str());
+    }
+    let mut larger = completed(&[]);
+    larger["response"]["service_tier"] = json!("priorityxx");
+    assert_budget_exceeded(&feed(&mut acc, &[larger]).unwrap_err());
+    assert!(acc.service_tier.is_none());
+    assert_eq!(budget.used(), base + charge);
+}
+
+#[test]
 fn collaboration_snapshots_and_encrypted_parts_respect_the_response_budget() {
     let huge = "x".repeat(100_000);
     for item in [
