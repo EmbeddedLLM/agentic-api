@@ -1358,7 +1358,9 @@ def run_messages(
             results = []
             for call in pending_tool_use:
                 out = tool_outputs.get(call.get("name"), "{}")
-                results.append({"type": "tool_result", "tool_use_id": call.get("id"), "content": out})
+                results.append(
+                    {"type": "tool_result", "tool_use_id": call.get("id"), "content": out, "is_error": False}
+                )
             history.append({"role": "user", "content": results})
             click.echo(f"  [fed back {len(results)} tool_result(s) for {[c.get('name') for c in pending_tool_use]}]")
         else:

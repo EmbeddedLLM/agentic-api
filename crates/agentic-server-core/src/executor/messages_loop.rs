@@ -20,7 +20,7 @@ use tracing::Instrument as _;
 use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::executor::inference::fetch_response_json_with_headers;
 use crate::executor::messages_context::MessagesRequestContext;
-use crate::executor::messages_tools::{GatewayToolUse, execute_gateway_calls};
+use crate::executor::messages_tools::{GatewayToolUse, execute_gateway_calls, request_gateway_map};
 use crate::executor::messages_usage::MessagesUsageTotals;
 use crate::executor::request::ExecutionContext;
 use crate::executor::telemetry::{Api, ExecutionSpan, FailureCategory, Route};
@@ -114,6 +114,9 @@ async fn run_messages_loop_traced(
     // what the client asked (the handler routes streaming elsewhere).
     ctx.force_stream(false);
     let mut usage = MessagesUsageTotals::default();
+    // Gateway ownership is request-scoped: the operator aliases plus the
+    // gateway tools this request's registry resolved.
+    let gateway_map = request_gateway_map(&exec_ctx.messages_gateway_tools, registry);
 
     for round in 0..MAX_GATEWAY_TOOL_ROUNDS {
         let body = ctx.upstream_body()?;
@@ -144,10 +147,9 @@ async fn run_messages_loop_traced(
         // Split the assistant turn into gateway-owned tool_use vs everything the
         // client should see. A client-owned tool_use means we cannot continue
         // the loop server-side — return the turn to the client (edge E7).
-        let gateway_map = &exec_ctx.messages_gateway_tools;
         let Some(content) = content else {
             execution.completed_with_stop_reason(stop_reason);
-            return Ok(deliver(message, &mut usage, gateway_map, response_headers));
+            return Ok(deliver(message, &mut usage, &gateway_map, response_headers));
         };
         let mut gateway_calls: Vec<Value> = Vec::new();
         let mut has_client_tool_use = false;
@@ -170,7 +172,7 @@ async fn run_messages_loop_traced(
             if message["stop_reason"] == "end_turn" {
                 message["stop_reason"] = json!("tool_use");
             }
-            return Ok(deliver(message, &mut usage, gateway_map, response_headers));
+            return Ok(deliver(message, &mut usage, &gateway_map, response_headers));
         }
 
         // The shared context accepts tool_use and vLLM's end_turn for a matching
@@ -182,13 +184,13 @@ async fn run_messages_loop_traced(
             )
         {
             execution.completed_with_stop_reason(stop_reason);
-            return Ok(deliver(message, &mut usage, gateway_map, response_headers));
+            return Ok(deliver(message, &mut usage, &gateway_map, response_headers));
         }
         // Pure gateway-tool round: execute the calls, then feed the model's FULL
         // assistant turn (thinking/text/tool_use, order preserved — F3) plus the
         // tool_results back for the next round. Gateway blocks stay internal.
         usage.record(message.get("usage"));
-        let tool_results = execute_gateway_calls(tool_uses(&gateway_calls), &mut ctx, registry, gateway_map).await;
+        let tool_results = execute_gateway_calls(tool_uses(&gateway_calls), &mut ctx, registry, &gateway_map).await;
         ctx.append_round(content, tool_results)?;
     }
 

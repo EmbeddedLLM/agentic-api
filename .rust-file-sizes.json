@@ -15,8 +15,8 @@
   },
   "exceptions": {
     "crates/agentic-server-core/src/config.rs": {
-      "limit": 629,
-      "reason": "Operator-owned code-interpreter worker limits and admission validation share runtime configuration with the Tavily web-search provider settings."
+      "limit": 637,
+      "reason": "The gateway-executed web_fetch settings join the shared tool runtime configuration beside the web-search provider and code-interpreter limits."
     },
     "crates/agentic-server-core/src/executor/accumulator/active.rs": {
       "limit": 512,
@@ -39,8 +39,8 @@
       "reason": "The shared retained-item budget accounts for code-interpreter outputs, agent attribution, and the response service tier."
     },
     "crates/agentic-server-core/src/tool/registry.rs": {
-      "limit": 528,
-      "reason": "The code interpreter follows the existing registry validation and executor registration flow."
+      "limit": 544,
+      "reason": "The web_fetch executor binds through the existing registry validation and executor registration flow, like the code interpreter."
     },
     "crates/agentic-server-core/src/tool/tool_search.rs": {
       "limit": 1681,
@@ -55,12 +55,12 @@
       "reason": "The shared output-item conversion replays native code-interpreter calls while omitting gateway projections."
     },
     "crates/agentic-server-core/src/types/tools/params.rs": {
-      "limit": 576,
-      "reason": "The shared tagged tool declaration validates the OpenAI auto-container form and exposes its closed public schema."
+      "limit": 581,
+      "reason": "The shared tagged tool declaration carries the Messages-only web_fetch variant so one registry builder serves every gateway tool."
     },
     "crates/agentic-server/src/main.rs": {
-      "limit": 643,
-      "reason": "Server configuration applies documented file and environment precedence to code-interpreter worker memory and guest resource limits."
+      "limit": 644,
+      "reason": "Server configuration resolves the web_fetch settings with the same file and environment precedence as the other tool settings."
     }
   },
   "generated": {}

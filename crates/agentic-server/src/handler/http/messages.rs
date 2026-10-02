@@ -8,8 +8,8 @@ use tracing::debug;
 
 use agentic_core::executor::telemetry::Api;
 use agentic_core::executor::{
-    ExecutorError, MessagesRequestContext, MessagesUpstream, ParsedMessagesRequest,
-    normalize_native_web_search_for_upstream, run_messages_loop, run_messages_stream,
+    ExecutorError, MessagesRequestContext, MessagesUpstream, ParsedMessagesRequest, declares_native_web_fetch,
+    normalize_native_server_tools_for_upstream, run_messages_loop, run_messages_stream,
 };
 use agentic_core::proxy::{ProxyAuth, ProxyRequest, error_response_for_auth, upstream_request_headers};
 use agentic_core::tool::ToolRegistry;
@@ -166,7 +166,15 @@ pub async fn count_tokens(State(state): State<AppState>, request: Request) -> Re
         Err(response) => return response,
     };
     if let Ok(mut request_json) = serde_json::from_slice::<serde_json::Value>(&bytes) {
-        match normalize_native_web_search_for_upstream(&mut request_json) {
+        // The executors own the availability policy: a disabled executor
+        // refuses the declaration here too, so counting tokens and sending the
+        // request answer alike.
+        if declares_native_web_fetch(&request_json) {
+            if let Err(error) = state.exec_ctx.gateway_executors.require_web_fetch() {
+                return messages_error_response(ExecutorError::from(error));
+            }
+        }
+        match normalize_native_server_tools_for_upstream(&mut request_json) {
             Ok(true) => match serde_json::to_vec(&request_json) {
                 Ok(body) => bytes = Bytes::from(body),
                 Err(error) => return messages_error_response(ExecutorError::from(error)),

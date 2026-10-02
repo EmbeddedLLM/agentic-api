@@ -11,6 +11,7 @@ use super::mcp::McpHandler;
 use super::registry::ToolType;
 use super::shell::ShellHandler;
 use super::tool_search::ToolSearchHandler;
+use super::web_fetch::WebFetchHandler;
 use super::web_search::web_search_function_tool;
 
 #[cfg(not(feature = "embedded-code-interpreter"))]
@@ -37,7 +38,7 @@ impl ResponsesTool {
             Self::Function(param) => FunctionHandler.validate(param),
             Self::Mcp(param) => McpHandler::spec_from_param(param).validate(param),
             Self::ToolSearch(param) => ToolSearchHandler.validate(param),
-            Self::WebSearch(_) | Self::FileSearch(_) | Self::Unknown => Ok(()),
+            Self::WebSearch(_) | Self::WebFetch(_) | Self::FileSearch(_) | Self::Unknown => Ok(()),
             // Runtime availability is checked before the request is normalized.
             Self::CodeInterpreter(param) => CodeInterpreterHandler.validate(param),
             Self::Shell(param) => ShellHandler.validate(param),
@@ -54,6 +55,7 @@ impl ResponsesTool {
             Self::ToolSearch(_) => Some(ToolType::ToolSearch),
             Self::Mcp(_) => Some(ToolType::Mcp),
             Self::WebSearch(_) => Some(ToolType::WebSearch),
+            Self::WebFetch(_) => Some(ToolType::WebFetch),
             Self::FileSearch(_) => Some(ToolType::FileSearch),
             Self::CodeInterpreter(_) => Some(ToolType::CodeInterpreter),
             Self::Namespace(_) => Some(ToolType::CodexNamespace),
@@ -96,6 +98,7 @@ impl ResponsesTool {
             Self::Mcp(param) => McpHandler::spec_from_param(param).normalize(param),
             Self::ToolSearch(param) => ToolSearchHandler.normalize(param).into_iter().take(1).collect(),
             Self::WebSearch(_) => vec![web_search_function_tool()],
+            Self::WebFetch(param) => WebFetchHandler::spec_only().normalize(param),
             Self::FileSearch(_) => {
                 tracing::debug!("file_search tool skipped in normalize - handler not yet registered");
                 vec![]

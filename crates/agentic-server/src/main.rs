@@ -26,6 +26,7 @@ mod code_interpreter_startup;
 mod config_file;
 mod responses_config;
 mod server;
+mod web_fetch_config;
 mod web_search_config;
 use responses_config::{generated_responses_file_config, resolve_responses_config};
 
@@ -33,6 +34,7 @@ use config_file::{
     CodeInterpreterFileConfig, FileConfig, McpFileConfig, MessagesGatewayFileConfig, ServerFileConfig, ToolsFileConfig,
 };
 use server::GatewayOptions;
+use web_fetch_config::resolve_web_fetch_config;
 use web_search_config::{generated_web_search_file_config, resolve_web_search_config};
 
 /// Environment override for the serialized request-size ceiling.
@@ -461,6 +463,7 @@ fn build_config(llm_api_base: String, common: &CommonArgs, file: &FileConfig) ->
         .map_or_else(default_database_url, Ok)?;
     let (postgres, sqlite) = database_configs_from_env(&db_url)?;
     let web_search = resolve_web_search_config(&file.web_search, environment_value)?;
+    let web_fetch = resolve_web_fetch_config(&file.web_fetch, environment_value)?;
     let mcp_allowed_hosts = environment_value("AGENTIC_MCP_ALLOWED_HOSTS")
         .map_or_else(|| file.mcp.allowed_hosts.clone(), |value| parse_comma_separated(&value));
     let max_concurrent_gateway_calls_default = file
@@ -487,6 +490,7 @@ fn build_config(llm_api_base: String, common: &CommonArgs, file: &FileConfig) ->
         sqlite,
         tools: ToolRuntimeConfig {
             web_search,
+            web_fetch,
             mcp_servers: file.mcp_servers.clone(),
             mcp_allowed_hosts,
             messages_gateway_tool_aliases: file.messages_gateway.tool_aliases.clone(),

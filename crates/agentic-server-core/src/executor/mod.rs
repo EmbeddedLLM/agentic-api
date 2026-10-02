@@ -34,7 +34,9 @@ pub use error::{ExecutorError, ExecutorResult, ResourceLimit};
 pub use inference::call_inference;
 pub use messages_context::{MessagesRequestContext, ParsedMessagesRequest};
 pub use messages_loop::{MessagesResponse, MessagesUpstream, run_messages_loop};
-pub use messages_request::normalize_native_web_search_for_upstream;
+pub use messages_request::{
+    declares_native_web_fetch, normalize_native_server_tools_for_upstream, normalize_native_web_search_for_upstream,
+};
 pub use messages_stream::run_messages_stream;
 pub use modes::{ConversationHandler, ResponseHandler};
 pub use persist::{commit, persist_response, persist_turn};

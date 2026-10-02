@@ -33,6 +33,7 @@ use tracing::Instrument as _;
 use crate::executor::error::ExecutorResult;
 use crate::executor::inference::{BoxStream, response_lines, send_request};
 use crate::executor::messages_context::MessagesRequestContext;
+use crate::executor::messages_tools::request_gateway_map;
 use crate::executor::messages_usage::MessagesUsageTotals;
 use crate::executor::request::ExecutionContext;
 use crate::executor::telemetry::{Api, ExecutionSpan, FailureCategory, InstrumentedStream, Route};
@@ -118,7 +119,7 @@ fn messages_stream_body(
 ) -> BoxStream {
     Box::pin(stream! {
         let mut acc = MessagesStreamAccumulator {
-            gateway_map: exec_ctx.messages_gateway_tools.clone(),
+            gateway_map: request_gateway_map(&exec_ctx.messages_gateway_tools, &registry),
             ..Default::default()
         };
         let mut prepared_response = Some(first_response);
@@ -210,7 +211,7 @@ fn messages_stream_body(
                 &calls,
                 &mut ctx,
                 &registry,
-                &exec_ctx.messages_gateway_tools,
+                &acc.gateway_map,
             ).await;
             if let Err(e) = ctx.append_round(&assistant_content, tool_results) {
                 execution.failed(&e);

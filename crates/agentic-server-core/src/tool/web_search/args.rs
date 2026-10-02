@@ -224,21 +224,31 @@ pub(crate) fn clean_vec(values: Option<&[String]>) -> Option<Vec<String>> {
 pub(crate) struct DomainFilter {
     include: Vec<String>,
     exclude: Vec<String>,
+    /// An allowlist was declared but none of its entries normalizes to a
+    /// domain, so nothing can match it: the filter fails closed instead of
+    /// widening to every host.
+    deny_all: bool,
 }
 
 impl DomainFilter {
     pub(crate) fn new(include: Option<&[String]>, exclude: Option<&[String]>) -> Self {
+        let include_declared = include.is_some_and(|domains| !domains.is_empty());
+        let include = normalize_domains(include);
         Self {
-            include: normalize_domains(include),
+            deny_all: include_declared && include.is_empty(),
+            include,
             exclude: normalize_domains(exclude),
         }
     }
 
     pub(crate) fn is_empty(&self) -> bool {
-        self.include.is_empty() && self.exclude.is_empty()
+        !self.deny_all && self.include.is_empty() && self.exclude.is_empty()
     }
 
     pub(crate) fn allows(&self, url: &str) -> bool {
+        if self.deny_all {
+            return false;
+        }
         let Some(host) = url_host(url) else {
             return self.is_empty();
         };
@@ -472,6 +482,19 @@ mod tests {
         let invalid = DomainFilter::new(Some(&["https://example.com/path".to_owned()]), None);
         assert!(!invalid.is_empty());
         assert!(!invalid.allows("https://example.com/"));
+    }
+
+    #[test]
+    fn domain_filter_fails_closed_when_an_allowlist_names_no_domain() {
+        // "." normalizes to nothing; a declared allowlist must then admit
+        // nothing rather than every host.
+        let dots = DomainFilter::new(Some(&[".".to_owned(), "...".to_owned()]), None);
+        assert!(!dots.is_empty());
+        assert!(!dots.allows("https://example.com/"));
+        assert!(!dots.allows("not a url"));
+        // An absent or explicitly empty allowlist is still no filter.
+        assert!(DomainFilter::new(Some(&[]), None).allows("https://example.com/"));
+        assert!(DomainFilter::new(None, Some(&[".".to_owned()])).allows("https://example.com/"));
     }
 
     #[test]

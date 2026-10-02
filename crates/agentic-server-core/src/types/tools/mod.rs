@@ -6,6 +6,8 @@
 pub mod code_interpreter;
 /// This module contains only serde shapes (serialization/deserialization types).
 pub mod params;
+/// Declaration parameters of the Messages-only `web_fetch` tool.
+pub mod web_fetch;
 
 pub use code_interpreter::{CodeInterpreterCallArguments, CodeInterpreterCallArgumentsError};
 pub use params::{
@@ -14,3 +16,4 @@ pub use params::{
     NonEmptyToolName, ResponsesTool, ShellEnvironment, ShellToolParam, ToolSearchExecution, ToolSearchStatus,
     ToolSearchToolParam, WebSearchContextSize, WebSearchFilters, WebSearchToolParam, WebSearchUserLocation,
 };
+pub use web_fetch::WebFetchToolParam;

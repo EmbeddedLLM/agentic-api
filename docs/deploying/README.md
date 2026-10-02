@@ -449,6 +449,30 @@ kubectl create secret generic agentic-api-secrets \
 
 Do not commit API keys to the manifest or source tree.
 
+## Optional web fetch
+
+Claude's native `web_fetch_20250910` tool on `/v1/messages` is executed by the gateway
+itself and needs no provider or key; it is on by default. The fetcher refuses non-public
+addresses (loopback, private, link-local, cloud metadata, carrier-grade NAT) directly,
+through DNS, and through redirects, and bounds every fetch in time and size. The
+defaults, and the variables that change them:
+
+```yaml
+            # "false" switches the fetcher off; declarations are then rejected with HTTP 400.
+            - name: AGENTIC_WEB_FETCH_ENABLED
+              value: "true"
+            # "true" only for deployments that fetch intranet pages on purpose.
+            - name: AGENTIC_WEB_FETCH_ALLOW_PRIVATE_NETWORKS
+              value: "false"
+            - name: AGENTIC_WEB_FETCH_MAX_RESPONSE_BYTES
+              value: "10485760"
+            - name: AGENTIC_WEB_FETCH_TIMEOUT_SECS
+              value: "20"
+```
+
+The same settings live under `[web_fetch]` in `config.toml`; the README describes the
+per-request contract (`max_uses`, domain filters, `max_content_tokens`, error codes).
+
 ## Optional: deploy with llm-d
 
 `--llm-api-base` accepts any OpenAI-compatible endpoint, not only a single vLLM

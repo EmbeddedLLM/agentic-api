@@ -38,6 +38,32 @@ impl WebSearchFileConfig {
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
+pub(crate) struct WebFetchFileConfig {
+    /// Whether native `web_fetch` declarations are executed; unset means enabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// Whether fetches may reach private, loopback, and other non-public addresses.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow_private_networks: Option<bool>,
+    /// Bytes read from one page before the download is cut.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_response_bytes: Option<NonZeroUsize>,
+    /// Seconds allowed for one fetch, including redirects.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<NonZeroU64>,
+}
+
+impl WebFetchFileConfig {
+    fn is_empty(&self) -> bool {
+        self.enabled.is_none()
+            && self.allow_private_networks.is_none()
+            && self.max_response_bytes.is_none()
+            && self.timeout_secs.is_none()
+    }
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(default, deny_unknown_fields)]
 pub(crate) struct McpFileConfig {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub allowed_hosts: Vec<String>,
@@ -204,6 +230,8 @@ pub(crate) struct FileConfig {
     pub database_url: Option<String>,
     #[serde(skip_serializing_if = "WebSearchFileConfig::is_empty")]
     pub web_search: WebSearchFileConfig,
+    #[serde(skip_serializing_if = "WebFetchFileConfig::is_empty")]
+    pub web_fetch: WebFetchFileConfig,
     #[serde(skip_serializing_if = "McpFileConfig::is_empty")]
     pub mcp: McpFileConfig,
     #[serde(skip_serializing_if = "ServerFileConfig::is_empty")]
@@ -403,7 +431,7 @@ impl FileConfig {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::num::NonZeroUsize;
+    use std::num::{NonZeroU64, NonZeroUsize};
 
     use agentic_core::McpServerEntry;
     use agentic_server::model_capabilities::{InputModalities, UpstreamCapabilities};
@@ -768,6 +796,40 @@ mod tests {
                 .map(std::num::NonZeroUsize::get),
             Some(1_048_576)
         );
+    }
+
+    #[test]
+    fn web_fetch_settings_round_trip_and_reject_unknown_keys() {
+        let home = tempdir().expect("temp home");
+        fs::write(
+            home.path().join("config.toml"),
+            "[web_fetch]\nenabled = false\nallow_private_networks = true\nmax_response_bytes = 4096\ntimeout_secs = 7\n",
+        )
+        .expect("write config");
+        let config = FileConfig::load(home.path())
+            .expect("load config")
+            .expect("existing config");
+        assert_eq!(config.web_fetch.enabled, Some(false));
+        assert_eq!(config.web_fetch.allow_private_networks, Some(true));
+        assert_eq!(config.web_fetch.max_response_bytes.map(NonZeroUsize::get), Some(4096));
+        assert_eq!(config.web_fetch.timeout_secs.map(NonZeroU64::get), Some(7));
+        let rendered = toml::to_string(&config).expect("serialize config");
+        assert!(rendered.contains("[web_fetch]"), "{rendered}");
+        assert!(rendered.contains("allow_private_networks = true"), "{rendered}");
+
+        let rendered = toml::to_string(&FileConfig::default()).expect("serialize defaults");
+        assert!(
+            !rendered.contains("web_fetch"),
+            "an empty section is not written: {rendered}"
+        );
+
+        fs::write(home.path().join("config.toml"), "[web_fetch]\nmax_response_bytes = 0\n").expect("write config");
+        let error = FileConfig::load(home.path()).expect_err("zero download ceiling must fail");
+        assert!(error.to_string().contains("max_response_bytes"), "{error}");
+
+        fs::write(home.path().join("config.toml"), "[web_fetch]\nfetch_timeout = 1\n").expect("write config");
+        let error = FileConfig::load(home.path()).expect_err("unknown keys must fail");
+        assert!(error.to_string().contains("fetch_timeout"), "{error}");
     }
 
     #[test]

@@ -418,6 +418,7 @@ fn typed_top_level_registry_keys(tools: &[ResponsesTool]) -> HashMap<String, Too
             let registry_key = match tool {
                 ResponsesTool::Function(function) => function.name.as_str().to_owned(),
                 ResponsesTool::WebSearch(_) => "web_search".to_owned(),
+                ResponsesTool::WebFetch(_) => "web_fetch".to_owned(),
                 ResponsesTool::FileSearch(_) => "file_search".to_owned(),
                 ResponsesTool::CodeInterpreter(_) => "code_interpreter".to_owned(),
                 ResponsesTool::ToolSearch(_)

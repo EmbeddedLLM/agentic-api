@@ -31,7 +31,7 @@ flowchart LR
     subgraph A ["⚡ Agentic API (Rust 🦀)"]
         direction TB
         S["🔄 State hydration<br/><code>previous_response_id</code>"]
-        T["🛠️ Server-side tools<br/>web search · MCP · code interpreter"]
+        T["🛠️ Server-side tools<br/>web search · web fetch · MCP · code interpreter"]
         P["💾 Persistence<br/>SQLite · PostgreSQL"]
     end
     A -->|"🚀 <code>POST /v1/responses</code> · <code>/v1/messages</code><br/>⚙️ stateless&nbsp;&nbsp;🤝 OpenAI/Anthropic-compatible"| V(["🚀 vLLM core<br/>inference engine"])
@@ -271,6 +271,15 @@ api_key_env = "YOU_API_KEY"
 # Concurrent provider requests inside one batched web-search call; unset uses
 # the provider default (Brave: 1; You.com and Tavily: max_concurrent_gateway_calls).
 # max_concurrent_queries = 1
+
+[web_fetch]
+# Gateway-executed page fetches for Claude's native web_fetch_20250910 tool on /v1/messages.
+# enabled = true
+# Allow fetches of private, loopback, and other non-public addresses (off by default).
+# allow_private_networks = false
+# Download ceiling per fetch in bytes and time ceiling per fetch in seconds.
+# max_response_bytes = 10485760
+# timeout_secs = 20
 
 [mcp]
 allowed_hosts = ["mcp.example.com"]
@@ -593,6 +602,72 @@ Older clients that declare a function tool named `WebSearch` can still opt in wi
 
 > Note: allow and block domain lists are mutually exclusive, matching Anthropic's native tool contract.
 
+### Fetching pages with the native web fetch tool
+
+Applications that call the Messages API through the Anthropic SDK can declare Claude's native
+[`web_fetch_20250910`](https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-fetch-tool) server tool. Agentic
+API rewrites that declaration into an ordinary function tool for the upstream model, fetches the page itself when the
+model calls it, hands the page text back to the model, and keeps the call out of the client-visible response: the same
+hide-the-call contract as web search. `/v1/messages/count_tokens` accepts the declaration too. No search provider or API
+key is involved; the built-in fetcher is on by default and can be switched off with `[web_fetch] enabled = false` or
+`AGENTIC_WEB_FETCH_ENABLED=false`, after which such a declaration is rejected with HTTP 400 instead of being forwarded
+in a shape the upstream cannot execute.
+
+```json
+{
+  "tools": [
+    {"type": "web_fetch_20250910", "name": "web_fetch", "max_uses": 5,
+     "allowed_domains": ["example.com"], "max_content_tokens": 20000}
+  ]
+}
+```
+
+The gateway supports `max_uses`, `allowed_domains` / `blocked_domains` (matched on the host only, as Anthropic documents
+for web fetch, so each entry must be a host name or address without scheme or path), and `max_content_tokens`;
+`citations: {"enabled": false}` and `allowed_callers: ["direct"]` are accepted. Anything the gateway cannot honour
+(`citations` enabled, the `use_cache` and `response_inclusion` settings of later tool versions, or another
+`web_fetch_*` version) is rejected with HTTP 400 rather than ignored.
+
+Each call answers the model with one JSON `tool_result`: the final URL after redirects, the page title, the content
+type, a `retrieved_at` timestamp, and the page text. HTML is reduced to plain text; `text/*`, XHTML, XML, and JSON
+bodies are returned as text; PDF and other binary types are refused. `max_content_tokens` is applied as an approximate
+budget of four bytes per token, and the text is always cut below the gateway's 1 MiB tool output cap. A fetch that
+cannot be served answers the model with the documented
+[error codes](https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-fetch-tool#errors) in an error
+`tool_result` (`url_not_accessible`, `url_not_allowed`, `too_many_requests`, `unsupported_content_type`, `url_too_long`,
+`invalid_tool_input`, `max_uses_exceeded`, `url_not_in_prior_context`, `unavailable`), so the turn continues.
+
+Fetches are bounded and never reach internal networks:
+
+- Only a URL that already appeared in the conversation can be fetched: in a user message, a client `tool_result`, or a
+  gateway web search or fetch result, and only as that whole URL, not as the prefix of a longer one. A URL the model
+  produced itself, or one that appears only in the system prompt, is refused with `url_not_in_prior_context`, matching
+  Anthropic's rule.
+- Only absolute `http`/`https` URLs of at most 250 characters without embedded credentials are accepted.
+- Hosts that are, or resolve to, loopback, private, link-local (including cloud metadata), carrier-grade NAT, multicast,
+  or other non-public addresses are refused before any connection; the connection is pinned to the addresses that
+  passed the check, and every redirect hop is checked again with the same rules and domain filters. Under this policy
+  the fetcher connects directly and ignores the `HTTP_PROXY` / `HTTPS_PROXY` environment, so the check and the pin
+  apply to the real destination. Deployments that fetch intranet pages on purpose can set
+  `[web_fetch] allow_private_networks = true`, which also restores proxy use.
+- Each fetch is bounded in time (`timeout_secs`, default 20 s including redirects), size (`max_response_bytes`,
+  default 10 MiB; a longer body is cut and reported as truncated), and redirects (5 hops).
+- `max_uses` is a request-wide budget of fetches. Every admitted call is charged whether the page arrives, the fetch
+  fails, or the URL is refused; a call whose arguments carry no URL is answered as invalid input without being charged.
+- At most `max_concurrent_gateway_calls` fetches (default 5) are in flight at once across the gateway; a round that
+  asks for more waits for a slot.
+
+| Setting | Environment variable | `config.toml` key | Default |
+| :--- | :--- | :--- | :--- |
+| Enabled | `AGENTIC_WEB_FETCH_ENABLED` | `[web_fetch] enabled` | `true` |
+| Private networks | `AGENTIC_WEB_FETCH_ALLOW_PRIVATE_NETWORKS` | `[web_fetch] allow_private_networks` | `false` |
+| Download ceiling | `AGENTIC_WEB_FETCH_MAX_RESPONSE_BYTES` | `[web_fetch] max_response_bytes` | `10485760` |
+| Time ceiling | `AGENTIC_WEB_FETCH_TIMEOUT_SECS` | `[web_fetch] timeout_secs` | `20` |
+
+Claude Code is unaffected: its `WebFetch` is a client tool with its own schema that Claude Code runs locally, and a
+client function named `web_fetch` without the native `type` stays client-owned. Page content reaches the client only
+through the model's answer; returning `server_tool_use` blocks to the client (#409) and PDF text are follow-ups.
+
 ## 🧩 Tool Ownership Model
 
 Every tool call has exactly one execution path, so nothing runs by accident:
@@ -663,7 +738,7 @@ Design and migration decisions are tracked as ADRs in [docs/adr/](docs/adr/), wi
 
 - [x] **Responses API hydration**: stateful continuation with `previous_response_id`
 - [x] **Codex support**: practical Codex sessions through the Responses API
-- [x] **Server-side tool execution**: explicit ownership, web search, MCP, and code interpreter built in
+- [x] **Server-side tool execution**: explicit ownership, web search, web fetch, MCP, and code interpreter built in
 - [x] **Messages API**: Claude Code support with a server-side gateway tool loop
 - [x] **Conversations API**: OpenAI-compatible conversation and item management
 - [ ] **Multi-agent Responses**: HTTP execution ships today; WebSocket injection and stateless requests are next

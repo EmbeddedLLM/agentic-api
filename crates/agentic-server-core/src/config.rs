@@ -8,6 +8,11 @@ use serde::{Deserialize, Serialize};
 use crate::error::Error;
 use crate::tool::McpServerEntry;
 
+mod web_fetch;
+pub use web_fetch::{
+    DEFAULT_WEB_FETCH_MAX_REDIRECTS, DEFAULT_WEB_FETCH_MAX_RESPONSE_BYTES, DEFAULT_WEB_FETCH_TIMEOUT, WebFetchConfig,
+};
+
 pub const AGENTIC_API_HOME_ENV: &str = "AGENTIC_API_HOME";
 pub const CONFIG_FILE_NAME: &str = "config.toml";
 pub const DATABASE_FILE_NAME: &str = "agentic_api.db";
@@ -538,6 +543,8 @@ impl std::fmt::Debug for WebSearchProviderConfig {
 #[derive(Debug, Clone)]
 pub struct ToolRuntimeConfig {
     pub web_search: WebSearchProviderConfig,
+    /// Settings of the built-in `web_fetch` executor; enabled by default.
+    pub web_fetch: WebFetchConfig,
     pub mcp_servers: HashMap<String, McpServerEntry>,
     pub mcp_allowed_hosts: Vec<String>,
     pub messages_gateway_tool_aliases: Option<String>,
@@ -557,6 +564,7 @@ impl Default for ToolRuntimeConfig {
     fn default() -> Self {
         Self {
             web_search: WebSearchProviderConfig::default(),
+            web_fetch: WebFetchConfig::default(),
             mcp_servers: HashMap::default(),
             mcp_allowed_hosts: Vec::default(),
             messages_gateway_tool_aliases: None,

@@ -4,6 +4,25 @@ All notable changes to Agentic API are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Added Claude's native `web_fetch_20250910` server tool as a gateway-executed tool on `/v1/messages` and
+  `/v1/messages/count_tokens` (#408). The declaration is rewritten into an ordinary `web_fetch` function tool for the
+  upstream, the gateway fetches the page the model names and feeds the text back as a hidden `tool_result`, and the
+  call never reaches the client, like native web search. `max_uses` is a request-wide budget of fetches charged for
+  every admitted call, `allowed_domains` / `blocked_domains` match on the host and apply to every redirect hop, and
+  `max_content_tokens` cuts the text at an approximate four bytes per token below the 1 MiB tool output cap. Only a
+  URL that already appeared in a user message or a tool result can be fetched; non-public addresses (loopback,
+  private, link-local, cloud metadata, carrier-grade NAT) are refused directly, through DNS, and through redirects,
+  with connections pinned to the checked addresses and made directly, without environment proxies, under the default
+  policy; every fetch is bounded in time, size, and redirects, and at most `max_concurrent_gateway_calls` fetches run
+  at once. Failures reach the model as the documented
+  `web_fetch_tool_result_error` codes. `citations` enabled, the later-version
+  `use_cache` and `response_inclusion` settings, and other `web_fetch_*` versions are rejected with HTTP 400; a plain
+  function named `web_fetch` stays client-owned. Operators tune or disable the fetcher with `[web_fetch]` in
+  `config.toml` or `AGENTIC_WEB_FETCH_ENABLED`, `AGENTIC_WEB_FETCH_ALLOW_PRIVATE_NETWORKS`,
+  `AGENTIC_WEB_FETCH_MAX_RESPONSE_BYTES`, and `AGENTIC_WEB_FETCH_TIMEOUT_SECS`.
+
 ## [0.9.0] - 2026-09-30
 
 ### Added

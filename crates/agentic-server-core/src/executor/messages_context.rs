@@ -23,8 +23,9 @@
 //! The two are **not** kept byte-identical, and must not be confused: `typed` is
 //! what the client sent, `raw` is what the gateway sends upstream. They diverge
 //! wherever the gateway rewrites the body for upstream — today
-//! `normalize_native_web_search` rewriting a native `web_search_20250305`
-//! declaration into the ordinary function-tool shape vLLM accepts. Accordingly,
+//! `normalize_native_server_tools` rewriting a native `web_search_20250305` or
+//! `web_fetch_20250910` declaration into the ordinary function-tool shape vLLM
+//! accepts. Accordingly,
 //! only the fields the loops never mutate are exposed off `typed`
 //! ([`tools`](MessagesRequestContext::tools),
 //! [`stream`](MessagesRequestContext::stream),
@@ -36,7 +37,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 use crate::executor::error::{ExecutorError, ExecutorResult};
-use crate::executor::messages_request::{WebSearchBudget, normalize_native_web_search};
+use crate::executor::messages_request::{ServerToolBudgets, normalize_native_server_tools};
 use crate::types::messages::request::MessagesToolDeclarations;
 use crate::types::messages::{
     GatewayToolMap, GatewayToolResult, MessagesRequest, MessagesToolChoice, ToolParam, has_gateway_tool,
@@ -123,8 +124,42 @@ pub struct MessagesRequestContext {
     /// The upstream body. Mutated by the loops; the source of truth for
     /// `messages` and `system`.
     raw: Value,
-    /// Request-wide native web-search budget, derived while normalizing `raw`.
-    web_search_budget: WebSearchBudget,
+    /// Request-wide native server-tool budgets, derived while normalizing `raw`.
+    budgets: ServerToolBudgets,
+}
+
+/// Whether `text` mentions `url` as a whole URL rather than as the prefix of a
+/// longer one: the match must end where a URL ends — at the end of the text,
+/// before whitespace, a quote, or a bracket, or before sentence punctuation
+/// that is itself followed by one of those. A trailing slash is optional on
+/// either side, so a bare host matches its normalized form.
+fn mentions_url(text: &str, url: &str) -> bool {
+    let base = url.trim_end_matches('/');
+    if base.is_empty() {
+        return false;
+    }
+    text.match_indices(base)
+        .any(|(index, _)| url_ends_before(text[index + base.len()..].trim_start_matches('/')))
+}
+
+/// Whether a URL that stops right before `rest` is complete there.
+fn url_ends_before(rest: &str) -> bool {
+    let mut chars = rest.chars();
+    match chars.next() {
+        None => true,
+        Some(ch) if is_url_boundary(ch) => true,
+        Some('.' | ',' | ';' | ':' | '!' | '?') => chars.next().is_none_or(is_url_boundary),
+        Some(_) => false,
+    }
+}
+
+/// Characters that cannot continue a URL in prose or JSON.
+fn is_url_boundary(ch: char) -> bool {
+    ch.is_whitespace()
+        || matches!(
+            ch,
+            '"' | '\'' | '<' | '>' | '(' | ')' | '[' | ']' | '{' | '}' | '`' | '|' | '\\'
+        )
 }
 
 impl MessagesRequestContext {
@@ -165,12 +200,12 @@ impl MessagesRequestContext {
     }
 
     fn from_parts(mut typed: MessagesRequest, mut raw: Value) -> ExecutorResult<Self> {
-        let web_search_budget = normalize_native_web_search(&mut raw)?;
+        let budgets = normalize_native_server_tools(&mut raw)?;
         Ok(Self {
             tool_choice: typed.tool_choice.take(),
             typed: typed.into(),
             raw,
-            web_search_budget,
+            budgets,
         })
     }
 
@@ -217,7 +252,46 @@ impl MessagesRequestContext {
     /// searches. `max_uses` limits searches, so a batched call is charged for
     /// every query and is refused whole when the budget cannot cover it.
     pub(super) fn admit_searches(&mut self, searches: usize) -> bool {
-        self.web_search_budget.admit(searches)
+        self.budgets.searches.admit(searches)
+    }
+
+    /// Admit one gateway call that would perform `fetches` native web fetches
+    /// against the request-wide `web_fetch` `max_uses` budget.
+    pub(super) fn admit_fetches(&mut self, fetches: usize) -> bool {
+        self.budgets.fetches.admit(fetches)
+    }
+
+    /// Whether `url` appeared earlier in the conversation where a web fetch
+    /// may take it from: a user message, or a `tool_result` the client or the
+    /// gateway supplied (including hidden `web_search` and `web_fetch`
+    /// rounds). Assistant text and the system prompt are excluded, as
+    /// Anthropic documents, so the model cannot fetch a URL it produced
+    /// itself; the URL must appear whole ([`mentions_url`]).
+    pub(super) fn url_in_prior_context(&self, url: &str) -> bool {
+        let mentions = |text: &str| mentions_url(text, url);
+        let block_mentions = |block: &Value| match block.get("type").and_then(Value::as_str) {
+            Some("text") => block.get("text").and_then(Value::as_str).is_some_and(mentions),
+            Some("tool_result") => match block.get("content") {
+                Some(Value::String(text)) => mentions(text),
+                Some(Value::Array(blocks)) => blocks
+                    .iter()
+                    .filter(|inner| inner.get("type").and_then(Value::as_str) == Some("text"))
+                    .any(|inner| inner.get("text").and_then(Value::as_str).is_some_and(mentions)),
+                _ => false,
+            },
+            _ => false,
+        };
+        self.raw
+            .get("messages")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|message| message.get("role").and_then(Value::as_str) == Some("user"))
+            .any(|message| match message.get("content") {
+                Some(Value::String(text)) => mentions(text),
+                Some(Value::Array(blocks)) => blocks.iter().any(block_mentions),
+                _ => false,
+            })
     }
 
     /// Whether a finished round permits executing its gateway calls.
@@ -415,6 +489,107 @@ mod tests {
         let mut ctx = MessagesRequestContext::from_value(body).unwrap();
         for searches in [5, 5, 5] {
             assert!(ctx.admit_searches(searches));
+        }
+    }
+
+    #[test]
+    fn fetch_budget_is_separate_and_charged_per_fetch() {
+        let mut body = request();
+        body["tools"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"type": "web_fetch_20250910", "name": "web_fetch", "max_uses": 1}));
+        let mut ctx = MessagesRequestContext::from_value(body).unwrap();
+        assert!(ctx.admit_fetches(1));
+        assert!(!ctx.admit_fetches(1), "max_uses caps fetches");
+        assert!(ctx.admit_fetches(0), "arguments without a url are never charged");
+        assert!(ctx.admit_searches(2), "the search budget is untouched");
+    }
+
+    #[test]
+    fn url_in_prior_context_reads_user_messages_and_tool_results_only() {
+        let body = json!({
+            "model": "m", "max_tokens": 8,
+            "system": "see https://system.example/only",
+            "messages": [
+                {"role": "user", "content": "read https://user.example/page please"},
+                {"role": "assistant", "content": [{"type": "text", "text": "I found https://assistant.example/made-up"}]},
+                {"role": "user", "content": [
+                    {"type": "text", "text": "and https://block.example/"},
+                    {"type": "tool_result", "tool_use_id": "t1", "content": "result mentions https://result.example/a"},
+                    {"type": "tool_result", "tool_use_id": "t2", "content": [{"type": "text", "text": "https://nested.example/b"}]}
+                ]}
+            ]
+        });
+        let mut ctx = MessagesRequestContext::from_value(body).unwrap();
+        for seen in [
+            "https://user.example/page",
+            "https://block.example/",
+            "https://block.example",
+            "https://result.example/a",
+            "https://nested.example/b",
+        ] {
+            assert!(ctx.url_in_prior_context(seen), "{seen}");
+        }
+        for unseen in [
+            "https://assistant.example/made-up",
+            "https://system.example/only",
+            "https://user.example/other",
+        ] {
+            assert!(!ctx.url_in_prior_context(unseen), "{unseen}");
+        }
+
+        // A hidden gateway round's results are user-role tool_results and count.
+        ctx.append_round(
+            &[json!({"type": "tool_use", "id": "s1", "name": "web_search", "input": {"query": "q"}})],
+            vec![GatewayToolResult::new(
+                "s1",
+                r#"{"results":{"web":[{"url":"https://search.example/hit"}]}}"#.to_owned(),
+                false,
+            )],
+        )
+        .unwrap();
+        assert!(ctx.url_in_prior_context("https://search.example/hit"));
+        // The model's own tool_use input never counts.
+        ctx.append_round(
+            &[json!({"type": "tool_use", "id": "f1", "name": "web_fetch", "input": {"url": "https://model.example/own"}})],
+            vec![GatewayToolResult::new("f1", "refused".to_owned(), true)],
+        )
+        .unwrap();
+        assert!(!ctx.url_in_prior_context("https://model.example/own"));
+    }
+
+    #[test]
+    fn url_in_prior_context_matches_whole_urls_only() {
+        let body = json!({
+            "model": "m", "max_tokens": 8,
+            "messages": [{"role": "user", "content": [
+                {"type": "text", "text": "Read https://a.example/docs/page. Then (https://b.example/x?q=1)."},
+                {"type": "text", "text": "Also \"https://c.example\" and [https://e.example/y]"},
+                {"type": "tool_result", "tool_use_id": "t1", "content": "{\"url\":\"https://d.example/hit\"}"}
+            ]}]
+        });
+        let ctx = MessagesRequestContext::from_value(body).unwrap();
+        for seen in [
+            "https://a.example/docs/page",
+            "https://a.example/docs/page/",
+            "https://b.example/x?q=1",
+            "https://c.example",
+            "https://c.example/",
+            "https://d.example/hit",
+            "https://e.example/y",
+        ] {
+            assert!(ctx.url_in_prior_context(seen), "{seen}");
+        }
+        for unseen in [
+            "https://a.example/docs",
+            "https://a.example/docs/pag",
+            "https://a.example/docs/page/sub",
+            "https://b.example/x",
+            "https://c.exam",
+            "https://d.example/hit/more",
+        ] {
+            assert!(!ctx.url_in_prior_context(unseen), "{unseen}");
         }
     }
 

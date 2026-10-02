@@ -989,6 +989,31 @@ whole with an error `tool_result` and leaves the budget untouched, so a later ca
 fits still runs. A call whose arguments cannot be parsed performs no search and is not
 charged.
 
+A native `web_fetch_20250910` declaration is handled the same way (`tool/web_fetch`,
+#408): the upstream sees an ordinary `web_fetch` function tool with a single `url`
+argument, and the gateway executes the call. The Messages adapter
+(`messages_request.rs`) judges the Anthropic-specific settings — tool version,
+`citations`, cache settings, `allowed_callers`, `max_uses` — reads the shared parameters
+into `WebFetchToolParam`, and routes them through `WebFetchHandler::validate` and
+`normalize`; the registry seam reads a declaration through the same parser.
+`GatewayExecutors::require_web_fetch` is the one owner of the operator switch, used by
+registry construction and by `count_tokens` alike. Ownership is request-scoped and
+derived from the registry (`messages_tools::request_gateway_map`): the `web_fetch` name
+is gateway-owned only when the request-scoped registry bound it to the gateway executor,
+which only a native declaration does, so a client function that happens to be named
+`web_fetch` stays client-owned. The fetch budget is separate from the search budget and
+counted in fetches; every admitted call is charged whatever its outcome, and a call whose
+arguments carry no URL is not. Two rules live in the loop rather than the handler because
+only the loop holds the conversation: the budget, and the Anthropic rule that a URL must
+already appear in a user message or a `tool_result` (including hidden `web_search`
+results) before it can be fetched. The handler owns everything else — URL admission, the
+address policy and DNS pinning applied to every redirect hop, domain filtering,
+HTML-to-text extraction, the content limit, and the `max_concurrent_gateway_calls`
+ceiling on fetches in flight — and answers documented failures in the
+`web_fetch_tool_result_error` shape, which the loop flags `is_error`. Retrieval sits
+behind the crate-private `WebFetchBackend` trait; the built-in HTTP backend is the
+default.
+
 Both loops take a `MessagesRequestContext` (`messages_context.rs`), the per-request
 type that replaced a bare `serde_json::Value` at that boundary. It holds two views of
 one request: typed fields for reading `tools`/`stream`/`model`, the current
@@ -1141,8 +1166,8 @@ the operator enables it, and Eryx runtime readiness succeeds.
   `to_function_tools()`. These are the declaration-level validation and normalization
   entry points used by `RequestPayload::to_upstream_request`. Each supported variant's
   policy belongs to its corresponding `ToolHandler`: `FunctionHandler`,
-  `ToolSearchHandler`, `McpHandler`, `WebSearchHandler`, `CodexNamespaceHandler`,
-  `CustomHandler`, or `CodeInterpreterHandler`. Web search's fixed canonical builder
+  `ToolSearchHandler`, `McpHandler`, `WebSearchHandler`, `WebFetchHandler`,
+  `CodexNamespaceHandler`, `CustomHandler`, or `CodeInterpreterHandler`. Web search's fixed canonical builder
   is shared with `WebSearchHandler::normalize`; it remains one schema even though it has no
   per-declaration normalization state. The method name is plural because namespace and
   MCP declarations may expand to several model-visible function tools.
@@ -1205,9 +1230,12 @@ the operator enables it, and Eryx runtime readiness succeeds.
   - **Gateway-owned / built-in** tools implement both traits: see `web_search/mod.rs`
     (`WebSearchHandler`, backed by the configured `WebSearchProvider` in `web_search/you.rs`,
     `web_search/brave.rs`, or `web_search/tavily.rs`) and `mcp/handler.rs` (`McpHandler`, backed
-    by `mcp/client.rs`'s MCP protocol client and `mcp/pool.rs`'s connection pool). They
-    have no client translator association because the gateway owns their execution and
-    public lifecycle.
+    by `mcp/client.rs`'s MCP protocol client and `mcp/pool.rs`'s connection pool).
+    `web_fetch/mod.rs` (`WebFetchHandler`, Messages-only, backed by a `WebFetchBackend` —
+    the built-in `web_fetch/http.rs` fetcher — with `web_fetch/policy.rs` for URL and
+    address admission and `web_fetch/extract.rs` for HTML-to-text extraction) follows the
+    same pattern. They have no client translator association because the gateway owns
+    their execution and public lifecycle.
 - **`ownership.rs`** — `ToolOwnership::Client` versus
   `ToolOwnership::Gateway(Option<GatewayBinding>)`. A `GatewayBinding` combines the
   resolved executor, its typed `ExecutionParams`, and the optional same-tool semaphore

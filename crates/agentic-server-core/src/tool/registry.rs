@@ -16,12 +16,13 @@ use super::normalize::code_interpreter_unavailable_error;
 use super::ownership::{GatewayBinding, ToolOwnership};
 use super::shell::insert_shell_entry;
 use super::tool_search::{TOOL_SEARCH_NAME, insert_tool_search_entry};
+use super::web_fetch::insert_web_fetch_entry;
 use super::web_search::insert_web_search_entry;
 use super::{CodexNamespaceHandler, McpHandler, NamespaceMap, ToolError, ToolOutput};
 
 use crate::types::io::output::{FunctionToolCall, McpListTools};
 use crate::types::io::{InputItem, ResponsesInput};
-use crate::types::tools::{CodeInterpreterToolParam, FileSearchToolParam, ResponsesTool};
+use crate::types::tools::{CodeInterpreterToolParam, FileSearchToolParam, ResponsesTool, WebFetchToolParam};
 
 const MAX_MCP_SERVERS_PER_REQUEST: usize = 64;
 const MAX_DISCOVERED_MCP_TOOLS_PER_REQUEST: usize = 128;
@@ -40,6 +41,8 @@ pub enum ToolType {
     /// Note: the corresponding `ResponsesTool` wire tag is `"web_search_preview"`.
     /// `ToolType` is not used in wire-facing types so the names differ intentionally.
     WebSearch,
+    /// Gateway-executed page fetch, declared only through the Messages seam.
+    WebFetch,
     FileSearch,
     CodeInterpreter,
 }
@@ -55,6 +58,7 @@ impl ToolType {
             Self::CodexNamespace => "Codex namespace tool",
             Self::Mcp => "MCP tool",
             Self::WebSearch => "web search tool",
+            Self::WebFetch => "web fetch tool",
             Self::FileSearch => "file search tool",
             Self::CodeInterpreter => "code interpreter tool",
         }
@@ -171,6 +175,17 @@ fn insert_code_interpreter_entry(
             ),
         );
     })
+}
+
+/// Binds the operator-enabled `web_fetch` executor to a Messages declaration;
+/// a disabled executor fails the request before an entry exists.
+fn insert_web_fetch_binding(
+    entries: &mut HashMap<String, ToolEntry>,
+    executors: &GatewayExecutors,
+    param: &WebFetchToolParam,
+) -> Result<(), ToolError> {
+    let executor = executors.require_web_fetch()?;
+    insert_unique_tool_entries(entries, |resolved| insert_web_fetch_entry(resolved, param, executor))
 }
 
 /// Request-scoped registry built from `RequestPayload.tools`.
@@ -317,6 +332,7 @@ impl ToolRegistry {
                         insert_web_search_entry(resolved, p, executors.web_search_handler());
                     })?;
                 }
+                ResponsesTool::WebFetch(p) => insert_web_fetch_binding(&mut entries, executors, p)?,
                 ResponsesTool::FileSearch(p) => {
                     insert_unique_tool_entries(&mut entries, |resolved| insert_file_search_entry(resolved, p))?;
                 }
@@ -952,6 +968,24 @@ mod tests {
             [crate::types::tools::CodexNamespaceMember::Function(function)] if function.name.as_str() == "run"
         ));
         assert_namespace_mapping(&registry);
+    }
+
+    #[tokio::test]
+    async fn web_fetch_registers_only_with_an_enabled_executor() {
+        let declaration = ResponsesTool::WebFetch(crate::types::tools::WebFetchToolParam::default());
+        let mut executors = GatewayExecutors::from_env(Arc::new(reqwest::Client::new()));
+        let registry = ToolRegistry::build_with_handlers(&mut [declaration.clone()], &mut executors)
+            .await
+            .expect("web_fetch registry");
+        let entry = registry.lookup("web_fetch").expect("web_fetch entry");
+        assert_eq!(entry.tool_type, ToolType::WebFetch);
+        assert!(matches!(entry.ownership, ToolOwnership::Gateway(Some(_))));
+        assert!(registry.is_gateway_owned_name("web_fetch"));
+
+        let error = ToolRegistry::build_with_handlers(&mut [declaration], &mut GatewayExecutors::default())
+            .await
+            .expect_err("a disabled executor must not register a placeholder");
+        assert!(matches!(error, ToolError::Config(message) if message.contains("web_fetch is disabled")));
     }
 
     #[tokio::test]

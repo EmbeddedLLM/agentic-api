@@ -76,6 +76,7 @@ pub(super) fn tool_has_deferred_definition(tool: &ResponsesTool) -> bool {
         ResponsesTool::Custom(custom) => custom.defer_loading == Some(true),
         ResponsesTool::ToolSearch(_)
         | ResponsesTool::WebSearch(_)
+        | ResponsesTool::WebFetch(_)
         | ResponsesTool::FileSearch(_)
         | ResponsesTool::CodeInterpreter(_)
         | ResponsesTool::Shell(_)
@@ -100,6 +101,7 @@ pub(super) fn has_reserved_tool_search_name(tool: &ResponsesTool) -> bool {
         ResponsesTool::ToolSearch(_)
         | ResponsesTool::Mcp(_)
         | ResponsesTool::WebSearch(_)
+        | ResponsesTool::WebFetch(_)
         | ResponsesTool::FileSearch(_)
         | ResponsesTool::CodeInterpreter(_)
         | ResponsesTool::Shell(_)

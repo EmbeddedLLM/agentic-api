@@ -201,6 +201,7 @@ impl TranslationDispatcher {
             ToolType::Shell
             | ToolType::Mcp
             | ToolType::WebSearch
+            | ToolType::WebFetch
             | ToolType::FileSearch
             | ToolType::CodeInterpreter => {
                 self.active.insert(output_index, ActiveCall::Gateway);

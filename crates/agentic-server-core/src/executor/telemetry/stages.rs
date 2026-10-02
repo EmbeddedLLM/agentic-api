@@ -60,6 +60,7 @@ pub(crate) const fn tool_type(kind: ToolType) -> &'static str {
         ToolType::CodexNamespace => "codex_namespace",
         ToolType::Mcp => "mcp",
         ToolType::WebSearch => "web_search",
+        ToolType::WebFetch => "web_fetch",
         ToolType::FileSearch => "file_search",
         ToolType::CodeInterpreter => "code_interpreter",
     }
