@@ -586,3 +586,118 @@ async fn compact_endpoint_does_not_fill_missing_tiers() {
     model.abort();
     gateway.abort();
 }
+
+#[tokio::test]
+async fn compact_endpoint_forwards_only_explicit_prompt_cache_keys() {
+    let (model_url, requests, model) = spawn_compaction_model().await;
+    let (gateway_url, gateway) = spawn_gateway(test_state(&test_config(&model_url))).await;
+    let client = reqwest::Client::new();
+    for key in [
+        None,
+        Some(serde_json::Value::Null),
+        Some(serde_json::json!("workspace-a")),
+        Some(serde_json::json!("")),
+    ] {
+        let mut request = serde_json::json!({"model":"test-model","input":"retain context"});
+        if let Some(key) = &key {
+            request["prompt_cache_key"] = key.clone();
+        }
+        let response = client
+            .post(format!("{gateway_url}/v1/responses/compact"))
+            .json(&request)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        let body: serde_json::Value = response.json().await.unwrap();
+        assert_eq!(body["object"], "response.compaction");
+        assert!(body.get("prompt_cache_key").is_none());
+        let requests = requests.lock().await;
+        let upstream = requests.last().unwrap();
+        if let Some(key) = key.filter(|value| !value.is_null()) {
+            assert_eq!(upstream["prompt_cache_key"], key);
+        } else {
+            assert!(upstream.get("prompt_cache_key").is_none());
+        }
+    }
+    assert_eq!(requests.lock().await.len(), 4);
+    model.abort();
+    gateway.abort();
+}
+
+#[tokio::test]
+async fn compact_endpoint_rejects_invalid_prompt_cache_keys_before_inference() {
+    let (model_url, requests, model) = spawn_compaction_model().await;
+    let (gateway_url, gateway) = spawn_gateway(test_state(&test_config(&model_url))).await;
+    for key in [
+        serde_json::json!(42),
+        serde_json::json!(true),
+        serde_json::json!([]),
+        serde_json::json!({}),
+    ] {
+        let response = reqwest::Client::new()
+            .post(format!("{gateway_url}/v1/responses/compact"))
+            .json(&serde_json::json!({"model":"test-model","input":"retain context","prompt_cache_key":key}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    }
+    assert!(requests.lock().await.is_empty());
+    model.abort();
+    gateway.abort();
+}
+
+#[tokio::test]
+async fn compact_endpoint_cache_key_is_request_scoped_with_previous_response() {
+    use agentic_core::executor::{
+        ExecutionContext,
+        modes::{ConversationHandler, ResponseHandler},
+    };
+    use agentic_core::storage::{ConversationStore, ResponseStore, create_pool_with_schema};
+
+    let (model_url, requests, model) = spawn_compaction_model().await;
+    let pool = create_pool_with_schema(Some("sqlite::memory:")).await.unwrap();
+    let mut state = test_state(&test_config(&model_url));
+    state.exec_ctx = Arc::new(ExecutionContext::new(
+        ConversationHandler::new(ConversationStore::new(pool.clone())),
+        ResponseHandler::new(ResponseStore::new(pool)),
+        Arc::new(reqwest::Client::new()),
+        model_url,
+    ));
+    let (gateway_url, gateway) = spawn_gateway(state).await;
+    let client = reqwest::Client::new();
+    let response = client.post(format!("{gateway_url}/v1/responses"))
+        .json(&serde_json::json!({"model":"test-model","input":"previous context","store":true,"prompt_cache_key":"parent-key"}))
+        .send().await.unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let parent: serde_json::Value = response.json().await.unwrap();
+    for key in [
+        None,
+        Some(serde_json::Value::Null),
+        Some(serde_json::json!("compact-key")),
+    ] {
+        let mut request = serde_json::json!({"model":"test-model","previous_response_id":parent["id"]});
+        if let Some(key) = &key {
+            request["prompt_cache_key"] = key.clone();
+        }
+        let response = client
+            .post(format!("{gateway_url}/v1/responses/compact"))
+            .json(&request)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+    }
+    let requests = requests.lock().await;
+    assert_eq!(requests.len(), 4);
+    assert_eq!(requests[0]["prompt_cache_key"], "parent-key");
+    assert!(requests[1].get("prompt_cache_key").is_none());
+    assert!(requests[2].get("prompt_cache_key").is_none());
+    assert_eq!(requests[3]["prompt_cache_key"], "compact-key");
+    for request in &requests[1..] {
+        assert!(request["input"].to_string().contains("previous context"));
+    }
+    model.abort();
+    gateway.abort();
+}

@@ -89,16 +89,17 @@ Continue the agent tree with `previous_response_id`. See
 [HTTP multi-agent execution](https://github.com/vllm-project/agentic-api/blob/main/ARCHITECTURE.md#http-multi-agent-execution).
 
 `prompt_cache_key` is forwarded unchanged on direct and executor-backed HTTP
-requests, WebSocket requests, gateway tool rounds, automatic compaction, and
-summary inference requested by a `compaction_trigger` input item.
+requests, WebSocket requests, gateway tool rounds, automatic compaction,
+standalone `/v1/responses/compact` requests, and summary inference requested by
+a `compaction_trigger` input item.
 
 - The key is scoped to the current request. A continuation using
   `previous_response_id` must send it again to remain in the same upstream
   cache group.
 - Executor-backed requests omit an absent or `null` key. Direct HTTP requests
   preserve the original body, including an explicit `null`.
-- This support applies to `/v1/responses`. Response-object echoing and the
-  separate `/v1/responses/compact` endpoint are outside its scope.
+- The same request-scoped behavior applies when `/v1/responses/compact` loads
+  history through `previous_response_id`. The key is not echoed in responses.
 
 The configured upstream decides whether a request receives a cache hit.
 

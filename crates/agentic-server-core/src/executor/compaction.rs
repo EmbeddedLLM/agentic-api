@@ -265,6 +265,7 @@ pub async fn compact_response(
     );
     payload.previous_response_id = request.previous_response_id;
     payload.service_tier = request.service_tier;
+    payload.prompt_cache_key = request.prompt_cache_key;
     let ctx = rehydrate_conversation(payload, exec_ctx).await?;
     let (mut ctx, tool_search_state) =
         prepare_request_tools(ctx, &exec_ctx.conv_handler, &exec_ctx.resp_handler).await?;
