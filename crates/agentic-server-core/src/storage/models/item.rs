@@ -10,7 +10,7 @@ use super::super::types::item::{InOutItem, ItemKind, STORED_CODE_INTERPRETER_ORI
 use crate::storage::{StorageError, StoreResult};
 use crate::types::conversations::ItemOrder;
 use crate::types::io::code_interpreter::CodeInterpreterCallOrigin;
-use crate::types::io::{InputItem, OutputItem};
+use crate::types::io::{InputItem, OutputItem, ReasoningOutput};
 use crate::utils::common::{deserialize_from_str_opt, utcnow_str, uuid7_str};
 
 const ITEM_COLUMN_COUNT: usize = 5;
@@ -64,22 +64,33 @@ impl Item {
         Some((value, gateway_origin))
     }
 
-    /// Deserialize data column as `InputItem`.
+    /// Deserialize data column as `InputItem`, projecting pre-typed reasoning rows.
     #[must_use]
     pub fn as_input(&self) -> Option<InputItem> {
         let (value, _) = self.data_without_storage_marker()?;
-        serde_json::from_value(value).ok()
+        serde_json::from_value(value)
+            .ok()
+            .or_else(|| self.legacy_reasoning().map(InputItem::Reasoning))
     }
 
-    /// Deserialize data column as `OutputItem`.
+    /// Deserialize data column as `OutputItem`, projecting pre-typed reasoning rows.
     #[must_use]
     pub fn as_output(&self) -> Option<OutputItem> {
         let (value, gateway_origin) = self.data_without_storage_marker()?;
-        let mut output: OutputItem = serde_json::from_value(value).ok()?;
+        let mut output = serde_json::from_value(value)
+            .ok()
+            .or_else(|| self.legacy_reasoning().map(OutputItem::Reasoning))?;
         if gateway_origin && let OutputItem::CodeInterpreterCall(call) = &mut output {
             call.origin = CodeInterpreterCallOrigin::Gateway;
         }
         Some(output)
+    }
+
+    /// Project a reasoning row written before typed reasoning. Typed decoding already
+    /// failed, so this rare path parses the row again instead of copying every row up front.
+    fn legacy_reasoning(&self) -> Option<ReasoningOutput> {
+        let (value, _) = self.data_without_storage_marker()?;
+        ReasoningOutput::from_legacy_value(&value)
     }
 
     /// Deserialize data column as either `InputItem` or `OutputItem`.
@@ -749,9 +760,9 @@ mod tests {
         ]);
         reasoning
             .summary
-            .push(serde_json::json!({"type": "summary_text", "text": "concise summary"}));
-        reasoning.encrypted_content = Some(serde_json::json!({"ciphertext": "opaque"}));
-        reasoning.status = Some("completed".to_owned());
+            .push(crate::types::ReasoningSummaryContent::new("concise summary"));
+        reasoning.encrypted_content = Some(crate::types::OpaqueReasoning::try_from("opaque".to_owned()).unwrap());
+        reasoning.status = Some(crate::types::ReasoningStatus::Completed);
         let stored = InOutItem::Output(OutputItem::Reasoning(reasoning));
         let stored_json = String::try_from(&stored).expect("serialization failed");
         assert!(stored_json.contains(STORED_ITEM_KIND_KEY));
@@ -770,12 +781,15 @@ mod tests {
         };
         assert_eq!(reasoning.id, "rs_1");
         assert_eq!(reasoning.content.len(), 2);
-        assert_eq!(reasoning.summary[0]["text"], "concise summary");
+        assert_eq!(reasoning.summary[0].text, "concise summary");
         assert_eq!(
-            reasoning.encrypted_content,
-            Some(serde_json::json!({"ciphertext": "opaque"}))
+            reasoning
+                .encrypted_content
+                .as_ref()
+                .map(crate::types::OpaqueReasoning::as_str),
+            Some("opaque")
         );
-        assert_eq!(reasoning.status.as_deref(), Some("completed"));
+        assert_eq!(reasoning.status, Some(crate::types::ReasoningStatus::Completed));
 
         let reconstructed = serde_json::to_value(OutputItem::Reasoning(reasoning)).expect("reasoning value");
         assert!(reconstructed.get(STORED_ITEM_KIND_KEY).is_none());

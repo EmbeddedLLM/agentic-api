@@ -519,24 +519,17 @@ mod tests {
 
     #[test]
     fn token_estimate_counts_large_json_numbers() {
-        assert_text_growth([
-            (
-                "reasoning numbers",
-                serde_json::json!([{"type": "reasoning", "id": "rs_1", "summary": [vec![1_u64; 64]]}]),
-                serde_json::json!([{"type": "reasoning", "id": "rs_1", "summary": [vec![u64::MAX; 64]]}]),
-            ),
-            (
-                "tool-search argument numbers",
-                serde_json::json!([{
-                    "type": "tool_search_call", "id": "ts_1", "call_id": "call_1",
-                    "arguments": {"values": vec![1_u64; 64]}
-                }]),
-                serde_json::json!([{
-                    "type": "tool_search_call", "id": "ts_1", "call_id": "call_1",
-                    "arguments": {"values": vec![u64::MAX; 64]}
-                }]),
-            ),
-        ]);
+        assert_text_growth([(
+            "tool-search argument numbers",
+            serde_json::json!([{
+                "type": "tool_search_call", "id": "ts_1", "call_id": "call_1",
+                "arguments": {"values": vec![1_u64; 64]}
+            }]),
+            serde_json::json!([{
+                "type": "tool_search_call", "id": "ts_1", "call_id": "call_1",
+                "arguments": {"values": vec![u64::MAX; 64]}
+            }]),
+        )]);
     }
 
     #[test]

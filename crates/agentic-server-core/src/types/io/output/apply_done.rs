@@ -1,6 +1,6 @@
 use super::{
-    CompactionItem, CustomToolCall, FunctionToolCall, McpCall, McpListTools, ReasoningOutput, ReasoningTextContent,
-    ToolSearchCall,
+    CompactionItem, CustomToolCall, FunctionToolCall, McpCall, McpListTools, ReasoningOutput, ReasoningSummaryContent,
+    ReasoningTextContent, ToolSearchCall,
 };
 use crate::events::EventPayload;
 use crate::utils::common::deserialize_from_value_opt;
@@ -31,11 +31,7 @@ impl ApplyDone for ReasoningOutput {
             } => {
                 buffer.clear();
                 if !text.is_empty() {
-                    insert_at_part_index(
-                        &mut self.summary,
-                        *summary_index,
-                        serde_json::json!({"type": "summary_text", "text": text}),
-                    );
+                    insert_at_part_index(&mut self.summary, *summary_index, ReasoningSummaryContent::new(text));
                 }
             }
             EventPayload::OutputItemDone { item, .. } => {

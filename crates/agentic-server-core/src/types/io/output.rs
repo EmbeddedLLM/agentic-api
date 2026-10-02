@@ -19,6 +19,8 @@ use super::input::{
     InputTextContent, InputToolSearchCall, deserialize_non_blank_string,
 };
 use super::multi_agent::{AgentAttribution, AgentMessage, MultiAgentCall, MultiAgentCallOutput};
+pub use super::reasoning::ReasoningTextContent;
+use super::reasoning::{OpaqueReasoning, ReasoningStatus, ReasoningSummaryContent};
 use super::shell::ShellCall;
 
 /// Text emitted by an assistant or a hosted collaboration action.
@@ -823,23 +825,9 @@ impl TryFrom<&EventPayload> for McpCall {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
-pub struct ReasoningTextContent {
-    #[serde(rename = "type")]
-    pub type_: String,
-    pub text: String,
-}
-
-impl ReasoningTextContent {
-    pub fn new(text: impl Into<String>) -> Self {
-        Self {
-            type_: "reasoning_text".into(),
-            text: text.into(),
-        }
-    }
-}
-
+/// Canonical reasoning item. Content containers and text are charged to the
+/// shared retained-response budget during ingestion, including empty parts.
+/// Input and stored history retain the public representation, not a replay projection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ReasoningOutput {
@@ -850,9 +838,9 @@ pub struct ReasoningOutput {
     #[serde(default, deserialize_with = "deserialize_nullable_vec")]
     pub content: Vec<ReasoningTextContent>,
     #[serde(default, deserialize_with = "deserialize_nullable_vec")]
-    pub summary: Vec<Value>,
-    pub encrypted_content: Option<Value>,
-    pub status: Option<String>,
+    pub summary: Vec<ReasoningSummaryContent>,
+    pub encrypted_content: Option<OpaqueReasoning>,
+    pub status: Option<ReasoningStatus>,
 }
 
 fn deserialize_nullable_vec<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
@@ -890,7 +878,13 @@ impl TryFrom<&EventPayload> for ReasoningOutput {
                 Ok(Self::new(id))
             }
             EventPayload::OutputItemDone { item, .. } => {
-                let Some(OutputItem::Reasoning(item)) = deserialize_from_value_opt::<OutputItem>(item.clone()) else {
+                // Strict ingestion validates the typed item first; lenient ingestion
+                // keeps what earlier releases accepted, as for JSON responses.
+                let item = match deserialize_from_value_opt::<OutputItem>(item.clone()) {
+                    Some(OutputItem::Reasoning(item)) => Some(item),
+                    _ => Self::from_legacy_value(item),
+                };
+                let Some(item) = item else {
                     return Err(ExecutorError::ParseError(
                         "expected a complete reasoning output item".into(),
                     ));
@@ -1523,16 +1517,15 @@ mod tests {
             item.content.iter().map(|part| part.text.as_str()).collect::<Vec<_>>(),
             ["first thought", "second thought"]
         );
-        assert_eq!(item.summary[0]["text"], "first summary");
-        assert_eq!(item.summary[1]["text"], "second summary");
+        assert_eq!(item.summary[0].text, "first summary");
+        assert_eq!(item.summary[1].text, "second summary");
     }
 
     #[test]
     fn reasoning_output_done_owns_authoritative_field_reconciliation() {
         let mut item = ReasoningOutput::new("rs_1");
         item.content.push(ReasoningTextContent::new("buffered thought"));
-        item.summary
-            .push(serde_json::json!({"type": "summary_text", "text": "buffered summary"}));
+        item.summary.push(ReasoningSummaryContent::new("buffered summary"));
         let done = EventPayload::OutputItemDone {
             item_id: "rs_1".to_owned(),
             item_type: crate::events::SSEItemType::Reasoning,
@@ -1553,8 +1546,11 @@ mod tests {
         item.apply_done(&done, &mut String::new());
         assert_eq!(item.content[0].text, "buffered thought");
         assert!(item.summary.is_empty());
-        assert_eq!(item.encrypted_content, Some(serde_json::json!("opaque-state")));
-        assert_eq!(item.status.as_deref(), Some("completed"));
+        assert_eq!(
+            item.encrypted_content.as_ref().map(OpaqueReasoning::as_str),
+            Some("opaque-state")
+        );
+        assert_eq!(item.status, Some(ReasoningStatus::Completed));
 
         let before = serde_json::to_value(&item).unwrap();
         let malformed = EventPayload::OutputItemDone {

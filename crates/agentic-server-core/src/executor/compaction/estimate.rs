@@ -196,16 +196,23 @@ fn add_input_item(estimate: &mut InputTokenEstimate, item: &InputItem) {
         }
         InputItem::Reasoning(reasoning) => {
             estimate.add_text(&reasoning.id);
-            estimate.add_optional_text(reasoning.status.as_deref());
+            estimate.add_optional_text(reasoning.status.map(crate::types::io::ReasoningStatus::as_str));
             for content in &reasoning.content {
                 estimate.add_tokens(ESTIMATED_CONTENT_PART_OVERHEAD_TOKENS);
                 estimate.add_text(&content.text);
             }
             for summary in &reasoning.summary {
-                estimate.add_json_value(summary);
+                // Match the previous JSON estimate: one object, two strings,
+                // and the literal field names, without reconstructing JSON.
+                estimate.add_tokens(3 * ESTIMATED_JSON_VALUE_OVERHEAD_TOKENS);
+                estimate.add_text("type");
+                estimate.add_text("summary_text");
+                estimate.add_text("text");
+                estimate.add_text(&summary.text);
             }
             if let Some(encrypted_content) = &reasoning.encrypted_content {
-                estimate.add_json_value(encrypted_content);
+                estimate.add_tokens(ESTIMATED_JSON_VALUE_OVERHEAD_TOKENS);
+                estimate.add_text(encrypted_content.as_str());
             }
         }
         InputItem::Compaction(compaction) => {

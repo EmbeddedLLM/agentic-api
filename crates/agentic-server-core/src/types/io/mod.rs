@@ -3,6 +3,7 @@ pub mod input;
 mod item_id;
 pub mod multi_agent;
 pub mod output;
+pub mod reasoning;
 pub mod shell;
 pub mod tools;
 pub mod usage;
@@ -26,6 +27,10 @@ pub use output::{
     OutputMessageContent, OutputTextContent, OutputTextLogprob, ReasoningOutput, ReasoningTextContent, ToolSearchCall,
     TopLogprob, WebSearchAction, WebSearchActionError, WebSearchActionFindInPage, WebSearchActionOpenPage,
     WebSearchActionSearch, WebSearchCall, WebSearchCallStatus, WebSearchSource,
+};
+pub use reasoning::{
+    OpaqueReasoning, OpaqueReasoningError, ReasoningStatus, ReasoningSummaryContent, ReasoningSummaryKind,
+    ReasoningTextKind,
 };
 pub use shell::{
     ShellCall, ShellCallAction, ShellCallLimit, ShellCallOutcome, ShellCallOutputContent, ShellCallOutputMessage,

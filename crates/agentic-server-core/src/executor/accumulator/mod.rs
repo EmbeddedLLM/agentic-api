@@ -202,7 +202,7 @@ impl ResponseAccumulator {
         let output = deserialize_from_value_opt::<Vec<serde_json::Value>>(json["output"].take())
             .map(|items| {
                 let mut out = Vec::with_capacity(items.len());
-                out.extend(items.into_iter().filter_map(deserialize_from_value_opt::<OutputItem>));
+                out.extend(items.into_iter().filter_map(json::lenient_output_item));
                 out
             })
             .unwrap_or_default();

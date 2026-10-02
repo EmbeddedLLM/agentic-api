@@ -33,10 +33,6 @@
       "limit": 696,
       "reason": "Gateway-owned code-interpreter calls emit their public SSE lifecycle through the existing scheduler after policy extraction."
     },
-    "crates/agentic-server-core/src/executor/response_budget.rs": {
-      "limit": 512,
-      "reason": "The shared retained-item budget accounts for code-interpreter outputs, agent attribution, and the response service tier."
-    },
     "crates/agentic-server-core/src/tool/registry.rs": {
       "limit": 544,
       "reason": "The web_fetch executor binds through the existing registry validation and executor registration flow, like the code interpreter."
