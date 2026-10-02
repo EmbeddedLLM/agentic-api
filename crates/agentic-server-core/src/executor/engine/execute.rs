@@ -9,12 +9,17 @@ use tracing::{Instrument as _, debug};
 
 use super::run_blocking;
 use super::streaming::run_stream;
-use crate::executor::error::ExecutorResult;
+use crate::executor::RunningResponse;
+use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::executor::inference::BoxStream;
+use crate::executor::multi_agent::RunControlReceiver;
 use crate::executor::prepare::prepare_request_tools;
+use crate::executor::rehydrate::rehydrate_with_continuation;
 use crate::executor::rehydrate::validate_reasoning_for_vllm;
-use crate::executor::request::ExecutionContext;
+use crate::executor::request::{ExecutionContext, RequestContext};
+use crate::executor::session::ResponseContinuation;
 use crate::executor::telemetry::{Api, ExecutionSpan, Route};
+use crate::tool::ToolSearchState;
 use crate::types::request_response::{RequestPayload, ResponsePayload};
 
 /// Builder for a stateful conversation turn.
@@ -29,6 +34,7 @@ pub struct ExecuteRequest {
     continuation: Option<crate::executor::session::ResponseContinuation>,
     max_stream_event_bytes: Option<usize>,
     execution: Option<ExecutionSpan>,
+    control: Option<RunControlReceiver>,
 }
 
 impl ExecuteRequest {
@@ -41,6 +47,7 @@ impl ExecuteRequest {
             continuation: None,
             max_stream_event_bytes: None,
             execution: None,
+            control: None,
         }
     }
 
@@ -93,6 +100,52 @@ impl ExecuteRequest {
         Ok(self)
     }
 
+    /// Allow a streaming multi-agent run to receive live client tool outputs. The
+    /// coordinator consumes this endpoint; adapters retain the paired handle.
+    /// Admission still requires effective multi-agent configuration and storage.
+    /// Use with [`Self::run`]; [`Self::run_retained`] creates its own control pair.
+    #[must_use]
+    pub fn with_run_control(mut self, control: RunControlReceiver) -> Self {
+        self.control = Some(control);
+        self
+    }
+
+    /// Start a response with delivery retained until all event-sink handles are dropped.
+    /// The adapter must drain events independently and join the owner on every exit.
+    /// # Errors
+    /// Returns request preparation errors or rejects an externally supplied
+    /// control endpoint before spawning response work.
+    pub async fn run_retained(mut self) -> ExecutorResult<RunningResponse> {
+        let mut execution = self
+            .execution
+            .take()
+            .unwrap_or_else(|| ExecutionSpan::start(Api::Responses, Route::Executor, true));
+        let limit = self.effective_max_stream_event_bytes();
+        let prepared = if self.control.is_some() {
+            Err(ExecutorError::InvalidRequest(
+                "retained execution creates its own run control; use run for an external control".into(),
+            ))
+        } else {
+            prepare(self.payload, &self.exec_ctx, self.continuation, false).await
+        };
+        let (ctx, tools) = match prepared {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                execution.failed(&error);
+                execution.not_delivered();
+                return Err(error);
+            }
+        };
+        Ok(super::retained::start(
+            ctx,
+            tools,
+            self.exec_ctx,
+            self.client_auth,
+            limit,
+            execution,
+        ))
+    }
+
     /// Execute one stateful conversation turn.
     ///
     /// Returns `Either::Left(ResponsePayload)` for non-streaming requests, or
@@ -100,7 +153,7 @@ impl ExecuteRequest {
     /// a complete SSE frame ready to forward to the client.
     ///
     /// # Errors
-    /// Returns [`crate::executor::error::ExecutorError`] if rehydration or (non-streaming) LLM inference fails.
+    /// Returns [`ExecutorError`] if rehydration or (non-streaming) LLM inference fails.
     pub async fn run(mut self) -> ExecutorResult<Either<ResponsePayload, BoxStream>> {
         let execution = self
             .execution
@@ -126,19 +179,7 @@ impl ExecuteRequest {
             "executor received responses request"
         );
         let max_stream_event_bytes = self.effective_max_stream_event_bytes();
-        let prepared = async {
-            let ctx = crate::executor::rehydrate::rehydrate_with_continuation(
-                self.payload,
-                &self.exec_ctx,
-                self.continuation,
-            )
-            .await?;
-            if !ctx.enriched_request.input.has_compaction_trigger() {
-                validate_reasoning_for_vllm(&ctx.enriched_request.input)?;
-            }
-            prepare_request_tools(ctx, &self.exec_ctx.conv_handler, &self.exec_ctx.resp_handler).await
-        }
-        .await;
+        let prepared = prepare(self.payload, &self.exec_ctx, self.continuation, self.control.is_some()).await;
         let (ctx, tool_search_state) = match prepared {
             Ok(prepared) => prepared,
             Err(error) => {
@@ -155,6 +196,7 @@ impl ExecuteRequest {
                 self.client_auth,
                 max_stream_event_bytes,
                 execution,
+                self.control,
             )));
         }
         let result = Box::pin(run_blocking(
@@ -191,4 +233,42 @@ pub async fn execute(
     exec_ctx: Arc<ExecutionContext>,
 ) -> ExecutorResult<Either<ResponsePayload, BoxStream>> {
     ExecuteRequest::new(request, exec_ctx).run().await
+}
+
+/// Prepare a rehydrated turn for local completion without model generation.
+/// Consumes the context so rejected input cannot expose a partially prepared
+/// agent tree. The returned context is ready for [`crate::executor::persist_turn`].
+///
+/// # Errors
+/// Rejects invalid multi-agent continuation input or checkpoint retention limits
+/// before publishing a checkpoint.
+pub fn prepare_non_generating_turn(mut ctx: RequestContext, exec: &ExecutionContext) -> ExecutorResult<RequestContext> {
+    super::multi_agent::prepare_without_inference(&mut ctx, exec)?;
+    Ok(ctx)
+}
+
+async fn prepare(
+    payload: RequestPayload,
+    exec: &ExecutionContext,
+    continuation: Option<ResponseContinuation>,
+    controlled: bool,
+) -> ExecutorResult<(RequestContext, Option<ToolSearchState>)> {
+    let ctx = rehydrate_with_continuation(payload, exec, continuation).await?;
+    if controlled
+        && (!ctx.original_request.stream
+            || !ctx
+                .enriched_request
+                .multi_agent
+                .as_ref()
+                .is_some_and(|config| config.enabled)
+            || ctx.original_request.input.has_compaction_trigger())
+    {
+        return Err(ExecutorError::InvalidRequest(
+            "run control requires streaming multi-agent inference".into(),
+        ));
+    }
+    if !ctx.enriched_request.input.has_compaction_trigger() {
+        validate_reasoning_for_vllm(&ctx.enriched_request.input)?;
+    }
+    prepare_request_tools(ctx, &exec.conv_handler, &exec.resp_handler).await
 }

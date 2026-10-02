@@ -2,12 +2,14 @@ use crate::config::DEFAULT_MAX_STREAM_EVENT_BYTES;
 use crate::events::{EventFrame, EventPayload, SSEEventType, WireEvent, normalize_sse_line};
 use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::executor::pipeline::AgentFrameSink;
+use crate::executor::response_events::ResponseEventSink;
 use crate::types::request_response::ResponsePayload;
 use crate::utils::common::{serialize_to_string, serialize_to_value};
 use serde_json::Value;
 
 #[derive(Clone)]
 pub struct GatewayStreamAccumulator {
+    pub(super) response_sink: Option<ResponseEventSink>,
     pub(super) agent_sink: Option<AgentFrameSink>,
     next_sequence_number: u64,
     emitted_created: bool,
@@ -15,9 +17,25 @@ pub struct GatewayStreamAccumulator {
     max_stream_event_bytes: usize,
 }
 
-pub(super) struct StreamEvent {
+/// Ordered delivery messages. Flush barriers carry no wire data or sequence.
+pub(super) enum StreamEvent {
+    Frame(StreamFrame),
+    Flush(tokio::sync::oneshot::Sender<()>),
+}
+
+pub(super) struct StreamFrame {
     pub(super) content: String,
     pub(super) sequence_number: u64,
+}
+
+#[cfg(test)]
+impl StreamEvent {
+    pub(super) fn into_frame(self) -> StreamFrame {
+        match self {
+            Self::Frame(frame) => frame,
+            Self::Flush(_) => panic!("expected a wire frame, received a flush barrier"),
+        }
+    }
 }
 
 /// Executor streams keep only a small number of bounded-size events ahead of
@@ -36,6 +54,7 @@ impl GatewayStreamAccumulator {
     pub fn with_max_stream_event_bytes(max_stream_event_bytes: usize) -> Self {
         Self {
             agent_sink: None,
+            response_sink: None,
             next_sequence_number: 0,
             emitted_created: false,
             emitted_in_progress: false,
@@ -135,7 +154,7 @@ fn rebase_output_index(wire: &mut WireEvent, output_offset: usize) {
     }
 }
 
-fn terminal_response_frame(payload: &ResponsePayload) -> ExecutorResult<EventFrame> {
+pub(super) fn terminal_response_frame(payload: &ResponsePayload) -> ExecutorResult<EventFrame> {
     let event_type = match payload.terminal_event_type() {
         "response.incomplete" => SSEEventType::ResponseIncomplete,
         "response.failed" => SSEEventType::ResponseFailed,
@@ -151,7 +170,7 @@ fn terminal_response_frame(payload: &ResponsePayload) -> ExecutorResult<EventFra
         .ok_or_else(|| ExecutorError::StreamError("terminal response event has no wire representation".to_owned()))
 }
 
-fn executor_error_frame(error: &ExecutorError) -> EventFrame {
+pub(super) fn executor_error_frame(error: &ExecutorError) -> EventFrame {
     let mut wire = WireEvent::new("error");
     wire.rest
         .insert("status".to_owned(), serde_json::json!(error.http_status().as_u16()));
@@ -212,10 +231,10 @@ pub(super) async fn emit_sse_frame_limited(
         .ok_or_else(|| ExecutorError::StreamError("stream event has no sequence number".to_owned()))?;
     let content = checked_stream_event_limited(frame, max_bytes)?;
     sender
-        .send(StreamEvent {
+        .send(StreamEvent::Frame(StreamFrame {
             content,
             sequence_number,
-        })
+        }))
         .await
         .map_err(|_| ExecutorError::StreamError("stream receiver closed while emitting gateway event".to_owned()))
 }
@@ -350,7 +369,11 @@ mod tests {
         });
 
         for expected_sequence_number in 0..300 {
-            let event = receiver.recv().await.expect("all burst events should arrive");
+            let event = receiver
+                .recv()
+                .await
+                .expect("all burst events should arrive")
+                .into_frame();
             assert_eq!(event.sequence_number, expected_sequence_number);
         }
         producer.await.expect("producer should not panic");

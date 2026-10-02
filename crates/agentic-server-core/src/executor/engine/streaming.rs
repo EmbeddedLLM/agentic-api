@@ -6,6 +6,7 @@ use crate::executor::gateway_accumulator::{
     GatewayStreamAccumulator, STREAM_EVENT_BUFFER, StreamEvent, error_sse_chunk,
 };
 use crate::executor::inference::{BoxStream, DONE_MARKER};
+use crate::executor::multi_agent::RunControlReceiver;
 use crate::executor::persist::persist_if_needed;
 use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::executor::telemetry::{ExecutionSpan, FailureCategory, InstrumentedStream};
@@ -77,6 +78,7 @@ pub(super) fn run_stream(
     auth: Option<String>,
     max_stream_event_bytes: usize,
     mut execution: ExecutionSpan,
+    control: Option<RunControlReceiver>,
 ) -> BoxStream {
     let span = execution.span().clone();
     let task_span = span.clone();
@@ -91,6 +93,7 @@ pub(super) fn run_stream(
                 Some(event_tx_for_run),
                 max_stream_event_bytes,
             );
+            agent.control = control;
             let cancellation = agent.request.enriched_request.multi_agent.as_ref()
                 .is_some_and(|config| config.enabled).then(|| agent.cancellation_token());
             let mut run_handle = AbortOnDrop::new(tokio::spawn(
@@ -113,7 +116,9 @@ pub(super) fn run_stream(
             loop {
                 tokio::select! {
                     Some(event) = event_rx.recv() => {
-                        yield consume_stream_event(event, &mut next_sequence_number);
+                        if let Some(content) = consume_stream_event(event, &mut next_sequence_number) {
+                            yield content;
+                        }
                     }
                     result = &mut run_handle.handle => {
                         match result {
@@ -131,28 +136,19 @@ pub(super) fn run_stream(
                             Ok((Err(e), mut stream_accumulator)) => {
                                 execution.failed(&e);
                                 while let Ok(event) = event_rx.try_recv() {
-                                    yield consume_stream_event(event, &mut next_sequence_number);
-                                }
-                                if e.is_invalid_upstream_tool_search() {
-                                    let payload = failure_context.failed_payload(&e);
-                                    match stream_accumulator.terminal_response_chunk(&payload) {
-                                        Ok(chunk) => yield chunk,
-                                        Err(serialize_error) => {
-                                            yield GatewayStreamAccumulator::executor_error_chunk_at(
-                                                &serialize_error,
-                                                next_sequence_number,
-                                            );
-                                        }
+                                    if let Some(content) = consume_stream_event(event, &mut next_sequence_number) {
+                                        yield content;
                                     }
-                                } else {
-                                    yield GatewayStreamAccumulator::executor_error_chunk_at(&e, next_sequence_number);
                                 }
+                                yield failed_stream_chunk(&e, &failure_context, &mut stream_accumulator, next_sequence_number);
                                 execution.delivered();
                                 yield DONE_MARKER.to_string();
                             }
                             Ok((Ok((payload, ctx, tool_search_metadata)), stream_accumulator)) => {
                                 while let Ok(event) = event_rx.try_recv() {
-                                    yield consume_stream_event(event, &mut next_sequence_number);
+                                    if let Some(content) = consume_stream_event(event, &mut next_sequence_number) {
+                                        yield content;
+                                    }
                                 }
                                 let terminal = Box::pin(completed_stream_chunk(
                                     payload,
@@ -175,6 +171,21 @@ pub(super) fn run_stream(
             }
     });
     Box::pin(InstrumentedStream::new(frames, span))
+}
+
+fn failed_stream_chunk(
+    error: &ExecutorError,
+    context: &StreamFailureContext,
+    accumulator: &mut GatewayStreamAccumulator,
+    next_sequence_number: u64,
+) -> String {
+    if error.is_invalid_upstream_tool_search() {
+        accumulator
+            .terminal_response_chunk(&context.failed_payload(error))
+            .unwrap_or_else(|error| GatewayStreamAccumulator::executor_error_chunk_at(&error, next_sequence_number))
+    } else {
+        GatewayStreamAccumulator::executor_error_chunk_at(error, next_sequence_number)
+    }
 }
 
 /// The terminal frame for an execution that produced a response: the
@@ -262,9 +273,18 @@ impl StreamFailureContext {
     }
 }
 
-pub(super) fn consume_stream_event(event: StreamEvent, next_sequence_number: &mut u64) -> String {
-    *next_sequence_number = event.sequence_number.saturating_add(1);
-    event.content
+pub(super) fn consume_stream_event(event: StreamEvent, next_sequence_number: &mut u64) -> Option<String> {
+    match event {
+        StreamEvent::Frame(frame) => {
+            *next_sequence_number = frame.sequence_number.saturating_add(1);
+            Some(frame.content)
+        }
+        StreamEvent::Flush(reply) => {
+            // Flush markers do not advance the public sequence or emit a frame.
+            let _ = reply.send(());
+            None
+        }
+    }
 }
 
 pub(super) fn stream_task_failure_chunk(error: &tokio::task::JoinError, sequence_number: u64) -> String {
@@ -278,7 +298,7 @@ pub(super) fn panicked_stream_chunks(
 ) -> Vec<String> {
     let mut chunks = Vec::new();
     while let Ok(event) = event_rx.try_recv() {
-        chunks.push(consume_stream_event(event, next_sequence_number));
+        chunks.extend(consume_stream_event(event, next_sequence_number));
     }
     chunks.push(stream_task_failure_chunk(error, *next_sequence_number));
     chunks.push(DONE_MARKER.to_owned());

@@ -1,330 +1,50 @@
-use std::collections::{HashMap, VecDeque};
-use std::num::NonZeroUsize;
 use std::sync::Arc;
 
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::ws::{Message, WebSocketUpgrade};
 use axum::extract::{Extension, State};
 use axum::http::HeaderMap;
 use axum::response::Response;
-use either::Either;
-use futures::stream::SplitSink;
-use futures::{Sink, SinkExt, Stream, StreamExt};
-use serde::Deserialize;
+#[cfg(test)]
+use futures::SinkExt;
+use futures::StreamExt;
+#[cfg(test)]
+use futures::{Sink, Stream};
 use serde_json::Value;
-use tokio::sync::mpsc;
-use tokio::task::JoinSet;
+use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument as _, debug, warn};
 
-use agentic_core::executor::{BoxStream, ExecuteRequest, ExecutorError, ResponseSession, ResponseSessionGroup};
-use agentic_core::types::request_response::RequestPayload;
+use agentic_core::executor::response_events::ResponseCommitState;
+use agentic_core::executor::{BoxStream, ExecuteRequest, ExecutorError, ResponseSession};
+use agentic_core::types::injection::ResponseInjectRequest;
 
-use super::super::common::extract_bearer;
 use super::error::WsError;
 use crate::app::AppState;
 use crate::auth::AuthenticatedPrincipal;
 
+mod connection;
+mod control;
 mod event;
 mod local;
-use local::complete_without_inference;
+mod multiplexer;
+mod request;
 mod telemetry;
+
+use connection::{begin_ws_draining, responses_ws_loop};
+use control::Registration;
 use event::{StreamId, WsEventLimit, WsOutboundEvent};
 #[cfg(test)]
 use event::{WS_MAX_STREAM_ID_CHARS, WS_ROUTING_SLACK_BYTES, attach_stream_id, ws_routing_overhead};
+use local::complete_without_inference;
+use multiplexer::{WsMultiplexer, WsWorkItem};
+use request::{WsRequest, WsRequestParseError, is_injection, parse_ws_request, stream_id_from_text};
 
-type WsSender = SplitSink<WebSocket, Message>;
+type WsSender = mpsc::Sender<WsOutboundEvent>;
 
 /// Outbound events queued ahead of the socket writer. Each entry is bounded by
 /// the configured `max_stream_event_bytes`, so the queue holds at most
 /// `WS_OUTBOUND_BUFFER * max_stream_event_bytes` serialized bytes.
 const WS_OUTBOUND_BUFFER: usize = 64;
-const WS_MAX_OUTSTANDING_REQUESTS: usize = 64;
-const WS_MAX_OUTSTANDING_BYTES: usize = 12 * 1024 * 1024;
-// Retained state is bounded separately from queued requests and outbound events.
-// Limits cover serialized checkpoints, including pinned parents and replacements.
-const WS_MAX_SESSION_LANES: usize = 128;
-const WS_MAX_CHECKPOINT_ITEMS: usize = 32_768;
-const WS_MAX_CHECKPOINT_BYTES: usize = 16 * 1024 * 1024;
-const WS_MAX_RETAINED_BYTES: usize = 32 * 1024 * 1024;
-
-struct WsRequest {
-    payload: RequestPayload,
-    stream_id: Option<StreamId>,
-    generate: Option<bool>,
-    execution: Option<telemetry::QueuedExecution>,
-}
-
-#[derive(Debug)]
-struct WsRequestParseError {
-    previous_response_id: Option<String>,
-    error: WsError,
-    stream_id: Option<StreamId>,
-}
-
-enum WsWorkItem {
-    Execute {
-        request: Box<WsRequest>,
-        input_bytes: usize,
-    },
-    Reject {
-        error: WsRequestParseError,
-        input_bytes: usize,
-    },
-}
-
-impl WsWorkItem {
-    fn stream_id(&self) -> Option<&StreamId> {
-        match self {
-            Self::Execute { request, .. } => request.stream_id.as_ref(),
-            Self::Reject { error, .. } => error.stream_id.as_ref(),
-        }
-    }
-
-    fn lane(&self) -> Option<StreamId> {
-        self.stream_id().cloned()
-    }
-
-    fn input_bytes(&self) -> usize {
-        match self {
-            Self::Execute { input_bytes, .. } | Self::Reject { input_bytes, .. } => *input_bytes,
-        }
-    }
-}
-
-struct WsAdmissionError {
-    error: WsError,
-    stream_id: Option<StreamId>,
-}
-
-struct RequestCompletion {
-    lane: Option<StreamId>,
-    input_bytes: usize,
-    result: Result<(), WsError>,
-}
-
-#[derive(Default)]
-struct WsByteBudget {
-    used: usize,
-}
-
-impl WsByteBudget {
-    fn can_reserve(&self, input_bytes: usize) -> bool {
-        input_bytes <= WS_MAX_OUTSTANDING_BYTES.saturating_sub(self.used)
-    }
-
-    fn reserve(&mut self, input_bytes: usize) {
-        debug_assert!(self.can_reserve(input_bytes));
-        self.used += input_bytes;
-    }
-
-    fn release(&mut self, input_bytes: usize) {
-        self.used = self.used.saturating_sub(input_bytes);
-    }
-}
-
-struct WsMultiplexer {
-    state: Arc<AppState>,
-    auth: Option<String>,
-    principal: Option<Arc<AuthenticatedPrincipal>>,
-    outbound_tx: mpsc::Sender<WsOutboundEvent>,
-    lanes: HashMap<Option<StreamId>, VecDeque<WsWorkItem>>,
-    // Idle lanes retain their latest checkpoint until the connection closes.
-    sessions: HashMap<Option<StreamId>, Arc<ResponseSession>>,
-    session_group: ResponseSessionGroup,
-    request_tasks: JoinSet<RequestCompletion>,
-    queued_requests: usize,
-    byte_budget: WsByteBudget,
-    shutdown_token: CancellationToken,
-}
-
-impl WsMultiplexer {
-    fn new(
-        state: Arc<AppState>,
-        auth: Option<String>,
-        principal: Option<AuthenticatedPrincipal>,
-        outbound_tx: mpsc::Sender<WsOutboundEvent>,
-        shutdown_token: CancellationToken,
-    ) -> Self {
-        Self {
-            state,
-            auth,
-            principal: principal.map(Arc::new),
-            outbound_tx,
-            lanes: HashMap::new(),
-            sessions: HashMap::new(),
-            session_group: ResponseSessionGroup::new(
-                NonZeroUsize::new(WS_MAX_SESSION_LANES).expect("positive session limit"),
-                NonZeroUsize::new(WS_MAX_CHECKPOINT_ITEMS).expect("positive item limit"),
-                NonZeroUsize::new(WS_MAX_CHECKPOINT_BYTES).expect("positive checkpoint limit"),
-                NonZeroUsize::new(WS_MAX_RETAINED_BYTES).expect("positive retention limit"),
-            ),
-            request_tasks: JoinSet::new(),
-            queued_requests: 0,
-            byte_budget: WsByteBudget::default(),
-            shutdown_token,
-        }
-    }
-
-    fn event_limit(&self) -> WsEventLimit {
-        WsEventLimit::from_state(&self.state)
-    }
-
-    fn has_capacity_for(&self, input_bytes: usize) -> bool {
-        self.request_tasks.len() + self.queued_requests < WS_MAX_OUTSTANDING_REQUESTS
-            && self.byte_budget.can_reserve(input_bytes)
-    }
-
-    fn schedule(&mut self, mut work: WsWorkItem) -> Result<(), WsAdmissionError> {
-        if !self.has_capacity_for(work.input_bytes()) {
-            return Err(WsAdmissionError {
-                error: WsError::TooManyRequests,
-                stream_id: work.stream_id().cloned(),
-            });
-        }
-
-        let lane = work.lane();
-        if !self.sessions.contains_key(&lane) {
-            if self.sessions.len() >= WS_MAX_SESSION_LANES {
-                return Err(WsAdmissionError {
-                    error: WsError::TooManyRequests,
-                    stream_id: lane,
-                });
-            }
-            let session = self.session_group.new_session().map_err(|error| WsAdmissionError {
-                error: WsError::from(error),
-                stream_id: lane.clone(),
-            })?;
-            self.sessions.insert(lane.clone(), Arc::new(session));
-        }
-        if let WsWorkItem::Execute { request, .. } = &mut work {
-            request.execution = Some(telemetry::QueuedExecution::new());
-        }
-        self.byte_budget.reserve(work.input_bytes());
-        if let Some(queue) = self.lanes.get_mut(&lane) {
-            queue.push_back(work);
-            self.queued_requests += 1;
-            debug!(stream_id = ?lane, queued_requests = queue.len(), "queued websocket request on active lane");
-            return Ok(());
-        }
-
-        self.lanes.insert(lane.clone(), VecDeque::new());
-        self.spawn(lane, work);
-        Ok(())
-    }
-
-    fn schedule_next(&mut self, lane: Option<StreamId>) {
-        let next = self.lanes.get_mut(&lane).and_then(VecDeque::pop_front);
-        if let Some(work) = next {
-            self.queued_requests -= 1;
-            self.spawn(lane, work);
-        } else {
-            self.lanes.remove(&lane);
-        }
-    }
-
-    fn discard_queued(&mut self) {
-        let discarded_bytes = self
-            .lanes
-            .values()
-            .flat_map(|queue| queue.iter())
-            .map(WsWorkItem::input_bytes)
-            .sum::<usize>();
-        self.byte_budget.release(discarded_bytes);
-        self.lanes.clear();
-        self.queued_requests = 0;
-    }
-
-    fn finish(&mut self, completion: Result<RequestCompletion, tokio::task::JoinError>, draining: bool) -> bool {
-        let completion = match completion {
-            Ok(completion) => completion,
-            Err(error) => {
-                warn!(%error, "responses websocket request task failed");
-                return false;
-            }
-        };
-        self.byte_budget.release(completion.input_bytes);
-        if let Err(error) = completion.result {
-            warn!(%error, "responses websocket request failed without a client-visible event");
-            return false;
-        }
-        if !draining && !self.shutdown_token.is_cancelled() {
-            self.schedule_next(completion.lane);
-        }
-        true
-    }
-
-    fn reap_ready(&mut self, draining: bool) -> bool {
-        while let Some(completion) = self.request_tasks.try_join_next() {
-            if !self.finish(completion, draining) {
-                return false;
-            }
-        }
-        true
-    }
-
-    fn spawn(&mut self, lane: Option<StreamId>, work: WsWorkItem) {
-        let state = Arc::clone(&self.state);
-        let auth = self.auth.clone();
-        let principal = self.principal.clone();
-        let outbound_tx = self.outbound_tx.clone();
-        let shutdown_token = self.shutdown_token.clone();
-        let stream_id = work.stream_id().cloned();
-        let input_bytes = work.input_bytes();
-        let event_limit = self.event_limit();
-        // schedule creates a session before admitting work; idle sessions survive schedule_next.
-        let session = Arc::clone(self.sessions.get(&lane).expect("admitted lane has a session"));
-        self.request_tasks.spawn(async move {
-            // Admission may precede dispatch by an entire inference/tool round.
-            // Recheck here for both new lanes and work dequeued by schedule_next.
-            if let Some(event) = websocket_identity_error_event(principal.as_deref()) {
-                return RequestCompletion {
-                    lane,
-                    input_bytes,
-                    result: queue_ws_json(&outbound_tx, event, stream_id.as_ref(), event_limit).await,
-                };
-            }
-            let result = match work {
-                WsWorkItem::Execute { request, .. } => {
-                    handle_ws_request(
-                        *request,
-                        &state,
-                        auth,
-                        &outbound_tx,
-                        &shutdown_token,
-                        &session,
-                        event_limit,
-                    )
-                    .await
-                }
-                WsWorkItem::Reject { error, .. } => {
-                    if let Some(parent) = error.previous_response_id.as_deref() {
-                        session
-                            .discard_cached_response(parent)
-                            .map_err(WsError::from)
-                            .and(Err(error.error))
-                    } else {
-                        Err(error.error)
-                    }
-                }
-            };
-            // Dropping a failed executor stream aborts its worker asynchronously.
-            // Do not dispatch the next turn until its lease has been released.
-            let result = match session.wait_until_idle().await {
-                Ok(()) => result,
-                Err(error) => Err(WsError::from(error)),
-            };
-            let result = match result {
-                Ok(()) => Ok(()),
-                Err(error) => queue_ws_error(&outbound_tx, error, stream_id.as_ref(), event_limit).await,
-            };
-            RequestCompletion {
-                lane,
-                input_bytes,
-                result,
-            }
-        });
-    }
-}
 
 pub async fn responses_ws(State(state): State<AppState>, headers: HeaderMap, ws: WebSocketUpgrade) -> Response {
     upgrade_responses_ws(state, headers, ws, None)
@@ -358,116 +78,7 @@ fn upgrade_responses_ws(
         })
 }
 
-fn begin_ws_draining(multiplexer: &mut WsMultiplexer, draining: &mut bool) {
-    *draining = true;
-    multiplexer.discard_queued();
-    debug!(
-        active_streams = multiplexer.request_tasks.len(),
-        "draining responses websocket session"
-    );
-}
-
-#[tracing::instrument(name = "agentic.websocket.session", skip_all, parent = None)]
-async fn responses_ws_loop(
-    socket: WebSocket,
-    state: AppState,
-    headers: HeaderMap,
-    principal: Option<AuthenticatedPrincipal>,
-) {
-    debug!("responses websocket session opened");
-    let shutdown_token = state.shutdown_token.clone();
-    let state = Arc::new(state);
-    let (mut sender, mut receiver) = socket.split();
-    let auth = extract_bearer(&headers, state.openai_api_key.as_deref());
-    let (outbound_tx, mut outbound_rx) = mpsc::channel(WS_OUTBOUND_BUFFER);
-    let mut multiplexer = WsMultiplexer::new(state, auth, principal, outbound_tx, shutdown_token.clone());
-    let mut draining = false;
-    let mut client_disconnected = false;
-
-    loop {
-        if shutdown_token.is_cancelled() && !draining {
-            begin_ws_draining(&mut multiplexer, &mut draining);
-        }
-        if draining && multiplexer.request_tasks.is_empty() && outbound_rx.is_empty() {
-            break;
-        }
-
-        tokio::select! {
-            () = shutdown_token.cancelled(), if !draining => {
-                begin_ws_draining(&mut multiplexer, &mut draining);
-            }
-            outbound = outbound_rx.recv() => {
-                let Some(value) = outbound else {
-                    continue;
-                };
-                if send_ws_event(&mut sender, value).await.is_err() {
-                    client_disconnected = true;
-                    break;
-                }
-            }
-            completion = multiplexer.request_tasks.join_next(), if !multiplexer.request_tasks.is_empty() => {
-                let Some(completion) = completion else {
-                    continue;
-                };
-                if !multiplexer.finish(completion, draining) {
-                    client_disconnected = true;
-                    break;
-                }
-                if shutdown_token.is_cancelled() && !draining {
-                    begin_ws_draining(&mut multiplexer, &mut draining);
-                }
-            }
-            message = receiver.next() => {
-                if shutdown_token.is_cancelled() && !draining {
-                    begin_ws_draining(&mut multiplexer, &mut draining);
-                    debug!("discarded websocket message received during shutdown");
-                    continue;
-                }
-                let Some(message) = message else {
-                    client_disconnected = true;
-                    break;
-                };
-                match message {
-                    Ok(message) => {
-                        if !handle_ws_client_message(
-                            message,
-                            &mut sender,
-                            &mut multiplexer,
-                            &mut draining,
-                        )
-                        .await
-                        {
-                            client_disconnected = true;
-                            break;
-                        }
-                    }
-                    Err(error) => {
-                        warn!(%error, "responses websocket receive error");
-                        client_disconnected = true;
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    if client_disconnected {
-        multiplexer.request_tasks.abort_all();
-        while multiplexer.request_tasks.join_next().await.is_some() {}
-        // Executor stream disposal aborts its nested inference worker. Wait for
-        // every lease to release its pinned state before ending this connection.
-        for session in multiplexer.sessions.values() {
-            if let Err(error) = session.wait_until_idle().await {
-                warn!(%error, "failed to await websocket continuation disposal");
-            }
-        }
-    }
-    drop(multiplexer);
-    close_ws(&mut sender, &mut receiver).await;
-    debug!("responses websocket session closed");
-}
-
-async fn handle_ws_client_message(
+fn handle_ws_client_message(
     message: Message,
     sender: &mut WsSender,
     multiplexer: &mut WsMultiplexer,
@@ -481,16 +92,14 @@ async fn handle_ws_client_message(
         Message::Text(text) => {
             if let Some(event) = websocket_identity_error_event(multiplexer.principal.as_deref()) {
                 let stream_id = stream_id_from_text(&text);
-                let send_succeeded = match WsOutboundEvent::new(event, stream_id.as_ref(), multiplexer.event_limit()) {
-                    Ok(event) => send_ws_event(sender, event).await.is_ok(),
+                let _ = match WsOutboundEvent::new(event, stream_id.as_ref(), multiplexer.event_limit()) {
+                    Ok(event) => send_ws_event(sender, event).is_ok(),
                     Err(error) => {
                         warn!(%error, "failed to build websocket identity error event");
                         false
                     }
                 };
-                *draining = true;
-                multiplexer.discard_queued();
-                return send_succeeded;
+                return false;
             }
 
             if !multiplexer.reap_ready(*draining) {
@@ -501,11 +110,32 @@ async fn handle_ws_client_message(
                 debug!("discarded websocket response.create during shutdown");
                 return true;
             }
+            if is_injection(&text) {
+                match serde_json::from_str::<ResponseInjectRequest>(&text) {
+                    Ok(request) => {
+                        if let Err(error) =
+                            multiplexer
+                                .controls
+                                .dispatch(request, text.len(), multiplexer.principal.clone())
+                        {
+                            let _ = handle_ws_error(sender, error, None, multiplexer.event_limit());
+                            return false;
+                        }
+                        return true;
+                    }
+                    Err(error) => {
+                        // Injection schema errors are connection-fatal. Create
+                        // validation retains the existing lane-ordered error behavior.
+                        let _ = handle_ws_error(sender, WsError::InvalidJson(error), None, multiplexer.event_limit());
+                        return false;
+                    }
+                }
+            }
             let input_bytes = text.len();
             if !multiplexer.has_capacity_for(input_bytes) {
                 let stream_id = stream_id_from_text(&text);
                 let limit = multiplexer.event_limit();
-                return handle_ws_error(sender, WsError::TooManyRequests, stream_id.as_ref(), limit).await;
+                return handle_ws_error(sender, WsError::TooManyRequests, stream_id.as_ref(), limit);
             }
             let work = match parse_ws_request(&text) {
                 Ok(request) => WsWorkItem::Execute {
@@ -522,24 +152,16 @@ async fn handle_ws_client_message(
             let limit = multiplexer.event_limit();
             match multiplexer.schedule(work) {
                 Ok(()) => true,
-                Err(rejected) => handle_ws_error(sender, rejected.error, rejected.stream_id.as_ref(), limit).await,
+                Err(rejected) => handle_ws_error(sender, rejected.error, rejected.stream_id.as_ref(), limit),
             }
         }
         Message::Binary(_) if *draining => true,
-        Message::Binary(_) => handle_ws_error(sender, WsError::BinaryFrame, None, multiplexer.event_limit()).await,
+        Message::Binary(_) => handle_ws_error(sender, WsError::BinaryFrame, None, multiplexer.event_limit()),
         Message::Close(_) => false,
-        Message::Ping(payload) => sender.send(Message::Pong(payload)).await.is_ok(),
-        Message::Pong(_) => true,
+        // Axum queues the protocol pong automatically. A second application pong
+        // races the independent writer and can duplicate the reply.
+        Message::Ping(_) | Message::Pong(_) => true,
     }
-}
-
-fn stream_id_from_text(text: &str) -> Option<StreamId> {
-    #[derive(Deserialize)]
-    struct StreamIdEnvelope {
-        stream_id: Option<StreamId>,
-    }
-
-    serde_json::from_str::<StreamIdEnvelope>(text).ok()?.stream_id
 }
 
 fn websocket_identity_error_event(principal: Option<&AuthenticatedPrincipal>) -> Option<Value> {
@@ -554,10 +176,12 @@ fn websocket_identity_error_event(principal: Option<&AuthenticatedPrincipal>) ->
     })
 }
 
+#[cfg(test)]
 fn keep_if_running<T>(shutdown_token: &CancellationToken, value: T) -> Option<T> {
     (!shutdown_token.is_cancelled()).then_some(value)
 }
 
+#[cfg(test)]
 async fn close_ws<Sender, Receiver, SendError, ReceiveError>(sender: &mut Sender, receiver: &mut Receiver)
 where
     Sender: Sink<Message, Error = SendError> + Unpin,
@@ -582,78 +206,26 @@ where
     }
 }
 
-fn parse_ws_request(text: &str) -> Result<WsRequest, WsRequestParseError> {
-    let value = serde_json::from_str::<Value>(text).map_err(|error| WsRequestParseError {
-        error: WsError::InvalidJson(error),
-        previous_response_id: None,
-        stream_id: None,
-    })?;
-    let stream_id = value
-        .get("stream_id")
-        .map(|value| {
-            value
-                .as_str()
-                .ok_or_else(|| "stream_id must be a string".to_owned())
-                .and_then(StreamId::try_from)
-        })
-        .transpose()
-        .map_err(|error| WsRequestParseError {
-            error: WsError::from(ExecutorError::InvalidRequest(error)),
-            previous_response_id: None,
-            stream_id: None,
-        })?;
-
-    if value.get("type").and_then(Value::as_str) != Some("response.create") {
-        return Err(WsRequestParseError {
-            error: WsError::UnexpectedType,
-            previous_response_id: None,
-            stream_id,
-        });
-    }
-
-    // Only valid routing plus response.create may identify a checkpoint for eviction.
-    // In particular, an explicit null/invalid stream_id must not target the default lane.
-    let previous_response_id = value
-        .get("previous_response_id")
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    let generate = value.get("generate").and_then(Value::as_bool);
-    let mut payload = serde_json::from_value::<RequestPayload>(value).map_err(|error| WsRequestParseError {
-        error: WsError::from(ExecutorError::from(error)),
-        previous_response_id,
-        stream_id: stream_id.clone(),
-    })?;
-    let requested_stream = payload.stream;
-    payload.stream = true;
-    debug!(
-        requested_stream,
-        forced_stream = payload.stream,
-        store = payload.store,
-        has_previous_response_id = payload.previous_response_id.is_some(),
-        has_conversation_id = payload.conversation_id.is_some(),
-        stream_id = stream_id.as_ref().map(StreamId::as_str),
-        ?generate,
-        tools = payload.tools.as_ref().map_or(0, Vec::len),
-        "accepted websocket response.create"
-    );
-
-    Ok(WsRequest {
-        execution: None,
-        payload,
-        stream_id,
-        generate,
-    })
+struct RequestExecution<'a> {
+    state: &'a AppState,
+    auth: Option<String>,
+    outbound_tx: &'a mpsc::Sender<WsOutboundEvent>,
+    disposal: &'a CancellationToken,
+    session: &'a ResponseSession,
+    event_limit: WsEventLimit,
+    register: &'a mpsc::Sender<Registration>,
 }
 
-async fn handle_ws_request(
-    request: WsRequest,
-    state: &AppState,
-    auth: Option<String>,
-    outbound_tx: &mpsc::Sender<WsOutboundEvent>,
-    shutdown_token: &CancellationToken,
-    session: &ResponseSession,
-    event_limit: WsEventLimit,
-) -> Result<(), WsError> {
+async fn handle_ws_request(request: WsRequest, context: RequestExecution<'_>) -> Result<(), WsError> {
+    let RequestExecution {
+        state,
+        auth,
+        outbound_tx,
+        disposal,
+        session,
+        event_limit,
+        register,
+    } = context;
     let WsRequest {
         payload,
         stream_id,
@@ -674,24 +246,47 @@ async fn handle_ws_request(
     // The executor validates every frame, including the terminal
     // `response.completed`, against what this socket can deliver after routing
     // metadata is attached, and does so before persisting the response.
-    let result = ExecuteRequest::new(payload, Arc::clone(&state.exec_ctx))
+    let response = ExecuteRequest::new(payload, Arc::clone(&state.exec_ctx))
         .with_execution_span(execution)
         .with_auth(auth)
         .with_session(session)?
         .with_max_stream_event_bytes(event_limit.executor_limit(stream_id.as_ref()))
-        .run()
+        .run_retained()
         .await?;
-    let Some(result) = keep_if_running(shutdown_token, result) else {
-        debug!("discarded websocket response initialized during shutdown");
-        return Ok(());
+    let sink = response.sink.clone();
+    let (reply, receive) = oneshot::channel();
+    if let Err(rejected) = register
+        .send(Registration {
+            response,
+            lane: stream_id,
+            reply,
+        })
+        .await
+    {
+        let mut owner = rejected.0.response.owner;
+        owner.cancel();
+        let _ = owner.join().await;
+        return Err(WsError::SendFailed);
+    }
+    let mut owner = receive.await.map_err(|_| WsError::SendFailed)?;
+    let result = tokio::select! {
+        result = owner.join() => result,
+        () = disposal.cancelled() => {
+            owner.cancel();
+            let _ = owner.join().await;
+            return Err(WsError::SendFailed);
+        }
     };
-    let Either::Right(stream) = result else {
-        return Err(WsError::Executor(Box::new(ExecutorError::InvalidRequest(
-            "websocket response.create must produce a stream".to_owned(),
-        ))));
-    };
-
-    stream_ws_response(outbound_tx, stream, stream_id.as_ref(), event_limit).await
+    if sink.commit_state() == ResponseCommitState::Aborted {
+        return Err(WsError::SendFailed);
+    }
+    sink.flush().await?;
+    // Execution failures were delivered by the retained executor. They end this
+    // response without closing the session or emitting a duplicate error.
+    if let Err(error) = result {
+        debug!(%error, "retained websocket response ended with an execution error");
+    }
+    Ok(())
 }
 
 async fn stream_ws_response(
@@ -753,7 +348,7 @@ async fn queue_ws_error(
     queue_ws_json(outbound_tx, frame, stream_id, event_limit).await
 }
 
-async fn handle_ws_error(
+fn handle_ws_error(
     sender: &mut WsSender,
     err: WsError,
     stream_id: Option<&StreamId>,
@@ -761,11 +356,11 @@ async fn handle_ws_error(
 ) -> bool {
     match err {
         WsError::SendFailed => false,
-        err => send_ws_error(sender, &err, stream_id, event_limit).await.is_ok(),
+        err => send_ws_error(sender, &err, stream_id, event_limit).is_ok(),
     }
 }
 
-async fn send_ws_error(
+fn send_ws_error(
     sender: &mut WsSender,
     err: &WsError,
     stream_id: Option<&StreamId>,
@@ -774,14 +369,12 @@ async fn send_ws_error(
     let Some(frame) = err.to_ws_frame() else {
         return Err(WsError::SendFailed);
     };
-    send_ws_event(sender, WsOutboundEvent::new(frame, stream_id, event_limit)?).await
+    send_ws_event(sender, WsOutboundEvent::new(frame, stream_id, event_limit)?)
 }
 
-async fn send_ws_event(sender: &mut WsSender, event: WsOutboundEvent) -> Result<(), WsError> {
-    sender
-        .send(Message::Text(event.0.into()))
-        .await
-        .map_err(|_| WsError::SendFailed)
+fn send_ws_event(sender: &mut WsSender, event: WsOutboundEvent) -> Result<(), WsError> {
+    // Reader-side admission never waits for a slow socket writer.
+    sender.try_send(event).map_err(|_| WsError::SendFailed)
 }
 
 #[cfg(test)]
@@ -795,10 +388,9 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     use super::{
-        StreamId, WS_MAX_OUTSTANDING_BYTES, WS_MAX_OUTSTANDING_REQUESTS, WS_MAX_STREAM_ID_CHARS,
-        WS_ROUTING_SLACK_BYTES, WsByteBudget, WsError, WsEventLimit, WsOutboundEvent, attach_stream_id, close_ws,
-        forward_ws_stream_chunk, keep_if_running, parse_ws_request, queue_ws_json, sse_json_data_lines,
-        websocket_identity_error_event, ws_routing_overhead,
+        StreamId, WS_MAX_STREAM_ID_CHARS, WS_ROUTING_SLACK_BYTES, WsError, WsEventLimit, WsOutboundEvent,
+        attach_stream_id, close_ws, forward_ws_stream_chunk, keep_if_running, parse_ws_request, queue_ws_json,
+        sse_json_data_lines, websocket_identity_error_event, ws_routing_overhead,
     };
     use crate::auth::AuthenticatedPrincipal;
 
@@ -900,18 +492,6 @@ mod tests {
         });
         let parsed = parse_ws_request(&request.to_string()).expect("256-character stream_id should be valid");
         assert_eq!(parsed.stream_id.expect("stream_id").as_str(), maximum);
-    }
-
-    #[test]
-    fn websocket_capacity_is_bounded_by_count_and_input_bytes() {
-        assert_eq!(WS_MAX_OUTSTANDING_REQUESTS, 64);
-        let mut budget = WsByteBudget::default();
-        budget.reserve(WS_MAX_OUTSTANDING_BYTES - 1);
-        assert!(budget.can_reserve(1));
-        budget.reserve(1);
-        assert!(!budget.can_reserve(1));
-        budget.release(WS_MAX_OUTSTANDING_BYTES);
-        assert!(budget.can_reserve(WS_MAX_OUTSTANDING_BYTES));
     }
 
     #[test]

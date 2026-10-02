@@ -11,6 +11,7 @@ use crate::executor::{
     pipeline::{AgentFrameSink, AgentPipeline, AgentRoundId},
     request::{ExecutionContext, RequestContext},
 };
+use crate::tool::ToolSearchHandler;
 use crate::types::{
     agent::{AgentCompletion, AgentTurnKey},
     client_calls::{ClientCallId, ClientCallKind, ClientCallOwner, ClientCallRegistration},
@@ -110,6 +111,17 @@ impl MultiAgentRun {
         let context = &self.contexts[&turn.agent];
         let mut request = context.request.clone();
         request.input = ResponsesInput::Items(context.stored.history.clone());
+        let refresh_tools = context.discovery_dirty;
+        let tool_search = if refresh_tools {
+            // Live client discovery adds public outputs to only the owner's history.
+            // Reuse HTTP restoration's preparation before exposing the next inference.
+            if let Some(state) = &context.tool_search {
+                request.tools = state.public_effective_tools().map(<[_]>::to_vec);
+            }
+            ToolSearchHandler::prepare_request(&mut request, &context.stored.loaded_tools, false)?
+        } else {
+            context.tool_search.clone()
+        };
         let ctx = RequestContext {
             multi_agent_tree: None,
             original_request: request.clone(),
@@ -122,12 +134,8 @@ impl MultiAgentRun {
         };
         let sender = pipeline.stream_sender();
         let streaming = sender.is_some();
-        let mut agent = AgentPipeline::with_limits(
-            ctx,
-            context.tool_search.clone(),
-            sender,
-            exec.responses_config.max_stream_event_bytes,
-        );
+        let mut agent =
+            AgentPipeline::with_limits(ctx, tool_search, sender, exec.responses_config.max_stream_event_bytes);
         agent.set_agent_guidance(self.round_guidance(turn));
         if streaming {
             agent.set_agent_frame_sink(AgentFrameSink {
@@ -136,7 +144,7 @@ impl MultiAgentRun {
                 sender: self.frame_sender.clone(),
             });
         }
-        let execution = context.execution.clone();
+        let mut execution = context.execution.clone();
         let source = AgentRoundId {
             agent: turn.agent.clone(),
             round: self.rounds,
@@ -146,6 +154,9 @@ impl MultiAgentRun {
         let budget = self.budget.clone();
         self.tasks
             .spawn_turn(turn.clone(), async move {
+                if refresh_tools {
+                    execution.refresh_tools(&mut agent, &exec, &budget).await?;
+                }
                 let mut turn = AgentTurn::resume(&mut agent, &exec, execution);
                 let result = turn.run_round(0, auth.as_deref(), streaming, &budget).await?;
                 let execution = turn.execution_state();
@@ -260,6 +271,7 @@ impl MultiAgentRun {
         context.generation += 1;
         context.request = request;
         context.tool_search = tool_search;
+        context.discovery_dirty = false;
         if let Some(state) = context.tool_search.clone() {
             context.stored.loaded_tools = state.into_public_metadata().loaded_tools;
         }
