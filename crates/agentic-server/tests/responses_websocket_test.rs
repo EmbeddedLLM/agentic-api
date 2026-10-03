@@ -639,6 +639,58 @@ async fn websocket_preserves_actual_service_tier_without_inheriting_request_tier
     assert!(requests[1].get("service_tier").is_none());
 }
 
+#[tokio::test]
+async fn websocket_echoes_max_tool_calls_without_inheriting_it_and_rejects_invalid_values() {
+    let mock = MockResponsesServer::start(vec![
+        sse_response("resp_upstream_1", "msg_upstream_1", "first"),
+        sse_response("resp_upstream_2", "msg_upstream_2", "second"),
+    ])
+    .await;
+    let fixture = storage_backed_state(&mock.url).await;
+    let (gateway_url, _gateway) = spawn_gateway(fixture.state.clone()).await;
+    let mut ws = connect_responses_ws(&gateway_url).await;
+
+    send_json(
+        &mut ws,
+        json!({"type": "response.create", "model": "test-model", "input": "bad", "max_tool_calls": 0}),
+    )
+    .await;
+    let rejected = recv_json(&mut ws).await;
+    assert_eq!(rejected["type"], "error");
+    assert_eq!(rejected["status"], 400);
+    assert_eq!(rejected["error"]["code"], "integer_below_min_value");
+    assert_eq!(rejected["error"]["param"], "max_tool_calls");
+
+    send_json(
+        &mut ws,
+        json!({"type": "response.create", "model": "test-model", "input": "first", "max_tool_calls": 4}),
+    )
+    .await;
+    let first = recv_until_completed(&mut ws).await;
+    assert_eq!(first[0]["type"], "response.created");
+    assert_eq!(first[0]["response"]["max_tool_calls"], 4);
+    let first_response = &first.last().expect("first terminal event")["response"];
+    assert_eq!(first_response["max_tool_calls"], 4);
+    let first_response_id = first_response["id"].as_str().expect("first response id");
+
+    send_json(
+        &mut ws,
+        json!({
+            "type": "response.create", "model": "test-model", "input": "second",
+            "previous_response_id": first_response_id
+        }),
+    )
+    .await;
+    let second = recv_until_completed(&mut ws).await;
+    assert_eq!(
+        second.last().expect("second terminal event")["response"]["max_tool_calls"],
+        Value::Null
+    );
+    let requests = mock.request_bodies().await;
+    assert_eq!(requests.len(), 2, "the invalid request never reaches the upstream");
+    assert!(requests.iter().all(|request| request.get("max_tool_calls").is_none()));
+}
+
 /// Two message items whose combined text is larger than any single delta, so
 /// the terminal `response.completed` snapshot is the largest event of the stream.
 fn two_message_sse_response(response_id: &str, text_bytes: usize) -> String {

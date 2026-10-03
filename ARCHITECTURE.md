@@ -1008,7 +1008,17 @@ round:
   semaphore. The semaphore serializes only simultaneous calls to the **same
   model-visible tool name**. It never blocks different tools from running concurrently.
   MCP and web search opt into same-tool parallel execution.
-- Each scheduler slot retains its `GatewayEventPlan`; `emit_gateway_start_events` and
+- `max_tool_calls` admission lives in `gateway/admission.rs`. `AgentTurn` owns one
+  `BuiltInToolCallBudget` per response, and `GatewayScheduler::plan_with_budget` admits
+  gateway-executed calls in output order before any call runs, so concurrency cannot exceed
+  the limit. A call over the limit is a refused slot: it never reaches its handler, opens no
+  `agentic.tool.execute` span, and returns the limit message as its tool call output. The first
+  refused call with a public item keeps its started item (`web_search_call` at `searching`,
+  `code_interpreter_call` at `interpreting`); refused MCP calls and later refusals have no public item, and
+  `public_item_index` keeps later public indexes contiguous for deferred frames. After a
+  refusal, `AgentPipeline` withholds gateway-executed tools from later upstream requests
+  without changing the persisted `enriched_request.tools`.
+- Each scheduler slot retains its `GatewayEventPlan`; `gateway/lifecycle.rs`'s `emit_gateway_start_events` and
   `emit_gateway_completed_events` synthesize public lifecycle events for gateway-executed
   web search, MCP, and optional code-interpreter calls from those same slots. A code-interpreter
   call emits `output_item.added`, `code_interpreter_call.in_progress`, the

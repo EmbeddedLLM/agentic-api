@@ -1435,6 +1435,64 @@ async fn test_null_prompt_cache_key_preserves_proxy_body_and_is_omitted_by_execu
 }
 
 #[tokio::test]
+async fn test_max_tool_calls_is_validated_on_proxy_and_executor_routes() {
+    let (llm_url, requests, llm) = spawn_mock_vllm_json_capture().await;
+    let fixture = storage_backed_state(&llm_url).await;
+    let (gateway_url, gateway) = spawn_gateway(fixture.state.clone()).await;
+    let client = reqwest::Client::new();
+    for store in [false, true] {
+        for (value, code) in [
+            (serde_json::json!(0), "integer_below_min_value"),
+            (serde_json::json!("2"), "invalid_type"),
+        ] {
+            let response = client
+                .post(format!("{gateway_url}/v1/responses"))
+                .json(&serde_json::json!({"model": "test", "input": "hi", "store": store, "max_tool_calls": value}))
+                .send()
+                .await
+                .expect("response request");
+            assert_eq!(
+                response.status(),
+                StatusCode::BAD_REQUEST,
+                "store={store} value={value}"
+            );
+            let body: serde_json::Value = response.json().await.expect("error body");
+            assert_eq!(body["error"]["type"], "invalid_request_error");
+            assert_eq!(body["error"]["code"], code);
+            assert_eq!(body["error"]["param"], "max_tool_calls");
+        }
+    }
+    assert!(
+        requests.lock().await.is_empty(),
+        "invalid limits never reach the upstream"
+    );
+
+    let mut bodies = Vec::new();
+    for store in [false, true] {
+        let response = client
+            .post(format!("{gateway_url}/v1/responses"))
+            .json(&serde_json::json!({"model": "test", "input": "hi", "store": store, "max_tool_calls": 3}))
+            .send()
+            .await
+            .expect("response request");
+        assert_eq!(response.status(), StatusCode::OK);
+        bodies.push(response.json::<serde_json::Value>().await.expect("response body"));
+    }
+    assert_eq!(bodies[1]["max_tool_calls"], 3, "the executor echoes the request limit");
+    let requests = requests.lock().await;
+    assert_eq!(
+        requests[0]["max_tool_calls"], 3,
+        "the proxy forwards the request unchanged"
+    );
+    assert!(
+        requests[1].get("max_tool_calls").is_none(),
+        "the executor enforces the limit instead of forwarding it"
+    );
+    gateway.abort();
+    llm.abort();
+}
+
+#[tokio::test]
 async fn test_stateful_request_forwards_text_configuration() {
     let (llm_url, requests, _llm) = spawn_mock_vllm_json_capture().await;
     let fixture = storage_backed_state(&llm_url).await;

@@ -1,5 +1,7 @@
 mod apply_done;
+mod web_search_status;
 pub use apply_done::ApplyDone;
+pub use web_search_status::WebSearchCallStatus;
 
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
@@ -439,8 +441,6 @@ impl GatewayCallStatus {
         }
     }
 }
-
-pub type WebSearchCallStatus = GatewayCallStatus;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]

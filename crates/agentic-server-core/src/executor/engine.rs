@@ -214,6 +214,7 @@ async fn run_compaction_trigger(
         previous_response_id: ctx.original_request.previous_response_id.clone(),
         conversation_id: ctx.conversation_id.clone(),
         instructions,
+        max_tool_calls: None,
         service_tier,
         tools: None,
         tool_choice: None,

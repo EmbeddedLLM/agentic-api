@@ -8,7 +8,7 @@ use agentic_core::executor::{ConversationHandler, ExecuteRequest, ExecutionConte
 use agentic_core::storage::{ConversationStore, ResponseStore};
 use agentic_core::tool::{GatewayExecutor, ToolOutput, WebSearchHandler};
 use agentic_core::types::event::MessageStatus;
-use agentic_core::types::io::output::{FunctionToolCall, WebSearchCallStatus};
+use agentic_core::types::io::output::{FunctionToolCall, GatewayCallStatus};
 use agentic_core::types::io::{
     FunctionToolResultMessage, InputItem, OutputItem, ResponsesInput, ToolCallOutput, ToolChoice,
 };
@@ -475,7 +475,7 @@ async fn web_search_handler_output_is_byte_identical_for_mock_you_response() {
         status: MessageStatus::Completed,
     };
     let public = handler
-        .public_output(&call, &output, WebSearchCallStatus::Completed, &params)
+        .public_output(&call, &output, GatewayCallStatus::Completed, &params)
         .expect("web_search_call public output");
     assert_eq!(
         serde_json::to_value(&public).unwrap(),
@@ -574,7 +574,7 @@ async fn web_search_handler_normalizes_recorded_you_response() {
         .public_output(
             &call,
             &output,
-            WebSearchCallStatus::Completed,
+            GatewayCallStatus::Completed,
             &WebSearchToolParam::default(),
         )
         .expect("web_search_call public output");

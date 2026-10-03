@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::num::NonZeroU64;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -8,8 +9,10 @@ use super::io::{FunctionTool, InputItem, MultiAgentConfig, OutputItem, ResponseU
 use super::tools::ResponsesTool;
 use crate::tool::{CodexNamespaceHandler, CustomHandler, ToolError};
 
+mod max_tool_calls;
 mod response_stream;
 mod serde_helpers;
+pub use max_tool_calls::{JsonKind, MAX_TOOL_CALLS_PARAM, MaxToolCalls, MaxToolCallsError, OutOfRangeInteger};
 use serde_helpers::{default_true, is_absent_or_default_tool_choice, serialize_upstream_tool_choice};
 #[cfg(feature = "openapi")]
 mod schema;
@@ -102,9 +105,10 @@ pub struct RequestPayload<T: ?Sized = ResponseTextConfig> {
     pub temperature: Option<f64>,
     pub top_p: Option<f64>,
     pub max_output_tokens: Option<u32>,
-    /// Parsed for admission checks; unsupported when multi-agent execution is enabled.
+    /// Maximum built-in tool calls one response may process, as sent by the client.
+    /// Read it through [`RequestPayload::max_tool_calls_limit`]; unsupported with multi-agent execution.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_tool_calls: Option<u32>,
+    pub max_tool_calls: Option<MaxToolCalls>,
     /// vLLM extension: continue generation past the end-of-sequence token.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ignore_eos: Option<bool>,
@@ -181,6 +185,15 @@ pub enum UpstreamTool {
 }
 
 impl<T: ?Sized> RequestPayload<T> {
+    /// The validated `max_tool_calls` limit; `None` means no limit.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MaxToolCallsError`] when the client sent an invalid value.
+    pub fn max_tool_calls_limit(&self) -> Result<Option<NonZeroU64>, MaxToolCallsError> {
+        self.max_tool_calls.as_ref().map(MaxToolCalls::limit).transpose()
+    }
+
     /// Names the feature in this request that only the in-process executor
     /// implements, if any — neither the passthrough proxy nor split execution
     /// can serve it.
@@ -388,6 +401,9 @@ pub struct ResponsePayload {
     pub previous_response_id: Option<String>,
     pub conversation_id: Option<String>,
     pub instructions: Option<String>,
+    /// The request's `max_tool_calls`, always echoed (`null` when unset). Never inherited.
+    #[serde(default)]
+    pub max_tool_calls: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service_tier: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -474,7 +490,13 @@ mod tests {
             }
             let request: RequestPayload = serde_json::from_value(wire).unwrap();
             let request = request.try_map_text(Ok::<_, std::convert::Infallible>).unwrap();
-            assert_eq!(request.max_tool_calls, limit);
+            assert_eq!(
+                request.max_tool_calls_limit().map(|limit| limit.map(NonZeroU64::get)),
+                match limit {
+                    Some(0) => Err(MaxToolCallsError::BelowMinimum(OutOfRangeInteger::Unsigned(0))),
+                    limit => Ok(limit),
+                }
+            );
             assert_eq!(
                 serde_json::to_value(request).unwrap().get("max_tool_calls"),
                 limit.map(serde_json::Value::from).as_ref()
@@ -1243,6 +1265,7 @@ mod tests {
             previous_response_id: None,
             conversation_id: None,
             instructions: None,
+            max_tool_calls: None,
             service_tier: None,
             tools: None,
             tool_choice: None,
@@ -1281,6 +1304,7 @@ mod tests {
             previous_response_id: None,
             conversation_id: None,
             instructions: None,
+            max_tool_calls: None,
             service_tier: None,
             tools: Some(vec![tool]),
             tool_choice: None,
@@ -1310,6 +1334,7 @@ mod tests {
             previous_response_id: None,
             conversation_id: None,
             instructions: None,
+            max_tool_calls: None,
             service_tier: None,
             tools: None,
             tool_choice: None,
