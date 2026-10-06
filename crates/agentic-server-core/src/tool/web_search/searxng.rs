@@ -33,12 +33,13 @@ use std::sync::Arc;
 use reqwest::StatusCode;
 use serde::Deserialize;
 
-use super::args::{DomainFilter, Freshness, WebSearchArguments, clean_string, clean_vec, validate_count};
+use super::args::{Freshness, WebSearchArguments, clean_string, clean_vec, retain_allowed_results, validate_count};
 use super::{
     ApiKey, WebSearchProvider, WebSearchProviderMetadata, WebSearchProviderResponse, WebSearchResult, clean_base_url,
     null_as_default, read_response_limited,
 };
 use crate::config::WebSearchProviderKind;
+use crate::tool::domain_policy::DomainFilter;
 use crate::tool::handler::ToolError;
 use crate::types::tools::{WebSearchContextSize, WebSearchToolParam};
 
@@ -420,8 +421,8 @@ impl SearxngSearchResponse {
             self.results.into_iter().partition(SearxngResult::is_news);
         let mut web: Vec<WebSearchResult> = web.into_iter().map(Into::into).collect();
         let mut news: Vec<WebSearchResult> = news.into_iter().map(Into::into).collect();
-        request.domain_filter.retain(&mut web);
-        request.domain_filter.retain(&mut news);
+        retain_allowed_results(&request.domain_filter, &mut web);
+        retain_allowed_results(&request.domain_filter, &mut news);
         if let Some(count) = request.count {
             web.truncate(usize::from(count));
             news.truncate(usize::from(count));
@@ -442,7 +443,7 @@ impl SearxngSearchResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::tools::{WebSearchFilters, WebSearchUserLocation};
+    use crate::types::tools::{DomainFilters, WebSearchUserLocation};
 
     fn build_provider(api_key: Option<&str>, base_url: Option<&str>) -> SearxngSearchProvider {
         SearxngSearchProvider::from_values(
@@ -606,7 +607,7 @@ mod tests {
     #[test]
     fn request_prefers_tool_config_filters_and_rejects_conflicting_lists() {
         let config = WebSearchToolParam {
-            filters: Some(WebSearchFilters {
+            filters: Some(DomainFilters {
                 allowed_domains: Some(vec!["rust-lang.org".to_owned()]),
                 blocked_domains: None,
             }),

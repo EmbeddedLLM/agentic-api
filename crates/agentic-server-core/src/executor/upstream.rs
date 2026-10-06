@@ -310,12 +310,10 @@ pub(super) mod tests {
         );
         request.enriched_request.parallel_tool_calls = Some(false);
         let state = ToolSearchHandler::prepare_request(&mut request.enriched_request, &[], false).unwrap();
-        let registry = ToolRegistry::build_with_handlers(
-            request.enriched_request.tools.as_mut().unwrap(),
-            &mut GatewayExecutors::default(),
-        )
-        .await
-        .unwrap();
+        let mut declarations = request.enriched_request.tool_declarations().unwrap();
+        let registry = ToolRegistry::build_with_handlers(&mut declarations, &mut GatewayExecutors::default())
+            .await
+            .unwrap();
         let mut agent = agent_pipeline(request, state, None);
         let stream_context = translation_context(&registry, &agent);
         let json_context = translation_context(&registry, &agent);

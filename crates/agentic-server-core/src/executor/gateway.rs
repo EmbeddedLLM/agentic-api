@@ -317,10 +317,7 @@ pub(super) fn has_client_owned_calls(output_items: &[OutputItem], registry: &Too
 
 fn execution_error_output(call: &FunctionToolCall, message: &str) -> ExecutorResult<ToolOutput> {
     let output = serialize_to_string(&serde_json::json!({ "error": message })).map_err(ExecutorError::JsonError)?;
-    Ok(ToolOutput {
-        call_id: call.call_id.clone(),
-        output,
-    })
+    Ok(ToolOutput::failure(call.call_id.clone(), output))
 }
 
 pub(super) fn public_output_items(
@@ -755,6 +752,7 @@ mod tests {
         MAX_CONCURRENT_MATERIALIZATIONS,
     };
     use crate::executor::response_budget::ExecutorResponseBudget;
+    use crate::tool::ToolDeclaration;
     use crate::tool::{
         GatewayBinding, GatewayExecutor, GatewayExecutors, GatewayToolEventPlan, ToolError, ToolHandler, ToolOutput,
         ToolRegistry, ToolType,
@@ -795,10 +793,7 @@ mod tests {
             let call_id = call_id.to_owned();
             Box::pin(async move {
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                Ok(ToolOutput {
-                    call_id,
-                    output: "unreachable".to_owned(),
-                })
+                Ok(ToolOutput::success(call_id, "unreachable"))
             })
         }
 
@@ -853,12 +848,7 @@ mod tests {
         ) -> Pin<Box<dyn Future<Output = Result<ToolOutput, ToolError>> + Send + '_>> {
             let call_id = call_id.to_owned();
             let bytes = self.bytes;
-            Box::pin(async move {
-                Ok(ToolOutput {
-                    call_id,
-                    output: "x".repeat(bytes),
-                })
-            })
+            Box::pin(async move { Ok(ToolOutput::success(call_id, "x".repeat(bytes))) })
         }
 
         fn supports_parallel_execution(&self) -> bool {
@@ -955,7 +945,7 @@ mod tests {
                     slow_call_finished.store(true, Ordering::SeqCst);
                     "ok".to_owned()
                 };
-                Ok(ToolOutput { call_id, output })
+                Ok(ToolOutput::success(call_id, output))
             })
         }
 
@@ -1015,10 +1005,7 @@ mod tests {
                     .map_err(|error| ToolError::Execution(format!("materialization probe closed: {error}")))?;
                 permit.forget();
                 active.fetch_sub(1, Ordering::SeqCst);
-                Ok(ToolOutput {
-                    call_id,
-                    output: "ok".to_owned(),
-                })
+                Ok(ToolOutput::success(call_id, "ok"))
             })
         }
 
@@ -1039,13 +1026,23 @@ mod tests {
         }
     }
 
+    /// The gateway's own error output is a failure output: the status is the
+    /// signal, not the `{"error": ...}` shape of the text.
+    #[test]
+    fn an_execution_error_is_a_failure_output() {
+        let output = super::execution_error_output(&web_search_call("call_1"), "boom").expect("serializable");
+        assert_eq!(output.call_id, "call_1");
+        assert_eq!(output.output, r#"{"error":"boom"}"#);
+        assert!(output.is_failure());
+    }
+
     #[tokio::test]
     async fn hung_gateway_call_times_out_into_error_output() {
         let web_search: ResponsesTool =
             serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).expect("web_search tool param");
         let mut executors = GatewayExecutors::default();
         executors.insert(Arc::new(SlowExecutor));
-        let mut tools = [web_search];
+        let mut tools = [ToolDeclaration::from(web_search)];
         let registry = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
             .await
             .expect("registry builds");
@@ -1084,7 +1081,7 @@ mod tests {
         // output, not fail the whole request.
         let web_search: ResponsesTool =
             serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).expect("web_search tool param");
-        let mut tools = [web_search];
+        let mut tools = [ToolDeclaration::from(web_search)];
         let mut executors = GatewayExecutors::default();
         let registry = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
             .await
@@ -1117,7 +1114,7 @@ mod tests {
             serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).expect("web_search tool param");
         let mut executors = GatewayExecutors::default();
         executors.insert(Arc::new(SizedOutputExecutor { bytes: 250 * 1024 + 1 }));
-        let mut tools = [web_search];
+        let mut tools = [ToolDeclaration::from(web_search)];
         let registry = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
             .await
             .expect("registry builds");
@@ -1144,7 +1141,7 @@ mod tests {
         executors.insert(Arc::new(SizedErrorExecutor {
             message: "\"".repeat(crate::tool::handler::MAX_GATEWAY_TOOL_OUTPUT_BYTES / 2 + 1),
         }));
-        let mut tools = [web_search];
+        let mut tools = [ToolDeclaration::from(web_search)];
         let registry = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
             .await
             .expect("registry builds");
@@ -1169,7 +1166,7 @@ mod tests {
         executors.insert(Arc::new(DrainTrackingExecutor {
             slow_call_finished: Arc::clone(&slow_call_finished),
         }));
-        let mut tools = [web_search];
+        let mut tools = [ToolDeclaration::from(web_search)];
         let registry = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
             .await
             .expect("registry builds");
@@ -1206,7 +1203,7 @@ mod tests {
             entered: entered_tx,
             release: Arc::clone(&release),
         }));
-        let mut tools = [web_search];
+        let mut tools = [ToolDeclaration::from(web_search)];
         let registry = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
             .await
             .expect("registry builds");
@@ -1261,7 +1258,7 @@ mod tests {
         .expect("file_search tool param");
         let web_search: ResponsesTool =
             serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).expect("web_search tool param");
-        let mut tools = [file_search, web_search];
+        let mut tools = [ToolDeclaration::from(file_search), ToolDeclaration::from(web_search)];
         let mut executors = GatewayExecutors::default();
         let registry = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
             .await
@@ -1323,7 +1320,7 @@ mod tests {
             serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).expect("web_search tool param");
         let mut executors = GatewayExecutors::default();
         executors.insert(Arc::new(SlowExecutor));
-        let mut tools = [web_search];
+        let mut tools = [ToolDeclaration::from(web_search)];
         let registry = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
             .await
             .expect("registry builds");
@@ -1358,7 +1355,7 @@ mod tests {
             serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).expect("web_search tool param");
         let mut executors = GatewayExecutors::default();
         executors.insert(Arc::new(SlowExecutor));
-        let mut tools = [web_search];
+        let mut tools = [ToolDeclaration::from(web_search)];
         let registry = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
             .await
             .expect("registry builds");
@@ -1412,10 +1409,7 @@ mod tests {
             let call_id = call_id.to_owned();
             Box::pin(async move {
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                Ok(ToolOutput {
-                    call_id,
-                    output: "unreachable".to_owned(),
-                })
+                Ok(ToolOutput::success(call_id, "unreachable"))
             })
         }
     }
@@ -1426,7 +1420,7 @@ mod tests {
             serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).expect("web_search tool param");
         let mut executors = GatewayExecutors::default();
         executors.insert(Arc::new(ExclusiveSlowExecutor));
-        let mut tools = [web_search];
+        let mut tools = [ToolDeclaration::from(web_search)];
         let registry = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
             .await
             .expect("registry builds");
@@ -1496,10 +1490,7 @@ mod tests {
                 } else if call_id == self.observed_call_id {
                     observed_started.notify_one();
                 }
-                Ok(ToolOutput {
-                    call_id,
-                    output: "completed".to_owned(),
-                })
+                Ok(ToolOutput::success(call_id, "completed"))
             })
         }
 
@@ -1891,13 +1882,7 @@ mod tests {
         ));
         let results = vec![GatewayCallResult {
             item_index: 0,
-            input_item: InputItem::FunctionCallOutput(
-                ToolOutput {
-                    call_id: "call_1".to_owned(),
-                    output: "1".to_owned(),
-                }
-                .into(),
-            ),
+            input_item: InputItem::FunctionCallOutput(ToolOutput::success("call_1", "1").into()),
             public_output: Some(final_item),
         }];
 
@@ -1947,13 +1932,7 @@ mod tests {
         }];
         let results = vec![GatewayCallResult {
             item_index: 0,
-            input_item: InputItem::FunctionCallOutput(
-                ToolOutput {
-                    call_id: "call_1".to_owned(),
-                    output: r#"{"error":"boom"}"#.to_owned(),
-                }
-                .into(),
-            ),
+            input_item: InputItem::FunctionCallOutput(ToolOutput::failure("call_1", r#"{"error":"boom"}"#).into()),
             public_output: Some(OutputItem::McpCall(crate::types::io::McpCall::new(
                 "mcp_1",
                 "counter",

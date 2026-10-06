@@ -14,7 +14,7 @@ use agentic_core::tool::{GatewayExecutor, SEARXNG_BASE_URL_HINT, WebSearchHandle
 use agentic_core::types::event::MessageStatus;
 use agentic_core::types::io::OutputItem;
 use agentic_core::types::io::output::{FunctionToolCall, WebSearchCallStatus};
-use agentic_core::types::tools::{WebSearchContextSize, WebSearchFilters, WebSearchToolParam};
+use agentic_core::types::tools::{DomainFilters, WebSearchContextSize, WebSearchToolParam};
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, Uri, header};
 use axum::response::IntoResponse;
@@ -335,7 +335,7 @@ async fn searxng_handler_applies_domain_filters_client_side() {
     // Tool-level allowlist wins over the model's arguments and is enforced
     // locally: SearXNG never sees a domain parameter.
     let params = WebSearchToolParam {
-        filters: Some(WebSearchFilters {
+        filters: Some(DomainFilters {
             allowed_domains: Some(vec!["Example.com".to_owned()]),
             blocked_domains: None,
         }),

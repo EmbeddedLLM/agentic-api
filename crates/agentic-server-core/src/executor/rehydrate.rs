@@ -173,7 +173,7 @@ pub(crate) async fn rehydrate_with_continuation(
     // check again once stored effective settings and history are resolved.
     exec_ctx
         .gateway_executors
-        .validate_declarations(request.tools.as_deref())?;
+        .validate_declarations(request.tool_declarations().as_deref())?;
     validate_message_content(&request.input)?;
     let response_id = uuid7_str("resp_");
     // Persistence keeps the public items. Tool lowering belongs to the enriched
@@ -212,7 +212,7 @@ pub(crate) async fn rehydrate_with_continuation(
 
     exec_ctx
         .gateway_executors
-        .validate_declarations(ctx.enriched_request.tools.as_deref())?;
+        .validate_declarations(ctx.enriched_request.tool_declarations().as_deref())?;
     validate_message_content(&ctx.enriched_request.input)?;
     validate_multi_agent_request(&ctx.enriched_request)?;
     Ok(ctx)

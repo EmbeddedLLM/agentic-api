@@ -42,6 +42,16 @@ All notable changes to Agentic API are documented here.
 
 ### Changed
 
+- The domain lists of `web_search` and `web_fetch` declarations are one shared type, `DomainFilters` (formerly
+  `WebSearchFilters`, the same two fields), matched by one shared policy module that also validates a `web_fetch`
+  entry as a host name (`web_search` keeps its non-empty-entry rule in the Messages adapter); the request and
+  response wire shapes are unchanged, and the OpenAPI component is named `DomainFilters`.
+- `agentic_core`: `ToolOutput` carries an explicit success/failure status set by the handler, which the Messages
+  loop reports as `is_error`; the request-scoped tool registry and the declaration helpers take one concrete
+  `ToolDeclaration`, which each API converts to at its adapter boundary (`responses_declarations` for the Responses
+  wire tools, `registry_tools` for Messages), so `ResponsesTool` is a pure wire enum without the Messages-only
+  `web_fetch` variant and without declaration behaviour; discovered MCP tools reach a Responses request through
+  `record_discovered_mcp_tools`.
 - `WebSearchProviderKind` gains a `Searxng` variant (`"searxng"`) with no default endpoint, `SEARXNG_API_KEY` as its
   conventional key variable, and no provider concurrency ceiling; `WebSearchProviderKind::ALL` lists it after
   `Tavily`, so the operator-facing "expected one of" message is now `you, brave, tavily, searxng`.
