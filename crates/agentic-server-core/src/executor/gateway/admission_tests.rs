@@ -10,7 +10,9 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 
 use crate::executor::gateway_accumulator::GatewayStreamAccumulator;
-use crate::tool::{GatewayExecutor, GatewayExecutors, GatewayToolEventPlan, ToolHandler, ToolType};
+use crate::tool::{
+    GatewayExecutor, GatewayExecutors, GatewayToolEventPlan, ToolHandler, ToolType, responses_declarations,
+};
 use crate::types::io::FunctionTool;
 use crate::types::io::output::WebSearchCallStatus;
 use crate::types::tools::{ResponsesTool, WebSearchToolParam};
@@ -49,12 +51,7 @@ impl GatewayExecutor for CountingSearch {
     ) -> Pin<Box<dyn Future<Output = Result<ToolOutput, ToolError>> + Send + '_>> {
         self.executions.fetch_add(1, Ordering::SeqCst);
         let call_id = call_id.to_owned();
-        Box::pin(async move {
-            Ok(ToolOutput {
-                call_id,
-                output: r#"{"query":"q"}"#.to_owned(),
-            })
-        })
+        Box::pin(async move { Ok(ToolOutput::success(call_id, r#"{"query":"q"}"#)) })
     }
 
     fn supports_parallel_execution(&self) -> bool {
@@ -77,7 +74,8 @@ impl GatewayExecutor for CountingSearch {
 }
 
 async fn registry(search: &Arc<CountingSearch>, declarations: serde_json::Value) -> ToolRegistry {
-    let mut tools: Vec<ResponsesTool> = serde_json::from_value(declarations).expect("tool declarations");
+    let tools: Vec<ResponsesTool> = serde_json::from_value(declarations).expect("tool declarations");
+    let mut tools = responses_declarations(&tools);
     let mut executors = GatewayExecutors::default();
     executors.insert(Arc::clone(search));
     ToolRegistry::build_with_handlers(&mut tools, &mut executors)

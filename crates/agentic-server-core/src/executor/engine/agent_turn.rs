@@ -24,7 +24,7 @@ use crate::executor::rehydrate::prepare_reasoning_for_vllm;
 use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::executor::response_budget::ExecutorResponseBudget;
 use crate::executor::upstream::{fetch_blocking_payload, fetch_stream_payload};
-use crate::tool::{ToolRegistry, mcp};
+use crate::tool::{ToolRegistry, mcp, record_discovered_mcp_tools, responses_declarations};
 use crate::types::io::{InputItem, OutputItem, ResponsesInput, ToolChoice};
 use crate::types::request_response::ResponsePayload;
 
@@ -88,14 +88,21 @@ pub(super) async fn build_tool_registry(
     let mut executors = exec_ctx.gateway_executors.request_scoped();
     let mut registry: ToolRegistry = match agent.request.enriched_request.tools.as_mut() {
         Some(tools) => {
+            // The Responses adapter boundary: the registry is built from the
+            // converted declarations, and what MCP discovery recorded on them
+            // is written back into the request's wire tools so the discovered
+            // tools go upstream and are stored with the request.
+            let mut declarations = responses_declarations(tools);
             let policy = exec_ctx.gateway_scheduler_policy.clone();
-            ToolRegistry::build_with_handlers_guarded(
-                tools,
+            let registry = ToolRegistry::build_with_handlers_guarded(
+                &mut declarations,
                 &mut executors,
                 |bytes| response_budget.consume(bytes),
                 move || policy.acquire_materialization_permit(),
             )
-            .await?
+            .await?;
+            record_discovered_mcp_tools(declarations, tools);
+            registry
         }
         None => ToolRegistry::default(),
     };

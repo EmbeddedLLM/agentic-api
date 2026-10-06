@@ -274,7 +274,7 @@ mod tests {
     use crate::executor::modes::{ConversationHandler, ResponseHandler};
     use crate::storage::{ConversationStore, InOutItem, ResponseStore, create_pool_with_schema};
     use crate::tool::{GatewayExecutorRegistration, McpDiscoveredHandler, McpHandler};
-    use crate::types::tools::McpDiscoveredToolParam;
+    use crate::types::tools::{McpDiscoveredToolParam, ResponsesTool};
     use futures::StreamExt;
     use std::sync::Arc;
     use tokio::sync::Mutex;
@@ -570,6 +570,72 @@ mod tests {
         mcp_build
             .await
             .expect("sequential MCP discoveries should reuse the released shared permit");
+    }
+
+    /// The registry is built from the converted declarations; what discovery
+    /// found must still reach the request's own `mcp` declaration, where the
+    /// upstream request and storage read it.
+    #[tokio::test]
+    async fn the_registry_build_records_discovered_mcp_tools_into_the_request() {
+        let payload: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test-model",
+            "store": false,
+            "input": "test input",
+            "tools": [
+                {"type": "function", "name": "echo"},
+                {"type": "mcp", "server_label": "counter"}
+            ]
+        }))
+        .expect("valid MCP request");
+        let request = RequestContext {
+            multi_agent_tree: None,
+            original_request: payload.clone(),
+            enriched_request: payload,
+            new_input_items: Vec::new(),
+            response_id: "resp_discovery".to_owned(),
+            conversation_id: None,
+            conversation_version: None,
+            continuation: None,
+        };
+        let mut exec_ctx = ExecutionContext::new(
+            ConversationHandler::new(ConversationStore::disabled()),
+            ResponseHandler::new(ResponseStore::disabled()),
+            Arc::new(reqwest::Client::new()),
+            "http://127.0.0.1:1".to_owned(),
+        );
+        exec_ctx.gateway_executors.insert(GatewayExecutorRegistration::Mcp {
+            server_label: "counter".to_owned(),
+            handlers: vec![McpDiscoveredHandler {
+                param: McpDiscoveredToolParam {
+                    server_label: "counter".to_owned(),
+                    tool_name: "read".to_owned(),
+                    internal_name: "mcp__counter__read".to_owned(),
+                    tool: serde_json::from_value(serde_json::json!({
+                        "name": "read",
+                        "inputSchema": {"type": "object"}
+                    }))
+                    .expect("valid MCP tool"),
+                },
+                handler: Arc::new(McpHandler::discovered_tool_spec_only()),
+            }],
+        });
+
+        let mut agent = agent_pipeline(request, None, None);
+        let registry = build_tool_registry(&mut agent, &exec_ctx, &ExecutorResponseBudget::new())
+            .await
+            .expect("registry with a discovered MCP tool");
+        assert!(registry.lookup("mcp__counter__read").is_some());
+
+        let tools = agent.request.enriched_request.tools.as_deref().expect("declared tools");
+        let ResponsesTool::Mcp(declared) = &tools[1] else {
+            panic!("expected the mcp wire declaration, got {tools:?}");
+        };
+        assert_eq!(declared.discovered_tools.len(), 1);
+        assert_eq!(declared.discovered_tools[0].internal_name, "mcp__counter__read");
+        assert!(matches!(
+            &tools[0],
+            ResponsesTool::Function(function) if function.name.as_str() == "echo"
+        ));
     }
 
     #[tokio::test]
