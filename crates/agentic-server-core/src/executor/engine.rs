@@ -580,6 +580,7 @@ mod tests {
         let payload: RequestPayload = serde_json::from_value(serde_json::json!({
             "model": "test-model",
             "service_tier": "priority",
+            "prompt_cache_retention": "24h",
             "stream": false,
             "store": false,
             "input": [
@@ -608,6 +609,7 @@ mod tests {
 
         let upstream = captured.lock().await.take().expect("summary inference ran");
         assert_eq!(upstream["service_tier"], "priority");
+        assert_eq!(upstream["prompt_cache_retention"], "24h");
         assert!(
             !upstream.to_string().contains("compaction_trigger"),
             "trigger must never reach the upstream model"
@@ -854,6 +856,7 @@ mod tests {
         let payload: RequestPayload = serde_json::from_value(serde_json::json!({
             "model": "test-model",
             "service_tier": "priority",
+            "prompt_cache_retention": "24h",
             "stream": true,
             "store": false,
             "input": [
@@ -908,6 +911,7 @@ mod tests {
             ]
         );
         assert_eq!(compaction_done_count, 1);
+        assert_eq!(captured.lock().await.as_ref().unwrap()["prompt_cache_retention"], "24h");
         assert_eq!(
             captured.lock().await.as_ref().expect("summary inference ran")["service_tier"],
             "priority"
