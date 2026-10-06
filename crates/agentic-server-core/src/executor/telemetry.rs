@@ -194,7 +194,7 @@ impl From<&ExecutorError> for FailureCategory {
             ExecutorError::JsonError(_) | ExecutorError::ParseError(_) => Self::Parse,
             ExecutorError::StreamError(_) => Self::Stream,
             ExecutorError::NotFound { .. } | ExecutorError::PreviousResponseNotFound { .. } => Self::NotFound,
-            ExecutorError::InvalidRequest(_) => Self::InvalidRequest,
+            ExecutorError::InvalidRequest(_) | ExecutorError::InvalidMaxToolCalls(_) => Self::InvalidRequest,
             ExecutorError::PayloadTooLarge(_) => Self::PayloadTooLarge,
             ExecutorError::ResourceLimitExceeded { .. } => Self::ResourceLimit,
             ExecutorError::Conflict(_) => Self::Conflict,

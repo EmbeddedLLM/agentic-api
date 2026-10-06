@@ -17,6 +17,7 @@ use crate::utils::common::utcnow_str;
 use async_stream::stream;
 use futures::StreamExt;
 use producer::ProducerEvent;
+use std::num::NonZeroU64;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -174,6 +175,7 @@ pub(super) struct StreamFailureContext {
     model: String,
     previous_response_id: Option<String>,
     instructions: Option<String>,
+    max_tool_calls: Option<u64>,
 }
 
 impl From<&RequestContext> for StreamFailureContext {
@@ -184,6 +186,7 @@ impl From<&RequestContext> for StreamFailureContext {
             model: ctx.enriched_request.model.clone(),
             previous_response_id: ctx.original_request.previous_response_id.clone(),
             instructions: ctx.original_request.instructions.clone(),
+            max_tool_calls: ctx.max_tool_calls().map(NonZeroU64::get),
         }
     }
 }
@@ -207,6 +210,7 @@ impl StreamFailureContext {
             previous_response_id: self.previous_response_id.clone(),
             conversation_id: self.conversation_id.clone(),
             instructions: self.instructions.clone(),
+            max_tool_calls: self.max_tool_calls,
             service_tier: None,
             tools: None,
             tool_choice: None,

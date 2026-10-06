@@ -80,7 +80,7 @@ impl GatewayExecutor for LocalSearch {
         Some(OutputItem::WebSearchCall(
             WebSearchCall::try_new(
                 format!("ws_{}", call.id.strip_prefix("fc_").unwrap_or(&call.id)),
-                status,
+                status.into(),
                 vec!["local".to_owned()],
                 Vec::new(),
             )

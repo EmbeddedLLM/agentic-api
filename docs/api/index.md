@@ -135,6 +135,31 @@ retry with another one. In multi-agent execution, the last root-agent inference
 round determines the returned tier; child-agent tiers do not override it, and a
 missing final root tier clears any earlier value.
 
+#### `max_tool_calls`
+
+`max_tool_calls` limits the built-in tool calls one response may dispatch: web
+search, MCP calls, and code interpreter share one limit across every inference
+round. Listing MCP tools and client-executed function, custom, and shell calls do
+not count. A dispatched call counts even when it fails. The behavior matches the
+OpenAI reference recordings under `crates/agentic-server-core/tests/cassettes/max_tool_calls`.
+
+- The value must be an integer from 1 to 9223372036854775807. Other values return
+  `400` with `param: "max_tool_calls"` and code `integer_below_min_value`,
+  `integer_above_max_value`, or `invalid_type`, on direct and executor-backed HTTP
+  requests and on WebSocket requests.
+- A call over the limit is not executed. The model receives
+  `{"error":"UserError: Reached tool call limit of N"}` as its tool call output, and later
+  rounds of the response no longer offer gateway-executed built-in tools. One
+  refused call stays in the output: the first refused `web_search_call` ends at
+  `searching` or `code_interpreter_call` at `interpreting`, without a completed
+  event. Refused MCP calls and every other refused call are omitted. The response
+  still completes normally.
+- Every response echoes `max_tool_calls` (`null` when unset). The value applies
+  to one response and is not inherited through `previous_response_id`.
+- Executor-backed requests enforce the limit in the gateway and do not forward
+  it upstream; direct requests are passed through unchanged. Multi-agent
+  requests reject it.
+
 ### `GET /v1/responses/{response_id}`
 
 Returns the terminal snapshot of a response created with `store: true`, including
