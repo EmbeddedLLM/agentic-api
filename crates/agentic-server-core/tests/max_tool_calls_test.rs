@@ -11,7 +11,9 @@ use agentic_core::types::io::ResponsesInput;
 use agentic_core::types::request_response::{MaxToolCalls, RequestPayload, ResponsePayload};
 use agentic_core::types::tools::ResponsesTool;
 use axum::Router;
-use axum::routing::get;
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
+use axum::routing::{get, post};
 use either::Either;
 use futures::StreamExt;
 use serde_json::{Value, json};
@@ -439,5 +441,133 @@ async fn a_round_with_client_calls_and_a_refusal_continues_with_a_fresh_budget()
             .iter()
             .any(|tool| tool["name"] == "web_search"),
         "a new response offers built-in tools again"
+    );
+}
+
+/// Search provider that is always down, counting how often the gateway reached it.
+async fn spawn_failing_search() -> (String, Arc<AtomicUsize>) {
+    let searches = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&searches);
+    let app = Router::new().route(
+        "/v1/search",
+        get(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+            async { (StatusCode::INTERNAL_SERVER_ERROR, "provider down") }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (format!("http://{address}"), searches)
+}
+
+/// Minimal stateless MCP server over streamable HTTP with one `echo` tool, counting calls.
+async fn spawn_counting_mcp() -> (String, Arc<AtomicUsize>) {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&calls);
+    let app = Router::new().route(
+        "/mcp",
+        post(move |axum::Json(request): axum::Json<Value>| {
+            let counter = Arc::clone(&counter);
+            async move {
+                let id = request["id"].clone();
+                if id.is_null() {
+                    // A notification such as `notifications/initialized`.
+                    return StatusCode::ACCEPTED.into_response();
+                }
+                let reply = match request["method"].as_str() {
+                    Some("initialize") => json!({"result": {
+                        "protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
+                        "serverInfo": {"name": "stub", "version": "0"}
+                    }}),
+                    Some("tools/list") => json!({"result": {"tools": [{
+                        "name": "echo", "description": "Echo the input.",
+                        "inputSchema": {"type": "object", "properties": {}}
+                    }]}}),
+                    Some("tools/call") => {
+                        counter.fetch_add(1, Ordering::SeqCst);
+                        json!({"result": {"content": [{"type": "text", "text": "echoed"}], "isError": false}})
+                    }
+                    _ => json!({"error": {"code": -32601, "message": "method not found"}}),
+                };
+                let mut body = json!({"jsonrpc": "2.0", "id": id});
+                body.as_object_mut().unwrap().extend(reply.as_object().unwrap().clone());
+                axum::Json(body).into_response()
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    (format!("http://{address}/mcp"), calls)
+}
+
+/// A dispatched call that fails still spends the budget, and the budget is one
+/// pool across tool kinds: the next call, to a different built-in tool, is refused.
+#[tokio::test]
+async fn a_failed_call_spends_the_budget_shared_across_tool_kinds() {
+    let (search_url, searches) = spawn_failing_search().await;
+    let (mcp_url, mcp_calls) = spawn_counting_mcp().await;
+    let llm = support::MockServer::start_deque(vec![
+        calls_response(&[("web_search", "a"), ("mcp__stub__echo", "b")]),
+        support::text_response("done"),
+    ])
+    .await;
+    let exec_ctx = execution_context(llm.url(), &search_url).await;
+    let mut payload = request(Some(1), false, None);
+    payload.tools = Some(
+        serde_json::from_value(json!([
+            {"type": "web_search"},
+            {"type": "mcp", "server_label": "stub", "server_url": mcp_url, "require_approval": "never"}
+        ]))
+        .unwrap(),
+    );
+
+    let response = run_blocking(&exec_ctx, payload).await;
+
+    assert_eq!(
+        searches.load(Ordering::SeqCst),
+        1,
+        "the failing call executes exactly once"
+    );
+    assert_eq!(
+        mcp_calls.load(Ordering::SeqCst),
+        0,
+        "the refused MCP call never reaches the server"
+    );
+    assert_eq!(response.status, "completed");
+    assert_eq!(response.max_tool_calls, Some(1));
+    let output = serde_json::to_value(&response.output).unwrap();
+    assert_eq!(web_search_statuses(&output), ["failed"]);
+    let item_types: Vec<_> = output
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["type"].clone())
+        .collect();
+    assert!(item_types.contains(&json!("mcp_list_tools")), "{item_types:?}");
+    assert!(
+        !item_types.contains(&json!("mcp_call")),
+        "a refused MCP call is omitted: {item_types:?}"
+    );
+    let bodies = llm.request_bodies().await;
+    assert_eq!(bodies.len(), 2, "the model answers after the refusal round");
+    let outputs = tool_outputs(&bodies[1]);
+    assert_eq!(outputs.len(), 2);
+    assert!(
+        outputs[0].contains("\"error\""),
+        "the failed search reports its error: {}",
+        outputs[0]
+    );
+    assert_eq!(outputs[1], r#"{"error":"UserError: Reached tool call limit of 1"}"#);
+    let tool_names: Vec<_> = bodies[1]["tools"]
+        .as_array()
+        .map(|tools| tools.iter().map(|tool| tool["name"].clone()).collect())
+        .unwrap_or_default();
+    assert!(
+        !tool_names
+            .iter()
+            .any(|name| name == "web_search" || name == "mcp__stub__echo"),
+        "built-in tools are withheld after the refusal: {tool_names:?}"
     );
 }
