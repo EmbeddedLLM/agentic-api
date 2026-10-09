@@ -160,6 +160,44 @@ OpenAI reference recordings under `crates/agentic-server-core/tests/cassettes/ma
   it upstream; direct requests are passed through unchanged. Multi-agent
   requests reject it.
 
+#### Prompt-cache usage compatibility
+
+Cache-read usage is reported in `usage.input_tokens_details.cached_tokens`;
+cache-write usage, when supplied by the upstream, is reported in
+`usage.input_tokens_details.cache_write_tokens`. The wire names follow the
+[OpenAI Responses usage contract](https://github.com/openai/openai-python/blob/becc1d20eed83c1b8d85e15dc131a372d9dc7813/src/openai/types/responses/response_usage.py),
+checked on October 2, 2026. That SDK declares `cache_write_tokens` as a required
+`int`. Accepting an absent or `null` counter is this gateway's compatibility
+policy for other upstreams, rather than an allowance in that OpenAI contract.
+Availability of these counters depends on the upstream.
+
+Direct HTTP requests pass through without typed response assembly. Requests with
+`store:true`, `previous_response_id`, tool-search state, or a feature requiring
+in-process execution use the executor and typed accounting. Thus `store:false`
+alone does not guarantee a direct request.
+
+| Path | Cache reads | Cache writes |
+| --- | --- | --- |
+| Direct HTTP JSON/SSE | Upstream value passes through | Upstream value and field presence pass through, including `null` |
+| Typed HTTP JSON/SSE | Preserved for a single inference; accumulated across inference rounds | Accumulated when reported; explicit `0` is retained |
+| WebSocket | Same typed accounting, scoped to the current response | Same typed accounting; a continuation does not carry over its parent's usage |
+| Stored response retrieval | Returns the terminal response snapshot without inference | Preserves the terminal value or omission |
+
+Typed execution treats an absent or `null` cache-write counter as unreported and
+omits it when every round leaves it unreported. A round that reports the counter
+contributes its value even when another round does not report it. The gateway
+never derives cache writes from cache reads. Typed SSE accounting uses the
+terminal response usage snapshot and counts each inference once; separate tool
+inference rounds contribute separately. Reported `total_tokens` is preserved
+independently rather than recomputed from the other counters. These counts do not establish a cache hit
+rate or billing amount.
+
+This matrix covers usage preservation under
+[#330](https://github.com/vllm-project/agentic-api/issues/330) and
+[#314](https://github.com/vllm-project/agentic-api/issues/314).
+Cache mode, TTL, breakpoint qualification, and backend capability enforcement
+remain separate acceptance items; this matrix does not claim support for them.
+
 ### `GET /v1/responses/{response_id}`
 
 Returns the terminal snapshot of a response created with `store: true`, including
