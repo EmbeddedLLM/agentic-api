@@ -1,5 +1,5 @@
 use super::*;
-use crate::events::{SSEEventType, SseLine};
+use crate::events::{EventPayload, SSEEventType, SseLine};
 use crate::executor::accumulator::ResponseAccumulator;
 use crate::executor::pipeline::RoundIngestion;
 use crate::tool::ToolType;
@@ -286,7 +286,7 @@ fn function_call_events(output_index: u32, name: &str, arguments: &str) -> Vec<V
 
 /// Async client calls carry `async: true` on their public item lifecycle (stream) and on the
 /// round's final call items; other client calls are unchanged. Custom calls keep the marker in
-/// their restored public shape.
+/// their restored public shape. A streamed item, its event payload and the final output item agree.
 #[test]
 fn async_tool_calls_are_marked_on_stream_items_and_final_output() {
     let mut accumulator = ResponseAccumulator::new("resp_1".to_owned(), None);
@@ -299,6 +299,7 @@ fn async_tool_calls_are_marked_on_stream_items_and_final_output() {
     let mut translator = TranslationDispatcher::new(context);
 
     let mut lifecycle = Vec::new();
+    let mut done_items = Vec::new();
     for (index, name, arguments) in [
         (0, "get_weather", r#"{"city":"Paris"}"#),
         (1, "get_time", r#"{"city":"Tokyo"}"#),
@@ -311,6 +312,10 @@ fn async_tool_calls_are_marked_on_stream_items_and_final_output() {
                     SSEEventType::OutputItemAdded | SSEEventType::OutputItemDone
                 ) {
                     lifecycle.push((index, frame.wire.rest["item"].clone()));
+                }
+                if let EventPayload::OutputItemDone { item, .. } = &frame.payload {
+                    assert_eq!(item, &frame.wire.rest["item"], "payload and wire items agree");
+                    done_items.push(item.clone());
                 }
             }
         }
@@ -331,14 +336,13 @@ fn async_tool_calls_are_marked_on_stream_items_and_final_output() {
         "custom calls are restored to their public shape"
     );
 
-    let mut output: Vec<OutputItem> = ["get_weather", "get_time"]
+    // The final output holds the upstream items, which carry no marker.
+    let mut output: Vec<OutputItem> = done_items[..2]
         .iter()
-        .map(|name| {
-            serde_json::from_value(serde_json::json!({
-                "type": "function_call", "id": format!("fc_{name}"), "call_id": format!("call_{name}"),
-                "name": name, "arguments": "{}", "status": "completed"
-            }))
-            .unwrap()
+        .map(|item| {
+            let mut upstream = item.clone();
+            upstream.as_object_mut().unwrap().remove("async");
+            serde_json::from_value(upstream).unwrap()
         })
         .collect();
     translator
@@ -351,6 +355,47 @@ fn async_tool_calls_are_marked_on_stream_items_and_final_output() {
         .map(|item| matches!(item, OutputItem::FunctionCall(call) if call.async_execution))
         .collect();
     assert_eq!(marked, [true, false]);
+    let finals: Vec<Value> = output.iter().map(|item| serde_json::to_value(item).unwrap()).collect();
+    assert_eq!(finals, done_items[..2], "streamed and final call items agree");
+}
+
+/// Marking an async call keeps what the upstream item left out: a call identified only by its
+/// `item_id` keeps that ID, and an added call without a status stays in progress.
+#[test]
+fn async_marking_keeps_the_upstream_id_and_in_progress_status() {
+    let mut accumulator = ResponseAccumulator::new("resp_1".to_owned(), None);
+    let context = test_context(HashMap::from([("get_weather".to_owned(), ToolType::Function)]))
+        .with_async_tool_names(HashSet::from(["get_weather".to_owned()]));
+    let mut translator = TranslationDispatcher::new(context);
+    let mut events = function_call_events(0, "get_weather", r#"{"city":"Paris"}"#);
+    for event in &mut events {
+        let added = event["type"] == "response.output_item.added";
+        if let Some(item) = event.get_mut("item").and_then(Value::as_object_mut) {
+            let id = item.insert("id".to_owned(), Value::from("")).unwrap();
+            item.insert("item_id".to_owned(), id);
+            if added {
+                item.insert("status".to_owned(), Value::Null);
+            }
+        }
+    }
+    let mut items = Vec::new();
+    for event in &events {
+        for frame in translate(&mut accumulator, &mut translator, event).frames {
+            if matches!(
+                frame.event_type,
+                SSEEventType::OutputItemAdded | SSEEventType::OutputItemDone
+            ) {
+                items.push(frame.wire.rest["item"].clone());
+            }
+        }
+    }
+    assert_eq!(items.len(), 2, "{items:?}");
+    assert!(
+        items.iter().all(|item| item["id"] == "fc_0" && item["async"] == true),
+        "{items:?}"
+    );
+    assert_eq!(items[0]["status"], "in_progress");
+    assert_eq!(items[1]["status"], "completed");
 }
 
 #[test]

@@ -292,6 +292,7 @@ pub(super) async fn prepare_agent(
         generation: 0,
         compacted_generation: None,
         compacting: false,
+        inputs_during_round: Vec::new(),
         stored,
         execution,
         request: ctx.enriched_request,

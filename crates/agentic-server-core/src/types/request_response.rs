@@ -7,7 +7,10 @@ use serde_json::{Map, Value};
 
 use super::io::{FunctionTool, InputItem, MultiAgentConfig, OutputItem, ResponseUsage, ResponsesInput, ToolChoice};
 use super::tools::ResponsesTool;
-use crate::tool::{CodexNamespaceHandler, CustomHandler, ToolDeclaration, ToolError, responses_declarations};
+use crate::tool::async_execution::lower_async_calls;
+use crate::tool::{
+    CodexNamespaceHandler, CustomHandler, ToolDeclaration, ToolError, declares_async, responses_declarations,
+};
 
 mod max_tool_calls;
 mod response_stream;
@@ -218,7 +221,7 @@ impl<T: ?Sized> RequestPayload<T> {
     pub fn declares_async_tools(&self) -> bool {
         self.tools
             .as_deref()
-            .is_some_and(|tools| tools.iter().any(crate::tool::declares_async))
+            .is_some_and(|tools| tools.iter().any(declares_async))
     }
 
     /// Names the feature in this request that only the in-process executor
@@ -348,7 +351,7 @@ impl RequestPayload {
         });
         let tools = tools.filter(|tools| !tools.is_empty());
         let namespace_map = CodexNamespaceHandler.build_namespace_map(declarations.as_deref())?;
-        let input = crate::tool::async_execution::lower_async_calls(
+        let input = lower_async_calls(
             CodexNamespaceHandler.resolve_input(namespace_map.as_ref(), self.input.normalized_model_input()),
         );
         let tool_choice = CodexNamespaceHandler.resolve_tool_choice(namespace_map.as_ref(), self.tool_choice.as_ref());

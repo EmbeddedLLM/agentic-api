@@ -4,7 +4,7 @@ use crate::executor::error::ExecutorResult;
 use crate::executor::pending_calls::resolved_prefix_len;
 use crate::executor::request::ExecutionContext;
 use crate::types::agent::AgentIdentity;
-use crate::types::io::input::open_async_calls;
+use crate::types::io::input::async_records;
 use crate::types::io::{InputItem, ResponseUsage, ResponsesInput};
 use crate::types::request_response::{PromptCacheRetention, RequestPayload};
 
@@ -92,8 +92,16 @@ impl CompactionPlan {
             .filter(|item| matches!(item, InputItem::McpListTools(_)))
             .cloned()
             .collect::<Vec<_>>();
-        // Pending async calls stay verbatim after the summary so their outputs can still arrive.
-        let open_async_calls = open_async_calls(&self.prefix);
+        // Async calls and their last outputs stay with the summary: an open call's output can still
+        // arrive, and a further output for an answered call still finds its call. The model view
+        // shows them only while the call is open or answered again after the summary.
+        let async_records: Vec<InputItem> = self
+            .prefix
+            .iter()
+            .zip(async_records(&self.prefix))
+            .filter(|(_, record)| *record)
+            .map(|(item, _)| item.clone())
+            .collect();
         let request = RequestPayload {
             model: self.model,
             instructions: self.instructions,
@@ -104,8 +112,12 @@ impl CompactionPlan {
         };
         let (mut replacement, usage, service_tier) =
             compact_items(&request, ResponsesInput::Items(self.prefix), exec, auth).await?;
+        let at = replacement
+            .iter()
+            .rposition(|item| matches!(item, InputItem::Compaction(_)))
+            .unwrap_or(replacement.len());
+        replacement.splice(at..at, async_records);
         replacement.extend(discovery);
-        replacement.extend(open_async_calls);
         Ok(CompactionResult {
             agent: self.agent,
             generation: self.generation,

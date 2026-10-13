@@ -6,9 +6,10 @@
 //! async and stops at each call, so the gateway must run the continuation round itself.
 
 use std::fmt::Write as _;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
-use agentic_core::executor::{ExecuteRequest, ExecutionContext, ExecutorError};
+use agentic_core::executor::{ExecuteRequest, ExecutionContext, ExecutorError, ResponseSession};
 use agentic_core::tool::ToolError;
 use agentic_core::tool::async_execution::{DESCRIPTION_SUFFIX, pending_call_note};
 use agentic_core::types::io::OutputItem;
@@ -846,6 +847,52 @@ async fn explicit_compaction_keeps_a_pending_custom_call_public() {
     assert_eq!(calls[0]["async"], true);
 }
 
+/// A pending custom call stays public after a continuation that declares no tools: its public form
+/// comes from the stored history, not from the tools the compacting request declares.
+#[tokio::test]
+async fn compaction_without_the_tool_declared_keeps_a_pending_custom_call_public() {
+    let fixture = support::TestFixture::new_with_responses(vec![
+        model_response(
+            false,
+            &[call_item("echo", "call_custom", r#"{"input":"ASYNC_CUSTOM_OK"}"#)],
+        ),
+        model_response(false, &[message_item("msg_1", "Started.")]),
+        model_response(false, &[message_item("msg_2", "Still waiting for the echo.")]),
+        support::text_response("Summary: an echo job is pending."),
+    ])
+    .await;
+    let tools = json!([{"type": "custom", "name": "echo", "async": true}]);
+    let (first, _) = run(
+        request(false, json!("Start echo."), tools, None),
+        fixture.exec_ctx.clone(),
+    )
+    .await;
+    let (second, _) = run(
+        request(false, json!("Anything else?"), json!([]), Some(&first.id)),
+        fixture.exec_ctx.clone(),
+    )
+    .await;
+    let compacted = agentic_core::executor::compact_response(
+        serde_json::from_value(json!({"model": "test-model", "previous_response_id": second.id, "tools": []})).unwrap(),
+        &fixture.exec_ctx,
+        None,
+    )
+    .await
+    .expect("compaction succeeds");
+    let window = serde_json::to_value(&compacted.output).unwrap();
+    let calls: Vec<&Value> = window
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["call_id"] == "call_custom")
+        .collect();
+    assert_eq!(calls.len(), 1, "{window}");
+    assert_eq!(calls[0]["type"], "custom_tool_call", "{window}");
+    assert_eq!(calls[0]["id"], "ctc_call_custom");
+    assert_eq!(calls[0]["input"], "ASYNC_CUSTOM_OK");
+    assert_eq!(calls[0]["async"], true);
+}
+
 /// Compacting input alone (no stored history) returns the request's pending custom call as sent.
 #[tokio::test]
 async fn stateless_compaction_keeps_a_pending_custom_call_public() {
@@ -915,6 +962,112 @@ async fn a_repeated_output_after_compaction_keeps_its_call() {
         "the call accompanies the repeated output: {last}"
     );
     assert!(developer_notes(last).is_empty(), "the call is answered: {last}");
+}
+
+/// The same through a WebSocket session without storage: the session history the compaction
+/// replaces keeps the answered call, so the transport does not change what a continuation accepts.
+#[tokio::test]
+async fn a_repeated_output_after_compaction_in_a_session_keeps_its_call() {
+    let fixture = support::TestFixture::new_with_responses(vec![
+        model_response(false, &[call_item(WEATHER_TOOL, "call_1", r#"{"city":"Paris"}"#)]),
+        model_response(false, &[message_item("msg_1", "Started the lookup.")]),
+        support::text_response("Summary: the Paris weather arrived: clear, 22 C."),
+        model_response(false, &[message_item("msg_2", "Paris is clear and 22 C.")]),
+        model_response(false, &[message_item("msg_3", "Now it is rainy and 9 C.")]),
+    ])
+    .await;
+    let session = ResponseSession::new(NonZeroUsize::new(16).unwrap(), NonZeroUsize::new(1_000_000).unwrap());
+    let in_session = |request: RequestPayload| {
+        let mut request = request;
+        request.store = false;
+        let session = &session;
+        let ctx = fixture.exec_ctx.clone();
+        async move {
+            let response = match ExecuteRequest::new(request, ctx)
+                .with_session(session)
+                .unwrap()
+                .run()
+                .await
+                .unwrap()
+            {
+                Either::Left(response) => response,
+                Either::Right(_) => panic!("expected a JSON response"),
+            };
+            session.wait_until_idle().await.unwrap();
+            response
+        }
+    };
+    let tools = json!([weather_tool(true)]);
+    let first = in_session(request(false, json!("Check Paris."), tools.clone(), None)).await;
+    let output = function_output("call_1", r#"{"temperature_c":22}"#);
+    let second = in_session(compacting(request(
+        false,
+        json!([output]),
+        tools.clone(),
+        Some(&first.id),
+    )))
+    .await;
+    let repeat = function_output("call_1", r#"{"temperature_c":9}"#);
+    let third = in_session(request(false, json!([repeat]), tools, Some(&second.id))).await;
+    assert_eq!(support::output_text(&third), "Now it is rainy and 9 C.");
+    let bodies = fixture.request_bodies().await;
+    assert!(
+        bodies.iter().any(|body| body.get("tools").is_none()),
+        "the second request compacted"
+    );
+    let last = *inference_bodies(&bodies).last().unwrap();
+    assert_call_once_before_output(last, "call_1");
+    assert!(developer_notes(last).is_empty(), "the call is answered: {last}");
+}
+
+/// The same in a multi-agent run: the compaction keeps the answered call with its output, so a
+/// further output through `previous_response_id` still finds the call it answers.
+#[tokio::test]
+async fn a_repeated_output_after_multi_agent_compaction_is_accepted() {
+    let fixture = support::TestFixture::new_with_responses(vec![
+        model_response(false, &[call_item(WEATHER_TOOL, "call_1", r#"{"city":"Paris"}"#)]),
+        model_response(false, &[message_item("msg_1", "Started the lookup.")]),
+        support::text_response("Summary: the Paris weather arrived: clear, 22 C."),
+        model_response(false, &[message_item("msg_2", "Paris is clear and 22 C.")]),
+        model_response(false, &[message_item("msg_3", "Now it is rainy and 9 C.")]),
+    ])
+    .await;
+    let multi_agent = |mut request: RequestPayload| {
+        request.multi_agent = Some(serde_json::from_value(json!({"enabled": true})).unwrap());
+        request
+    };
+    let tools = json!([weather_tool(true)]);
+    let (first, _) = run(
+        multi_agent(request(false, json!("Check Paris."), tools.clone(), None)),
+        fixture.exec_ctx.clone(),
+    )
+    .await;
+    let output = function_output("call_1", r#"{"temperature_c":22}"#);
+    let (second, _) = run(
+        multi_agent(compacting(request(
+            false,
+            json!([output]),
+            tools.clone(),
+            Some(&first.id),
+        ))),
+        fixture.exec_ctx.clone(),
+    )
+    .await;
+    let bodies = fixture.request_bodies().await;
+    assert!(
+        bodies.iter().any(|body| body.get("tools").is_none()),
+        "the second request compacted: {bodies:?}"
+    );
+    let repeat = function_output("call_1", r#"{"temperature_c":9}"#);
+    let (third, _) = run(
+        multi_agent(request(false, json!([repeat]), tools, Some(&second.id))),
+        fixture.exec_ctx.clone(),
+    )
+    .await;
+    assert_eq!(support::output_text(&third), "Now it is rainy and 9 C.");
+    let bodies = fixture.request_bodies().await;
+    let last = *inference_bodies(&bodies).last().unwrap();
+    assert_call_once_before_output(last, "call_1");
 }
 
 /// A late custom tool output delivered with automatic compaction is kept like a function output.

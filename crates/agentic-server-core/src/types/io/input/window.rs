@@ -60,74 +60,47 @@ pub(crate) fn latest_compaction_window(items: &[InputItem]) -> Option<Compaction
 pub(crate) fn open_async_call_ids(items: &[InputItem]) -> HashSet<&str> {
     let mut open = HashSet::new();
     for item in items {
-        match item {
-            InputItem::FunctionCall(call) if call.async_execution => {
-                open.insert(call.call_id.as_str());
-            }
-            InputItem::CustomToolCall(call) if call.async_execution => {
-                open.insert(call.call_id.as_str());
-            }
-            InputItem::FunctionCallOutput(output) => {
-                open.remove(output.call_id.as_str());
-            }
-            InputItem::CustomToolCallOutput(output) => {
-                open.remove(output.call_id.as_str());
-            }
-            _ => {}
+        if item.is_async_call() {
+            open.extend(item.call_id());
+        } else if let Some(call_id) = item.output_call_id() {
+            open.remove(call_id);
         }
     }
     open
 }
 
-/// The `call_id` that a client tool output answers; `None` for every other item.
-#[must_use]
-pub(crate) fn output_call_id(item: &InputItem) -> Option<&str> {
-    match item {
-        InputItem::FunctionCallOutput(output) => Some(&output.call_id),
-        InputItem::ToolSearchOutput(output) => Some(&output.call_id),
-        InputItem::CustomToolCallOutput(output) => Some(&output.call_id),
-        InputItem::ShellCallOutput(output) => Some(&output.call_id),
-        // Multi-agent outputs belong to the coordinator, not to a client call.
-        InputItem::MultiAgentCall(_)
-        | InputItem::MultiAgentCallOutput(_)
-        | InputItem::AgentMessage(_)
-        | InputItem::Message(_)
-        | InputItem::FunctionCall(_)
-        | InputItem::CodeInterpreterCall(_)
-        | InputItem::ToolSearchCall(_)
-        | InputItem::CustomToolCall(_)
-        | InputItem::ShellCall(_)
-        | InputItem::Reasoning(_)
-        | InputItem::McpListTools(_)
-        | InputItem::Compaction(_)
-        | InputItem::CompactionTrigger
-        | InputItem::Unknown => None,
-    }
-}
-
-/// Whether `item` is an async call that is still open (its call ID is in `open`).
+/// Whether `item` is an async call whose call ID is in `ids`.
 ///
 /// A summary cannot stand in for a call whose output may still arrive: the output must find
 /// its call. Such calls stay in the model context even though a checkpoint supersedes the
 /// items around them.
-pub(crate) fn retained_async_call(item: &InputItem, open: &HashSet<&str>) -> bool {
-    match item {
-        InputItem::FunctionCall(call) => call.async_execution && open.contains(call.call_id.as_str()),
-        InputItem::CustomToolCall(call) => call.async_execution && open.contains(call.call_id.as_str()),
-        _ => false,
-    }
+pub(crate) fn retained_async_call(item: &InputItem, ids: &HashSet<&str>) -> bool {
+    item.is_async_call() && item.call_id().is_some_and(|call_id| ids.contains(call_id))
 }
 
-/// The async call items in `items` that have no output in `items`, in order and in their
-/// public form.
+/// Marks, by position, the async call records a retained history keeps through a compaction:
+/// every async call, and the last output that answers each one.
+///
+/// Async calls accept outputs at any time, so a later output must still find and validate against
+/// its call, and an answered call must still read as answered. One output per call is enough for
+/// both, so repeated outputs do not accumulate across compactions. The model view hides these
+/// records unless the call is still open or answered again after the checkpoint ([`model_items`]).
 #[must_use]
-pub(crate) fn open_async_calls(items: &[InputItem]) -> Vec<InputItem> {
-    let open = open_async_call_ids(items);
-    items
+pub(crate) fn async_records(items: &[InputItem]) -> Vec<bool> {
+    let calls: HashSet<&str> = items
         .iter()
-        .filter(|item| retained_async_call(item, &open))
-        .cloned()
-        .collect()
+        .filter(|item| item.is_async_call())
+        .filter_map(InputItem::call_id)
+        .collect();
+    let mut answered = HashSet::new();
+    let mut records = vec![false; items.len()];
+    for (record, item) in records.iter_mut().zip(items).rev() {
+        *record = item.is_async_call()
+            || item
+                .output_call_id()
+                .is_some_and(|call_id| calls.contains(call_id) && answered.insert(call_id));
+    }
+    records
 }
 
 /// The model-visible items of the latest compaction window.
@@ -140,7 +113,7 @@ pub(crate) fn model_items(items: &[InputItem]) -> impl Iterator<Item = &InputIte
     let open = window.map_or_else(HashSet::new, |window| {
         let (before, after) = items.split_at(window.latest_index());
         let mut kept = open_async_call_ids(before);
-        kept.extend(after.iter().filter_map(output_call_id));
+        kept.extend(after.iter().filter_map(InputItem::output_call_id));
         kept
     });
     items
@@ -154,19 +127,20 @@ pub(crate) fn model_items(items: &[InputItem]) -> impl Iterator<Item = &InputIte
         .map(|(_, item)| item)
 }
 
-/// The items of the latest compaction window, plus earlier items that `keep` selects.
+/// The items of the latest compaction window, plus the async call records from before it
+/// ([`async_records`]) and earlier items that `keep` selects.
 #[must_use]
 pub(crate) fn retain_window(history: Vec<InputItem>, keep: impl Fn(&InputItem) -> bool) -> Vec<InputItem> {
     let Some(window) = latest_compaction_window(&history) else {
         return history;
     };
     let retained: Vec<bool> = {
-        let open = open_async_call_ids(&history[..window.latest_index()]);
+        let records = async_records(&history[..window.latest_index()]);
         history
             .iter()
             .enumerate()
             .map(|(index, item)| {
-                index >= window.latest_index() || window.retains_item(index, item, &open) || keep(item)
+                index >= window.latest_index() || window.retains_user_item(index, item) || records[index] || keep(item)
             })
             .collect()
     };

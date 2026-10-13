@@ -585,12 +585,15 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::sync::Arc;
 
     use super::*;
+    use crate::tool::codex::model_visible_namespace_member_name;
     use crate::tool::declaration::ToolDeclaration;
     use crate::tool::executors::GatewayExecutorRegistration;
     use crate::tool::mcp::{McpDiscoveredHandler, McpHandler};
+    use crate::tool::responses_declarations;
     use crate::types::io::output::McpListTool;
     use crate::types::tools::{McpDiscoveredToolParam, ResponsesTool};
 
@@ -617,18 +620,15 @@ mod tests {
             }
         ]))
         .unwrap();
-        let mut tools = crate::tool::responses_declarations(&wire);
+        let mut tools = responses_declarations(&wire);
 
         let registry = ToolRegistry::build_with_handlers(&mut tools, &mut GatewayExecutors::default())
             .await
             .expect("client tools register");
 
-        let names: std::collections::BTreeSet<&str> = registry.async_tool_names().collect();
-        let member = crate::tool::codex::model_visible_namespace_member_name("travel", "book");
-        assert_eq!(
-            names,
-            std::collections::BTreeSet::from(["get_weather", "echo", member.as_str()])
-        );
+        let names: BTreeSet<&str> = registry.async_tool_names().collect();
+        let member = model_visible_namespace_member_name("travel", "book");
+        assert_eq!(names, BTreeSet::from(["get_weather", "echo", member.as_str()]));
     }
 
     #[cfg(feature = "embedded-code-interpreter")]

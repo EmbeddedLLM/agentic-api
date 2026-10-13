@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde_json::Value;
 
 use super::declaration::ToolDeclaration;
-use crate::types::io::{CustomToolCall, FunctionTool, FunctionToolCall, InputItem, OutputItem, ToolChoice};
+use crate::types::io::{CustomToolCall, FunctionTool, FunctionToolCall, OutputItem, ToolChoice};
 use crate::types::tools::CustomToolParam;
 
 use super::{ToolEntry, ToolError, ToolHandler, ToolType};
@@ -97,26 +97,6 @@ impl CustomHandler {
             input: input_from_arguments(&call.arguments),
             async_execution: call.async_execution,
         })
-    }
-
-    /// A replayed call in its public form: a custom call that history rehydration lowered to a
-    /// function call for the model becomes the custom call it was. Other items are unchanged.
-    #[must_use]
-    pub(crate) fn public_input_item(item: InputItem, map: Option<&CustomToolMap>) -> InputItem {
-        match item {
-            InputItem::FunctionCall(call) if map.and_then(|map| map.declaration(&call.name)).is_some() => {
-                InputItem::CustomToolCall(CustomToolCall {
-                    agent: call.agent,
-                    id: public_item_id(call.id.as_deref().unwrap_or_default()),
-                    status: call.status,
-                    call_id: call.call_id,
-                    name: call.name,
-                    input: input_from_arguments(&call.arguments),
-                    async_execution: call.async_execution,
-                })
-            }
-            item => item,
-        }
     }
 }
 

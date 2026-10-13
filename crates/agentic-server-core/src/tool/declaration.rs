@@ -92,8 +92,8 @@ pub fn responses_declarations(tools: &[ResponsesTool]) -> Vec<ToolDeclaration> {
     tools.iter().map(ToolDeclaration::from).collect()
 }
 
-/// Whether a declared Responses tool makes any model-visible tool async; the borrowing
-/// counterpart of [`ToolDeclaration::declares_async`] for callers that only need the answer.
+/// Whether a declared Responses tool makes any model-visible tool async: an async function or
+/// custom tool, or a namespace with an async member function.
 #[must_use]
 pub fn declares_async(tool: &ResponsesTool) -> bool {
     match tool {

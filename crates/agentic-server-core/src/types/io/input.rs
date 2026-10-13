@@ -1,9 +1,10 @@
+mod calls;
 mod content;
 mod conversions;
-pub(crate) mod window;
+mod window;
 
 pub(crate) use window::{
-    latest_compaction_window, model_items, open_async_call_ids, open_async_calls, retain_window, retained_async_call,
+    async_records, latest_compaction_window, model_items, open_async_call_ids, retain_window, retained_async_call,
 };
 
 pub use content::{InputContent, InputFileContent, InputImageContent, InputTextContent, RefusalContent};
@@ -373,18 +374,6 @@ impl InputItem {
         matches!(self, Self::Unknown)
     }
 
-    /// The `call_id` of a replayed client call item; `None` for every other item.
-    #[must_use]
-    pub(crate) fn call_id(&self) -> Option<&str> {
-        match self {
-            Self::FunctionCall(call) => Some(&call.call_id),
-            Self::ToolSearchCall(call) => Some(&call.call_id),
-            Self::CustomToolCall(call) => Some(&call.call_id),
-            Self::ShellCall(call) => Some(&call.call_id),
-            _ => None,
-        }
-    }
-
     #[must_use]
     pub(crate) fn is_compaction_trigger(&self) -> bool {
         matches!(self, Self::CompactionTrigger)
@@ -443,10 +432,7 @@ impl ResponsesInput {
     /// Whether the input replays a call to an async tool.
     #[must_use]
     pub fn has_async_call(&self) -> bool {
-        matches!(self, Self::Items(items) if items.iter().any(|item| {
-            matches!(item, InputItem::FunctionCall(call) if call.async_execution)
-                || matches!(item, InputItem::CustomToolCall(call) if call.async_execution)
-        }))
+        matches!(self, Self::Items(items) if items.iter().any(InputItem::is_async_call))
     }
 
     /// Return the canonical context sent to vLLM.

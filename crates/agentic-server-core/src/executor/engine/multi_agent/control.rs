@@ -8,6 +8,7 @@ use crate::executor::multi_agent::{
 use crate::types::{
     agent::AgentTurnKey,
     client_calls::{ClientToolOutput, ClientToolOutputBatch},
+    io::InputItem,
 };
 
 pub(super) async fn receive(control: &mut Option<RunControlReceiver>) -> Option<OutputCommand> {
@@ -34,16 +35,22 @@ impl MultiAgentRun {
                 .expect("validated output remains until transfer");
             let late_root_output = routed.owner.async_execution && routed.owner.agent_turn.agent.is_root();
             let identity = routed.owner.agent_turn.agent;
+            let agent = self.registry.get(&identity).expect("registered call owner exists");
+            let (state, turn) = (agent.state, agent.turn);
             let context = self
                 .contexts
                 .get_mut(&identity)
                 .expect("registered call owner has context");
             context.discovery_dirty |= matches!(routed.output, ClientToolOutput::ToolSearch(_));
-            context.stored.history.push(routed.output.into());
+            let item = InputItem::from(routed.output);
+            // A running round's completion replaces history with its own input; keep this output
+            // for after that. A compaction is discarded instead (see `generation`).
+            if state == AgentState::Active(AgentPhase::Inferring) && !context.compacting {
+                context.inputs_during_round.push(item.clone());
+            }
+            context.stored.history.push(item);
             // Invalidate an in-flight summary snapshot; never overwrite new input.
             context.generation += 1;
-            let agent = self.registry.get(&identity).expect("registered call owner exists");
-            let (state, turn) = (agent.state, agent.turn);
             // Pending async calls never hold their owner; it resumes once its synchronous calls resolve.
             if state == AgentState::Active(AgentPhase::WaitingForClientOutputs)
                 && !self

@@ -204,7 +204,10 @@ fn scan_calls(items: &[InputItem]) -> ExecutorResult<CallLedger> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
+    use crate::types::io::input::{async_records, open_async_call_ids};
 
     #[test]
     fn compaction_prefix_never_splits_interleaved_calls_and_outputs() {
@@ -408,17 +411,6 @@ mod tests {
         InputItem::CustomToolCall(call)
     }
 
-    fn ids(calls: &[InputItem]) -> Vec<&str> {
-        calls
-            .iter()
-            .map(|item| match item {
-                InputItem::FunctionCall(call) => call.call_id.as_str(),
-                InputItem::CustomToolCall(call) => call.call_id.as_str(),
-                other => panic!("unexpected item {other:?}"),
-            })
-            .collect()
-    }
-
     /// A pending async call does not block a follow-up; a synchronous one still does.
     #[test]
     fn only_synchronous_calls_must_be_answered_before_continuing() {
@@ -477,20 +469,53 @@ mod tests {
         );
     }
 
-    /// Compaction keeps async calls whose output is not inside the summarized prefix.
+    /// Repeated outputs for one async call do not accumulate across compactions: a retained history
+    /// keeps the call and its latest output, so its size stays bounded per call.
     #[test]
-    fn open_async_calls_are_those_without_output_in_the_prefix() {
+    fn retained_history_keeps_one_output_per_async_call_across_compactions() {
+        let compaction = |id: &str| -> InputItem {
+            serde_json::from_value(serde_json::json!({"type": "compaction", "id": id, "encrypted_content": "summary"}))
+                .unwrap()
+        };
+        let mut history = vec![async_function_call("call_poll")];
+        for round in 0..20 {
+            history.push(function_call_output("call_poll"));
+            history.push(compaction(&format!("cmp_{round}")));
+            history = crate::types::io::input::retain_window(history, |_| false);
+        }
+        let kinds: Vec<&str> = history
+            .iter()
+            .map(|item| match item {
+                InputItem::FunctionCall(_) => "call",
+                InputItem::FunctionCallOutput(_) => "output",
+                InputItem::Compaction(_) => "compaction",
+                _ => "other",
+            })
+            .collect();
+        assert_eq!(kinds, ["call", "output", "compaction"]);
+    }
+
+    /// Compaction keeps every async call and the last output that answers it; the open ones are
+    /// those without an output in the prefix.
+    #[test]
+    fn async_records_and_open_calls_in_a_prefix() {
         let prefix = vec![
             async_function_call("call_open"),
             async_function_call("call_answered"),
+            function_call_output("call_answered"),
             function_call_output("call_answered"),
             function_call("call_sync"),
             function_call_output("call_sync"),
             async_custom_tool_call("call_custom_open"),
         ];
         assert_eq!(
-            ids(&crate::types::io::input::open_async_calls(&prefix)),
-            ["call_open", "call_custom_open"]
+            open_async_call_ids(&prefix),
+            HashSet::from(["call_open", "call_custom_open"])
+        );
+        assert_eq!(
+            async_records(&prefix),
+            [true, true, false, true, false, false, true],
+            "only the last output of the answered call is kept"
         );
     }
 }

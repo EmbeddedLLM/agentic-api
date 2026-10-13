@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
+mod support;
+
 /// A recorded provider and model, as they appear in cassette file names.
 #[derive(Clone, Copy)]
 struct Source {
@@ -218,14 +220,7 @@ fn load_from(source: Source, scenario: &str, mode: &str) -> Vec<Step> {
 }
 
 fn sse_events(chunks: &[Value]) -> Vec<Value> {
-    chunks
-        .iter()
-        .filter_map(Value::as_str)
-        .flat_map(str::lines)
-        .filter_map(|line| line.strip_prefix("data: "))
-        .filter(|data| *data != "[DONE]")
-        .map(|data| serde_json::from_str(data).expect("SSE data JSON"))
-        .collect()
+    support::named_sse_events(chunks.iter().filter_map(Value::as_str).flat_map(str::lines))
 }
 
 fn step<'a>(steps: &'a [Step], label: &str) -> &'a Step {

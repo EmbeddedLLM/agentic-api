@@ -1,5 +1,5 @@
 use crate::events::WireEvent;
-use crate::executor::error::ExecutorResult;
+use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::tool::custom::CustomToolMap;
 use crate::tool::{NamespaceMap, ToolType};
 use crate::types::event::ResponseStatus;
@@ -171,12 +171,39 @@ impl TranslationContext {
             if let OutputItem::FunctionCall(call) = item
                 && self.is_async_tool(&call.name)
             {
-                call.async_execution = true;
+                mark_async_call(item)?;
             }
         }
         super::namespace::CodexNamespaceTranslator::restore_output_items(output, self.namespace_map.as_ref());
         Ok(())
     }
+}
+
+/// Sets the public `async` flag on a call to an async tool. Streamed item events and the final
+/// output are both marked here; only function and custom calls are client calls that can be async.
+pub(super) fn mark_async_call(item: &mut OutputItem) -> ExecutorResult<()> {
+    match item {
+        OutputItem::FunctionCall(call) => call.async_execution = true,
+        OutputItem::CustomToolCall(call) => call.async_execution = true,
+        OutputItem::MultiAgentCall(_)
+        | OutputItem::MultiAgentCallOutput(_)
+        | OutputItem::AgentMessage(_)
+        | OutputItem::Message(_)
+        | OutputItem::CodeInterpreterCall(_)
+        | OutputItem::ToolSearchCall(_)
+        | OutputItem::ShellCall(_)
+        | OutputItem::WebSearchCall(_)
+        | OutputItem::McpCall(_)
+        | OutputItem::McpListTools(_)
+        | OutputItem::Reasoning(_)
+        | OutputItem::Compaction(_)
+        | OutputItem::Unknown => {
+            return Err(ExecutorError::StreamError(
+                "an async tool call translated to an item that is not a function or custom call".to_owned(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn complete_response_fields(response: &mut Map<String, Value>, fields: &StandardResponseFields) -> ExecutorResult<()> {

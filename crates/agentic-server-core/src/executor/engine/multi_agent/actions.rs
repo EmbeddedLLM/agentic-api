@@ -179,6 +179,7 @@ impl MultiAgentRun {
                 generation: 0,
                 compacted_generation: None,
                 compacting: false,
+                inputs_during_round: Vec::new(),
                 stored: StoredAgent {
                     identity: child.agent.clone(),
                     parent: Some(turn.agent.clone()),

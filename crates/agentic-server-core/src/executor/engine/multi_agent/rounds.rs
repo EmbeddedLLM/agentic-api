@@ -109,6 +109,10 @@ impl MultiAgentRun {
         auth: Option<&str>,
         pipeline: &AgentPipeline,
     ) -> ExecutorResult<()> {
+        if let Some(context) = self.contexts.get_mut(&turn.agent) {
+            // This round reads the whole history, so earlier accepted outputs need no reapplying.
+            context.inputs_during_round.clear();
+        }
         let context = &self.contexts[&turn.agent];
         let mut request = context.request.clone();
         request.input = ResponsesInput::Items(context.stored.history.clone());
@@ -274,6 +278,7 @@ impl MultiAgentRun {
             ResponsesInput::Items(items) => items.clone(),
             ResponsesInput::Text(_) => Vec::from(&request.input),
         };
+        context.stored.history.append(&mut context.inputs_during_round);
         context.generation += 1;
         context.request = request;
         context.tool_search = tool_search;

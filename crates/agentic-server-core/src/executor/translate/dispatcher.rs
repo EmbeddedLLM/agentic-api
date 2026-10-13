@@ -1,3 +1,4 @@
+use super::context::mark_async_call;
 use super::tool_search::ToolSearchStreamState;
 use super::{
     HasTranslator, MAX_PENDING_FUNCTION_BYTES, ToolEvent, ToolTranslator, Translation, TranslationContext,
@@ -7,6 +8,8 @@ use crate::events::{EventFrame, EventPayload, SSEEventType, SSEItemType};
 use crate::executor::accumulator::AccumulatedFunctionCall;
 use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::tool::{CodexNamespaceHandler, CustomHandler, FunctionHandler, ToolSearchHandler, ToolType, tool_search};
+use crate::types::event::MessageStatus;
+use crate::types::io::OutputItem;
 use crate::utils::common::serialize_to_string;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -50,17 +53,56 @@ impl ClientCall {
         let mut frames = TranslationDispatcher::translate_tool_event(self.translator.as_mut(), event, call)?;
         if self.async_execution {
             for frame in &mut frames {
-                if matches!(
-                    frame.event_type,
-                    SSEEventType::OutputItemAdded | SSEEventType::OutputItemDone
-                ) && let Some(item) = frame.wire.rest.get_mut("item").and_then(Value::as_object_mut)
-                {
-                    item.insert("async".to_owned(), Value::Bool(true));
-                }
+                mark_async_item_event(frame)?;
             }
         }
         Ok(frames)
     }
+}
+
+/// Marks the call item of an async call's `output_item.added` or `output_item.done` event through
+/// its typed form, keeping the wire item and the `output_item.done` payload equal. Other events
+/// pass unchanged.
+///
+/// Decoding fills fields the upstream item may omit: a call identified by `item_id` keeps that ID,
+/// which its deltas carry, and an added call without a status stays `in_progress`.
+fn mark_async_item_event(frame: &mut EventFrame) -> ExecutorResult<()> {
+    let added = match frame.event_type {
+        SSEEventType::OutputItemAdded => true,
+        SSEEventType::OutputItemDone => false,
+        _ => return Ok(()),
+    };
+    let item_id = match &frame.payload {
+        EventPayload::OutputItemAdded { item_id, .. } | EventPayload::OutputItemDone { item_id, .. } => {
+            Some(item_id.as_str())
+        }
+        _ => None,
+    };
+    let wire_item = frame
+        .wire
+        .rest
+        .get_mut("item")
+        .ok_or_else(|| ExecutorError::StreamError("an async call's item event has no item".to_owned()))?;
+    let has_id = wire_item
+        .get("id")
+        .and_then(Value::as_str)
+        .is_some_and(|id| !id.is_empty());
+    let has_status = wire_item.get("status").is_some_and(|status| !status.is_null());
+    let mut item: OutputItem = serde_json::from_value(wire_item.take())?;
+    if let OutputItem::FunctionCall(call) = &mut item {
+        if !has_id && let Some(item_id) = item_id {
+            item_id.clone_into(&mut call.id);
+        }
+        if added && !has_status {
+            call.status = MessageStatus::InProgress;
+        }
+    }
+    mark_async_call(&mut item)?;
+    *wire_item = serde_json::to_value(&item)?;
+    if let EventPayload::OutputItemDone { item: payload_item, .. } = &mut frame.payload {
+        payload_item.clone_from(wire_item);
+    }
+    Ok(())
 }
 
 /// Routes inline to the translator for each call and bounds events awaiting a name.

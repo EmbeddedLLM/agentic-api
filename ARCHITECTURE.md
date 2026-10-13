@@ -556,8 +556,12 @@ call inference, run the tool loop, persist. `agentic-server` never reaches past 
   missing-output error. An async call (`async: true` on the call item) may stay
   unresolved and accepts repeated outputs; it ends neither the resolved prefix used by
   compaction nor the continuation. A compaction window (`model_items`,
-  `canonical_session_history`) keeps an async call that was still open at its checkpoint,
-  and a session whose history compaction replaces keeps open parent calls the same way.
+  `canonical_session_history`) shows the model an async call that was still open at its
+  checkpoint. Retained histories (`retain_window`, a session whose history compaction
+  replaces, and a multi-agent compaction, before its compaction item) also keep every async
+  call and the last output that answers it, outside the model view, so a further output still
+  finds its call while repeated outputs do not accumulate. A compacted call's public form
+  comes from stored history, not from the current tool declarations.
   Compaction replaces the request's own items, so it stores two kinds of them again, as the
   request supplied them: outputs that answer calls made before the request, before the
   compaction item (the answered call and its output leave the window together), and the async

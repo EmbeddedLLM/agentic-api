@@ -132,18 +132,17 @@ A model served by vLLM stops at a tool call and does not know `async`. The gatew
 therefore runs another inference round with the call pending, and adds two hints to the
 request it sends the model server: the async tool's description says that it runs in the
 background, and a `developer` note follows each async call whose output has not arrived.
+The note names the tool and `call_id` only when each is a plain identifier.
 Without them the model tends to invent the pending result. The gateway does not store or
 return the hints: responses to a request with async tools echo the client's own tool
 declarations. The model's own reasoning output can still quote or paraphrase a hint.
 After compaction, by any of its triggers, an async call whose output has not arrived stays
 in the model context, so its output can still arrive. An output delivered in the request that
 compacts is stored with the summarized history, so its call is no longer reported as pending,
-and a further output for that call reaches the model after the call. If the model keeps
-calling async tools instead of answering, the gateway stops after two such rounds in a row.
-
-Over a WebSocket session, which keeps only the compacted window, a further output for an
-async call that was answered before a compaction is rejected with `400`; over HTTP with
-`previous_response_id` it is accepted.
+and a further output for that call reaches the model after the call. This holds over HTTP
+with `previous_response_id`, over a WebSocket session, and in multi-agent runs. If the model
+keeps calling async tools instead of answering, the gateway stops after two such rounds in a
+row.
 
 Differences from OpenAI:
 

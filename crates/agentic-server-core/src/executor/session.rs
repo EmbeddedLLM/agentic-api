@@ -4,7 +4,6 @@
 #[path = "session_budget_tests.rs"]
 mod budget_tests;
 
-use std::collections::HashSet;
 use std::fmt;
 use std::num::NonZeroUsize;
 use std::ops::Deref;
@@ -16,7 +15,7 @@ use tokio::sync::Notify;
 
 use super::{ExecutorError, ExecutorResult};
 use crate::storage::{InOutItem, ResponseMetadata};
-use crate::types::io::input::{open_async_call_ids, retain_window, retained_async_call};
+use crate::types::io::input::{async_records, retain_window};
 use crate::types::io::{InputItem, OutputItem};
 use crate::utils::common::serialized_size_up_to;
 
@@ -379,16 +378,17 @@ impl ResponseContinuation {
 
     /// Retain orchestration records across compaction without restoring the old
     /// model context. MCP discovery still needs to know which servers were listed,
-    /// and an async call still open in the parent history must remain for its output.
+    /// and async calls with their outputs remain so a later output finds its call.
     pub(crate) fn parent_items(&self) -> impl Iterator<Item = &InputItem> {
         let history = self.parent.as_ref().map_or(&[][..], |parent| parent.history.as_slice());
-        let open = if self.history_replaced {
-            open_async_call_ids(history)
+        let records = if self.history_replaced {
+            async_records(history)
         } else {
-            HashSet::new()
+            Vec::new()
         };
-        history.iter().filter(move |item| {
-            !self.history_replaced || matches!(item, InputItem::McpListTools(_)) || retained_async_call(item, &open)
+        history.iter().enumerate().filter_map(move |(index, item)| {
+            let kept = !self.history_replaced || matches!(item, InputItem::McpListTools(_)) || records[index];
+            kept.then_some(item)
         })
     }
 

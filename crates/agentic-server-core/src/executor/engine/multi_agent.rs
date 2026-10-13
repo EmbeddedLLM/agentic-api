@@ -38,7 +38,7 @@ use crate::types::{
     agent::{AgentIdentity, AgentTurnKey},
     agent_commands::{AgentListingStatus, CollaborationResult},
     agent_tree::{StoredAgent, StoredTreeSnapshot},
-    io::{MultiAgentAction, MultiAgentConfig, OutputItem},
+    io::{InputItem, MultiAgentAction, MultiAgentConfig, OutputItem},
     request_response::{RequestPayload, ResponsePayload},
 };
 use crate::utils::common::utcnow_str;
@@ -57,6 +57,9 @@ struct AgentContext {
     generation: u64,
     compacted_generation: Option<u64>,
     compacting: bool,
+    /// Outputs accepted while this agent's inference round runs. Completing the round replaces the
+    /// history with the round's own input, so these are applied again after it.
+    inputs_during_round: Vec<InputItem>,
     stored: StoredAgent,
     execution: AgentExecutionState,
     request: RequestPayload,

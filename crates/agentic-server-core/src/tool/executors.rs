@@ -408,7 +408,7 @@ impl std::fmt::Debug for GatewayExecutors {
 
 #[cfg(test)]
 mod tests {
-    use crate::tool::ToolDeclaration;
+    use crate::tool::{ToolDeclaration, declares_async, responses_declarations};
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -530,7 +530,7 @@ mod tests {
 
     #[test]
     fn async_is_accepted_on_function_custom_and_namespace_member_tools() {
-        let tools = declarations(serde_json::json!([
+        let raw: Vec<ResponsesTool> = serde_json::from_value(serde_json::json!([
             weather_function(&serde_json::json!({"async": true})),
             {"type": "custom", "name": "echo", "async": true},
             {
@@ -539,12 +539,14 @@ mod tests {
                 "description": "Demo weather tools.",
                 "tools": [weather_function(&serde_json::json!({"name": "get_forecast", "async": true}))]
             }
-        ]));
+        ]))
+        .expect("valid declarations");
+        let tools = responses_declarations(&raw);
 
         GatewayExecutors::default()
             .validate_declarations(Some(&tools))
             .expect("async is accepted on client function, custom, and namespace member tools");
-        assert!(tools.iter().all(ToolDeclaration::declares_async));
+        assert!(raw.iter().all(declares_async));
     }
 
     /// Matches the recorded `OpenAI` behavior: `async` anywhere else is an unknown parameter at its

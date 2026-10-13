@@ -452,6 +452,51 @@ async fn live_async_outputs_do_not_hold_their_owner_and_wake_an_idle_root() {
     server.abort();
 }
 
+/// An async output accepted while its owner's round is inferring survives the round's completion,
+/// which replaces the history with the round's own input.
+#[tokio::test]
+async fn async_output_accepted_during_a_round_survives_its_completion() {
+    let (exec, server) = setup().await;
+    let ctx = rehydrate_conversation(request(), &exec).await.unwrap();
+    let mut pipeline = AgentPipeline::new(ctx, None, StreamRelay::detached());
+    let mut run = MultiAgentRun::new(&mut pipeline, &exec).await.unwrap();
+    let root = AgentIdentity::root();
+    let turn = AgentTurnKey {
+        agent: root.clone(),
+        turn: run.registry.get(&root).unwrap().turn,
+    };
+    let registration = ClientCallRegistration {
+        call_id: ClientCallId::try_from("async_call".to_owned()).unwrap(),
+        owner: ClientCallOwner {
+            agent_turn: turn.clone(),
+            kind: ClientCallKind::Function,
+            async_execution: true,
+        },
+    };
+    run.pending.register_calls(&run.registry, &[registration]).unwrap();
+
+    run.spawn_round(&turn, &exec, None, &pipeline).unwrap();
+    assert_eq!(
+        run.registry.get(&root).unwrap().state,
+        AgentState::Active(AgentPhase::Inferring)
+    );
+    assert!(matches!(
+        run.accept_live_outputs(batch(&run.payload.id, &["async_call"])),
+        OutputDecision::Accepted
+    ));
+    let completion = run.tasks.join_next().await.unwrap();
+    run.complete(completion, &mut pipeline).await.unwrap();
+
+    let outputs = run.contexts[&root]
+        .stored
+        .history
+        .iter()
+        .filter(|item| matches!(item, InputItem::FunctionCallOutput(output) if output.call_id == "async_call"))
+        .count();
+    assert_eq!(outputs, 1, "the accepted output is in history exactly once");
+    server.abort();
+}
+
 #[tokio::test]
 async fn disconnect_while_waiting_fails_run_without_publication() {
     let (exec, server) = setup_with_options(Some(Arc::new(Semaphore::new(0))), true).await;

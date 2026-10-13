@@ -53,25 +53,6 @@ impl ToolDeclaration {
         }
     }
 
-    /// Whether this declaration makes any model-visible tool async: an async function or custom
-    /// tool, or a namespace with an async member function.
-    #[must_use]
-    pub fn declares_async(&self) -> bool {
-        match self {
-            Self::Function(param) => param.is_async(),
-            Self::Custom(param) => param.is_async(),
-            Self::Namespace(param) => super::declaration::namespace_declares_async(param),
-            Self::ToolSearch(_)
-            | Self::Mcp(_)
-            | Self::WebSearch(_)
-            | Self::WebFetch(_)
-            | Self::FileSearch(_)
-            | Self::CodeInterpreter(_)
-            | Self::Shell(_)
-            | Self::Unsupported => false,
-        }
-    }
-
     /// Whether this declaration carries `async` where it is not accepted.
     ///
     /// Async execution applies to function and custom tools that the client runs, including
