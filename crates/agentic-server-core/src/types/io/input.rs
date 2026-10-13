@@ -1,6 +1,6 @@
 mod content;
 mod conversions;
-mod window;
+pub(crate) mod window;
 
 pub(crate) use window::{
     latest_compaction_window, model_items, open_async_call_ids, open_async_calls, retain_window, retained_async_call,

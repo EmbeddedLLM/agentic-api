@@ -109,7 +109,7 @@ the output later on the original `call_id`, as in
 [OpenAI async tool calling](https://developers.openai.com/api/docs/guides/async-tool-calling).
 Calls to async tools carry `async: true`, in the response and in the streamed
 `response.output_item.added`/`done` items. Requests that declare an async tool, or replay
-an async call, always run through the executor.
+an async call, always run through the executor; the llm-d split-execution backend rejects them.
 
 The gateway matches the recorded OpenAI behavior:
 
@@ -136,8 +136,14 @@ Without them the model tends to invent the pending result. The gateway does not 
 return the hints: responses to a request with async tools echo the client's own tool
 declarations. The model's own reasoning output can still quote or paraphrase a hint.
 After compaction, by any of its triggers, an async call whose output has not arrived stays
-in the model context, so its output can still arrive. If the model keeps calling async tools
-instead of answering, the gateway stops after two such rounds in a row.
+in the model context, so its output can still arrive. An output delivered in the request that
+compacts is stored with the summarized history, so its call is no longer reported as pending,
+and a further output for that call reaches the model after the call. If the model keeps
+calling async tools instead of answering, the gateway stops after two such rounds in a row.
+
+Over a WebSocket session, which keeps only the compacted window, a further output for an
+async call that was answered before a compaction is rejected with `400`; over HTTP with
+`previous_response_id` it is accepted.
 
 Differences from OpenAI:
 

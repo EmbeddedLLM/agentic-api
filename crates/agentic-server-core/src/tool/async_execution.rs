@@ -70,8 +70,8 @@ pub fn lower_async_calls(input: Cow<'_, ResponsesInput>) -> Cow<'_, ResponsesInp
     let mut notes = Vec::new();
     for item in items {
         let InputItem::FunctionCall(call) = item else {
-            // Outputs directly after the calls stay with them: chat templates expect tool results
-            // to follow the assistant's tool calls.
+            // Outputs directly after the calls stay with them: chat templates expect tool call
+            // outputs to follow the assistant's tool calls.
             if !matches!(item, InputItem::FunctionCallOutput(_)) {
                 lowered.append(&mut notes);
             }

@@ -79,6 +79,32 @@ pub(crate) fn open_async_call_ids(items: &[InputItem]) -> HashSet<&str> {
     open
 }
 
+/// The `call_id` that a client tool output answers; `None` for every other item.
+#[must_use]
+pub(crate) fn output_call_id(item: &InputItem) -> Option<&str> {
+    match item {
+        InputItem::FunctionCallOutput(output) => Some(&output.call_id),
+        InputItem::ToolSearchOutput(output) => Some(&output.call_id),
+        InputItem::CustomToolCallOutput(output) => Some(&output.call_id),
+        InputItem::ShellCallOutput(output) => Some(&output.call_id),
+        // Multi-agent outputs belong to the coordinator, not to a client call.
+        InputItem::MultiAgentCall(_)
+        | InputItem::MultiAgentCallOutput(_)
+        | InputItem::AgentMessage(_)
+        | InputItem::Message(_)
+        | InputItem::FunctionCall(_)
+        | InputItem::CodeInterpreterCall(_)
+        | InputItem::ToolSearchCall(_)
+        | InputItem::CustomToolCall(_)
+        | InputItem::ShellCall(_)
+        | InputItem::Reasoning(_)
+        | InputItem::McpListTools(_)
+        | InputItem::Compaction(_)
+        | InputItem::CompactionTrigger
+        | InputItem::Unknown => None,
+    }
+}
+
 /// Whether `item` is an async call that is still open (its call ID is in `open`).
 ///
 /// A summary cannot stand in for a call whose output may still arrive: the output must find
@@ -105,10 +131,17 @@ pub(crate) fn open_async_calls(items: &[InputItem]) -> Vec<InputItem> {
 }
 
 /// The model-visible items of the latest compaction window.
+///
+/// An async call from before the checkpoint stays visible while it is open there, or when a further
+/// output for it arrives after the checkpoint (async calls accept repeated outputs), so the model
+/// never receives an output without its call.
 pub(crate) fn model_items(items: &[InputItem]) -> impl Iterator<Item = &InputItem> {
     let window = latest_compaction_window(items);
     let open = window.map_or_else(HashSet::new, |window| {
-        open_async_call_ids(&items[..window.latest_index()])
+        let (before, after) = items.split_at(window.latest_index());
+        let mut kept = open_async_call_ids(before);
+        kept.extend(after.iter().filter_map(output_call_id));
+        kept
     });
     items
         .iter()

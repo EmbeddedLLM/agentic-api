@@ -4,6 +4,8 @@ pub(crate) use estimate::{estimate_history_tokens, estimate_input_tokens};
 mod context;
 mod summary;
 
+use std::collections::HashSet;
+
 use super::telemetry::stages::CompactionTrigger;
 use context::item_has_meaningful_context;
 use summary::completed_summary_text;
@@ -17,9 +19,11 @@ use crate::executor::rehydrate::rehydrate_conversation;
 use crate::executor::relay::StreamRelay;
 use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::executor::upstream::fetch_blocking_payload;
-use crate::tool::ToolSearchState;
+use crate::tool::custom::CustomHandler;
+use crate::tool::{ToolSearchState, responses_declarations};
 use crate::types::event::MessageStatus;
-use crate::types::io::input::{InputTextContent, latest_compaction_window, open_async_calls};
+use crate::types::io::input::window::output_call_id;
+use crate::types::io::input::{InputTextContent, latest_compaction_window, open_async_call_ids, retained_async_call};
 use crate::types::io::{
     CompactionItem, InputContent, InputItem, InputMessage, InputMessageContent, ResponseUsage, ResponsesInput,
 };
@@ -28,35 +32,70 @@ use crate::utils::common::{utcnow_str, uuid7_str};
 
 const COMPACTION_PROMPT: &str = "You are performing a CONTEXT CHECKPOINT COMPACTION. Create a concise handoff summary that preserves current progress, decisions, constraints, unresolved work, and critical references for the next model. Return only the summary.";
 
-/// Async calls still open in the compacted items, in their public form.
+/// What a compaction must keep from the items it summarizes.
 ///
-/// A summary cannot stand in for a call whose output may still arrive. Every open call stays in
-/// the model input after the summary (`model`). Only the calls this request supplied are stored
-/// again (`stored`): compaction replaces the request's own items, whereas a call stored earlier in
-/// the history, or in this response's output, keeps its place and stays model-visible through the
-/// compaction window. Storing it again would duplicate its item and `call_id`.
-struct OpenAsyncCalls {
-    model: Vec<InputItem>,
-    stored: Vec<InputItem>,
+/// A summary cannot stand in for an async call whose output may still arrive, so every open call
+/// stays in the model input after the summary (`open_calls`). Compaction also replaces this
+/// request's own items in storage, so two kinds of them are stored again, from the request's
+/// public items: outputs that answer calls made before this request (`late_outputs`), and async
+/// calls this request made that are still open (`own_open_calls`). Late outputs are stored before
+/// the compaction item, so an answered call and its output leave the window together, as the
+/// summary covers them. A call stored earlier keeps its place and stays model-visible through the
+/// compaction window; storing it again would duplicate its item and `call_id`.
+struct CompactionCarryOver {
+    open_calls: Vec<InputItem>,
+    late_outputs: Vec<InputItem>,
+    own_open_calls: Vec<InputItem>,
 }
 
-impl OpenAsyncCalls {
-    fn new(compacted_items: &[InputItem], own_items: &[InputItem]) -> Self {
-        let own: std::collections::HashSet<&str> = own_items.iter().filter_map(InputItem::call_id).collect();
-        let model = open_async_calls(compacted_items);
-        let stored = model
+impl CompactionCarryOver {
+    /// `suffix` holds the items a multi-agent compaction leaves after its window; an output there is
+    /// kept in place, not stored twice. Single-agent compaction passes an empty suffix.
+    fn new(compacted_items: &[InputItem], own_items: &[InputItem], suffix: &[InputItem]) -> Self {
+        let open = open_async_call_ids(compacted_items);
+        let own_calls: HashSet<&str> = own_items.iter().filter_map(InputItem::call_id).collect();
+        let kept_in_suffix: HashSet<&str> = suffix.iter().filter_map(output_call_id).collect();
+        Self {
+            open_calls: compacted_items
+                .iter()
+                .filter(|item| retained_async_call(item, &open))
+                .cloned()
+                .collect(),
+            late_outputs: own_items
+                .iter()
+                .filter(|item| {
+                    output_call_id(item)
+                        .is_some_and(|call_id| !own_calls.contains(call_id) && !kept_in_suffix.contains(call_id))
+                })
+                .cloned()
+                .collect(),
+            own_open_calls: own_items
+                .iter()
+                .filter(|item| retained_async_call(item, &open))
+                .cloned()
+                .collect(),
+        }
+    }
+
+    /// The stored window: `compacted`, which ends with its compaction item (and, for multi-agent
+    /// compaction, MCP discovery records), with the late outputs before that item and the request's
+    /// own open calls after it.
+    fn store(self, mut compacted: Vec<InputItem>) -> Vec<InputItem> {
+        let at = compacted
             .iter()
-            .filter(|item| item.call_id().is_some_and(|call_id| own.contains(call_id)))
-            .cloned()
-            .collect();
-        Self { model, stored }
+            .rposition(|item| matches!(item, InputItem::Compaction(_)))
+            .unwrap_or(compacted.len());
+        compacted.splice(at..at, self.late_outputs);
+        compacted.extend(self.own_open_calls);
+        compacted
     }
 }
 
-/// The open async calls in `items` that this request supplied (`own_items`), which a
-/// compaction that replaces the request's items must store again.
-pub(crate) fn retain_own_open_async_calls(items: &[InputItem], own_items: &[InputItem]) -> Vec<InputItem> {
-    OpenAsyncCalls::new(items, own_items).stored
+/// The items a `compaction_trigger` turn stores again before its compaction output: the request's
+/// late outputs, then its own open async calls (see [`CompactionCarryOver`]).
+pub(crate) fn carried_over_inputs(items: &[InputItem], own_items: &[InputItem]) -> Vec<InputItem> {
+    let carry = CompactionCarryOver::new(items, own_items, &[]);
+    carry.late_outputs.into_iter().chain(carry.own_open_calls).collect()
 }
 fn retained_user_window(items: &[InputItem]) -> Vec<InputItem> {
     let window = latest_compaction_window(items);
@@ -256,12 +295,14 @@ pub(crate) async fn maybe_compact_context(
     if !items[..prefix].iter().any(item_has_meaningful_context) {
         return Ok(None);
     }
-    // Single-agent compaction covers every item, so open calls keep their public, un-lowered form.
+    // Single-agent compaction covers every item. Items stored again come from the request's own
+    // public items; the model input may keep a lowered call, which the model sees lowered anyway.
     let compacted_items = match (&ctx.enriched_request.input, multi_agent) {
-        (ResponsesInput::Items(public_items), false) => public_items.as_slice(),
+        (ResponsesInput::Items(model_items), false) => model_items.as_slice(),
         _ => &items[..prefix],
     };
-    let open = OpenAsyncCalls::new(compacted_items, &ctx.new_input_items);
+    let suffix = if multi_agent { &items[prefix..] } else { &[][..] };
+    let mut carry = CompactionCarryOver::new(compacted_items, &ctx.new_input_items, suffix);
     let input = ResponsesInput::Items(items[..prefix].to_vec());
     let (mut compacted, usage, _) = compact_items_with_trigger(
         &ctx.enriched_request,
@@ -279,14 +320,13 @@ pub(crate) async fn maybe_compact_context(
                 .cloned(),
         );
     }
-    let suffix = if multi_agent { &items[prefix..] } else { &[][..] };
     let mut model_input = compacted.clone();
-    model_input.extend(open.model);
+    model_input.extend(std::mem::take(&mut carry.open_calls));
     model_input.extend_from_slice(suffix);
-    compacted.extend(open.stored);
-    compacted.extend_from_slice(suffix);
+    let mut stored = carry.store(compacted);
+    stored.extend_from_slice(suffix);
     ctx.enriched_request.input = ResponsesInput::Items(model_input);
-    ctx.new_input_items = compacted;
+    ctx.new_input_items = stored;
     if let Some(continuation) = &mut ctx.continuation {
         continuation.mark_history_replaced();
     }
@@ -324,12 +364,17 @@ pub async fn compact_response(
         prepare_request_tools(ctx, &exec_ctx.conv_handler, &exec_ctx.resp_handler).await?;
     let tool_search_metadata = tool_search_state.map(ToolSearchState::into_public_metadata);
     let input = std::mem::replace(&mut ctx.enriched_request.input, ResponsesInput::Items(Vec::new()));
-    // The returned window keeps every open async call so a client replaying it stays
-    // self-contained; storage adds only the calls this request supplied.
-    let open = match &input {
-        ResponsesInput::Items(items) => OpenAsyncCalls::new(items, &ctx.new_input_items),
-        ResponsesInput::Text(_) => OpenAsyncCalls::new(&[], &[]),
+    // The returned window keeps every open async call, in its public form, so a client replaying it
+    // stays self-contained; storage adds only this request's own items (see `CompactionCarryOver`).
+    let mut carry = match &input {
+        ResponsesInput::Items(items) => CompactionCarryOver::new(items, &ctx.new_input_items, &[]),
+        ResponsesInput::Text(_) => CompactionCarryOver::new(&[], &[], &[]),
     };
+    let custom_tools = ctx
+        .enriched_request
+        .tools
+        .as_deref()
+        .and_then(|tools| CustomHandler::build_tool_map(&responses_declarations(tools)));
     let (compacted, usage, service_tier) = compact_items_with_trigger(
         &ctx.enriched_request,
         input,
@@ -338,12 +383,18 @@ pub async fn compact_response(
         CompactionTrigger::Explicit,
     )
     .await?;
+    // A call this request supplied is already public; a call from history is restored by tool.
+    let public_call = |item: InputItem| -> InputItem {
+        item.call_id()
+            .and_then(|call_id| ctx.new_input_items.iter().find(|own| own.call_id() == Some(call_id)))
+            .cloned()
+            .unwrap_or_else(|| CustomHandler::public_input_item(item, custom_tools.as_ref()))
+    };
     let mut output = compacted.clone();
-    output.extend(open.model);
+    output.extend(std::mem::take(&mut carry.open_calls).into_iter().map(public_call));
 
     let response_id = ctx.response_id.clone();
-    ctx.new_input_items = compacted;
-    ctx.new_input_items.extend(open.stored);
+    ctx.new_input_items = carry.store(compacted);
     match persist_prepared_turn(
         ctx,
         tool_search_metadata,

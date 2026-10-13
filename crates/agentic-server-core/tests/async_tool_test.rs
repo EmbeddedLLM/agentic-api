@@ -657,6 +657,298 @@ async fn compaction_trigger_keeps_the_pending_async_call() {
     assert_call_once_before_output(inference_bodies(&bodies).last().unwrap(), "call_1");
 }
 
+/// How a turn that delivers a late output also compacts.
+#[derive(Clone, Copy, Debug)]
+enum Compaction {
+    Automatic,
+    Trigger,
+    Explicit,
+}
+
+/// The model sees no call `call_id` as still pending: no note, and no copy of the call without its output.
+fn assert_not_pending(body: &Value, call_id: &str) {
+    assert!(developer_notes(body).is_empty(), "no pending note: {body}");
+    let has_call = items(body)
+        .iter()
+        .any(|item| item["type"] == "function_call" && item["call_id"] == call_id);
+    let has_output = items(body)
+        .iter()
+        .any(|item| item["type"] == "function_call_output" && item["call_id"] == call_id);
+    assert!(!has_call || has_output, "the call is not left unanswered: {body}");
+}
+
+/// A late output delivered in a request that also compacts is kept: later turns neither report an
+/// async call as pending nor reject a synchronous call as unanswered.
+#[tokio::test]
+async fn a_late_output_delivered_with_compaction_is_kept() {
+    for compaction in [Compaction::Automatic, Compaction::Trigger, Compaction::Explicit] {
+        for async_tool in [true, false] {
+            let case = format!("{compaction:?} async={async_tool}");
+            let mut responses = vec![model_response(
+                false,
+                &[call_item(WEATHER_TOOL, "call_1", r#"{"city":"Paris"}"#)],
+            )];
+            if async_tool {
+                responses.push(model_response(false, &[message_item("msg_1", "Started the lookup.")]));
+            }
+            responses.push(support::text_response(
+                "Summary: the Paris weather arrived: clear, 22 C.",
+            ));
+            if matches!(compaction, Compaction::Automatic) {
+                responses.push(model_response(
+                    false,
+                    &[message_item("msg_2", "Paris is clear and 22 C.")],
+                ));
+            }
+            responses.push(model_response(false, &[message_item("msg_3", "Take sunglasses.")]));
+            let fixture = support::TestFixture::new_with_responses(responses).await;
+            let tools = json!([weather_tool(async_tool)]);
+            let (first, _) = run(
+                request(false, json!("Check Paris."), tools.clone(), None),
+                fixture.exec_ctx.clone(),
+            )
+            .await;
+            let output = function_output("call_1", r#"{"temperature_c":22}"#);
+            let compacted_id = match compaction {
+                Compaction::Automatic => {
+                    let late = compacting(request(false, json!([output]), tools.clone(), Some(&first.id)));
+                    run(late, fixture.exec_ctx.clone()).await.0.id
+                }
+                Compaction::Trigger => {
+                    let input = json!([output, {"type": "compaction_trigger"}]);
+                    run(
+                        request(false, input, tools.clone(), Some(&first.id)),
+                        fixture.exec_ctx.clone(),
+                    )
+                    .await
+                    .0
+                    .id
+                }
+                Compaction::Explicit => {
+                    agentic_core::executor::compact_response(
+                        serde_json::from_value(
+                            json!({"model": "test-model", "previous_response_id": first.id, "input": [output]}),
+                        )
+                        .unwrap(),
+                        &fixture.exec_ctx,
+                        None,
+                    )
+                    .await
+                    .unwrap_or_else(|error| panic!("{case}: compaction fails: {error}"))
+                    .id
+                }
+            };
+
+            let next = ExecuteRequest::new(
+                request(false, json!("What should I pack?"), tools, Some(&compacted_id)),
+                fixture.exec_ctx.clone(),
+            )
+            .run()
+            .await;
+            assert!(next.is_ok(), "{case}: the next turn is accepted: {:?}", next.err());
+            let bodies = fixture.request_bodies().await;
+            assert_not_pending(inference_bodies(&bodies).last().unwrap(), "call_1");
+        }
+    }
+}
+
+/// A late output survives when the response that delivered it compacts again in a later round
+/// (here the continuation round after a new async call).
+#[tokio::test]
+async fn a_late_output_survives_compaction_in_two_rounds() {
+    let clock = json!({"type": "function", "name": "get_time", "async": true,
+        "parameters": {"type": "object", "properties": {"city": {"type": "string"}}}});
+    for async_tool in [true, false] {
+        let case = format!("async={async_tool}");
+        let mut responses = vec![model_response(
+            false,
+            &[call_item(WEATHER_TOOL, "call_1", r#"{"city":"Paris"}"#)],
+        )];
+        if async_tool {
+            responses.push(model_response(false, &[message_item("msg_1", "Started the lookup.")]));
+        }
+        responses.extend([
+            support::text_response("Summary: the Paris weather arrived: clear, 22 C."),
+            model_response(false, &[call_item("get_time", "call_2", r#"{"city":"Paris"}"#)]),
+            support::text_response("Summary: weather arrived; a time lookup is pending."),
+            model_response(false, &[message_item("msg_2", "Clear and 22 C; checking the time.")]),
+            model_response(false, &[message_item("msg_3", "Take sunglasses.")]),
+        ]);
+        let fixture = support::TestFixture::new_with_responses(responses).await;
+        let tools = json!([weather_tool(async_tool), clock]);
+        let (first, _) = run(
+            request(false, json!("Check Paris."), tools.clone(), None),
+            fixture.exec_ctx.clone(),
+        )
+        .await;
+        let output = function_output("call_1", r#"{"temperature_c":22}"#);
+        let (second, _) = run(
+            compacting(request(false, json!([output]), tools.clone(), Some(&first.id))),
+            fixture.exec_ctx.clone(),
+        )
+        .await;
+        assert_eq!(second.status, "completed", "{case}");
+
+        let next = ExecuteRequest::new(
+            request(false, json!("What should I pack?"), tools, Some(&second.id)),
+            fixture.exec_ctx.clone(),
+        )
+        .run()
+        .await;
+        assert!(next.is_ok(), "{case}: the next turn is accepted: {:?}", next.err());
+        let bodies = fixture.request_bodies().await;
+        let last = *inference_bodies(&bodies).last().unwrap();
+        assert_eq!(
+            developer_notes(last),
+            [pending_call_note("get_time", "call_2").as_str()],
+            "{case}: only the new call is pending: {last}"
+        );
+    }
+}
+
+/// The compact endpoint returns a pending async custom call in its public form, not lowered.
+#[tokio::test]
+async fn explicit_compaction_keeps_a_pending_custom_call_public() {
+    let fixture = support::TestFixture::new_with_responses(vec![
+        model_response(
+            false,
+            &[call_item("echo", "call_custom", r#"{"input":"ASYNC_CUSTOM_OK"}"#)],
+        ),
+        model_response(false, &[message_item("msg_1", "Started.")]),
+        support::text_response("Summary: an echo job is pending."),
+    ])
+    .await;
+    let tools = json!([{"type": "custom", "name": "echo", "async": true}]);
+    let (first, _) = run(
+        request(false, json!("Start echo."), tools, None),
+        fixture.exec_ctx.clone(),
+    )
+    .await;
+    let compacted = agentic_core::executor::compact_response(
+        serde_json::from_value(json!({"model": "test-model", "previous_response_id": first.id})).unwrap(),
+        &fixture.exec_ctx,
+        None,
+    )
+    .await
+    .expect("compaction succeeds");
+    let window = serde_json::to_value(&compacted.output).unwrap();
+    let calls: Vec<&Value> = window
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["call_id"] == "call_custom")
+        .collect();
+    assert_eq!(calls.len(), 1, "{window}");
+    assert_eq!(calls[0]["type"], "custom_tool_call", "{window}");
+    assert_eq!(calls[0]["id"], "ctc_call_custom");
+    assert_eq!(calls[0]["status"], "completed");
+    assert_eq!(calls[0]["input"], "ASYNC_CUSTOM_OK");
+    assert_eq!(calls[0]["async"], true);
+}
+
+/// Compacting input alone (no stored history) returns the request's pending custom call as sent.
+#[tokio::test]
+async fn stateless_compaction_keeps_a_pending_custom_call_public() {
+    let fixture =
+        support::TestFixture::new_with_responses(vec![support::text_response("Summary: an echo job is pending.")])
+            .await;
+    let call = json!({"type": "custom_tool_call", "id": "ctc_1", "call_id": "call_custom", "name": "echo",
+        "input": "ASYNC_CUSTOM_OK", "status": "completed", "async": true});
+    let compacted = agentic_core::executor::compact_response(
+        serde_json::from_value(json!({"model": "test-model", "input": [
+            {"type": "message", "role": "user", "content": "Start echo."}, call.clone()
+        ]}))
+        .unwrap(),
+        &fixture.exec_ctx,
+        None,
+    )
+    .await
+    .expect("compaction succeeds");
+    let window = serde_json::to_value(&compacted.output).unwrap();
+    let kept: Vec<&Value> = window
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["call_id"] == "call_custom")
+        .collect();
+    assert_eq!(kept, [&call], "{window}");
+}
+
+/// After the request that delivered an async output compacted, a further output for the same call
+/// reaches the model after its call, not on its own.
+#[tokio::test]
+async fn a_repeated_output_after_compaction_keeps_its_call() {
+    let fixture = support::TestFixture::new_with_responses(vec![
+        model_response(false, &[call_item(WEATHER_TOOL, "call_1", r#"{"city":"Paris"}"#)]),
+        model_response(false, &[message_item("msg_1", "Started the lookup.")]),
+        support::text_response("Summary: the Paris weather arrived: clear, 22 C."),
+        model_response(false, &[message_item("msg_2", "Paris is clear and 22 C.")]),
+        model_response(false, &[message_item("msg_3", "Now it is rainy and 9 C.")]),
+    ])
+    .await;
+    let tools = json!([weather_tool(true)]);
+    let (first, _) = run(
+        request(false, json!("Check Paris."), tools.clone(), None),
+        fixture.exec_ctx.clone(),
+    )
+    .await;
+    let output = function_output("call_1", r#"{"temperature_c":22}"#);
+    let (second, _) = run(
+        compacting(request(false, json!([output]), tools.clone(), Some(&first.id))),
+        fixture.exec_ctx.clone(),
+    )
+    .await;
+    let repeat = function_output("call_1", r#"{"temperature_c":9}"#);
+    let (third, _) = run(
+        request(false, json!([repeat]), tools, Some(&second.id)),
+        fixture.exec_ctx.clone(),
+    )
+    .await;
+    assert_eq!(support::output_text(&third), "Now it is rainy and 9 C.");
+    let bodies = fixture.request_bodies().await;
+    let last = *inference_bodies(&bodies).last().unwrap();
+    assert_call_once_before_output(last, "call_1");
+    assert!(
+        items(last)
+            .iter()
+            .any(|item| item["type"] == "function_call" && item["call_id"] == "call_1"),
+        "the call accompanies the repeated output: {last}"
+    );
+    assert!(developer_notes(last).is_empty(), "the call is answered: {last}");
+}
+
+/// A late custom tool output delivered with automatic compaction is kept like a function output.
+#[tokio::test]
+async fn a_late_custom_output_delivered_with_compaction_is_kept() {
+    let fixture = support::TestFixture::new_with_responses(vec![
+        model_response(false, &[call_item("echo", "call_custom", r#"{"input":"HI"}"#)]),
+        model_response(false, &[message_item("msg_1", "Started.")]),
+        support::text_response("Summary: the echo returned HI."),
+        model_response(false, &[message_item("msg_2", "Echo said HI.")]),
+        model_response(false, &[message_item("msg_3", "Done.")]),
+    ])
+    .await;
+    let tools = json!([{"type": "custom", "name": "echo", "async": true}]);
+    let (first, _) = run(
+        request(false, json!("Start echo."), tools.clone(), None),
+        fixture.exec_ctx.clone(),
+    )
+    .await;
+    let output = json!({"type": "custom_tool_call_output", "call_id": "call_custom", "output": "HI"});
+    let (second, _) = run(
+        compacting(request(false, json!([output]), tools.clone(), Some(&first.id))),
+        fixture.exec_ctx.clone(),
+    )
+    .await;
+    let (_, _) = run(
+        request(false, json!("Anything else?"), tools, Some(&second.id)),
+        fixture.exec_ctx.clone(),
+    )
+    .await;
+    let bodies = fixture.request_bodies().await;
+    assert_not_pending(inference_bodies(&bodies).last().unwrap(), "call_custom");
+}
+
 /// An async namespace member is called by its flattened model-visible name; the public call keeps
 /// its member name and namespace, and the upstream note names the call as the model sees it.
 #[tokio::test]

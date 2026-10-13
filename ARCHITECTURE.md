@@ -558,8 +558,12 @@ call inference, run the tool loop, persist. `agentic-server` never reaches past 
   compaction nor the continuation. A compaction window (`model_items`,
   `canonical_session_history`) keeps an async call that was still open at its checkpoint,
   and a session whose history compaction replaces keeps open parent calls the same way.
-  Compaction stores again only the open calls the request itself supplied, which it would
-  otherwise drop; a call already stored keeps its place, so no item or `call_id` repeats.
+  Compaction replaces the request's own items, so it stores two kinds of them again, as the
+  request supplied them: outputs that answer calls made before the request, before the
+  compaction item (the answered call and its output leave the window together), and the async
+  calls the request made that are still open. A call already stored keeps its place, so no item
+  or `call_id` repeats. An async call answered before the checkpoint returns to the model view
+  when a further output for it arrives after the checkpoint.
   Gateway-executed built-in tool calls are resolved and
   recorded within their originating round, so they do not remain pending at this
   boundary.
