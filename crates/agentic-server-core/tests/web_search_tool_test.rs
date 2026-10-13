@@ -2348,7 +2348,7 @@ async fn service_tier_comes_only_from_the_final_tool_round() {
         };
         assert_eq!(response.service_tier.as_deref(), actual);
         let stored = exec.resp_handler.retrieve(&response.id).await.unwrap();
-        assert_eq!(stored.service_tier.as_deref(), actual);
+        assert_eq!(stored.service_tier.as_deref(), actual.or(Some("default")));
         let requests = llm.request_bodies().await;
         assert_eq!(requests.len(), 2);
         assert!(requests.iter().all(|request| request["service_tier"] == "priority"));

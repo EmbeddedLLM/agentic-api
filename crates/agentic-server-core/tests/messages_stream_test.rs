@@ -19,6 +19,7 @@ use agentic_core::executor::{
 use agentic_core::storage::{ConversationStore, ResponseStore};
 use agentic_core::tool::registry_tools;
 use agentic_core::tool::{ToolRegistry, WebSearchHandler};
+use agentic_core::types::messages::tool_seam::NATIVE_WEB_SEARCH_VERSIONS;
 use agentic_core::types::messages::{GatewayToolMap, ToolParam};
 use axum::extract::State;
 use axum::http::Uri;
@@ -284,12 +285,11 @@ async fn assert_messages_stream_presents_one_message(streams: Vec<String>) -> St
     // content_block_start index and assert 0..N with no dup.
     let mut indices: Vec<u64> = Vec::new();
     for line in sse.lines() {
-        if let Some(d) = line.strip_prefix("data: ") {
-            if let Ok(ev) = serde_json::from_str::<Value>(d) {
-                if ev["type"] == "content_block_start" {
-                    indices.push(ev["index"].as_u64().expect("index"));
-                }
-            }
+        if let Some(d) = line.strip_prefix("data: ")
+            && let Ok(ev) = serde_json::from_str::<Value>(d)
+            && ev["type"] == "content_block_start"
+        {
+            indices.push(ev["index"].as_u64().expect("index"));
         }
     }
     assert!(!indices.is_empty(), "some blocks surfaced");
@@ -434,6 +434,118 @@ async fn messages_stream_hides_a_gateway_call_on_a_terminal_round() {
     for kind in ["message_start", "message_delta", "message_stop"] {
         assert_eq!(sse.matches(&format!("event: {kind}")).count(), 1, "one {kind}");
     }
+}
+
+/// Mock search backend that records each request's query parameters.
+async fn spawn_recording_search() -> (
+    String,
+    Arc<std::sync::Mutex<Vec<Vec<(String, String)>>>>,
+    tokio::task::JoinHandle<()>,
+) {
+    let searches = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let recorded = Arc::clone(&searches);
+    let app = Router::new().route(
+        "/v1/search",
+        get(move |uri: Uri| {
+            let params = url::form_urlencoded::parse(uri.query().unwrap_or_default().as_bytes())
+                .into_owned()
+                .collect();
+            recorded.lock().unwrap().push(params);
+            async {
+                Json(
+                    serde_json::json!({"results": {"web": [{"url": "https://www.rust-lang.org/", "title": "Rust",
+                    "description": "d", "snippets": ["Rust 1.89.0 is the latest stable release."]}], "news": []}}),
+                )
+            }
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app).await.ok();
+    });
+    (format!("http://{addr}"), searches, handle)
+}
+
+/// Streaming half of the JSON loop's
+/// `every_native_web_search_version_runs_as_the_basic_search` (#419).
+#[tokio::test]
+async fn every_native_web_search_version_streams_as_the_basic_search() {
+    let mut upstream_tools = Vec::new();
+    for version in NATIVE_WEB_SEARCH_VERSIONS {
+        let tool_type = version.type_name;
+        let streams = vec![
+            round_stream(&[("t1", serde_json::json!({"query": "rust release"}))]),
+            round_stream(&[]),
+        ];
+        let (vllm_url, upstream, _v) = spawn_mock_vllm_stream(streams).await;
+        let (search_url, searches, _s) = spawn_recording_search().await;
+        let exec_ctx = build_exec_ctx(&vllm_url, &search_url).await;
+        let mut tool = serde_json::json!({
+            "type": tool_type,
+            "name": "web_search",
+            "allowed_callers": ["direct"],
+            "allowed_domains": ["rust-lang.org"],
+            "user_location": {"type": "approximate", "country": "ca"}
+        });
+        if version.response_inclusion {
+            tool["response_inclusion"] = "full".into();
+        }
+        let request = serde_json::json!({
+            "model": "qwen3", "max_tokens": 1024, "stream": true,
+            "messages": [{"role": "user", "content": "Search Rust's official site."}],
+            "tools": [tool]
+        });
+        let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
+        let mut params = registry_tools(Some(&tools), &GatewayToolMap::default());
+        let mut executors = exec_ctx.gateway_executors.clone();
+        let registry = Arc::new(
+            ToolRegistry::build_with_handlers(&mut params, &mut executors)
+                .await
+                .unwrap(),
+        );
+
+        let sse = run_test_messages_stream(request, registry, Arc::clone(&exec_ctx))
+            .await
+            .collect::<Vec<_>>()
+            .await
+            .join("");
+
+        assert_eq!(upstream.calls.load(Ordering::SeqCst), 2, "{tool_type}");
+        let received = searches.lock().unwrap().clone();
+        let [search] = received.as_slice() else {
+            panic!("{tool_type}: expected one search, got {received:?}");
+        };
+        let param = |key: &str| {
+            search
+                .iter()
+                .find(|(name, _)| name == key)
+                .map(|(_, value)| value.as_str())
+        };
+        assert_eq!(
+            param("include_domains"),
+            Some("rust-lang.org"),
+            "{tool_type}: {search:?}"
+        );
+        assert_eq!(param("country"), Some("CA"), "{tool_type}: {search:?}");
+        assert!(sse.contains("Done."), "{tool_type}: final answer streams:\n{sse}");
+        assert!(
+            !sse.contains(r#""type":"tool_use""#),
+            "{tool_type}: gateway tool_use surfaced:\n{sse}"
+        );
+        for kind in ["message_start", "message_delta", "message_stop"] {
+            assert_eq!(
+                sse.matches(&format!("event: {kind}")).count(),
+                1,
+                "{tool_type}: one {kind}"
+            );
+        }
+        upstream_tools.push(upstream.requests.lock().await[0]["tools"].clone());
+    }
+    assert!(
+        upstream_tools.windows(2).all(|pair| pair[0] == pair[1]),
+        "every version reaches the upstream as the same function tool: {upstream_tools:?}"
+    );
 }
 
 /// One upstream SSE round whose assistant turn is the gateway calls `calls`
@@ -708,12 +820,11 @@ async fn messages_stream_multiround_single_lifecycle() {
     // Contiguous surfaced indices across rounds.
     let mut idx = Vec::new();
     for line in sse.lines() {
-        if let Some(d) = line.strip_prefix("data: ") {
-            if let Ok(ev) = serde_json::from_str::<Value>(d) {
-                if ev["type"] == "content_block_start" {
-                    idx.push(ev["index"].as_u64().expect("index"));
-                }
-            }
+        if let Some(d) = line.strip_prefix("data: ")
+            && let Ok(ev) = serde_json::from_str::<Value>(d)
+            && ev["type"] == "content_block_start"
+        {
+            idx.push(ev["index"].as_u64().expect("index"));
         }
     }
     assert_eq!(

@@ -11,7 +11,7 @@
 *Run OpenAI-grade agentic workloads (Responses and Messages APIs, server-side tools, Codex, Claude Code) on your own GPUs.*
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/Rust-1.85%2B-orange.svg?logo=rust)](Cargo.toml)
+[![Rust](https://img.shields.io/badge/Rust-1.98.1%2B-orange.svg?logo=rust)](Cargo.toml)
 [![CI](https://github.com/vllm-project/agentic-api/actions/workflows/rust.yml/badge.svg)](https://github.com/vllm-project/agentic-api/actions/workflows/rust.yml)
 [![pre-commit](https://github.com/vllm-project/agentic-api/actions/workflows/pre-commit.yml/badge.svg)](https://github.com/vllm-project/agentic-api/actions/workflows/pre-commit.yml)
 
@@ -72,8 +72,8 @@ flowchart LR
 | `POST /v1/responses/compact` | Compact direct input or a stored response chain | ✅ |
 | `/v1/conversations` · `/v1/conversations/{id}/items` | Conversations API: create, retrieve, update, and delete conversations and their items | ✅ |
 | `POST /v1/messages` · `POST /v1/messages/count_tokens` | Anthropic Messages API forwarded to the upstream, with a server-side loop for gateway-owned tools | ✅ |
-| `GET /v1/models` | Model listing proxied from vLLM | ✅ |
-| `POST /v1/chat/completions` · `POST /v1/completions` | Forwarded to the upstream verbatim, so clients on those endpoints keep working when the gateway is the entry point | ✅ |
+| `GET /v1/models` · `GET /v1/models/{model}` | Model listing proxied from vLLM; a single model is answered from that list | ✅ |
+| `POST /v1/chat/completions` · `POST /v1/completions` · `POST /v1/embeddings` | Forwarded to the upstream verbatim, so clients on those endpoints keep working when the gateway is the entry point | ✅ |
 | `GET /health` · `GET /ready` | Liveness and readiness probes | ✅ |
 | `GET /swagger-ui` · `GET /openapi.json` | Generated OpenAPI spec and Swagger UI, served when `ENABLE_OPENAPI_DOCS=true` | ✅ |
 | Stateful Messages | Messages continuation on the shared persistence primitives | ⏳ Planned |
@@ -280,7 +280,7 @@ api_key_env = "YOU_API_KEY"
 # max_concurrent_queries = 1
 
 [web_fetch]
-# Gateway-executed page fetches for Claude's native web_fetch_20250910 tool on /v1/messages.
+# Gateway-executed page fetches for Claude's native web_fetch tool on /v1/messages.
 # enabled = true
 # Allow fetches of private, loopback, and other non-public addresses (off by default).
 # allow_private_networks = false
@@ -637,8 +637,20 @@ YOU_API_KEY=<you.com-key> YOU_API_BASE_URL=<you.com-base-url> \
 ```
 
 The gateway supports the basic `web_search_20250305` contract, including `max_uses`, `allowed_domains`,
-`blocked_domains`, and the country in `user_location`. Other versioned native web-search declarations are rejected rather
-than forwarded in a shape the upstream cannot execute.
+`blocked_domains`, and the country in `user_location`. The later versions, `web_search_20260209` and
+`web_search_20260318`, add dynamic filtering, which calls the search from Anthropic's code execution by default. The
+gateway does not run code execution, so it runs a later version as the basic search when its `allowed_callers` includes
+`"direct"`:
+
+```json
+{"type": "web_search_20260318", "name": "web_search", "allowed_callers": ["direct"]}
+```
+
+Without `"direct"`, the request is rejected with HTTP 400 naming `allowed_callers`, as Anthropic's API answers for
+models that cannot call tools from code. `response_inclusion` (`web_search_20260318`) is accepted because it only
+affects results that code execution consumed. A `web_search` declaration of another version is rejected with HTTP 400
+rather than forwarded in a shape the upstream cannot execute, and so is one that sets `use_cache`, which no web search
+version defines, or `response_inclusion` on a version before `web_search_20260318`.
 
 `max_uses` limits the searches performed across the whole request, not the number of tool calls. The model may batch
 several queries into one call, and every query counts as one search. A call that the remaining budget cannot cover is
@@ -654,13 +666,13 @@ Older clients that declare a function tool named `WebSearch` can still opt in wi
 ### Fetching pages with the native web fetch tool
 
 Applications that call the Messages API through the Anthropic SDK can declare Claude's native
-[`web_fetch_20250910`](https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-fetch-tool) server tool. Agentic
-API rewrites that declaration into an ordinary function tool for the upstream model, fetches the page itself when the
-model calls it, hands the page text back to the model, and keeps the call out of the client-visible response: the same
-hide-the-call contract as web search. `/v1/messages/count_tokens` accepts the declaration too. No search provider or API
-key is involved; the built-in fetcher is on by default and can be switched off with `[web_fetch] enabled = false` or
-`AGENTIC_WEB_FETCH_ENABLED=false`, after which such a declaration is rejected with HTTP 400 instead of being forwarded
-in a shape the upstream cannot execute.
+[`web_fetch`](https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-fetch-tool) server tool, in its basic
+version `web_fetch_20250910` or a later one. Agentic API rewrites that declaration into an ordinary function tool for
+the upstream model, fetches the page itself when the model calls it, hands the page text back to the model, and keeps
+the call out of the client-visible response: the same hide-the-call contract as web search. `/v1/messages/count_tokens`
+accepts the declaration too. No search provider or API key is involved; the built-in fetcher is on by default and can be
+switched off with `[web_fetch] enabled = false` or `AGENTIC_WEB_FETCH_ENABLED=false`, after which such a declaration is
+rejected with HTTP 400 instead of being forwarded in a shape the upstream cannot execute.
 
 ```json
 {
@@ -673,9 +685,13 @@ in a shape the upstream cannot execute.
 
 The gateway supports `max_uses`, `allowed_domains` / `blocked_domains` (matched on the host only, as Anthropic documents
 for web fetch, so each entry must be a host name or address without scheme or path), and `max_content_tokens`;
-`citations: {"enabled": false}` and `allowed_callers: ["direct"]` are accepted. Anything the gateway cannot honour
-(`citations` enabled, the `use_cache` and `response_inclusion` settings of later tool versions, or another
-`web_fetch_*` version) is rejected with HTTP 400 rather than ignored.
+`citations: {"enabled": false}` and `allowed_callers: ["direct"]` are accepted. The later versions,
+`web_fetch_20260209`, `web_fetch_20260309`, and `web_fetch_20260318`, add dynamic filtering and follow the web search
+rule: they run as the basic fetch when `allowed_callers` includes `"direct"` and are rejected with HTTP 400 otherwise.
+`use_cache` (`web_fetch_20260309` and later) is honoured whatever its value, because the built-in fetcher keeps no cache
+of fetched pages, and `response_inclusion` (`web_fetch_20260318`) is accepted because it only affects results that code
+execution consumed. Anything the gateway cannot honour (`citations` enabled, `use_cache` or `response_inclusion` on a
+version that does not define it, or another `web_fetch_*` version) is rejected with HTTP 400 rather than ignored.
 
 Each call answers the model with one JSON `tool_result`: the final URL after redirects, the page title, the content
 type, a `retrieved_at` timestamp, and the page text. HTML is reduced to plain text; `text/*`, XHTML, XML, and JSON

@@ -14,7 +14,7 @@
 
 use crate::types::messages::request::ToolParam;
 use crate::types::messages::tool_seam::{
-    GatewayToolMap, NATIVE_WEB_SEARCH_TYPE, WEB_SEARCH_EXECUTOR, is_native_web_fetch_type,
+    GatewayToolMap, NATIVE_WEB_SEARCH_VERSIONS, NativeToolVersion, WEB_SEARCH_EXECUTOR, is_native_web_fetch_type,
 };
 use crate::types::tools::{
     CodeInterpreterToolParam, CodexNamespaceMember, CodexNamespaceToolParam, CustomToolParam, DomainFilters,
@@ -172,9 +172,11 @@ fn map_tool(tool: &ToolParam, map: &GatewayToolMap) -> Option<ToolDeclaration> {
 }
 
 /// The per-request settings of a native `web_search` declaration, read the
-/// same way for the registry and for the Messages adapter.
+/// same way for the registry and for the Messages adapter, for every version
+/// the gateway executes: the later versions carry the same settings as the
+/// basic one. A plain function named `web_search` has none.
 pub(crate) fn web_search_config(tool: &ToolParam) -> WebSearchToolParam {
-    if tool.type_.as_deref() != Some(NATIVE_WEB_SEARCH_TYPE) {
+    if NativeToolVersion::find(NATIVE_WEB_SEARCH_VERSIONS, tool.type_.as_deref()).is_none() {
         return WebSearchToolParam::default();
     }
 
@@ -224,6 +226,7 @@ mod tests {
     use super::*;
     use crate::tool::ToolType;
     use crate::types::messages::request::MessagesRequest;
+    use crate::types::messages::tool_seam::NATIVE_WEB_FETCH_VERSIONS;
     use crate::types::tools::McpDiscoveredToolParam;
 
     fn tools_of(json_req: Value) -> Option<Vec<ToolParam>> {
@@ -268,49 +271,74 @@ mod tests {
         ));
     }
 
+    /// Every version the gateway executes carries its settings into the
+    /// registry: the later versions declare the same domain lists and location
+    /// as the basic one, and dropping them would run an unfiltered search.
     #[test]
     fn a_native_web_search_declaration_carries_its_settings() {
-        let tools = tools_of(json!({
+        for tool_type in NATIVE_WEB_SEARCH_VERSIONS.iter().map(|version| version.type_name) {
+            let tools = tools_of(json!({
+                "model": "m", "max_tokens": 10, "messages": [],
+                "tools": [{"type": tool_type, "name": "web_search", "allowed_callers": ["direct"],
+                           "allowed_domains": ["example.com"], "user_location": {"type": "approximate", "city": "Paris"}}]
+            }));
+            let mapped = registry_tools(tools.as_ref(), &GatewayToolMap::default());
+            let [ToolDeclaration::WebSearch(param)] = mapped.as_slice() else {
+                panic!("expected one WebSearch declaration for {tool_type}, got {mapped:?}");
+            };
+            assert_eq!(
+                param
+                    .filters
+                    .as_ref()
+                    .and_then(|filters| filters.allowed_domains.clone()),
+                Some(vec!["example.com".to_owned()]),
+                "{tool_type}"
+            );
+            assert_eq!(
+                param.user_location.as_ref().and_then(|location| location.city.clone()),
+                Some("Paris".to_owned()),
+                "{tool_type}"
+            );
+        }
+
+        // A plain function named web_search has no native settings to read.
+        let plain = tools_of(json!({
             "model": "m", "max_tokens": 10, "messages": [],
-            "tools": [{"type": "web_search_20250305", "name": "web_search",
-                       "allowed_domains": ["example.com"], "user_location": {"type": "approximate", "city": "Paris"}}]
+            "tools": [{"name": "web_search", "input_schema": {"type": "object"}, "allowed_domains": ["example.com"]}]
         }));
-        let mapped = registry_tools(tools.as_ref(), &GatewayToolMap::default());
+        let mapped = registry_tools(plain.as_ref(), &GatewayToolMap::default());
         let [ToolDeclaration::WebSearch(param)] = mapped.as_slice() else {
             panic!("expected one WebSearch declaration, got {mapped:?}");
         };
-        assert_eq!(
-            param
-                .filters
-                .as_ref()
-                .and_then(|filters| filters.allowed_domains.clone()),
-            Some(vec!["example.com".to_owned()])
-        );
-        assert_eq!(
-            param.user_location.as_ref().and_then(|location| location.city.clone()),
-            Some("Paris".to_owned())
-        );
+        assert!(param.filters.is_none(), "{param:?}");
     }
 
     #[test]
     fn a_native_web_fetch_declaration_becomes_the_web_fetch_declaration() {
-        let tools = tools_of(json!({
-            "model": "m", "max_tokens": 10, "messages": [],
-            "tools": [{"type": "web_fetch_20250910", "name": "web_fetch", "max_uses": 2,
-                       "allowed_domains": ["example.com"], "max_content_tokens": 5000}]
-        }));
-        let mapped = registry_tools(tools.as_ref(), &GatewayToolMap::default());
-        let [ToolDeclaration::WebFetch(param)] = mapped.as_slice() else {
-            panic!("expected one WebFetch declaration, got {mapped:?}");
-        };
-        assert_eq!(
-            param
-                .filters
-                .as_ref()
-                .and_then(|filters| filters.allowed_domains.clone()),
-            Some(vec!["example.com".to_owned()])
-        );
-        assert_eq!(param.max_content_tokens.map(std::num::NonZeroU32::get), Some(5000));
+        for tool_type in NATIVE_WEB_FETCH_VERSIONS.iter().map(|version| version.type_name) {
+            let tools = tools_of(json!({
+                "model": "m", "max_tokens": 10, "messages": [],
+                "tools": [{"type": tool_type, "name": "web_fetch", "max_uses": 2, "allowed_callers": ["direct"],
+                           "allowed_domains": ["example.com"], "max_content_tokens": 5000}]
+            }));
+            let mapped = registry_tools(tools.as_ref(), &GatewayToolMap::default());
+            let [ToolDeclaration::WebFetch(param)] = mapped.as_slice() else {
+                panic!("expected one WebFetch declaration for {tool_type}, got {mapped:?}");
+            };
+            assert_eq!(
+                param
+                    .filters
+                    .as_ref()
+                    .and_then(|filters| filters.allowed_domains.clone()),
+                Some(vec!["example.com".to_owned()]),
+                "{tool_type}"
+            );
+            assert_eq!(
+                param.max_content_tokens.map(std::num::NonZeroU32::get),
+                Some(5000),
+                "{tool_type}"
+            );
+        }
 
         // A plain function that happens to be named web_fetch is the client's.
         let plain = tools_of(json!({

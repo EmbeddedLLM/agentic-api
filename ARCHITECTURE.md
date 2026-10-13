@@ -1122,7 +1122,7 @@ execution, and the fed-back `tool_result`s cannot differ between them. Calls are
 admitted sequentially in model order before any of them starts, then run concurrently
 under the per-call timeout.
 
-A native `web_search_20250305` declaration's `max_uses` is a request-wide budget of
+A native `web_search` declaration's `max_uses` is a request-wide budget of
 searches, not of calls. The normalized tool sent upstream lets one call batch several
 `queries`, so a call is charged for every query the handler would run, counted by the
 handler's own argument parser. A call the remaining budget cannot cover is refused
@@ -1130,7 +1130,7 @@ whole with an error `tool_result` and leaves the budget untouched, so a later ca
 fits still runs. A call whose arguments cannot be parsed performs no search and is not
 charged.
 
-A native `web_fetch_20250910` declaration is handled the same way (`tool/web_fetch`,
+A native `web_fetch` declaration is handled the same way (`tool/web_fetch`,
 #408): the upstream sees an ordinary `web_fetch` function tool with a single `url`
 argument, and the gateway executes the call. The Messages adapter
 (`messages_request.rs`) judges the Anthropic-specific settings — tool version,
@@ -1154,6 +1154,20 @@ ceiling on fetches in flight — and answers documented failures in the
 `web_fetch_tool_result_error` shape as a `ToolOutput` with a failure status, which the
 loop reports as `is_error` without reading the output. Retrieval sits behind the
 crate-private `WebFetchBackend` trait; the built-in HTTP backend is the default.
+
+Both tools are executed in every version `tool_seam` lists (`NATIVE_WEB_SEARCH_VERSIONS`,
+`NATIVE_WEB_FETCH_VERSIONS`; #419). Each `NativeToolVersion` records what its version
+defines beyond the basic one, as Anthropic documents it, and the adapter reads those
+fields rather than comparing version strings. A dynamic-filtering version's default
+caller is code execution, so its declaration is accepted only when `allowed_callers`
+includes `"direct"`, and is then rewritten into the basic version's function tool. The
+fetcher keeps no cache and the gateway never calls a tool from code execution, so
+`use_cache` and `response_inclusion` are accepted on the versions that define them; on
+every other version of either tool they are refused. The registry seam
+(`tool::declaration::web_search_config`) reads the shared settings of every listed
+version, so a later version keeps its domain lists and location, and the rewrite itself
+reports whether it changed a declaration, which is what `count_tokens` uses to decide
+whether to forward the rewritten body.
 
 Both loops take a `MessagesRequestContext` (`messages_context.rs`), the per-request
 type that replaced a bare `serde_json::Value` at that boundary. It holds two views of

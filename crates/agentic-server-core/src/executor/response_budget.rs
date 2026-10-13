@@ -647,12 +647,13 @@ mod tests {
             incomplete_details: None,
             error: None,
             previous_response_id: None,
-            conversation_id: None,
+            conversation: None,
             instructions: None,
             max_tool_calls: None,
             service_tier: None,
             tools: None,
             tool_choice: None,
+            standard_fields: crate::types::request_response::StandardResponseFields::default(),
         };
         let expected = RETAINED_CONTAINER_OVERHEAD_BYTES + "resp_test".len() + RETAINED_CONTAINER_OVERHEAD_BYTES;
         assert_eq!(retained_response_bytes(&payload), expected);

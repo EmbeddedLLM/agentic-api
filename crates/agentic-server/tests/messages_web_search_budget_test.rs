@@ -1,5 +1,5 @@
 //! `max_uses` on a native Messages web search limits the searches the gateway
-//! performs, over HTTP JSON and SSE alike.
+//! performs, over HTTP JSON and SSE alike, for every supported version (#419).
 #[allow(dead_code)]
 mod common;
 
@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use agentic_core::executor::ExecutionContext;
+use agentic_core::types::messages::tool_seam::NATIVE_WEB_SEARCH_VERSIONS;
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::Uri;
@@ -124,7 +125,7 @@ fn fed_back_errors(inference: &Value) -> Vec<bool> {
         .collect()
 }
 
-async fn assert_max_uses_limits_searches(stream: bool) {
+async fn assert_max_uses_limits_searches(tool: &Value, stream: bool) {
     let backend = Backend::default();
     let app = Router::new()
         .route("/v1/messages", post(infer))
@@ -149,8 +150,7 @@ async fn assert_max_uses_limits_searches(stream: bool) {
         .unwrap()
         .post(format!("{url}/v1/messages"))
         .json(&json!({"model":"test-model", "max_tokens":64, "stream":stream,
-            "messages":[{"role":"user", "content":"Search"}],
-            "tools":[{"type":"web_search_20250305", "name":"web_search", "max_uses":2}]}))
+            "messages":[{"role":"user", "content":"Search"}], "tools":[tool]}))
         .send()
         .await
         .unwrap();
@@ -183,12 +183,33 @@ async fn assert_max_uses_limits_searches(stream: bool) {
     context.storage_pool().unwrap().close().await;
 }
 
+fn basic_search() -> Value {
+    json!({"type":"web_search_20250305", "name":"web_search", "max_uses":2})
+}
+
 #[tokio::test]
 async fn max_uses_limits_batched_searches_over_http_json() {
-    assert_max_uses_limits_searches(false).await;
+    assert_max_uses_limits_searches(&basic_search(), false).await;
 }
 
 #[tokio::test]
 async fn max_uses_limits_batched_searches_over_http_sse() {
-    assert_max_uses_limits_searches(true).await;
+    assert_max_uses_limits_searches(&basic_search(), true).await;
+}
+
+/// The later versions run as the basic search when the declaration permits
+/// direct calls, under the same request-wide budget.
+#[tokio::test]
+async fn later_web_search_versions_run_under_the_same_budget_over_http() {
+    for version in &NATIVE_WEB_SEARCH_VERSIONS[1..] {
+        let mut tool = basic_search();
+        tool["type"] = json!(version.type_name);
+        tool["allowed_callers"] = json!(["direct"]);
+        if version.response_inclusion {
+            tool["response_inclusion"] = json!("full");
+        }
+        for stream in [false, true] {
+            assert_max_uses_limits_searches(&tool, stream).await;
+        }
+    }
 }

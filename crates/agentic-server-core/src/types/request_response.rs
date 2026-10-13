@@ -12,8 +12,13 @@ use crate::tool::{CodexNamespaceHandler, CustomHandler, ToolDeclaration, ToolErr
 mod max_tool_calls;
 mod response_stream;
 mod serde_helpers;
+mod standard_response;
 pub use max_tool_calls::{JsonKind, MAX_TOOL_CALLS_PARAM, MaxToolCalls, MaxToolCallsError, OutOfRangeInteger};
-use serde_helpers::{default_true, is_absent_or_default_tool_choice, serialize_upstream_tool_choice};
+use serde_helpers::{
+    default_true, deserialize_conversation, is_absent_or_default_tool_choice, serialize_conversation_object,
+    serialize_upstream_tool_choice,
+};
+pub use standard_response::{ResponseReasoning, StandardResponseFields};
 #[cfg(feature = "openapi")]
 mod schema;
 
@@ -98,8 +103,8 @@ pub struct RequestPayload<T: ?Sized = ResponseTextConfig> {
     pub input: ResponsesInput,
     pub instructions: Option<String>,
     pub previous_response_id: Option<String>,
-    #[serde(alias = "conversation")]
-    pub conversation_id: Option<String>,
+    #[serde(default, alias = "conversation_id", deserialize_with = "deserialize_conversation")]
+    pub conversation: Option<String>,
     pub tools: Option<Vec<ResponsesTool>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<ToolChoice>,
@@ -224,8 +229,8 @@ impl<T: ?Sized> RequestPayload<T> {
         if self.multi_agent.as_ref().is_some_and(|config| config.enabled) {
             return Some("multi_agent");
         }
-        if self.conversation_id.is_some() {
-            return Some("conversation_id");
+        if self.conversation.is_some() {
+            return Some("conversation");
         }
         if self
             .tools
@@ -267,7 +272,7 @@ impl<T: ?Sized> RequestPayload<T> {
             input: self.input,
             instructions: self.instructions,
             previous_response_id: self.previous_response_id,
-            conversation_id: self.conversation_id,
+            conversation: self.conversation,
             tools: self.tools,
             tool_choice: self.tool_choice,
             stream: self.stream,
@@ -425,7 +430,6 @@ pub struct IncompleteDetails {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ResponsePayload {
     pub id: String,
     pub object: String,
@@ -438,17 +442,26 @@ pub struct ResponsePayload {
     pub incomplete_details: Option<IncompleteDetails>,
     pub error: Option<Value>,
     pub previous_response_id: Option<String>,
-    pub conversation_id: Option<String>,
+    #[serde(
+        default,
+        alias = "conversation_id",
+        deserialize_with = "deserialize_conversation",
+        serialize_with = "serialize_conversation_object",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub conversation: Option<String>,
     pub instructions: Option<String>,
     /// The request's `max_tool_calls`, always echoed (`null` when unset). Never inherited.
     #[serde(default)]
     pub max_tool_calls: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, serialize_with = "standard_response::serialize_response_service_tier")]
     pub service_tier: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, serialize_with = "standard_response::serialize_response_tools")]
     pub tools: Option<Vec<ResponsesTool>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, serialize_with = "standard_response::serialize_response_tool_choice")]
     pub tool_choice: Option<ToolChoice>,
+    #[serde(flatten)]
+    pub standard_fields: StandardResponseFields,
 }
 
 #[cfg(test)]
@@ -620,8 +633,91 @@ mod tests {
             "model": "test-model", "input": "hello", "conversation": "conv_test"
         }))
         .expect("OpenAI conversation field should deserialize");
-        assert_eq!(request.conversation_id.as_deref(), Some("conv_test"));
-        assert_eq!(request.in_process_feature(), Some("conversation_id"));
+        assert_eq!(request.conversation.as_deref(), Some("conv_test"));
+        assert_eq!(request.in_process_feature(), Some("conversation"));
+    }
+
+    #[test]
+    fn request_payload_accepts_conversation_id_alias() {
+        let request: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test-model", "input": "hello", "conversation_id": "conv_alias"
+        }))
+        .expect("conversation_id alias should deserialize");
+        assert_eq!(request.conversation.as_deref(), Some("conv_alias"));
+        assert_eq!(request.in_process_feature(), Some("conversation"));
+    }
+
+    #[test]
+    fn request_payload_accepts_conversation_object_form() {
+        let request: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test-model", "input": "hello", "conversation": { "id": "conv_object" }
+        }))
+        .expect("conversation object form should deserialize");
+        assert_eq!(request.conversation.as_deref(), Some("conv_object"));
+        assert_eq!(request.in_process_feature(), Some("conversation"));
+    }
+
+    #[test]
+    fn request_payload_accepts_conversation_id_object_form() {
+        let request: RequestPayload = serde_json::from_value(serde_json::json!({
+            "model": "test-model", "input": "hello", "conversation_id": { "id": "conv_id_object" }
+        }))
+        .expect("conversation_id alias with object form should deserialize");
+        assert_eq!(request.conversation.as_deref(), Some("conv_id_object"));
+        assert_eq!(request.in_process_feature(), Some("conversation"));
+    }
+
+    #[test]
+    fn response_payload_serializes_conversation_as_object() {
+        let payload = ResponsePayload {
+            id: "resp_test".to_string(),
+            object: "response".to_string(),
+            created_at: 0,
+            model: "test-model".to_string(),
+            status: "completed".to_string(),
+            output: Vec::new(),
+            usage: None,
+            incomplete_details: None,
+            error: None,
+            previous_response_id: None,
+            conversation: Some("conv_123".to_string()),
+            instructions: None,
+            service_tier: None,
+            tools: None,
+            tool_choice: None,
+            standard_fields: StandardResponseFields::default(),
+            max_tool_calls: None,
+        };
+
+        let json = serde_json::to_value(&payload).expect("response should serialize");
+        assert_eq!(json["conversation"]["id"], "conv_123");
+        assert!(json["conversation"].is_object());
+    }
+
+    #[test]
+    fn response_payload_omits_absent_conversation() {
+        let payload = ResponsePayload {
+            id: "resp_test".to_string(),
+            object: "response".to_string(),
+            created_at: 0,
+            model: "test-model".to_string(),
+            status: "completed".to_string(),
+            output: Vec::new(),
+            usage: None,
+            incomplete_details: None,
+            error: None,
+            previous_response_id: None,
+            conversation: None,
+            instructions: None,
+            service_tier: None,
+            tools: None,
+            max_tool_calls: None,
+            tool_choice: None,
+            standard_fields: StandardResponseFields::default(),
+        };
+
+        let json = serde_json::to_value(&payload).expect("response should serialize");
+        assert!(json.get("conversation").is_none());
     }
 
     #[test]
@@ -1362,12 +1458,13 @@ mod tests {
             incomplete_details: None,
             error: None,
             previous_response_id: None,
-            conversation_id: None,
+            conversation: None,
             instructions: None,
             max_tool_calls: None,
             service_tier: None,
             tools: None,
             tool_choice: None,
+            standard_fields: StandardResponseFields::default(),
         };
 
         for (status, expected_type) in [
@@ -1401,12 +1498,13 @@ mod tests {
             incomplete_details: None,
             error: None,
             previous_response_id: None,
-            conversation_id: None,
+            conversation: None,
             instructions: None,
             max_tool_calls: None,
             service_tier: None,
             tools: Some(vec![tool]),
             tool_choice: None,
+            standard_fields: StandardResponseFields::default(),
         };
 
         let response = serde_json::to_value(&payload).expect("blocking response");
@@ -1431,12 +1529,13 @@ mod tests {
             incomplete_details: None,
             error: None,
             previous_response_id: None,
-            conversation_id: None,
+            conversation: None,
             instructions: None,
             max_tool_calls: None,
             service_tier: None,
             tools: None,
             tool_choice: None,
+            standard_fields: StandardResponseFields::default(),
         };
 
         let chunk = payload.as_created_response_chunk();

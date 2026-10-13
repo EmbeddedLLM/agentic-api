@@ -134,7 +134,7 @@ pub(super) fn prepare_reasoning_for_vllm(input: &mut ResponsesInput) -> Executor
 ///
 /// Dispatches based on `store` flag and which ID is present:
 /// - `previous_response_id`: rehydrate from the prior response checkpoint
-/// - `conversation_id`:      rehydrate from the conversation
+/// - `conversation`:         rehydrate from the conversation
 /// - no ids:                 forward only the new input
 ///
 /// # Errors
@@ -198,13 +198,13 @@ pub(crate) async fn rehydrate_with_continuation(
         continuation,
     };
 
-    if ctx.original_request.conversation_id.is_some() && ctx.original_request.previous_response_id.is_some() {
+    if ctx.original_request.conversation.is_some() && ctx.original_request.previous_response_id.is_some() {
         return Err(ExecutorError::InvalidRequest(
-            "provide only one of conversation_id or previous_response_id".into(),
+            "provide only one of conversation or previous_response_id".into(),
         ));
     }
 
-    if ctx.original_request.conversation_id.is_some() {
+    if ctx.original_request.conversation.is_some() {
         from_conversation(&mut ctx, exec_ctx).await?;
     } else if ctx.original_request.previous_response_id.is_some() {
         from_response(&mut ctx, exec_ctx).await?;
@@ -263,14 +263,14 @@ fn validate_multi_agent_request(request: &RequestPayload) -> ExecutorResult<()> 
 ///
 /// Loads the stored response, rehydrates its history items, resolves effective
 /// tools and tool choice from the stored metadata, and prepends the history to
-/// the enriched request input.
+/// the enriched request input. The new response is independent of any conversation
+/// associated with its parent.
 async fn from_response(ctx: &mut RequestContext, exec_ctx: &ExecutionContext) -> ExecutorResult<()> {
     if ctx.continuation.is_some() {
         return from_session_response(ctx, exec_ctx).await;
     }
     let stored = exec_ctx.resp_handler.get(ctx).await?;
     if restore_agent_tree(ctx, &stored.metadata, exec_ctx.responses_config.max_retained_bytes)? {
-        ctx.conversation_id = stored.conversation_id;
         return Ok(());
     }
     let history = exec_ctx.resp_handler.rehydrate(ctx).await?;
@@ -287,7 +287,6 @@ async fn from_response(ctx: &mut RequestContext, exec_ctx: &ExecutionContext) ->
     ctx.enriched_request.previous_response_id = None;
     ctx.enriched_request.input = ResponsesInput::Items(items);
     apply_effective_settings(ctx, &stored.metadata);
-    ctx.conversation_id = stored.conversation_id;
     Ok(())
 }
 
@@ -326,7 +325,6 @@ async fn from_session_response(ctx: &mut RequestContext, exec_ctx: &ExecutionCon
         std::sync::Arc::new(continuation.retain_parent(checkpoint)?)
     };
     if restore_agent_tree(ctx, &parent.metadata, exec_ctx.responses_config.max_retained_bytes)? {
-        ctx.conversation_id.clone_from(&parent.conversation_id);
         if let Some(continuation) = ctx.continuation.as_mut() {
             continuation.parent = Some(parent);
         }
@@ -354,7 +352,6 @@ async fn from_session_response(ctx: &mut RequestContext, exec_ctx: &ExecutionCon
         &parent.metadata.effective_tool_choice,
         ctx.original_request.tool_choice.is_some(),
     ));
-    ctx.conversation_id.clone_from(&parent.conversation_id);
     if let Some(continuation) = ctx.continuation.as_mut() {
         continuation.parent = Some(parent);
     }
@@ -381,12 +378,11 @@ async fn from_conversation(ctx: &mut RequestContext, exec_ctx: &ExecutionContext
         .conv_handler
         .response_metadata_at_version(ctx, &snapshot.version)
         .await?
+        && restore_agent_tree(ctx, &metadata, exec_ctx.responses_config.max_retained_bytes)?
     {
-        if restore_agent_tree(ctx, &metadata, exec_ctx.responses_config.max_retained_bytes)? {
-            ctx.conversation_id = Some(conv_data.conversation_id);
-            ctx.conversation_version = Some(snapshot.version);
-            return Ok(());
-        }
+        ctx.conversation_id = Some(conv_data.conversation_id);
+        ctx.conversation_version = Some(snapshot.version);
+        return Ok(());
     }
 
     let mut items = InOutItem::into_input_items(snapshot.items);
@@ -673,7 +669,7 @@ mod tests {
             input: ResponsesInput::Text("new input".into()),
             store: true,
             previous_response_id: previous_response_id.map(str::to_owned),
-            conversation_id: conversation_id.map(str::to_owned),
+            conversation: conversation_id.map(str::to_owned),
             ..Default::default()
         }
     }

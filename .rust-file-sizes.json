@@ -37,8 +37,8 @@
       "reason": "Code-interpreter continuation items pass through tool-search history without changing discovery state."
     },
     "crates/agentic-server-core/src/types/io/output.rs": {
-      "limit": 1119,
-      "reason": "Function and custom calls carry the typed async marker through the shared output-item conversions."
+      "limit": 1120,
+      "reason": "Open Responses omits absent encrypted reasoning content; this adds one serialization attribute to the canonical item type. Function and custom calls carry the typed async marker through the shared output-item conversions."
     },
     "crates/agentic-server-core/src/types/tools/params.rs": {
       "limit": 622,

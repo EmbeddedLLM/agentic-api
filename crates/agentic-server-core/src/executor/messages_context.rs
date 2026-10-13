@@ -23,9 +23,9 @@
 //! The two are **not** kept byte-identical, and must not be confused: `typed` is
 //! what the client sent, `raw` is what the gateway sends upstream. They diverge
 //! wherever the gateway rewrites the body for upstream — today
-//! `normalize_native_server_tools` rewriting a native `web_search_20250305` or
-//! `web_fetch_20250910` declaration into the ordinary function-tool shape vLLM
-//! accepts. Accordingly,
+//! `normalize_native_server_tools` rewriting a native web-search or web-fetch
+//! declaration, of any supported version, into the ordinary function-tool shape
+//! vLLM accepts. Accordingly,
 //! only the fields the loops never mutate are exposed off `typed`
 //! ([`tools`](MessagesRequestContext::tools),
 //! [`stream`](MessagesRequestContext::stream),
@@ -170,14 +170,15 @@ impl MessagesRequestContext {
     /// from the typed view; the owned message history and system prompt are
     /// dropped before this function returns.
     ///
-    /// Native web-search declarations are validated and normalized here, before
-    /// a streaming handler commits its HTTP status — an invalid declaration must
-    /// surface as an error response, not as a mid-stream event.
+    /// Native web search and web fetch declarations are validated and
+    /// normalized here, before a streaming handler commits its HTTP status — an
+    /// invalid declaration must surface as an error response, not as a
+    /// mid-stream event.
     ///
     /// # Errors
     /// Returns [`ExecutorError::JsonError`] if `body` is not valid JSON, or
     /// [`ExecutorError::InvalidRequest`] if it carries an unsupported or invalid
-    /// native web-search declaration.
+    /// native web search or web fetch declaration.
     pub fn new(parsed: ParsedMessagesRequest<'_>) -> ExecutorResult<Self> {
         let raw = serde_json::from_slice(parsed.body).map_err(ExecutorError::JsonError)?;
         Self::from_parts(parsed.typed, raw)
@@ -192,7 +193,7 @@ impl MessagesRequestContext {
     /// # Errors
     /// Returns [`ExecutorError::JsonError`] if `raw` is not a well-formed
     /// Messages request, or [`ExecutorError::InvalidRequest`] if it carries an
-    /// unsupported or invalid native web-search declaration.
+    /// unsupported or invalid native web search or web fetch declaration.
     pub fn from_value(raw: Value) -> ExecutorResult<Self> {
         // Deserializing from the parsed tree avoids re-lexing the body text.
         let typed = MessagesRequest::deserialize(&raw).map_err(ExecutorError::JsonError)?;
@@ -362,16 +363,14 @@ impl MessagesRequestContext {
             serde_json::to_value(tool_results).map_err(ExecutorError::JsonError)?,
         );
         messages.push(Value::Object(user));
-        if fulfilled_choice {
-            if let Some(choice) = &mut self.tool_choice {
-                match choice {
-                    MessagesToolChoice::Any(options) | MessagesToolChoice::Tool { options, .. } => {
-                        *choice = MessagesToolChoice::Auto(std::mem::take(options));
-                    }
-                    MessagesToolChoice::Auto(_) | MessagesToolChoice::None { .. } => {}
+        if fulfilled_choice && let Some(choice) = &mut self.tool_choice {
+            match choice {
+                MessagesToolChoice::Any(options) | MessagesToolChoice::Tool { options, .. } => {
+                    *choice = MessagesToolChoice::Auto(std::mem::take(options));
                 }
-                self.raw["tool_choice"] = serde_json::to_value(choice).map_err(ExecutorError::JsonError)?;
+                MessagesToolChoice::Auto(_) | MessagesToolChoice::None { .. } => {}
             }
+            self.raw["tool_choice"] = serde_json::to_value(choice).map_err(ExecutorError::JsonError)?;
         }
         Ok(())
     }

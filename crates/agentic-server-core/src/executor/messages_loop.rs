@@ -216,8 +216,8 @@ async fn run_messages_loop_traced(
 ///
 /// Hide-the-call applies to every terminal round, not just a round that also
 /// carries a client call. The client declares these tools for the gateway to
-/// execute — a native `web_search_20250305` declaration is even rewritten into
-/// an ordinary function tool for upstream — so a surfaced call names a tool the
+/// execute — a native web search declaration is even rewritten into an
+/// ordinary function tool for upstream — so a surfaced call names a tool the
 /// client never agreed to run. A round can end while a gateway call is present
 /// whenever the stop reason is not a tool-call stop, for example a `max_tokens`
 /// truncation mid-call. The streaming loop already suppresses these blocks on

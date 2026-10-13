@@ -1,7 +1,8 @@
 //! Gateway-executed `web_fetch` tool for the Anthropic Messages API (#408).
 //!
-//! A native `web_fetch_20250910` declaration is rewritten into an ordinary
-//! function tool for the upstream model, and the resulting `web_fetch` call is
+//! A native `web_fetch` declaration (`web_fetch_20250910`, or a later version
+//! that permits direct calls, #419) is rewritten into an ordinary function tool
+//! for the upstream model, and the resulting `web_fetch` call is
 //! executed here instead of reaching a client that expects the server to have
 //! run it. This module owns the model-facing policy: argument parsing, URL
 //! admission ([`policy`]), domain filtering through the shared

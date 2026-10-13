@@ -469,7 +469,8 @@ Do not commit API keys to the manifest or source tree.
 
 ## Optional web fetch
 
-Claude's native `web_fetch_20250910` tool on `/v1/messages` is executed by the gateway
+Claude's native `web_fetch` tool on `/v1/messages` (`web_fetch_20250910`, and the later
+versions when their `allowed_callers` includes `"direct"`) is executed by the gateway
 itself and needs no provider or key; it is on by default. The fetcher refuses non-public
 addresses (loopback, private, link-local, cloud metadata, carrier-grade NAT) directly,
 through DNS, and through redirects, and bounds every fetch in time and size. The

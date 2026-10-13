@@ -419,7 +419,7 @@ async fn test_previous_response_id_rehydrates_function_call_before_tool_output()
             "incomplete_details": null,
             "error": null,
             "previous_response_id": null,
-            "conversation_id": null,
+            "conversation": null,
             "instructions": null
         })
         .to_string(),
@@ -538,7 +538,7 @@ async fn test_mcp_namespace_showcase_round_trip_rehydrates_calls_tools_and_outpu
             "incomplete_details": null,
             "error": null,
             "previous_response_id": null,
-            "conversation_id": null,
+            "conversation": null,
             "instructions": null
         })
         .to_string(),
@@ -697,12 +697,12 @@ async fn test_public_persist_steps_honor_the_storage_policy() {
                 "status": "completed", "content": [{"type": "output_text", "text": "public answer"}]}]
         }))
         .expect("completed payload");
-        persist_response(
+        Box::pin(persist_response(
             payload,
             ctx,
             exec_ctx.conv_handler.clone(),
             exec_ctx.resp_handler.clone(),
-        )
+        ))
         .await
         .expect("persist_response");
         assert_eq!(

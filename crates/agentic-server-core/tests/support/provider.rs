@@ -64,14 +64,14 @@ impl Provider {
         for (turn_index, turn) in cassette.turns.iter().enumerate() {
             if let Some(raw_frames) = &turn.response.sse {
                 for (frame_index, line) in raw_frames.iter().flat_map(|raw| raw.lines()).enumerate() {
-                    if let Some(data) = line.strip_prefix("data:") {
-                        if data.trim() != "[DONE]" {
-                            assert!(
-                                normalize_sse_line(line).is_some(),
-                                "{path}, turn {}, frame {frame_index}: discarded {line}",
-                                turn_index + 1
-                            );
-                        }
+                    if let Some(data) = line.strip_prefix("data:")
+                        && data.trim() != "[DONE]"
+                    {
+                        assert!(
+                            normalize_sse_line(line).is_some(),
+                            "{path}, turn {}, frame {frame_index}: discarded {line}",
+                            turn_index + 1
+                        );
                     }
                 }
             }
@@ -108,12 +108,16 @@ fn first_message_id(payload: &ResponsePayload) -> &str {
         .expect("turn 1 output contains an assistant message")
 }
 
-/// Recordings made before the gateway omitted a missing reasoning `status`
-/// replay it as `null`; both mean the item has no status.
-fn omit_null_reasoning_status(history: &mut Value) {
+/// Older recordings replay missing reasoning fields as `null`; omission has
+/// the same meaning for these optional fields.
+fn omit_null_reasoning_fields(history: &mut Value) {
     for item in history.as_array_mut().into_iter().flatten() {
-        if item["type"] == "reasoning" && item.get("status").is_some_and(Value::is_null) {
-            item.as_object_mut().map(|fields| fields.remove("status"));
+        if item["type"] == "reasoning" {
+            for key in ["status", "encrypted_content"] {
+                if item.get(key).is_some_and(Value::is_null) {
+                    item.as_object_mut().map(|fields| fields.remove(key));
+                }
+            }
         }
     }
 }
@@ -176,7 +180,7 @@ fn assert_upstream_requests_are_stateless(requests: &[Value], t2: &Turn, p1: &Re
     let mut actual_history = requests[1]["input"].clone();
     omit_empty_output_text_metadata(&mut actual_history);
     omit_empty_output_text_metadata(&mut expected_history);
-    omit_null_reasoning_status(&mut expected_history);
+    omit_null_reasoning_fields(&mut expected_history);
     assert_eq!(
         actual_history, expected_history,
         "turn 2 must replay the full item history to the stateless upstream"

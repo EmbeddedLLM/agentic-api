@@ -20,6 +20,7 @@ use agentic_core::executor::{
 use agentic_core::storage::{ConversationStore, ResponseStore};
 use agentic_core::tool::registry_tools;
 use agentic_core::tool::{ToolRegistry, WebSearchHandler};
+use agentic_core::types::messages::tool_seam::NATIVE_WEB_SEARCH_VERSIONS;
 use agentic_core::types::messages::{GatewayToolMap, ToolParam};
 use axum::extract::State;
 use axum::http::Uri;
@@ -304,6 +305,64 @@ async fn native_web_search_applies_domain_and_location_configuration() {
     let search = recv_search(&mut captured, "search backend hit").await;
     assert_eq!(search.body["include_domains"], "rust-lang.org");
     assert_eq!(search.body["country"], "CA");
+}
+
+/// Every native web-search version the gateway executes runs as the basic
+/// search (#419): a later version that permits direct calls carries its domain
+/// list and location to the search backend, its later-version setting is
+/// accepted, and the upstream sees the same function tool as for
+/// `web_search_20250305`.
+#[tokio::test]
+async fn every_native_web_search_version_runs_as_the_basic_search() {
+    let mut upstream_tools = Vec::new();
+    for version in NATIVE_WEB_SEARCH_VERSIONS {
+        let tool_type = version.type_name;
+        let (vllm_url, upstream, _v) = spawn_mock_vllm_messages(cassette_turn_bodies()).await;
+        let (search_url, mut captured, _s) = spawn_mock_search().await;
+        let exec_ctx = build_exec_ctx(&vllm_url, &search_url).await;
+        let mut tool = serde_json::json!({
+            "type": tool_type,
+            "name": "web_search",
+            "allowed_callers": ["direct"],
+            "allowed_domains": ["rust-lang.org"],
+            "user_location": {"type": "approximate", "country": "ca"}
+        });
+        if version.response_inclusion {
+            tool["response_inclusion"] = "excluded".into();
+        }
+        let request = serde_json::json!({
+            "model": "qwen3", "max_tokens": 1024, "stream": false,
+            "messages": [{"role": "user", "content": "Search Rust's official site."}],
+            "tools": [tool]
+        });
+        let tools: Vec<ToolParam> = serde_json::from_value(request["tools"].clone()).unwrap();
+        let registry = build_tool_registry(&tools, &exec_ctx).await;
+
+        let message = run_test_messages_loop(request, &registry, &exec_ctx)
+            .await
+            .unwrap_or_else(|error| panic!("{tool_type}: {error}"));
+
+        let search = recv_search(&mut captured, tool_type).await;
+        assert_eq!(search.body["include_domains"], "rust-lang.org", "{tool_type}");
+        assert_eq!(search.body["country"], "CA", "{tool_type}");
+        assert_eq!(upstream.calls.load(Ordering::SeqCst), 2, "{tool_type}");
+        let content = message["content"].as_array().expect("final content");
+        assert!(
+            !content.iter().any(|block| block["type"] == "tool_use"),
+            "{tool_type}: {content:?}"
+        );
+        assert_eq!(message["stop_reason"], "end_turn", "{tool_type}");
+        upstream_tools.push(upstream.requests.lock().await[0]["tools"].clone());
+    }
+    assert!(
+        upstream_tools[0][0].get("type").is_none() && upstream_tools[0][0].get("input_schema").is_some(),
+        "the upstream sees an ordinary function tool: {:?}",
+        upstream_tools[0]
+    );
+    assert!(
+        upstream_tools.windows(2).all(|pair| pair[0] == pair[1]),
+        "every version reaches the upstream as the same function tool: {upstream_tools:?}"
+    );
 }
 
 #[tokio::test]

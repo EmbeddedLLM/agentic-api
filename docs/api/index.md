@@ -46,26 +46,39 @@ identity-provider dependency failure from rejected credentials. See
 For a complete GitHub-backed deployment example, see
 [GitHub authentication with Dex](../deploying/github-oidc.md).
 
-## Chat Completions
+## Chat Completions and Embeddings
 
-### `POST /v1/chat/completions` · `POST /v1/completions`
+### `POST /v1/chat/completions` · `POST /v1/completions` · `POST /v1/embeddings`
 
-Agentic API owns the stateful agentic APIs; it does not own the Chat Completions contract. Both paths are
-forwarded to `{LLM_API_BASE}` verbatim, so clients on those endpoints keep working when the gateway is deployed
-as the entry point in front of an inference stack. Request and response bodies are relayed unchanged, including
-`tools` and returned `tool_calls`; streaming responses are relayed as they arrive, and the upstream status code
-and headers are preserved.
+Agentic API owns the stateful agentic APIs; it does not own the Chat Completions or Embeddings contracts. These
+paths are forwarded to `{LLM_API_BASE}` verbatim, so clients on those endpoints keep working when the gateway is
+deployed as the entry point in front of an inference stack. Request and response bodies are relayed unchanged,
+including `tools` and returned `tool_calls`; streaming responses are relayed as they arrive, and the upstream
+status code and headers are preserved.
 
 There is no state, no continuation, and no gateway tool loop on these routes: server-side tool execution is a
 Responses and Messages capability. Inbound authentication, the request-body ceiling, and CORS apply as they do
 to every other `/v1/*` route; the configured upstream credential is injected only when the caller supplies none.
+
+## Models
+
+### `GET /v1/models` · `GET /v1/models/{model}`
+
+`GET /v1/models` returns the upstream model list unchanged. Codex clients, which send `client_version`, receive
+it in the Codex catalog shape instead.
+
+`GET /v1/models/{model}` returns one entry of that list exactly as the upstream wrote it. vLLM serves no
+per-model route, so the gateway answers from `/v1/models` instead of forwarding the request. Model IDs that
+contain `/`, such as `meta-llama/Llama-3.1-8B-Instruct`, work with the slash encoded or not. A model the upstream
+does not list returns 404 with the error code `model_not_found`, and an upstream error is returned unchanged.
+Both routes are stateless and use the same authentication as every other `/v1/*` route.
 
 ## Responses
 
 ### `POST /v1/responses`
 
 HTTP Responses requests use the OpenAI-compatible Responses shape. Requests
-with `store=true`, `previous_response_id`, `conversation_id`, any non-function
+with `store=true`, `previous_response_id`, `conversation`, any non-function
 tool, an async tool or replayed async call, `multi_agent.enabled`, tool-search state,
 compaction input, or `context_management` run through the executor. Other stateless `store=false`
 requests are passed directly to the configured vLLM backend. A `store=false`
@@ -288,7 +301,7 @@ lane retains its latest response, including `generate: false` prewarm responses,
 so you can continue with `previous_response_id` without a database. After reconnecting,
 replay the full item history or a compacted window; an unstored response ID returns
 `400 previous_response_not_found`. With `store: true`, an uncached response can be
-loaded from durable storage. Explicit `conversation_id` requests retain the durable
+loaded from durable storage. Explicit `conversation` requests retain the durable
 Conversations API behavior.
 
 A failed same-lane continuation evicts its referenced cached parent. Failed forks
@@ -356,8 +369,9 @@ tenant rather than deriving ownership from the authenticated principal
 
 Anthropic Messages requests are forwarded to `{LLM_API_BASE}` with Anthropic
 headers and body fields preserved. When a request declares a tool the gateway
-owns, such as the native `web_search_20250305` and `web_fetch_20250910`
-server tools, the gateway runs
+owns, such as Claude's native web search and web fetch server tools (the
+basic `web_search_20250305` and `web_fetch_20250910`, and their later versions
+when `allowed_callers` includes `"direct"`), the gateway runs
 the tool loop itself: it executes each gateway call, appends the result, and
 streams only the client-visible content. Every upstream round must be a
 complete, well-formed Messages stream; a truncated or malformed round ends the

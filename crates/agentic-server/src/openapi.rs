@@ -13,9 +13,11 @@ use utoipa::OpenApi;
     paths(
         crate::handler::http::chat_completions::chat_completions,
         crate::handler::http::chat_completions::completions,
+        crate::handler::http::embeddings::embeddings,
         crate::handler::http::models::health,
         crate::handler::http::models::ready,
         crate::handler::http::models::models,
+        crate::handler::http::models::retrieve_model,
         crate::handler::http::responses::responses,
         crate::handler::http::responses::retrieve_response,
         crate::handler::http::responses::compact_response,
@@ -317,7 +319,9 @@ mod tests {
         for expected in [
             "/health",
             "/ready",
+            "/v1/embeddings",
             "/v1/models",
+            "/v1/models/{model}",
             "/v1/responses",
             "/v1/responses/compact",
             "/v1/conversations",
@@ -439,6 +443,15 @@ mod tests {
                 "#/components/schemas/CodexModelsResponse"
             ]
         );
+    }
+
+    #[test]
+    fn model_retrieval_declares_the_model_object_body() {
+        let spec = serde_json::to_value(ApiDoc::openapi()).expect("spec must serialize");
+        let response_schema =
+            &spec["paths"]["/v1/models/{model}"]["get"]["responses"]["200"]["content"]["application/json"]["schema"];
+
+        assert_eq!(response_schema["$ref"], "#/components/schemas/ModelObject");
     }
 
     #[test]

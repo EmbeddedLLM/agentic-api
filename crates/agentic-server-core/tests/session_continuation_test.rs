@@ -274,7 +274,7 @@ async fn session_explicit_conversation_generated_turns_match_no_session_history(
             let session = session();
             for input in ["first question", "second question"] {
                 let mut payload = request(None, json!(input));
-                payload.conversation_id = Some(conversation.conversation_id.clone());
+                payload.conversation = Some(conversation.conversation_id.clone());
                 payload.store = store;
                 let execution = ExecuteRequest::new(payload, Arc::new(model.exec.clone()));
                 let execution = if use_session {
@@ -328,7 +328,7 @@ async fn explicit_conversation_tool_history(use_session: bool, gateway_tool: boo
     };
     for (index, input) in [json!("first question"), next_input].into_iter().enumerate() {
         let mut payload = request(None, input);
-        payload.conversation_id = Some(conversation.conversation_id.clone());
+        payload.conversation = Some(conversation.conversation_id.clone());
         payload.store = store;
         if index == 0 {
             payload.tools = Some(if gateway_tool {
@@ -1340,7 +1340,7 @@ async fn session_round_limit_retains_the_final_call_output_in_order() {
     let history = serde_json::to_value(&next.enriched_request.input).unwrap();
     let items = history.as_array().unwrap();
     assert_eq!(items.len(), 32);
-    for (round, items) in items[1..31].chunks_exact(3).enumerate() {
+    for (round, items) in items[1..31].as_chunks::<3>().0.iter().enumerate() {
         assert_eq!(items[0]["type"], "message");
         assert_eq!(items[1]["type"], "function_call");
         assert_eq!(items[2]["type"], "function_call_output");

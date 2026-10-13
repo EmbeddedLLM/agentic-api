@@ -19,6 +19,7 @@ use agentic_core::storage::{ConversationStore, ResponseStore};
 use agentic_core::tool::registry_tools;
 use agentic_core::tool::{GatewayExecutorRegistration, GatewayExecutors, ToolRegistry, WebFetchHandler};
 use agentic_core::types::messages::GatewayToolMap;
+use agentic_core::types::messages::tool_seam::NATIVE_WEB_FETCH_VERSIONS;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -322,6 +323,113 @@ async fn web_fetch_runs_in_the_gateway_and_stays_hidden_over_json() {
     assert_eq!(content["content_type"], "text/html");
     assert_eq!(content["content"], "Hello\nfrom the page");
     assert_eq!(content["truncated"], false);
+}
+
+/// Every native web-fetch version the gateway executes runs as the basic fetch
+/// over both loops (#419): a later version that permits direct calls fetches
+/// the linked page under its domain policy, its later-version settings are
+/// accepted, and the upstream sees the same function tool as for
+/// `web_fetch_20250910`.
+#[tokio::test]
+async fn every_native_web_fetch_version_runs_as_the_basic_fetch() {
+    let mut upstream_tools = Vec::new();
+    for version in NATIVE_WEB_FETCH_VERSIONS {
+        let tool_type = version.type_name;
+        for stream in [false, true] {
+            let harness = harness(&loopback_config()).await;
+            let page_url = harness.page_url("doc.html");
+            harness.script(vec![assistant(&[fetch_call("t1", &page_url)], "tool_use"), done()]);
+            let mut tool = native_fetch(&json!({
+                "allowed_callers": ["direct"], "allowed_domains": ["127.0.0.1"], "max_uses": 1
+            }));
+            tool["type"] = tool_type.into();
+            if version.use_cache {
+                tool["use_cache"] = false.into();
+            }
+            if version.response_inclusion {
+                tool["response_inclusion"] = "excluded".into();
+            }
+            let request = request(&format!("Summarize {page_url} please"), &tool, stream);
+
+            if stream {
+                let sse = run_sse(&harness, request).await;
+                assert!(sse.contains("Done."), "{tool_type}: final answer streams:\n{sse}");
+                assert!(
+                    !sse.contains("web_fetch"),
+                    "{tool_type}: gateway calls stay hidden:\n{sse}"
+                );
+            } else {
+                let message = run_json(&harness, request).await;
+                assert_eq!(
+                    message["content"],
+                    json!([{"type": "text", "text": "Done."}]),
+                    "{tool_type}"
+                );
+            }
+            assert_eq!(harness.served_pages(), vec!["doc.html"], "{tool_type} stream={stream}");
+            let results = harness.fed_back_results(1);
+            assert_eq!(results[0]["is_error"], false, "{tool_type} stream={stream}");
+            assert_eq!(result_content(&results[0])["type"], "web_fetch_result", "{tool_type}");
+            upstream_tools.push(harness.upstream_requests()[0]["tools"].clone());
+        }
+    }
+    assert!(
+        upstream_tools.windows(2).all(|pair| pair[0] == pair[1]),
+        "every version reaches the upstream as the same function tool: {upstream_tools:?}"
+    );
+}
+
+/// Every version's `max_uses` caps the fetches of the whole request, as the
+/// basic version's does: of two calls admitted in model order, the second is
+/// refused with `max_uses_exceeded` and its page is never requested.
+#[tokio::test]
+async fn every_native_web_fetch_version_enforces_max_uses() {
+    for version in NATIVE_WEB_FETCH_VERSIONS {
+        let tool_type = version.type_name;
+        let harness = harness(&loopback_config()).await;
+        let page_url = harness.page_url("doc.html");
+        let other_url = harness.page_url("other.html");
+        harness.script(vec![
+            assistant(&[fetch_call("t1", &page_url), fetch_call("t2", &other_url)], "tool_use"),
+            done(),
+        ]);
+        let mut tool = native_fetch(&json!({"allowed_callers": ["direct"], "max_uses": 1}));
+        tool["type"] = tool_type.into();
+
+        run_json(
+            &harness,
+            request(&format!("Compare {page_url} with {other_url}"), &tool, false),
+        )
+        .await;
+
+        assert_eq!(harness.served_pages(), vec!["doc.html"], "{tool_type}");
+        let results = harness.fed_back_results(1);
+        assert_eq!(results[0]["is_error"], false, "{tool_type}");
+        assert_eq!(results[1]["is_error"], true, "{tool_type}");
+        assert_eq!(
+            result_content(&results[1])["error_code"],
+            "max_uses_exceeded",
+            "{tool_type}"
+        );
+    }
+}
+
+/// A later version's domain policy guards its fetches exactly as the basic
+/// version's does.
+#[tokio::test]
+async fn a_later_web_fetch_version_refuses_a_blocked_domain() {
+    let harness = harness(&loopback_config()).await;
+    let page_url = harness.page_url("doc.html");
+    harness.script(vec![assistant(&[fetch_call("t1", &page_url)], "tool_use"), done()]);
+    let mut tool = native_fetch(&json!({"allowed_callers": ["direct"], "blocked_domains": ["127.0.0.1"]}));
+    tool["type"] = "web_fetch_20260318".into();
+
+    run_json(&harness, request(&format!("Summarize {page_url} please"), &tool, false)).await;
+
+    assert!(harness.served_pages().is_empty(), "the blocked page is never requested");
+    let results = harness.fed_back_results(1);
+    assert_eq!(results[0]["is_error"], true);
+    assert_eq!(result_content(&results[0])["error_code"], "url_not_allowed");
 }
 
 #[tokio::test]

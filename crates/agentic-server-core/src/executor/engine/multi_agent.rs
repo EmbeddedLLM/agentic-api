@@ -142,12 +142,17 @@ impl MultiAgentRun {
             incomplete_details: None,
             error: None,
             previous_response_id: pipeline.request.original_request.previous_response_id.clone(),
-            conversation_id: pipeline.request.conversation_id.clone(),
+            conversation: pipeline.request.conversation_id.clone(),
             instructions: pipeline.request.original_request.instructions.clone(),
             max_tool_calls: None,
             service_tier: None,
             tools: pipeline.request.enriched_request.tools.clone(),
             tool_choice: pipeline.request.enriched_request.tool_choice.clone(),
+            standard_fields: {
+                let mut fields = crate::types::request_response::StandardResponseFields::default();
+                fields.apply_request(&pipeline.request.original_request);
+                fields
+            },
         };
         // One bounded event in flight, plus one size-limited awaited frame per
         // active worker. Client backpressure reaches upstream readers.
@@ -217,6 +222,7 @@ impl MultiAgentRun {
             &CheckpointLimits::for_response(self.max_retained_bytes),
         )?);
         self.payload.output = self.completed_items.into_values().collect();
+        self.payload.standard_fields.completed_at = (self.payload.status == "completed").then(utcnow_str);
         Ok(self.payload)
     }
 

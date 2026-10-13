@@ -1,7 +1,8 @@
-//! The native `web_fetch_20250910` tool over HTTP: the gateway fetches the page
-//! the user linked and hides the call on `/v1/messages` (JSON and SSE),
-//! `/v1/messages/count_tokens` accepts the declaration, and a disabled executor
-//! or an unsupported version is refused with HTTP 400 (#408).
+//! The native `web_fetch` tool over HTTP: the gateway fetches the page the
+//! user linked and hides the call on `/v1/messages` (JSON and SSE) for every
+//! supported version (#408, #419), `/v1/messages/count_tokens` accepts the
+//! declaration, and a disabled executor or an unsupported version is refused
+//! with HTTP 400.
 #[allow(dead_code)]
 mod common;
 
@@ -11,6 +12,7 @@ use std::time::Duration;
 
 use agentic_core::config::{Config, WebFetchConfig};
 use agentic_core::executor::ExecutionContext;
+use agentic_core::types::messages::tool_seam::NATIVE_WEB_FETCH_VERSIONS;
 use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -176,17 +178,13 @@ fn native_fetch() -> Value {
     json!({"type": "web_fetch_20250910", "name": "web_fetch", "max_uses": 3})
 }
 
-async fn assert_fetch_runs_over_http(stream: bool) {
+async fn assert_fetch_runs_over_http(tool: &Value, stream: bool) {
     let gateway = spawn(WebFetchConfig::default().with_allow_private_networks(true)).await;
     let page_url = format!("{}/page/doc.html", gateway.backend_url);
 
     let response = client()
         .post(format!("{}/v1/messages", gateway.url))
-        .json(&messages_request(
-            &format!("Summarize {page_url}"),
-            &native_fetch(),
-            stream,
-        ))
+        .json(&messages_request(&format!("Summarize {page_url}"), tool, stream))
         .send()
         .await
         .unwrap();
@@ -225,12 +223,32 @@ async fn assert_fetch_runs_over_http(stream: bool) {
 
 #[tokio::test]
 async fn web_fetch_runs_over_http_json() {
-    assert_fetch_runs_over_http(false).await;
+    assert_fetch_runs_over_http(&native_fetch(), false).await;
 }
 
 #[tokio::test]
 async fn web_fetch_runs_over_http_sse() {
-    assert_fetch_runs_over_http(true).await;
+    assert_fetch_runs_over_http(&native_fetch(), true).await;
+}
+
+/// The later versions run exactly like the basic one when the declaration
+/// permits direct calls, with the settings only they define (#419).
+#[tokio::test]
+async fn later_web_fetch_versions_run_over_http_json_and_sse() {
+    for version in &NATIVE_WEB_FETCH_VERSIONS[1..] {
+        let mut tool = native_fetch();
+        tool["type"] = json!(version.type_name);
+        tool["allowed_callers"] = json!(["direct"]);
+        if version.use_cache {
+            tool["use_cache"] = json!(false);
+        }
+        if version.response_inclusion {
+            tool["response_inclusion"] = json!("excluded");
+        }
+        for stream in [false, true] {
+            assert_fetch_runs_over_http(&tool, stream).await;
+        }
+    }
 }
 
 #[tokio::test]
@@ -258,27 +276,35 @@ async fn count_tokens_accepts_the_native_declaration() {
     assert_eq!(tools[1]["name"], "echo", "other tools are forwarded unchanged");
 }
 
+/// Every version is refused on both endpoints when the operator disables the
+/// fetcher.
 #[tokio::test]
 async fn a_disabled_executor_rejects_the_declaration_with_400() {
     let gateway = spawn(WebFetchConfig::default().with_enabled(false)).await;
     let page_url = format!("{}/page/doc.html", gateway.backend_url);
 
-    for path in ["/v1/messages", "/v1/messages/count_tokens"] {
-        let response = client()
-            .post(format!("{}{path}", gateway.url))
-            .json(&messages_request(&page_url, &native_fetch(), false))
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{path}");
-        let body: Value = response.json().await.unwrap();
-        assert_eq!(body["type"], "error", "{body}");
-        assert!(
-            body["error"]["message"]
-                .as_str()
-                .is_some_and(|message| message.contains("web_fetch is disabled")),
-            "{body}"
-        );
+    for version in NATIVE_WEB_FETCH_VERSIONS {
+        let mut tool = native_fetch();
+        tool["type"] = json!(version.type_name);
+        tool["allowed_callers"] = json!(["direct"]);
+        for path in ["/v1/messages", "/v1/messages/count_tokens"] {
+            let response = client()
+                .post(format!("{}{path}", gateway.url))
+                .json(&messages_request(&page_url, &tool, false))
+                .send()
+                .await
+                .unwrap();
+            let case = format!("{} {path}", version.type_name);
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{case}");
+            let body: Value = response.json().await.unwrap();
+            assert_eq!(body["type"], "error", "{case}: {body}");
+            assert!(
+                body["error"]["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("web_fetch is disabled")),
+                "{case}: {body}"
+            );
+        }
     }
     assert!(gateway.backend.inferences.lock().unwrap().is_empty());
     assert!(gateway.backend.counts.lock().unwrap().is_empty());
@@ -290,8 +316,12 @@ async fn unsupported_versions_and_parameters_are_rejected_with_400() {
     let gateway = spawn(WebFetchConfig::default()).await;
     for (tool, expected) in [
         (
-            json!({"type": "web_fetch_20260318", "name": "web_fetch"}),
-            "unsupported web_fetch tool type",
+            json!({"type": "web_fetch_20991231", "name": "web_fetch"}),
+            "unsupported web_fetch tool type 'web_fetch_20991231'",
+        ),
+        (
+            json!({"type": "web_fetch_20260209", "name": "web_fetch", "allowed_callers": ["direct"], "use_cache": false}),
+            "web_fetch_20260209 does not define use_cache",
         ),
         (
             json!({"type": "web_fetch_20250910", "name": "web_fetch", "citations": {"enabled": true}}),

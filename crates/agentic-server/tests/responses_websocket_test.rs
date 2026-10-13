@@ -2615,6 +2615,54 @@ async fn websocket_generate_false_rejects_code_interpreter_before_rehydration_or
     );
 }
 
+#[tokio::test]
+async fn websocket_generate_false_emits_conversation_as_object() {
+    let mock = MockResponsesServer::start(vec![]).await;
+    let fixture = storage_backed_state(&mock.url).await;
+    let (gateway_url, _gateway) = spawn_gateway(fixture.state.clone()).await;
+    let conversation_id = create_conversation(&gateway_url).await;
+    let mut ws = connect_responses_ws(&gateway_url).await;
+
+    send_json(
+        &mut ws,
+        json!({
+            "type": "response.create",
+            "model": "test-model",
+            "conversation": conversation_id,
+            "input": [{"type": "message", "role": "user", "content": "warmup"}],
+            "generate": false,
+            "store": true,
+            "stream": true
+        }),
+    )
+    .await;
+
+    let events = recv_until_completed(&mut ws).await;
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0]["type"], "response.created");
+    assert_eq!(events[1]["type"], "response.completed");
+
+    // Both events should have conversation as an object with id field
+    for event in &events {
+        assert!(
+            event["response"]["conversation"].is_object(),
+            "conversation should be object, got: {}",
+            event["response"]["conversation"]
+        );
+        assert_eq!(
+            event["response"]["conversation"]["id"], conversation_id,
+            "conversation.id should match"
+        );
+    }
+
+    assert_eq!(events[1]["response"]["status"], "completed");
+    assert_eq!(events[1]["response"]["output"], json!([]));
+    assert!(
+        mock.request_bodies().await.is_empty(),
+        "generate:false must not contact upstream"
+    );
+}
+
 #[cfg(not(feature = "embedded-code-interpreter"))]
 #[tokio::test]
 async fn websocket_generate_false_rejects_rehydrated_code_interpreter_before_persistence() {
@@ -3983,7 +4031,10 @@ async fn test_websocket_multiple_images_across_messages_keep_order() {
         .map(|part| part["image_url"].as_str().expect("image URL"))
         .collect::<Vec<_>>();
     assert_eq!(images, vec![RED_PIXEL_PNG, BLUE_PIXEL_PNG]);
-    assert_eq!(requests[0]["input"], input);
+    let mut expected_input = input.clone();
+    expected_input[0]["content"][1]["detail"] = "auto".into();
+    expected_input[2]["content"][0]["detail"] = "auto".into();
+    assert_eq!(requests[0]["input"], expected_input);
 }
 
 #[tokio::test]

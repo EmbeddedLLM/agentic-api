@@ -125,11 +125,11 @@ impl TryFrom<&ResponseMetadata> for String {
                 tool.sanitize_for_persistence();
             }
         }
-        if let Some(snapshot) = persisted.response_snapshot.as_mut() {
-            if let Some(tools) = snapshot.tools.as_mut() {
-                for tool in tools {
-                    tool.sanitize_for_persistence();
-                }
+        if let Some(snapshot) = persisted.response_snapshot.as_mut()
+            && let Some(tools) = snapshot.tools.as_mut()
+        {
+            for tool in tools {
+                tool.sanitize_for_persistence();
             }
         }
         serialize_to_string(&persisted).map_err(StorageError::Serialization)
@@ -178,6 +178,39 @@ mod tests {
         assert!(response.conversation_id.is_none());
         assert!(response.history_item_ids.is_empty());
         assert_eq!(response.metadata.model, "");
+    }
+
+    #[test]
+    fn legacy_conversation_id_snapshot_serializes_with_canonical_conversation() {
+        let metadata = serde_json::json!({
+            "model": "test-model",
+            "effective_tool_choice": "auto",
+            "response_snapshot": {
+                "id": "resp_legacy",
+                "object": "response",
+                "created_at": 1_704_067_200,
+                "model": "test-model",
+                "status": "completed",
+                "output": [],
+                "conversation_id": "conv_legacy"
+            }
+        });
+        let row = StorageDbResponse {
+            id: "resp_legacy".to_owned(),
+            conversation_id: Some("conv_legacy".to_owned()),
+            previous_response_id: None,
+            history_item_ids: Some("[]".to_owned()),
+            metadata: Some(metadata.to_string()),
+            created_at: 1_704_067_200,
+        };
+
+        let stored = ResponseData::try_from(row).expect("decode pre-rename stored metadata");
+        let snapshot = stored.metadata.response_snapshot.expect("stored response snapshot");
+        assert_eq!(snapshot.conversation.as_deref(), Some("conv_legacy"));
+        assert!(snapshot.standard_fields.store, "legacy response snapshots were stored");
+        let public = serde_json::to_value(snapshot).expect("serialize retrieved response");
+        assert_eq!(public["conversation"], serde_json::json!({"id": "conv_legacy"}));
+        assert!(public.get("conversation_id").is_none());
     }
 
     #[test]
@@ -253,12 +286,13 @@ mod tests {
             incomplete_details: None,
             error: None,
             previous_response_id: None,
-            conversation_id: None,
+            conversation: None,
             instructions: None,
             max_tool_calls: None,
             service_tier: None,
             tools: Some(vec![tool.clone()]),
             tool_choice: None,
+            standard_fields: crate::types::request_response::StandardResponseFields::default(),
         };
         let metadata = ResponseMetadata {
             multi_agent_tree: None,

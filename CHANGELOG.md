@@ -6,6 +6,18 @@ All notable changes to Agentic API are documented here.
 
 ### Added
 
+- Accepted the later versions of Claude's native server tools on `/v1/messages` and `/v1/messages/count_tokens`:
+  `web_search_20260209` and `web_search_20260318`, and `web_fetch_20260209`, `web_fetch_20260309`, and
+  `web_fetch_20260318` (#419). These versions add dynamic filtering, which calls the tool from Anthropic's code
+  execution by default; the gateway does not run code execution, so a declaration whose `allowed_callers` includes
+  `"direct"` runs exactly as the basic version, and one without it is rejected with HTTP 400 that names
+  `allowed_callers` and the reason, as Anthropic's API answers for models without programmatic tool calling.
+  `use_cache` (`web_fetch_20260309` and later) is honoured because the built-in fetcher keeps no cache of fetched
+  pages, and `response_inclusion` (the `_20260318` versions) is accepted because it only affects results that code
+  execution consumed; either setting on a version that does not define it is rejected with HTTP 400, as is a version
+  the gateway does not list. In `agentic_core::types::messages::tool_seam`, `NATIVE_WEB_SEARCH_VERSIONS` and
+  `NATIVE_WEB_FETCH_VERSIONS` list the versions as `NativeToolVersion` entries recording what each defines, and
+  `NativeToolVersion::find` looks a declared type up.
 - Added SearXNG as a selectable backend for the gateway-owned `web_search` tool (#326, part of #291). Select it
   with `AGENTIC_WEB_SEARCH_PROVIDER=searxng` or `[web_search] provider = "searxng"` and point
   `AGENTIC_WEB_SEARCH_BASE_URL` or `[web_search] base_url` at a self-hosted instance; the endpoint is mandatory
@@ -34,14 +46,21 @@ All notable changes to Agentic API are documented here.
   with connections pinned to the checked addresses and made directly, without environment proxies, under the default
   policy; every fetch is bounded in time, size, and redirects, and at most `max_concurrent_gateway_calls` fetches run
   at once. Failures reach the model as the documented
-  `web_fetch_tool_result_error` codes. `citations` enabled, the later-version
-  `use_cache` and `response_inclusion` settings, and other `web_fetch_*` versions are rejected with HTTP 400; a plain
-  function named `web_fetch` stays client-owned. Operators tune or disable the fetcher with `[web_fetch]` in
+  `web_fetch_tool_result_error` codes. `citations` enabled is rejected with HTTP 400; a plain function named
+  `web_fetch` stays client-owned. Operators tune or disable the fetcher with `[web_fetch]` in
   `config.toml` or `AGENTIC_WEB_FETCH_ENABLED`, `AGENTIC_WEB_FETCH_ALLOW_PRIVATE_NETWORKS`,
   `AGENTIC_WEB_FETCH_MAX_RESPONSE_BYTES`, and `AGENTIC_WEB_FETCH_TIMEOUT_SECS`.
 
 ### Changed
 
+- `agentic_core`: `NATIVE_WEB_SEARCH_TYPE` and `NATIVE_WEB_FETCH_TYPE` still name the basic versions, which are no
+  longer the only versions the Messages gateway executes; code that compares a declared type with them should look it
+  up with `NativeToolVersion::find` in `NATIVE_WEB_SEARCH_VERSIONS` or `NATIVE_WEB_FETCH_VERSIONS` (#419). On
+  `/v1/messages` and `/v1/messages/count_tokens`, a `web_search` declaration that sets `use_cache`, which no web
+  search version defines, or `response_inclusion` before `web_search_20260318` is rejected with HTTP 400 instead of
+  being ignored; a basic version whose `allowed_callers` omits `"direct"` is refused in the message shape every
+  version uses, which names the type, `allowed_callers`, and the reason; and the refusal of an unlisted `web_search_*`
+  version now lists the supported versions.
 - The domain lists of `web_search` and `web_fetch` declarations are one shared type, `DomainFilters` (formerly
   `WebSearchFilters`, the same two fields), matched by one shared policy module that also validates a `web_fetch`
   entry as a host name (`web_search` keeps its non-empty-entry rule in the Messages adapter); the request and
