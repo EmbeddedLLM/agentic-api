@@ -119,12 +119,7 @@ impl MultiAgentRun {
             agents,
             ..
         } = restored;
-        if registry
-            .agents()
-            .filter(|agent| !agent.identity.is_root() && matches!(agent.state, AgentState::Active(_)))
-            .count()
-            > limit
-        {
+        if registry.active_subagents() > limit {
             return Err(invalid(
                 "max_concurrent_subagents is below the stored active-agent count",
             ));
@@ -160,7 +155,7 @@ impl MultiAgentRun {
         // One bounded event in flight, plus one size-limited awaited frame per
         // active worker. Client backpressure reaches upstream readers.
         let (frame_sender, frames) = mpsc::channel(1);
-        Ok(Self {
+        let mut run = Self {
             control: pipeline.control.take(),
             frame_sender,
             frames,
@@ -177,7 +172,10 @@ impl MultiAgentRun {
             payload,
             rounds: 0,
             max_retained_bytes: exec.responses_config.max_retained_bytes,
-        })
+        };
+        // Late async outputs from this request, or parked by an earlier one at the subagent limit.
+        run.resume_unread_subagents();
+        Ok(run)
     }
 
     pub(super) async fn run(

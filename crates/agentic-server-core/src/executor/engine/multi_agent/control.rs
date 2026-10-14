@@ -72,6 +72,8 @@ impl MultiAgentRun {
                 context.stored.final_answer = None;
             }
         }
+        // An idle subagent reads its late output in a new turn, within the concurrency limit.
+        self.resume_unread_subagents();
         OutputDecision::Accepted
     }
 }

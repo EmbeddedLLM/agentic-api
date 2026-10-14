@@ -621,8 +621,13 @@ call inference, run the tool loop, persist. `agentic-server` never reaches past 
   whole batch, transfers outputs into canonical histories, invalidates stale compaction
   generations, and resumes a waiting owner only after all of its synchronous calls are
   resolved. A late async output owned by the root resumes an idle root with a fresh turn
-  when it arrives live, and any settled root in a continuation request; a busy or waiting
-  root reads it at its next turn. Live, interrupted owners retain input without being restarted.
+  when it arrives live, and any settled root in a continuation request. An idle subagent
+  with a client output after its last produced item starts a fresh turn
+  (`resume_unread_subagents`) when the run starts, after live input, and whenever a settled
+  subagent frees a `max_concurrent_subagents` slot; its answer then reaches its parent as
+  mail. The rule reads stored history, so an output that arrives at the limit waits only for a
+  free slot. A busy or waiting owner reads the output at its next turn. Interrupted and failed
+  subagents, and live interrupted owners, retain input without being restarted.
   Without a control endpoint, HTTP execution still completes at the client-output boundary.
   Finalization closes admission and rejects queued commands synchronously. `Finalizing`
   is distinct from successful persistence; a lost reply is an execution failure with

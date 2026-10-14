@@ -1070,6 +1070,73 @@ async fn a_repeated_output_after_multi_agent_compaction_is_accepted() {
     assert_call_once_before_output(last, "call_1");
 }
 
+/// A subagent's late async output starts a turn for that idle subagent, which reads the output and
+/// answers, as a late output does for an idle root.
+#[tokio::test]
+async fn a_late_async_output_for_an_idle_subagent_starts_its_turn() {
+    let fixture = support::TestFixture::new_with_responses(vec![
+        // The root spawns a worker and waits for it, so the worker runs alone.
+        model_response(
+            false,
+            &[
+                call_item(
+                    "spawn_agent",
+                    "call_spawn",
+                    r#"{"task_name":"worker","message":"Start the job."}"#,
+                ),
+                call_item("wait_agent", "call_wait", r#"{"timeout_ms":30000}"#),
+            ],
+        ),
+        model_response(false, &[call_item("poll_job", "call_poll", "{}")]),
+        model_response(false, &[message_item("msg_worker_1", "The job is running.")]),
+        model_response(false, &[message_item("msg_root_1", "The worker started the job.")]),
+        // The continuation: the worker reads the late output.
+        model_response(false, &[message_item("msg_worker_2", "The job finished: 42.")]),
+    ])
+    .await;
+    let multi_agent = |mut request: RequestPayload| {
+        request.multi_agent = Some(serde_json::from_value(json!({"enabled": true})).unwrap());
+        request
+    };
+    let tools = json!([{"type": "function", "name": "poll_job", "async": true, "parameters": {"type": "object"}}]);
+    let (first, _) = run(
+        multi_agent(request(
+            false,
+            json!("Start the job with a worker."),
+            tools.clone(),
+            None,
+        )),
+        fixture.exec_ctx.clone(),
+    )
+    .await;
+    assert_eq!(fixture.request_bodies().await.len(), 4, "{:?}", first.output);
+
+    let (second, _) = run(
+        multi_agent(request(
+            false,
+            json!([function_output("call_poll", r#"{"result":42}"#)]),
+            tools,
+            Some(&first.id),
+        )),
+        fixture.exec_ctx.clone(),
+    )
+    .await;
+    let bodies = fixture.request_bodies().await;
+    assert_eq!(bodies.len(), 5, "the worker runs once more: {:?}", second.output);
+    assert!(
+        items(&bodies[4])
+            .iter()
+            .any(|item| item["type"] == "function_call_output" && item["call_id"] == "call_poll"),
+        "the worker reads the late output: {}",
+        bodies[4]
+    );
+    let answered = second.output.iter().any(|item| {
+        matches!(item, OutputItem::Message(message)
+            if message.content.iter().any(|part| part.text() == "The job finished: 42."))
+    });
+    assert!(answered, "the worker's answer is in the response: {:?}", second.output);
+}
+
 /// A late custom tool output delivered with automatic compaction is kept like a function output.
 #[tokio::test]
 async fn a_late_custom_output_delivered_with_compaction_is_kept() {

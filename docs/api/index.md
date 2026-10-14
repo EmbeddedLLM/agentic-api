@@ -144,6 +144,13 @@ with `previous_response_id`, over a WebSocket session, and in multi-agent runs. 
 keeps calling async tools instead of answering, the gateway stops after two such rounds in a
 row.
 
+In multi-agent mode, a late async output is new information for the agent whose call it
+answers. In a continuation request it starts a new root turn; in a live WebSocket run, only
+once the root has finished its turn. A subagent that has finished its turn (not one that was
+interrupted or failed) starts a new turn as soon as `max_concurrent_subagents` allows, and its
+answer reaches its parent as mail; an idle root reads that mail at its next turn. An agent
+that is still busy reads the output at its next turn.
+
 Differences from OpenAI:
 
 - `async` is accepted for every served model; the gateway does not know which models
