@@ -32,6 +32,10 @@ use crate::executor::{
     relay::{AgentFrame, AgentRoundId},
     request::ExecutionContext,
     response_budget::ExecutorResponseBudget,
+    telemetry::{
+        Api,
+        metrics::{ExecutionClock, RoundCounter},
+    },
 };
 use crate::tool::ToolSearchState;
 use crate::types::{
@@ -92,6 +96,10 @@ pub(super) struct MultiAgentRun {
     sealer: TranscriptSealer,
     payload: ResponsePayload,
     rounds: usize,
+    /// Every agent's upstream rounds, recorded once for the execution.
+    round_counter: RoundCounter,
+    /// The execution's timing state, shared with each round's pipeline.
+    clock: Option<ExecutionClock>,
     max_retained_bytes: usize,
     frame_sender: mpsc::Sender<AgentFrame>,
     frames: mpsc::Receiver<AgentFrame>,
@@ -171,6 +179,8 @@ impl MultiAgentRun {
             sealer: TranscriptSealer::new()?,
             payload,
             rounds: 0,
+            round_counter: exec.metrics.rounds(Api::Responses),
+            clock: pipeline.execution_clock().cloned(),
             max_retained_bytes: exec.responses_config.max_retained_bytes,
         };
         // Late async outputs from this request, or parked by an earlier one at the subagent limit.
