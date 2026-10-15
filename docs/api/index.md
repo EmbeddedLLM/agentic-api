@@ -140,7 +140,9 @@ After compaction, by any of its triggers, an async call whose output has not arr
 in the model context, so its output can still arrive. An output delivered in the request that
 compacts is stored with the summarized history, so its call is no longer reported as pending,
 and a further output for that call reaches the model after the call. This holds over HTTP
-with `previous_response_id`, over a WebSocket session, and in multi-agent runs. If the model
+with `previous_response_id`, over a WebSocket session, and in multi-agent runs for calls the
+gateway emitted; in multi-agent mode, a further output for an async call that the client
+supplied in its own input is rejected with `400`. If the model
 keeps calling async tools instead of answering, the gateway stops after two such rounds in a
 row.
 
@@ -149,7 +151,10 @@ answers. In a continuation request it starts a new root turn; in a live WebSocke
 once the root has finished its turn. A subagent that has finished its turn (not one that was
 interrupted or failed) starts a new turn as soon as `max_concurrent_subagents` allows, and its
 answer reaches its parent as mail; an idle root reads that mail at its next turn. An agent
-that is still busy reads the output at its next turn.
+that is still busy reads the output at its next turn. When the output arrives during the
+agent's last round, that round ran without it, so the agent runs once more after the round
+ends its turn (a subagent once a slot is free). For the root this means a streamed response can
+contain a message with `phase: final_answer` followed by the root's next answer.
 
 Differences from OpenAI:
 

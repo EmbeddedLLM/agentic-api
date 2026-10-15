@@ -130,26 +130,28 @@ impl MultiAgentRun {
             context.generation += 1;
             context.stored.final_answer = None;
         }
-        // A settled subagent frees a slot for one with an unread late output.
-        self.resume_unread_subagents();
+        // A settled agent may not have read an output that arrived during its last round, and a
+        // settled subagent frees a slot for one with an unread late output.
+        self.resume_unread_agents();
         Ok(())
     }
 
-    /// Starts a turn for each idle subagent with client outputs it has not read (late async
-    /// outputs), while `max_concurrent_subagents` allows. The rule reads the stored history, so an
-    /// output waits only for a free slot, whichever request or live input delivered it. Interrupted
-    /// and failed subagents are not restarted.
-    pub(super) fn resume_unread_subagents(&mut self) {
+    /// Starts a turn for each idle agent with client outputs it has not read: late async outputs,
+    /// including one that arrived while its last round ran on older input. A subagent starts only
+    /// while `max_concurrent_subagents` allows; the root is not counted. The rule reads the stored
+    /// history, so an output waits only for a free slot, whichever request or live input delivered
+    /// it. Interrupted and failed agents are not restarted.
+    pub(super) fn resume_unread_agents(&mut self) {
         let unread = self
             .registry
             .agents()
-            .filter(|agent| !agent.identity.is_root() && agent.state == AgentState::Idle)
+            .filter(|agent| agent.state == AgentState::Idle)
             .filter(|agent| has_unread_output(&self.contexts[agent.identity].stored.history))
             .map(|agent| agent.identity.clone())
             .collect::<Vec<_>>();
         for identity in unread {
-            if self.registry.active_subagents() >= self.limit {
-                break;
+            if !identity.is_root() && self.registry.active_subagents() >= self.limit {
+                continue;
             }
             if self.registry.resume_idle(&identity).is_some() {
                 let context = self.contexts.get_mut(&identity).expect("registered agent has context");

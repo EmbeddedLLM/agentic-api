@@ -130,7 +130,7 @@ impl RestoredAgents {
                 .take_accepted(&id)
                 .expect("accepted output retained until transfer");
             // A late async output is new information for the root, like a new message. An idle
-            // subagent reads its late output in a turn the run starts (`resume_unread_subagents`).
+            // subagent reads its late output in a turn the run starts (`resume_unread_agents`).
             resume_root |= routed.owner.async_execution && routed.owner.agent_turn.agent.is_root();
             let key = routed.owner.agent_turn;
             self.agents

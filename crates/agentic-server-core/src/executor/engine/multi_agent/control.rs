@@ -33,7 +33,6 @@ impl MultiAgentRun {
                 .pending
                 .take_accepted(&id)
                 .expect("validated output remains until transfer");
-            let late_root_output = routed.owner.async_execution && routed.owner.agent_turn.agent.is_root();
             let identity = routed.owner.agent_turn.agent;
             let agent = self.registry.get(&identity).expect("registered call owner exists");
             let (state, turn) = (agent.state, agent.turn);
@@ -63,17 +62,12 @@ impl MultiAgentRun {
                 self.registry
                     .set_phase(&turn, AgentPhase::Runnable)
                     .expect("validated active owner");
-            } else if late_root_output && state == AgentState::Idle {
-                // As in a continuation request, a late async output is new information for an
-                // idle root. A busy or waiting root reads it at its next turn.
-                self.registry.resume_root();
-                let context = self.contexts.get_mut(&identity).expect("root has context");
-                context.execution.restart();
-                context.stored.final_answer = None;
             }
         }
-        // An idle subagent reads its late output in a new turn, within the concurrency limit.
-        self.resume_unread_subagents();
+        // As in a continuation request, a late async output is new information for its idle owner,
+        // which reads it in a new turn (a subagent within the concurrency limit). A busy or waiting
+        // owner reads it at its next turn.
+        self.resume_unread_agents();
         OutputDecision::Accepted
     }
 }

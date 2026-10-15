@@ -964,6 +964,45 @@ async fn a_repeated_output_after_compaction_keeps_its_call() {
     assert!(developer_notes(last).is_empty(), "the call is answered: {last}");
 }
 
+/// A request that supplies an async call and its first output itself, and compacts, still stores
+/// the call: a further output through the returned `previous_response_id` finds it.
+#[tokio::test]
+async fn a_repeated_output_finds_a_call_supplied_with_its_output_in_a_compacting_request() {
+    let fixture = support::TestFixture::new_with_responses(vec![
+        support::text_response("Summary: the Paris weather arrived: clear, 22 C."),
+        model_response(false, &[message_item("msg_1", "Paris is clear and 22 C.")]),
+        model_response(false, &[message_item("msg_2", "Now it is rainy and 9 C.")]),
+    ])
+    .await;
+    let tools = json!([weather_tool(true)]);
+    let mut call = call_item(WEATHER_TOOL, "call_1", r#"{"city":"Paris"}"#);
+    call["async"] = json!(true);
+    let input = json!([
+        {"type": "message", "role": "user", "content": "Check Paris."},
+        call,
+        function_output("call_1", r#"{"temperature_c":22}"#),
+    ]);
+    let (first, _) = run(
+        compacting(request(false, input, tools.clone(), None)),
+        fixture.exec_ctx.clone(),
+    )
+    .await;
+    let bodies = fixture.request_bodies().await;
+    assert!(
+        bodies.iter().any(|body| body.get("tools").is_none()),
+        "the request compacted"
+    );
+    let repeat = function_output("call_1", r#"{"temperature_c":9}"#);
+    let (second, _) = run(
+        request(false, json!([repeat]), tools, Some(&first.id)),
+        fixture.exec_ctx.clone(),
+    )
+    .await;
+    assert_eq!(support::output_text(&second), "Now it is rainy and 9 C.");
+    let bodies = fixture.request_bodies().await;
+    assert_call_once_before_output(inference_bodies(&bodies).last().unwrap(), "call_1");
+}
+
 /// The same through a WebSocket session without storage: the session history the compaction
 /// replaces keeps the answered call, so the transport does not change what a continuation accepts.
 #[tokio::test]

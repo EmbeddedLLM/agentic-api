@@ -1,15 +1,12 @@
-use super::context::mark_async_call;
 use super::tool_search::ToolSearchStreamState;
 use super::{
-    HasTranslator, MAX_PENDING_FUNCTION_BYTES, ToolEvent, ToolTranslator, Translation, TranslationContext,
-    TranslationOutcome, resolved_output_index,
+    CallExecution, HasTranslator, MAX_PENDING_FUNCTION_BYTES, ToolEvent, ToolTranslator, Translation,
+    TranslationContext, TranslationOutcome, resolved_output_index,
 };
 use crate::events::{EventFrame, EventPayload, SSEEventType, SSEItemType};
 use crate::executor::accumulator::AccumulatedFunctionCall;
 use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::tool::{CodexNamespaceHandler, CustomHandler, FunctionHandler, ToolSearchHandler, ToolType, tool_search};
-use crate::types::event::MessageStatus;
-use crate::types::io::OutputItem;
 use crate::utils::common::serialize_to_string;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -31,78 +28,10 @@ struct PendingFunctionCall {
 
 #[derive(Debug)]
 enum ActiveCall {
-    Client(ClientCall),
+    // A client-owned call's translator; an async call's translator marks its items.
+    Client(Box<dyn ToolTranslator>),
     // Gateway execution produces this call's public lifecycle.
     Gateway,
-}
-
-/// A client-owned call's translator, plus whether its tool is async.
-#[derive(Debug)]
-struct ClientCall {
-    translator: Box<dyn ToolTranslator>,
-    async_execution: bool,
-}
-
-impl ClientCall {
-    /// Translates one event; an async call's public item lifecycle carries `async: true`.
-    fn translate(
-        &mut self,
-        event: ToolEvent<'_>,
-        call: Option<AccumulatedFunctionCall<'_>>,
-    ) -> ExecutorResult<Vec<EventFrame>> {
-        let mut frames = TranslationDispatcher::translate_tool_event(self.translator.as_mut(), event, call)?;
-        if self.async_execution {
-            for frame in &mut frames {
-                mark_async_item_event(frame)?;
-            }
-        }
-        Ok(frames)
-    }
-}
-
-/// Marks the call item of an async call's `output_item.added` or `output_item.done` event through
-/// its typed form, keeping the wire item and the `output_item.done` payload equal. Other events
-/// pass unchanged.
-///
-/// Decoding fills fields the upstream item may omit: a call identified by `item_id` keeps that ID,
-/// which its deltas carry, and an added call without a status stays `in_progress`.
-fn mark_async_item_event(frame: &mut EventFrame) -> ExecutorResult<()> {
-    let added = match frame.event_type {
-        SSEEventType::OutputItemAdded => true,
-        SSEEventType::OutputItemDone => false,
-        _ => return Ok(()),
-    };
-    let item_id = match &frame.payload {
-        EventPayload::OutputItemAdded { item_id, .. } | EventPayload::OutputItemDone { item_id, .. } => {
-            Some(item_id.as_str())
-        }
-        _ => None,
-    };
-    let wire_item = frame
-        .wire
-        .rest
-        .get_mut("item")
-        .ok_or_else(|| ExecutorError::StreamError("an async call's item event has no item".to_owned()))?;
-    let has_id = wire_item
-        .get("id")
-        .and_then(Value::as_str)
-        .is_some_and(|id| !id.is_empty());
-    let has_status = wire_item.get("status").is_some_and(|status| !status.is_null());
-    let mut item: OutputItem = serde_json::from_value(wire_item.take())?;
-    if let OutputItem::FunctionCall(call) = &mut item {
-        if !has_id && let Some(item_id) = item_id {
-            item_id.clone_into(&mut call.id);
-        }
-        if added && !has_status {
-            call.status = MessageStatus::InProgress;
-        }
-    }
-    mark_async_call(&mut item)?;
-    *wire_item = serde_json::to_value(&item)?;
-    if let EventPayload::OutputItemDone { item: payload_item, .. } = &mut frame.payload {
-        payload_item.clone_from(wire_item);
-    }
-    Ok(())
 }
 
 /// Routes inline to the translator for each call and bounds events awaiting a name.
@@ -262,14 +191,19 @@ impl TranslationDispatcher {
             return Ok(Translation::default());
         }
         // Exhaustive routing is the extension point for supported tool types.
-        let translator: Box<dyn ToolTranslator> = match tool_type {
-            ToolType::Function => Box::new(FunctionHandler::new_translator()),
-            ToolType::CodexNamespace => Box::new(CodexNamespaceHandler::new_translator()),
-            ToolType::Custom => Box::new(CustomHandler::new_translator()),
+        let execution = if self.context.is_async_tool(name) {
+            CallExecution::Async
+        } else {
+            CallExecution::Sync
+        };
+        let mut translator: Box<dyn ToolTranslator> = match tool_type {
+            ToolType::Function => Box::new(FunctionHandler::new_translator(execution)),
+            ToolType::CodexNamespace => Box::new(CodexNamespaceHandler::new_translator(execution)),
+            ToolType::Custom => Box::new(CustomHandler::new_translator(execution)),
             ToolType::Shell if !self.context.is_gateway_owned(name) => {
-                Box::new(crate::tool::ShellHandler::new_translator())
+                Box::new(crate::tool::ShellHandler::new_translator(execution))
             }
-            ToolType::ToolSearch => Box::new(ToolSearchHandler::new_translator()),
+            ToolType::ToolSearch => Box::new(ToolSearchHandler::new_translator(execution)),
             ToolType::Shell
             | ToolType::Mcp
             | ToolType::WebSearch
@@ -283,11 +217,8 @@ impl TranslationDispatcher {
                 return Ok(Translation::default());
             }
         };
-        let mut client = ClientCall {
-            translator,
-            async_execution: self.context.is_async_tool(name),
-        };
-        let frames = client.translate(
+        let frames = Self::translate_tool_event(
+            translator.as_mut(),
             ToolEvent::Added {
                 item_id,
                 name,
@@ -300,7 +231,7 @@ impl TranslationDispatcher {
             let call = call.ok_or_else(|| ExecutorError::Tool(tool_search::invalid_upstream_search_call()))?;
             self.tool_search.start_synthetic(output_index, &call.item.call_id)?;
         }
-        self.active.insert(output_index, ActiveCall::Client(client));
+        self.active.insert(output_index, ActiveCall::Client(translator));
         Ok(Translation {
             frames,
             defer_from_output_index: None,
@@ -315,7 +246,9 @@ impl TranslationDispatcher {
         call: Option<AccumulatedFunctionCall<'_>>,
     ) -> ExecutorResult<Translation> {
         let frames = match self.active.get_mut(&output_index) {
-            Some(ActiveCall::Client(client)) => client.translate(ToolEvent::Delta(original), call)?,
+            Some(ActiveCall::Client(client)) => {
+                Self::translate_tool_event(client.as_mut(), ToolEvent::Delta(original), call)?
+            }
             Some(ActiveCall::Gateway) => Vec::new(),
             None => return self.buffer_unnamed(item_id, output_index, original, call),
         };
@@ -335,9 +268,11 @@ impl TranslationDispatcher {
     ) -> ExecutorResult<Translation> {
         let mut translated = self.resolve_pending(item_id, name, output_index, call)?;
         match self.active.get_mut(&output_index) {
-            Some(ActiveCall::Client(client)) => translated
-                .frames
-                .extend(client.translate(ToolEvent::ArgumentsDone(original), call)?),
+            Some(ActiveCall::Client(client)) => translated.frames.extend(Self::translate_tool_event(
+                client.as_mut(),
+                ToolEvent::ArgumentsDone(original),
+                call,
+            )?),
             Some(ActiveCall::Gateway) => {}
             None => translated.frames.push(original),
         }
@@ -355,10 +290,12 @@ impl TranslationDispatcher {
         let mut translated = self.resolve_pending(item_id, name, output_index, call)?;
         match self.active.remove(&output_index) {
             Some(ActiveCall::Client(mut client)) => {
-                translated
-                    .frames
-                    .extend(client.translate(ToolEvent::Done(original), call)?);
-                if client.translator.unfinished_tool_search_item_id().is_some() {
+                translated.frames.extend(Self::translate_tool_event(
+                    client.as_mut(),
+                    ToolEvent::Done(original),
+                    call,
+                )?);
+                if client.unfinished_tool_search_item_id().is_some() {
                     self.active.insert(output_index, ActiveCall::Client(client));
                 }
             }
@@ -403,7 +340,7 @@ impl TranslationDispatcher {
 
     fn unfinished_tool_search_item_ids(&self) -> std::collections::HashSet<String> {
         let active = self.active.values().filter_map(|active| match active {
-            ActiveCall::Client(client) => client.translator.unfinished_tool_search_item_id().map(str::to_owned),
+            ActiveCall::Client(client) => client.unfinished_tool_search_item_id().map(str::to_owned),
             ActiveCall::Gateway => None,
         });
         let pending = self

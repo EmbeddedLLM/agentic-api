@@ -174,7 +174,7 @@ impl MultiAgentRun {
             max_retained_bytes: exec.responses_config.max_retained_bytes,
         };
         // Late async outputs from this request, or parked by an earlier one at the subagent limit.
-        run.resume_unread_subagents();
+        run.resume_unread_agents();
         Ok(run)
     }
 

@@ -1,8 +1,12 @@
 mod estimate;
 pub(crate) use estimate::{estimate_history_tokens, estimate_input_tokens};
 
+mod carry_over;
 mod context;
 mod summary;
+
+pub(crate) use carry_over::carried_over_inputs;
+use carry_over::{CompactionCarryOver, public_calls};
 
 use std::collections::{HashMap, HashSet};
 
@@ -19,125 +23,16 @@ use crate::executor::rehydrate::rehydrate_conversation;
 use crate::executor::relay::StreamRelay;
 use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::executor::upstream::fetch_blocking_payload;
-use crate::storage::InOutItem;
 use crate::tool::ToolSearchState;
 use crate::types::event::MessageStatus;
-use crate::types::io::input::{InputTextContent, latest_compaction_window, open_async_call_ids, retained_async_call};
+use crate::types::io::input::{InputTextContent, latest_compaction_window};
 use crate::types::io::{
-    CompactionItem, InputContent, InputItem, InputMessage, InputMessageContent, OutputItem, ResponseUsage,
-    ResponsesInput,
+    CompactionItem, InputContent, InputItem, InputMessage, InputMessageContent, ResponseUsage, ResponsesInput,
 };
 use crate::types::request_response::{CompactRequest, CompactedResponse, RequestPayload};
 use crate::utils::common::{utcnow_str, uuid7_str};
 
 const COMPACTION_PROMPT: &str = "You are performing a CONTEXT CHECKPOINT COMPACTION. Create a concise handoff summary that preserves current progress, decisions, constraints, unresolved work, and critical references for the next model. Return only the summary.";
-
-/// What a compaction must keep from the items it summarizes, selected lazily from borrowed items.
-///
-/// A summary cannot stand in for an async call whose output may still arrive, so every open call
-/// stays in the model input after the summary ([`Self::open_calls`]). Compaction also replaces this
-/// request's own items in storage, so two kinds of them are stored again, as the request supplied
-/// them ([`Self::stored`]): outputs that answer calls made before this request, and async calls this
-/// request made that are still open. A call stored earlier keeps its place and stays model-visible
-/// through the compaction window; storing it again would duplicate its item and `call_id`.
-struct CompactionCarryOver<'a> {
-    compacted_items: &'a [InputItem],
-    own_items: &'a [InputItem],
-    open: HashSet<&'a str>,
-    own_calls: HashSet<&'a str>,
-    kept_in_suffix: HashSet<&'a str>,
-}
-
-impl<'a> CompactionCarryOver<'a> {
-    /// `suffix` holds the items a multi-agent compaction leaves after its window; an output there is
-    /// kept in place, not stored twice. Single-agent compaction passes an empty suffix.
-    fn new(compacted_items: &'a [InputItem], own_items: &'a [InputItem], suffix: &'a [InputItem]) -> Self {
-        Self {
-            compacted_items,
-            own_items,
-            open: open_async_call_ids(compacted_items),
-            own_calls: own_items.iter().filter_map(InputItem::call_id).collect(),
-            kept_in_suffix: suffix.iter().filter_map(InputItem::output_call_id).collect(),
-        }
-    }
-
-    /// Every async call still open in the compacted items.
-    fn open_calls(&self) -> impl Iterator<Item = &'a InputItem> + '_ {
-        self.compacted_items
-            .iter()
-            .filter(|item| retained_async_call(item, &self.open))
-    }
-
-    /// The request's own items to store again: its late outputs and its own open async calls.
-    fn stored(&self) -> StoredCarryOver {
-        let late = |item: &&InputItem| {
-            item.output_call_id()
-                .is_some_and(|call_id| !self.own_calls.contains(call_id) && !self.kept_in_suffix.contains(call_id))
-        };
-        StoredCarryOver {
-            late_outputs: self.own_items.iter().filter(late).cloned().collect(),
-            own_open_calls: self
-                .own_items
-                .iter()
-                .filter(|item| retained_async_call(item, &self.open))
-                .cloned()
-                .collect(),
-        }
-    }
-}
-
-/// The request's own items a compaction stores again (see [`CompactionCarryOver::stored`]).
-struct StoredCarryOver {
-    late_outputs: Vec<InputItem>,
-    own_open_calls: Vec<InputItem>,
-}
-
-impl StoredCarryOver {
-    /// The stored window: `compacted`, which ends with its compaction item (and, for multi-agent
-    /// compaction, MCP discovery records), with the late outputs before that item, so an answered
-    /// call and its output leave the window together, and the request's own open calls after it.
-    fn insert_into(self, mut compacted: Vec<InputItem>) -> Vec<InputItem> {
-        let at = compacted
-            .iter()
-            .rposition(|item| matches!(item, InputItem::Compaction(_)))
-            .unwrap_or(compacted.len());
-        compacted.splice(at..at, self.late_outputs);
-        compacted.extend(self.own_open_calls);
-        compacted
-    }
-
-    fn into_inputs(self) -> Vec<InputItem> {
-        let mut items = self.late_outputs;
-        items.extend(self.own_open_calls);
-        items
-    }
-}
-
-/// The public form of the calls in `call_ids` from a stored history, by `call_id`. Continuation
-/// lowers custom calls for the model; the stored items keep the form the client saw.
-fn public_calls(history: Vec<InOutItem>, call_ids: &HashSet<&str>) -> HashMap<String, InputItem> {
-    history
-        .into_iter()
-        .filter_map(|item| {
-            let public = match item {
-                InOutItem::Input(item) => item,
-                InOutItem::Output(OutputItem::CustomToolCall(call)) => InputItem::CustomToolCall(call),
-                InOutItem::Output(output) => output.to_input_item()?,
-            };
-            let call_id = public
-                .call_id()
-                .filter(|call_id| call_ids.contains(call_id))?
-                .to_owned();
-            Some((call_id, public))
-        })
-        .collect()
-}
-
-/// The items a `compaction_trigger` turn stores again before its compaction output: the request's
-/// late outputs, then its own open async calls.
-pub(crate) fn carried_over_inputs(items: &[InputItem], own_items: &[InputItem]) -> Vec<InputItem> {
-    CompactionCarryOver::new(items, own_items, &[]).stored().into_inputs()
-}
 
 fn retained_user_window(items: &[InputItem]) -> Vec<InputItem> {
     let window = latest_compaction_window(items);

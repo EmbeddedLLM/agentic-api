@@ -589,6 +589,63 @@ async fn async_output_accepted_during_a_round_survives_its_completion() {
     server.abort();
 }
 
+/// An async output accepted while the root's final-answer round is inferring is read: that round
+/// used the older input, so the root runs again and the next upstream input carries the output.
+#[tokio::test]
+async fn async_output_accepted_during_the_roots_final_round_is_read_next() {
+    let (exec, server) = setup().await;
+    let mut request = request();
+    request.input = ResponsesInput::Text("simple compaction test".into());
+    let ctx = rehydrate_conversation(request, &exec).await.unwrap();
+    let mut pipeline = AgentPipeline::new(ctx, None, StreamRelay::detached());
+    let mut run = MultiAgentRun::new(&mut pipeline, &exec).await.unwrap();
+    let root = AgentIdentity::root();
+    let turn = AgentTurnKey {
+        agent: root.clone(),
+        turn: run.registry.get(&root).unwrap().turn,
+    };
+    let registration = ClientCallRegistration {
+        call_id: ClientCallId::try_from("async_call".to_owned()).unwrap(),
+        owner: ClientCallOwner {
+            agent_turn: turn.clone(),
+            kind: ClientCallKind::Function,
+            async_execution: true,
+        },
+    };
+    run.pending.register_calls(&run.registry, &[registration]).unwrap();
+
+    run.spawn_round(&turn, &exec, None, &pipeline).unwrap();
+    assert!(matches!(
+        run.accept_live_outputs(batch(&run.payload.id, &["async_call"])),
+        OutputDecision::Accepted
+    ));
+    let completion = run.tasks.join_next().await.unwrap();
+    run.complete(completion, &mut pipeline).await.unwrap();
+    assert_eq!(
+        run.registry.get(&root).unwrap().state,
+        AgentState::Active(AgentPhase::Runnable),
+        "the root has not read the output yet"
+    );
+
+    run.schedule(&exec, None, &pipeline).unwrap();
+    let completion = run.tasks.join_next().await.unwrap();
+    run.complete(completion, &mut pipeline).await.unwrap();
+    let ResponsesInput::Items(sent) = &run.contexts[&root].request.input else {
+        panic!("the round input is items");
+    };
+    let copies = sent
+        .iter()
+        .filter(|item| matches!(item, InputItem::FunctionCallOutput(output) if output.call_id == "async_call"))
+        .count();
+    assert_eq!(copies, 1, "the next upstream input carries the output once");
+    assert_eq!(
+        run.registry.get(&root).unwrap().state,
+        AgentState::Idle,
+        "and then the root settles"
+    );
+    server.abort();
+}
+
 #[tokio::test]
 async fn disconnect_while_waiting_fails_run_without_publication() {
     let (exec, server) = setup_with_options(Some(Arc::new(Semaphore::new(0))), true).await;

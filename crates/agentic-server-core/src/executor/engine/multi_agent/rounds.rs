@@ -200,6 +200,8 @@ impl MultiAgentRun {
                 self.registry
                     .settle_turn(&turn, &AgentCompletion::Interrupted)
                     .map_err(registry_error)?;
+                // The interrupted turn frees a subagent slot.
+                self.resume_unread_agents();
                 return Ok(());
             }
             AgentTaskOutcome::Finished(Err(error)) => {

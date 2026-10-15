@@ -313,9 +313,12 @@ fn async_tool_calls_are_marked_on_stream_items_and_final_output() {
                 ) {
                     lifecycle.push((index, frame.wire.rest["item"].clone()));
                 }
-                if let EventPayload::OutputItemDone { item, .. } = &frame.payload {
-                    assert_eq!(item, &frame.wire.rest["item"], "payload and wire items agree");
-                    done_items.push(item.clone());
+                if frame.event_type == SSEEventType::OutputItemDone {
+                    // Built frames carry no payload; a passed-through one must agree with the wire.
+                    if let EventPayload::OutputItemDone { item, .. } = &frame.payload {
+                        assert_eq!(item, &frame.wire.rest["item"], "payload and wire items agree");
+                    }
+                    done_items.push(frame.wire.rest["item"].clone());
                 }
             }
         }

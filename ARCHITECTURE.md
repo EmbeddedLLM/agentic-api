@@ -562,12 +562,16 @@ call inference, run the tool loop, persist. `agentic-server` never reaches past 
   call and the last output that answers it, outside the model view, so a further output still
   finds its call while repeated outputs do not accumulate. A compacted call's public form
   comes from stored history, not from the current tool declarations.
-  Compaction replaces the request's own items, so it stores two kinds of them again, as the
-  request supplied them: outputs that answer calls made before the request, before the
-  compaction item (the answered call and its output leave the window together), and the async
-  calls the request made that are still open. A call already stored keeps its place, so no item
-  or `call_id` repeats. An async call answered before the checkpoint returns to the model view
-  when a further output for it arrives after the checkpoint.
+  Compaction replaces the request's own items, so it stores some of them again, as the
+  request supplied them. Before the compaction item (the answered call and its output leave the
+  window together) go outputs that answer calls made before the request, and the request's own
+  answered async calls with the last output for each; after it go the async calls the request
+  made that are still open. A call already stored keeps its place, so no item or `call_id`
+  repeats. Multi-agent runs route outputs through the pending-call ledger, which knows only
+  the calls the gateway emitted, so there a further output for an async call the client
+  supplied itself is rejected, with or without compaction. An async call answered before the
+  checkpoint returns to the model view when a further output for it arrives after the
+  checkpoint.
   Gateway-executed built-in tool calls are resolved and
   recorded within their originating round, so they do not remain pending at this
   boundary.
@@ -621,13 +625,15 @@ call inference, run the tool loop, persist. `agentic-server` never reaches past 
   whole batch, transfers outputs into canonical histories, invalidates stale compaction
   generations, and resumes a waiting owner only after all of its synchronous calls are
   resolved. A late async output owned by the root resumes an idle root with a fresh turn
-  when it arrives live, and any settled root in a continuation request. An idle subagent
-  with a client output after its last produced item starts a fresh turn
-  (`resume_unread_subagents`) when the run starts, after live input, and whenever a settled
-  subagent frees a `max_concurrent_subagents` slot; its answer then reaches its parent as
-  mail. The rule reads stored history, so an output that arrives at the limit waits only for a
-  free slot. A busy or waiting owner reads the output at its next turn. Interrupted and failed
-  subagents, and live interrupted owners, retain input without being restarted.
+  when it arrives live, and any settled root in a continuation request. An idle agent with a
+  client output after its last produced item starts a fresh turn (`resume_unread_agents`) when
+  the run starts, after live input, and whenever a turn settles or is interrupted. This covers
+  an output that arrived while the agent's last round ran on older input: the round completes,
+  the agent settles, and it starts again to read the output. A subagent starts only while
+  `max_concurrent_subagents` allows (the root is not counted), and its answer then reaches its
+  parent as mail. The rule reads stored history, so an output that arrives at the limit waits
+  only for a free slot. A busy or waiting owner reads the output at its next turn. Interrupted
+  and failed agents, and live interrupted owners, retain input without being restarted.
   Without a control endpoint, HTTP execution still completes at the client-output boundary.
   Finalization closes admission and rejects queued commands synchronously. `Finalizing`
   is distinct from successful persistence; a lost reply is an execution failure with
@@ -935,9 +941,11 @@ provides each round's tool classification and owns final restoration of public t
 declarations, custom/namespace shapes, tool choice, and tool-search metadata.
 
 Async client tools are marked from the same snapshot: the registry's async tool names
-(`ToolRegistry::async_tool_names`) are copied into the context. The dispatcher marks an
-async call's public `output_item.added`/`done` items with `async: true`, and final output
-normalization marks the round's call items, before namespace restoration renames them.
+(`ToolRegistry::async_tool_names`) are copied into the context. The dispatcher creates each
+call's translator with its `CallExecution`; for an async call, the function and custom
+translators build the public `output_item.added`/`done` items from the typed accumulated call
+and mark them with `mark_async_call`, which final output normalization also uses on the
+round's call items, before namespace restoration renames them.
 Later stages read the marker from the call item itself.
 
 Gateway-executed types (`Mcp`, `WebSearch`, `FileSearch`, and `CodeInterpreter`) are
