@@ -217,6 +217,10 @@ pub(crate) fn serialize_new_items(items: Vec<InOutItem>, source: ItemSource) -> 
 /// If `conversation_id` is provided, the next sequence range is computed in the insert statement so
 /// concurrent `SQLite` writers do not take a stale read snapshot before writing.
 ///
+/// Without a conversation, each item is an independent response-history row: it receives a fresh
+/// row ID and keeps the supplied ID as its public identity, so a repeated public ID can be stored
+/// once per occurrence. Rows are returned in input order.
+///
 /// # Errors
 /// Returns an error if insertion fails or an item already belongs to the conversation.
 pub async fn create_in_tx(
@@ -255,20 +259,28 @@ async fn create_in_tx_without_conversation(
     tx: &mut DbTransaction<'_>,
     items: &[(String, String)],
 ) -> DbResult<Vec<Item>> {
+    // Each occurrence gets a fresh row ID; the supplied ID is public and may repeat.
     let now = utcnow_str();
-    let values_clause = item_values_clause(items.len(), 1, false);
+    let row_ids = items.iter().map(|_| uuid7_str("item_")).collect::<Vec<_>>();
+    let values_clause = (0..items.len())
+        .map(|index| format!("($1, ${}, ${}, ${})", 3 * index + 2, 3 * index + 3, 3 * index + 4))
+        .collect::<Vec<_>>()
+        .join(", ");
     let sql = format!(
-        "WITH incoming (id, data, created_at, conversation_id, seq) AS (VALUES {values_clause}) \
-                 INSERT INTO items (id, data, created_at, conversation_id, seq, tenant_id) \
-                 SELECT incoming.*, 'default_tenant' FROM incoming RETURNING *"
+        "WITH incoming (created_at, id, public_id, data) AS (VALUES {values_clause}) \
+         INSERT INTO items (id, public_id, data, created_at, tenant_id) \
+         SELECT id, public_id, data, created_at, 'default_tenant' FROM incoming RETURNING *"
     );
 
-    let mut query = sqlx::query_as::<_, Item>(&sql);
-    for (id, data) in items {
-        query = query.bind(id).bind(data).bind(now).bind(None::<&str>).bind(None::<i64>);
+    let mut query = sqlx::query_as::<_, Item>(&sql).bind(now);
+    for ((public_id, data), row_id) in items.iter().zip(&row_ids) {
+        query = query.bind(row_id).bind(public_id).bind(data);
     }
 
-    query.fetch_all(&mut **tx).await
+    let mut rows = query.fetch_all(&mut **tx).await?;
+    // `RETURNING` does not promise output order; restore it so history matches the request.
+    rows.sort_by_key(|row| row_ids.iter().position(|id| id == &row.id));
+    Ok(rows)
 }
 
 async fn create_in_tx_with_next_conversation_seq(
@@ -279,6 +291,7 @@ async fn create_in_tx_with_next_conversation_seq(
 ) -> StoreResult<Vec<Item>> {
     let now = utcnow_str();
     let values_clause = item_values_clause(items.len(), 3, true);
+    // A repeated public ID resolves to the row whose own ID matches it, else the earliest one.
     let sql = format!(
         "WITH next_seq AS ( \
              SELECT COALESCE(MAX(seq), -1) + 1 AS start FROM items WHERE conversation_id = $1 \
@@ -685,16 +698,45 @@ mod tests {
         let items = (0..=MAX_BIND_PARAMETERS)
             .map(|index| (format!("item_{index}"), "{}".to_owned()))
             .collect::<Vec<_>>();
-        let ids = items.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>();
+        let public_ids = items.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>();
         let mut transaction = pool.begin().await.expect("begin transaction");
         let created = create_in_tx(&mut transaction, items, None)
             .await
             .expect("insert item batches");
         transaction.commit().await.expect("commit item batches");
-        let loaded = get_items(&pool, &ids).await.expect("load item batches");
+        let row_ids = created.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
+        let loaded = get_items(&pool, &row_ids).await.expect("load item batches");
 
         assert_eq!(created.len(), MAX_BIND_PARAMETERS + 1);
         assert_eq!(loaded.len(), MAX_BIND_PARAMETERS + 1);
+        assert_eq!(
+            created.iter().map(Item::public_id).collect::<Vec<_>>(),
+            public_ids.iter().map(String::as_str).collect::<Vec<_>>()
+        );
+        assert!(created.iter().all(|item| item.id != item.public_id()));
+    }
+
+    #[tokio::test]
+    async fn repeated_public_ids_get_distinct_history_rows() {
+        let pool = crate::storage::create_pool_with_schema(Some("sqlite://?mode=memory"))
+            .await
+            .expect("create in-memory database");
+        let items = vec![("item_repeated".to_owned(), "{}".to_owned()); 2];
+        let mut transaction = pool.begin().await.expect("begin transaction");
+        let created = create_in_tx(&mut transaction, items, None)
+            .await
+            .expect("insert repeated public ids");
+        transaction.commit().await.expect("commit history rows");
+
+        assert_eq!(created.len(), 2);
+        assert_ne!(created[0].id, created[1].id);
+        assert_eq!(created[0].public_id(), "item_repeated");
+        assert_eq!(created[1].public_id(), "item_repeated");
+        let row_ids = created.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
+        assert_eq!(
+            get_items(&pool, &row_ids).await.expect("reload history rows").len(),
+            2
+        );
     }
 
     #[tokio::test]

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::sync::Arc;
 
-use super::models::{item, response, response_history};
+use super::models::{item, response};
 use super::pool::DbPool;
 use super::types::{InOutItem, ResponseData, ResponseMetadata, StorageError, StoreResult};
 use crate::utils::common::serialize_to_string;
@@ -133,7 +133,8 @@ impl ResponseStore {
         let mut tx = pool.begin().await?;
 
         // History rows get their own row IDs, so repeated public IDs keep every position.
-        item_ids.extend(response_history::create_in_tx(&mut tx, &items_).await?);
+        let created = item::create_in_tx(&mut tx, items_, None).await?;
+        item_ids.extend(created.into_iter().map(|item| item.id));
         let history_item_ids_json = serialize_to_string(&item_ids)?;
 
         response::create_in_tx(
