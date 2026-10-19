@@ -337,6 +337,8 @@ pub async fn setup_pool() -> Arc<DbPool> {
 /// Bundles everything a test needs.  Dropped at end of test scope.
 pub struct TestFixture {
     pub exec_ctx: Arc<ExecutionContext>,
+    /// Database behind the handlers, exposed for store-level assertions.
+    pub pool: Arc<DbPool>,
     // Kept for its Drop impl — aborts the mock server when the test ends.
     pub server: MockServer,
 }
@@ -366,7 +368,7 @@ impl TestFixture {
             server.url().to_string(),
         ));
 
-        Self { exec_ctx, server }
+        Self { exec_ctx, pool, server }
     }
 
     pub async fn new_with_responses(responses: Vec<MockResponse>) -> Self {
@@ -383,7 +385,7 @@ impl TestFixture {
             server.url().to_string(),
         ));
 
-        Self { exec_ctx, server }
+        Self { exec_ctx, pool, server }
     }
 
     pub async fn request_bodies(&self) -> Vec<Value> {
