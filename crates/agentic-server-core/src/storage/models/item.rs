@@ -733,10 +733,7 @@ mod tests {
         assert_eq!(created[0].public_id(), "item_repeated");
         assert_eq!(created[1].public_id(), "item_repeated");
         let row_ids = created.iter().map(|item| item.id.clone()).collect::<Vec<_>>();
-        assert_eq!(
-            get_items(&pool, &row_ids).await.expect("reload history rows").len(),
-            2
-        );
+        assert_eq!(get_items(&pool, &row_ids).await.expect("reload history rows").len(), 2);
     }
 
     #[tokio::test]
