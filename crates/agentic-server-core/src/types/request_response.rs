@@ -28,7 +28,9 @@ use serde_helpers::{
 };
 pub use standard_response::{ResponseReasoning, StandardResponseFields};
 pub use text_config::{ResponseTextConfig, ResponseTextFormat};
-pub use unsupported::{BACKGROUND_PARAM, Background, PROMPT_PARAM, RejectedValue, UnsupportedParameterError};
+pub use unsupported::{
+    BACKGROUND_PARAM, Background, PROMPT_PARAM, RejectedValue, TOOL_CHOICE_PARAM, UnsupportedParameterError,
+};
 #[cfg(feature = "openapi")]
 mod schema;
 
@@ -207,6 +209,21 @@ impl<T: ?Sized, C> RequestPayload<T, C> {
         self.tools
             .as_deref()
             .is_some_and(|tools| tools.iter().any(declares_async))
+    }
+
+    /// Rejects a `tool_choice` the gateway parses but does not support.
+    ///
+    /// Unlike `background` and `prompt`, this is checked on the direct route too: a direct request declares no MCP
+    /// server, so an MCP `tool_choice` there names nothing and the upstream would be asked to honour a dangling choice.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`UnsupportedParameterError::McpToolChoice`] for an MCP selector.
+    pub fn validate_tool_choice(&self) -> Result<(), UnsupportedParameterError> {
+        match &self.tool_choice {
+            Some(choice) if !choice.is_supported() => Err(UnsupportedParameterError::McpToolChoice),
+            _ => Ok(()),
+        }
     }
 
     /// Names the feature in this request that only the in-process executor

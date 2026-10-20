@@ -34,6 +34,8 @@ const MAX_MCP_DISCOVERY_BYTES: usize = 1024 * 1024;
 pub enum ToolType {
     Function,
     ToolSearch,
+    /// Tool search the gateway runs itself (`execution: "server"`).
+    HostedToolSearch,
     Custom,
     Shell,
     CodexNamespace,
@@ -54,6 +56,7 @@ impl ToolType {
         match self {
             Self::Function => "function tool",
             Self::ToolSearch => "tool search",
+            Self::HostedToolSearch => "hosted tool search",
             Self::Custom => "custom tool",
             Self::Shell => "shell tool",
             Self::CodexNamespace => "Codex namespace tool",
@@ -234,7 +237,8 @@ impl ToolRegistry {
     /// override a gateway-configured server's connection). Transient MCP
     /// discovery failures (the server could not be reached) are not
     /// returned as errors; they are recorded as failed [`McpListTools`]
-    /// metadata so the rest of the request can proceed. Returns
+    /// metadata. The Responses executor fails the request on such a record,
+    /// as the Responses API does; other callers decide for themselves. Returns
     /// [`ToolError::Execution`] when discovered MCP metadata exceeds its byte
     /// or tool-count limit.
     pub async fn build_with_handlers(
@@ -467,7 +471,8 @@ impl ToolRegistry {
     }
 
     /// Current discovery items without an equivalent successful historical
-    /// lifecycle. Failed or changed discovery remains visible to the client.
+    /// lifecycle. Failed or changed discovery remains visible to the client
+    /// when the request continues (see [`Self::failed_mcp_list_tools`]).
     pub(crate) fn mcp_list_tool_items(&self) -> impl Iterator<Item = &McpListTools> {
         self.mcp_list_tools_items.values().filter_map(|items| {
             let (current, history) = items.split_first()?;
@@ -476,6 +481,18 @@ impl ToolRegistry {
                     .iter()
                     .any(|previous| previous.error.is_none() && previous.tools == current.tools);
             (!already_emitted).then_some(current)
+        })
+    }
+
+    /// The first declared MCP server whose current tool listing failed and
+    /// whose history holds no successful listing. The Responses API does not
+    /// list a server again while its listing is in context, so a continuation
+    /// keeps going when such a server later fails.
+    #[must_use]
+    pub(crate) fn failed_mcp_list_tools(&self) -> Option<&McpListTools> {
+        self.mcp_list_tools_items.values().find_map(|items| {
+            let (current, history) = items.split_first()?;
+            (current.error.is_some() && history.iter().all(|previous| previous.error.is_some())).then_some(current)
         })
     }
 
@@ -501,7 +518,12 @@ impl ToolRegistry {
         let entry = self.entries.get(TOOL_SEARCH_NAME).ok_or_else(|| {
             ToolError::Config("prepared tool-search declaration is missing from the private registry".to_owned())
         })?;
-        if entry.tool_type != ToolType::ToolSearch || !matches!(entry.ownership, ToolOwnership::Client) {
+        let valid = match entry.tool_type {
+            ToolType::ToolSearch => matches!(entry.ownership, ToolOwnership::Client),
+            ToolType::HostedToolSearch => matches!(entry.ownership, ToolOwnership::Gateway(Some(_))),
+            _ => false,
+        };
+        if !valid {
             return Err(ToolError::Config(
                 "prepared tool-search declaration has invalid private registry ownership".to_owned(),
             ));
@@ -516,6 +538,65 @@ impl ToolRegistry {
             .iter()
             .filter(|c| self.entries.get(&c.name).is_some_and(|e| e.ownership.is_gateway()))
             .collect()
+    }
+
+    /// Adds client entries for tools a hosted search loaded mid-response, and
+    /// rebuilds the namespace and custom maps that restore their public shape.
+    /// Gateway entries, including discovered MCP tools, are kept as built, so
+    /// no MCP server is listed again.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ToolError::Config`] when a loaded name collides with another tool.
+    pub(crate) async fn refresh_client_tools(
+        &mut self,
+        tools: &[crate::types::tools::ResponsesTool],
+    ) -> Result<(), ToolError> {
+        let declarations = super::declaration::responses_declarations(tools);
+        let mut client_declarations: Vec<_> = declarations
+            .iter()
+            .filter(|declaration| {
+                matches!(
+                    declaration,
+                    ToolDeclaration::Function(_) | ToolDeclaration::Namespace(_) | ToolDeclaration::Custom(_)
+                )
+            })
+            .cloned()
+            .collect();
+        let client = Self::build_with_handlers(&mut client_declarations, &mut GatewayExecutors::default()).await?;
+        for (name, entry) in client.entries {
+            self.entries.entry(name).or_insert(entry);
+        }
+        self.namespace_map =
+            CodexNamespaceHandler.build_namespace_map((!declarations.is_empty()).then_some(&declarations))?;
+        self.custom_tool_map = CustomHandler::build_tool_map(&declarations);
+        Ok(())
+    }
+
+    /// Binds the hosted `tool_search` entry to this response's catalog.
+    pub(crate) fn bind_hosted_tool_search(&mut self, catalog: super::tool_search::HostedCatalog) {
+        if self.is_hosted_tool_search_name(TOOL_SEARCH_NAME) {
+            self.entries.insert(
+                TOOL_SEARCH_NAME.to_owned(),
+                super::tool_search::hosted_tool_search_entry(catalog),
+            );
+        }
+    }
+
+    /// Whether `name` is the hosted `tool_search` the gateway runs. Its model
+    /// call is replaced by the call result's own model input and history.
+    #[must_use]
+    pub fn is_hosted_tool_search_name(&self, name: &str) -> bool {
+        self.entries
+            .get(name)
+            .is_some_and(|entry| entry.tool_type == ToolType::HostedToolSearch)
+    }
+
+    /// Whether an upstream output item is recorded as the model saw it. A
+    /// hosted search call is recorded through its call result instead.
+    #[must_use]
+    pub(crate) fn records_output_item(&self, item: &crate::types::io::OutputItem) -> bool {
+        !matches!(item, crate::types::io::OutputItem::FunctionCall(call) if self.is_hosted_tool_search_name(&call.name))
     }
 
     #[must_use]
@@ -917,6 +998,38 @@ mod tests {
             visible_discovery_ids(current_failure, vec![previous_empty_success]),
             ["mcpl_current_failed"]
         );
+    }
+
+    #[test]
+    fn failed_mcp_list_tools_ignores_a_server_with_a_successful_listing_in_history() {
+        let failed = |id: &str| {
+            let mut item = McpListTools::new(id, "server", Vec::new());
+            item.error = Some("discovery failed".to_owned());
+            item
+        };
+        let mut registry = ToolRegistry::default();
+        registry
+            .mcp_list_tools_items
+            .insert("server".to_owned(), vec![failed("mcpl_current")]);
+        assert_eq!(
+            registry.failed_mcp_list_tools().map(|item| item.id.as_str()),
+            Some("mcpl_current")
+        );
+
+        registry.mcp_list_tools_items.insert(
+            "server".to_owned(),
+            vec![failed("mcpl_current"), failed("mcpl_previous")],
+        );
+        assert_eq!(
+            registry.failed_mcp_list_tools().map(|item| item.id.as_str()),
+            Some("mcpl_current")
+        );
+
+        let previous = McpListTools::new("mcpl_previous", "server", vec![listed_tool("read")]);
+        registry
+            .mcp_list_tools_items
+            .insert("server".to_owned(), vec![failed("mcpl_current"), previous]);
+        assert!(registry.failed_mcp_list_tools().is_none());
     }
 
     #[test]

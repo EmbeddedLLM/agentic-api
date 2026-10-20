@@ -8,7 +8,7 @@ mod policy;
 mod timing;
 
 pub(crate) use admission::BuiltInToolCallBudget;
-pub(super) use history::{append_gateway_calls_to_new_input, append_output_items_to_input, append_tool_outputs};
+pub(super) use history::{append_gateway_calls_to_new_input, append_gateway_results, append_output_items_to_input};
 pub(super) use lifecycle::{
     emit_gateway_completed_events, emit_gateway_start_events, emit_response_start_events, relay_round_events,
 };
@@ -25,7 +25,7 @@ use tokio::sync::Semaphore;
 use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::executor::relay::StreamRelay;
 use crate::executor::request::ExecutionContext;
-use crate::executor::response_budget::ExecutorResponseBudget;
+use crate::executor::response_budget::{ExecutorResponseBudget, RetainedSize};
 use crate::executor::telemetry::metrics::ExecutorMetrics;
 use crate::tool::handler::MAX_GATEWAY_TOOL_OUTPUT_BYTES;
 use crate::tool::{GatewayBinding, ToolError, ToolOutput, ToolOwnership, ToolRegistry};
@@ -45,10 +45,28 @@ const GATEWAY_TOOL_TIMEOUT: Duration = Duration::from_secs(60);
 #[derive(Clone)]
 pub(super) struct GatewayCallResult {
     pub(super) item_index: usize,
-    pub(super) input_item: InputItem,
+    /// Appended to the model's context for the next inference round.
+    pub(super) model_input: Vec<InputItem>,
+    /// Recorded as the turn's history; usually the model input.
+    pub(super) history_input: Vec<InputItem>,
     pub(super) public_output: Option<OutputItem>,
+    /// A second public item at the next output index (a hosted `tool_search_output`).
+    pub(super) follow_up_output: Option<OutputItem>,
     /// A call refused by `max_tool_calls` that the public response does not show.
     pub(super) omitted: bool,
+}
+
+impl GatewayCallResult {
+    fn new(item_index: usize, model_input: Vec<InputItem>, public_output: Option<OutputItem>, omitted: bool) -> Self {
+        Self {
+            item_index,
+            history_input: model_input.clone(),
+            model_input,
+            public_output,
+            follow_up_output: None,
+            omitted,
+        }
+    }
 }
 
 /// Supplies the public output that completes a gateway event plan.
@@ -73,6 +91,8 @@ pub(super) struct GatewayEventPlan {
     output_index: u32,
     started_output: Option<OutputItem>,
     completed_output: Option<OutputItem>,
+    /// Complete at planning time; emitted after `completed_output` at the next index.
+    follow_up_output: Option<OutputItem>,
     arguments: Option<String>,
 }
 
@@ -108,6 +128,8 @@ pub(super) struct GatewayScheduler {
     calls: Vec<GatewayCallPlan>,
     /// Item indexes of refused calls without a public item, in ascending order.
     omitted_items: Vec<usize>,
+    /// Item indexes of calls with a follow-up public item, in ascending order.
+    expanded_items: Vec<usize>,
     policy: GatewaySchedulerPolicy,
     timeout: Duration,
     /// Times each executed call as an `agentic.stage.duration` sample.
@@ -154,6 +176,7 @@ impl GatewayScheduler {
         budget: &mut BuiltInToolCallBudget,
     ) -> Self {
         let mut omitted_items = Vec::new();
+        let mut expanded_items = Vec::new();
         let calls = output_items
             .iter()
             .enumerate()
@@ -166,17 +189,27 @@ impl GatewayScheduler {
                     return None;
                 };
 
-                let started_output = binding
+                let (started_output, follow_up_output) = binding
                     .as_ref()
-                    .and_then(|binding| binding.plan_gateway_events(call).into_started_output());
-                // Earlier omitted calls have no public position.
-                let public_index = output_offset.saturating_add(item_index - omitted_items.len());
+                    .map(|binding| binding.plan_gateway_events(call).into_parts())
+                    .unwrap_or_default();
+                // Earlier omitted calls have no public position; earlier
+                // follow-up items take one more.
+                let public_index = output_offset
+                    .saturating_add(item_index - omitted_items.len())
+                    .saturating_add(expanded_items.len());
                 let execution = binding
                     .as_ref()
                     .map_or(GatewayExecutionPlan::MissingHandler, |binding| {
                         GatewayExecutionPlan::Bound(binding.clone())
                     });
-                let (refused, started_output, completed_output) = match budget.admit() {
+                // A hosted search does not count toward `max_tool_calls`.
+                let admission = if entry.tool_type == crate::tool::ToolType::HostedToolSearch {
+                    admission::Admission::Dispatch
+                } else {
+                    budget.admit()
+                };
+                let (refused, started_output, completed_output) = match admission {
                     admission::Admission::Dispatch => (None, started_output, None),
                     admission::Admission::Refuse { limit, visible } => {
                         let shown = started_output
@@ -191,6 +224,10 @@ impl GatewayScheduler {
                         (Some(limit), started_output.filter(|_| shown.is_some()), shown)
                     }
                 };
+                let follow_up_output = follow_up_output.filter(|_| refused.is_none());
+                if follow_up_output.is_some() {
+                    expanded_items.push(item_index);
+                }
                 Some(GatewayCallPlan {
                     tool_type: entry.tool_type,
                     item_index,
@@ -201,6 +238,7 @@ impl GatewayScheduler {
                         output_index: u32::try_from(public_index).unwrap_or(u32::MAX),
                         started_output,
                         completed_output,
+                        follow_up_output,
                         arguments: Some(call.arguments.clone()),
                     },
                 })
@@ -209,6 +247,7 @@ impl GatewayScheduler {
         Self {
             calls,
             omitted_items,
+            expanded_items,
             policy,
             timeout,
             metrics: None,
@@ -220,7 +259,10 @@ impl GatewayScheduler {
     pub(super) fn public_item_index(&self, item_index: usize) -> Option<usize> {
         match self.omitted_items.binary_search(&item_index) {
             Ok(_) => None,
-            Err(omitted_before) => Some(item_index - omitted_before),
+            Err(omitted_before) => {
+                let expanded_before = self.expanded_items.partition_point(|expanded| *expanded < item_index);
+                Some(item_index - omitted_before + expanded_before)
+            }
         }
     }
 
@@ -256,7 +298,8 @@ impl GatewayScheduler {
     }
 
     /// Number of leading scheduled calls whose start lifecycle may be emitted
-    /// before execution without overtaking an earlier client-owned call.
+    /// before execution without overtaking an earlier client-owned call or a
+    /// follow-up item.
     pub(super) fn initial_event_run_len(&self, output_items: &[OutputItem], registry: &ToolRegistry) -> usize {
         let Some(first) = self.calls.first().map(|call| call.item_index) else {
             return 0;
@@ -267,11 +310,23 @@ impl GatewayScheduler {
         {
             return 0;
         }
-        self.calls
+        let contiguous = self
+            .calls
             .iter()
             .enumerate()
             .take_while(|(offset, call)| call.item_index == first.saturating_add(*offset))
-            .count()
+            .count();
+        contiguous.min(self.start_run_before_follow_up_len())
+    }
+
+    /// Number of leading calls that can be announced before execution without a
+    /// later call overtaking a follow-up item: the run ends with the first call
+    /// that has one, because that item takes the next public index.
+    fn start_run_before_follow_up_len(&self) -> usize {
+        self.calls
+            .iter()
+            .position(|call| call.events.follow_up_output.is_some())
+            .map_or(self.calls.len(), |index| index + 1)
     }
 
     /// Executes planned calls under the bounded-concurrency policy and records
@@ -315,6 +370,8 @@ impl GatewayScheduler {
         let Some(limit) = plan.refused else {
             return self.timed_run(plan, execution_slots, response_budget).await;
         };
+        // Admission never refuses a hosted search, whose model input must pair a call with its output.
+        debug_assert_ne!(plan.tool_type, crate::tool::ToolType::HostedToolSearch);
         let message = admission::limit_reached_message(limit);
         let omitted = plan.events.completed_output.is_none();
         let public_output = plan.events.completed_output;
@@ -338,12 +395,21 @@ impl GatewayScheduler {
         response_budget: &ExecutorResponseBudget,
     ) -> ExecutorResult<(GatewayCallResult, GatewayCallStatus)> {
         let GatewayCallPlan {
+            tool_type,
             item_index,
             call,
             execution,
+            events,
             ..
         } = plan;
         let GatewayExecutionPlan::Bound(binding) = execution else {
+            if tool_type == crate::tool::ToolType::HostedToolSearch {
+                // A hosted search entry is always bound; an unbound one would
+                // leave the model an output without its call.
+                return Err(ExecutorError::Tool(ToolError::Config(
+                    "hosted tool_search has no bound catalog".to_owned(),
+                )));
+            }
             let message = format!("gateway tool '{}' has no registered handler", call.name);
             return unexecuted_result(item_index, &call, &message, None, false, response_budget)
                 .map(|result| (result, GatewayCallStatus::Failed));
@@ -387,11 +453,19 @@ impl GatewayScheduler {
         };
         enforce_gateway_tool_output_size(output.output.len())?;
         response_budget.consume(output.output.len())?;
+        let follow_up_output = events.follow_up_output;
+        if let Some(follow_up) = &follow_up_output {
+            response_budget.consume(follow_up.retained_bytes())?;
+        }
         let public_output = binding.public_output(&call, &output, status);
+        let history_input = binding.history_input(&call, follow_up_output.as_ref());
+        let model_input = binding.model_input(&call, output, follow_up_output.as_ref());
         let result = GatewayCallResult {
             item_index,
-            input_item: InputItem::FunctionCallOutput(output.into()),
+            history_input: history_input.unwrap_or_else(|| model_input.clone()),
+            model_input,
             public_output,
+            follow_up_output,
             omitted: false,
         };
         Ok((result, status))
@@ -419,12 +493,12 @@ fn unexecuted_result(
     let output = execution_error_output(call, message)?;
     enforce_gateway_tool_output_size(output.output.len())?;
     response_budget.consume(output.output.len())?;
-    Ok(GatewayCallResult {
+    Ok(GatewayCallResult::new(
         item_index,
-        input_item: InputItem::FunctionCallOutput(output.into()),
+        vec![InputItem::FunctionCallOutput(output.into())],
         public_output,
         omitted,
-    })
+    ))
 }
 
 fn execution_error_output(call: &FunctionToolCall, message: &str) -> ExecutorResult<ToolOutput> {
@@ -455,15 +529,19 @@ pub(super) fn public_output_items(
                         ExecutorError::ParseError("shell function call contains invalid action arguments".to_owned())
                     })?
                 }
-                OutputItem::FunctionCall(call) if registry.is_gateway_owned_name(&call.name) => gateway_results
-                    .iter()
-                    .find(|result| result.item_index == item_index)
-                    .and_then(|result| result.public_output.clone())
-                    .unwrap_or_else(|| OutputItem::FunctionCall(call.clone())),
+                OutputItem::FunctionCall(call) if registry.is_gateway_owned_name(&call.name) => {
+                    let result = gateway_results.iter().find(|result| result.item_index == item_index);
+                    let public = result
+                        .and_then(|result| result.public_output.clone())
+                        .unwrap_or_else(|| OutputItem::FunctionCall(call.clone()));
+                    return Ok([Some(public), result.and_then(|result| result.follow_up_output.clone())]);
+                }
                 other => other.clone(),
             })
+            .map(|item| [Some(item), None])
         })
-        .collect()
+        .collect::<ExecutorResult<Vec<_>>>()
+        .map(|items| items.into_iter().flatten().flatten().collect())
 }
 
 pub(super) fn mcp_list_tools_event_plans(
@@ -481,6 +559,7 @@ pub(super) fn mcp_list_tools_event_plans(
                 output_index: u32::try_from(output_offset.saturating_add(index)).unwrap_or(u32::MAX),
                 started_output: Some(crate::tool::mcp::handler::started_list_tools_output_item(list_tools)),
                 completed_output: Some(item.clone()),
+                follow_up_output: None,
                 arguments: None,
             })
         })
@@ -499,6 +578,7 @@ pub(super) fn compaction_event_plans(
             output_index: u32::try_from(output_offset.saturating_add(index)).unwrap_or(u32::MAX),
             started_output: Some(item.clone()),
             completed_output: Some(item.clone()),
+            follow_up_output: None,
             arguments: None,
         })
         .collect()
@@ -526,9 +606,16 @@ pub(super) async fn execute_and_emit_output_calls(
     let mut scheduler =
         GatewayScheduler::plan_with_budget(output_items, registry, output_offset, policy, tool_call_budget)
             .with_metrics(&exec_ctx.metrics);
-    emit_gateway_start_events(scheduler.event_plans(), relay).await?;
+    let started = scheduler.start_run_before_follow_up_len();
+    emit_gateway_start_events(scheduler.event_plans().take(started), relay).await?;
     let gateway_results = scheduler.execute_with_budget(response_budget).await?;
-    emit_gateway_completed_events(&gateway_results, scheduler.event_plans(), relay).await?;
+    // Calls after a follow-up item are announced once it has been emitted.
+    for (index, plan) in scheduler.event_plans().enumerate() {
+        if index >= started {
+            emit_gateway_start_events(std::iter::once(plan), relay).await?;
+        }
+        emit_gateway_completed_events(&gateway_results[index..=index], std::iter::once(plan), relay).await?;
+    }
     Ok(gateway_results)
 }
 
@@ -878,7 +965,7 @@ mod tests {
         // A failed web_search still yields a public web_search_call item.
         assert!(matches!(result.public_output, Some(OutputItem::WebSearchCall(_))));
         // The fed-back tool output is an error JSON mentioning the timeout.
-        let InputItem::FunctionCallOutput(msg) = &result.input_item else {
+        let InputItem::FunctionCallOutput(msg) = &result.model_input[0] else {
             panic!("expected a function_call_output");
         };
         let body = serde_json::to_string(msg).expect("serialize output");
@@ -914,7 +1001,7 @@ mod tests {
 
         assert_eq!(result.item_index, 0);
         assert!(matches!(result.public_output, Some(OutputItem::WebSearchCall(_))));
-        let InputItem::FunctionCallOutput(msg) = &result.input_item else {
+        let InputItem::FunctionCallOutput(msg) = &result.model_input[0] else {
             panic!("expected a function_call_output");
         };
         let body = serde_json::to_string(msg).expect("serialize output");
@@ -1326,6 +1413,7 @@ mod tests {
             tool_type: crate::tool::ToolType::WebSearch,
             item_index,
             events: GatewayEventPlan {
+                follow_up_output: None,
                 output_index: u32::try_from(item_index).expect("test item index fits in u32"),
                 started_output: None,
                 completed_output: None,
@@ -1360,6 +1448,7 @@ mod tests {
         let mut scheduler = GatewayScheduler {
             calls,
             omitted_items: Vec::new(),
+            expanded_items: Vec::new(),
             policy: GatewaySchedulerPolicy::new(NonZeroUsize::new(2).expect("nonzero test limit")),
             timeout: std::time::Duration::ZERO,
             metrics: None,
@@ -1406,6 +1495,7 @@ mod tests {
         let mut scheduler = GatewayScheduler {
             calls,
             omitted_items: Vec::new(),
+            expanded_items: Vec::new(),
             policy: GatewaySchedulerPolicy::new(NonZeroUsize::new(2).expect("nonzero test limit")),
             timeout: std::time::Duration::ZERO,
             metrics: None,
@@ -1538,6 +1628,7 @@ mod tests {
     #[tokio::test]
     async fn code_interpreter_gateway_events_follow_openai_lifecycle() {
         let mut plans = vec![super::GatewayEventPlan {
+            follow_up_output: None,
             output_index: 4,
             started_output: Some(OutputItem::CodeInterpreterCall(CodeInterpreterCall {
                 agent: None,
@@ -1649,6 +1740,7 @@ mod tests {
             None,
         ));
         let mut plans = vec![super::GatewayEventPlan {
+            follow_up_output: None,
             output_index: 0,
             started_output: Some(started),
             completed_output: None,
@@ -1701,7 +1793,9 @@ mod tests {
         ));
         let results = vec![GatewayCallResult {
             item_index: 0,
-            input_item: InputItem::FunctionCallOutput(ToolOutput::success("call_1", "1").into()),
+            model_input: vec![InputItem::FunctionCallOutput(ToolOutput::success("call_1", "1").into())],
+            history_input: Vec::new(),
+            follow_up_output: None,
             public_output: Some(final_item),
             omitted: false,
         }];
@@ -1738,6 +1832,7 @@ mod tests {
             namespace: None,
         };
         let mut plans = vec![super::GatewayEventPlan {
+            follow_up_output: None,
             output_index: 0,
             started_output: Some(OutputItem::McpCall(crate::types::io::McpCall::new(
                 "mcp_1",
@@ -1753,7 +1848,11 @@ mod tests {
         }];
         let results = vec![GatewayCallResult {
             item_index: 0,
-            input_item: InputItem::FunctionCallOutput(ToolOutput::failure("call_1", r#"{"error":"boom"}"#).into()),
+            model_input: vec![InputItem::FunctionCallOutput(
+                ToolOutput::failure("call_1", r#"{"error":"boom"}"#).into(),
+            )],
+            history_input: Vec::new(),
+            follow_up_output: None,
             public_output: Some(OutputItem::McpCall(crate::types::io::McpCall::new(
                 "mcp_1",
                 "counter",

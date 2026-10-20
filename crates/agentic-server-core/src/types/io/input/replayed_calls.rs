@@ -1,0 +1,188 @@
+//! Public records of gateway-executed calls that a client replays as input.
+//!
+//! A `store: false` client sends back the `mcp_call` and `web_search_call` items a response returned. The model
+//! never saw those public records: it called a function and read its output. The model-facing copy therefore
+//! carries each record as that function call and output pair, as stored history does after a live call.
+
+use serde_json::{Value, json};
+
+use super::{FunctionToolResultMessage, InputFunctionToolCall, InputItem, ToolCallOutput};
+use crate::types::io::output::{McpCall, WebSearchAction, WebSearchCall};
+use crate::utils::common::{serialize_to_string, serialize_to_value};
+
+/// The function the gateway lowers web search to; see `tool::web_search`.
+const WEB_SEARCH_FUNCTION_NAME: &str = "web_search";
+
+/// Whether this item is a replayed public record of a gateway-executed call.
+pub(super) const fn is_replayed_gateway_call(item: &InputItem) -> bool {
+    matches!(item, InputItem::McpCall(_) | InputItem::WebSearchCall(_))
+}
+
+/// The model-facing items for one input item: a replayed gateway call becomes its function call and output.
+pub(super) fn model_items(item: InputItem) -> Vec<InputItem> {
+    match item {
+        InputItem::McpCall(call) => mcp_call_items(&call),
+        InputItem::WebSearchCall(call) => web_search_items(&call),
+        other => vec![other],
+    }
+}
+
+fn mcp_call_items(call: &McpCall) -> Vec<InputItem> {
+    let output = match (&call.output, &call.error) {
+        (Some(output), _) => output.clone(),
+        (None, Some(error)) => {
+            serialize_to_string(&json!({"error": serialize_to_value(error).unwrap_or(Value::Null)})).unwrap_or_default()
+        }
+        (None, None) => String::new(),
+    };
+    call_pair(
+        call,
+        &call.id,
+        crate::tool::mcp::handler::model_tool_name(&call.server_label, &call.name),
+        call.arguments.clone(),
+        output,
+    )
+}
+
+fn web_search_items(call: &WebSearchCall) -> Vec<InputItem> {
+    let (arguments, output) = match &call.action {
+        WebSearchAction::Search(search) => {
+            let queries = if search.queries.is_empty() {
+                vec![search.query.clone()]
+            } else {
+                search.queries.clone()
+            };
+            let output = if search.sources.is_empty() {
+                json!({"note": "The results of this earlier web search are not available."})
+            } else {
+                json!({"sources": serialize_to_value(&search.sources).unwrap_or(Value::Null)})
+            };
+            (json!({"queries": queries}), output)
+        }
+        action => (
+            serialize_to_value(action).unwrap_or(Value::Null),
+            json!({"note": "The result of this earlier web action is not available."}),
+        ),
+    };
+    call_pair(
+        call,
+        &call.id,
+        WEB_SEARCH_FUNCTION_NAME.to_owned(),
+        serialize_to_string(&arguments).unwrap_or_default(),
+        serialize_to_string(&output).unwrap_or_default(),
+    )
+}
+
+/// The record's id serves as the call id, so a replay pairs its call and output deterministically.
+fn call_pair(
+    record: &impl Attributed,
+    item_id: &str,
+    name: String,
+    arguments: String,
+    output: String,
+) -> Vec<InputItem> {
+    vec![
+        InputItem::FunctionCall(InputFunctionToolCall {
+            agent: record.agent(),
+            id: Some(item_id.to_owned()),
+            call_id: item_id.to_owned(),
+            name,
+            namespace: None,
+            arguments,
+            status: Some(crate::types::event::MessageStatus::Completed),
+            async_execution: false,
+        }),
+        InputItem::FunctionCallOutput(FunctionToolResultMessage {
+            call_id: item_id.to_owned(),
+            output: ToolCallOutput::Text(output),
+        }),
+    ]
+}
+
+trait Attributed {
+    fn agent(&self) -> Option<crate::types::io::AgentAttribution>;
+}
+
+impl Attributed for McpCall {
+    fn agent(&self) -> Option<crate::types::io::AgentAttribution> {
+        self.agent.clone()
+    }
+}
+
+impl Attributed for WebSearchCall {
+    fn agent(&self) -> Option<crate::types::io::AgentAttribution> {
+        self.agent.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use crate::types::io::{InOutItem, ResponsesInput};
+
+    fn model_input(items: serde_json::Value) -> serde_json::Value {
+        let input: ResponsesInput = serde_json::from_value(items).expect("input");
+        serde_json::to_value(input.model_input()).expect("model input")
+    }
+
+    #[test]
+    fn replayed_mcp_call_reaches_the_model_as_its_function_call_and_output() {
+        let model = model_input(json!([
+            {"type": "message", "role": "user", "content": "hi"},
+            {"type": "mcp_call", "id": "mcp_1", "server_label": "docs", "name": "search", "arguments": "{\"q\":\"x\"}",
+                "status": "completed", "approval_request_id": null, "output": "found", "error": null}
+        ]));
+        assert_eq!(
+            model,
+            json!([
+                {"type": "message", "role": "user", "content": "hi"},
+                {"type": "function_call", "id": "mcp_1", "call_id": "mcp_1", "name": "mcp__docs__search",
+                    "arguments": "{\"q\":\"x\"}", "status": "completed"},
+                {"type": "function_call_output", "call_id": "mcp_1", "output": "found"}
+            ])
+        );
+    }
+
+    #[test]
+    fn replayed_failed_mcp_call_carries_its_error() {
+        let model = model_input(json!([
+            {"type": "mcp_call", "id": "mcp_2", "server_label": "docs", "name": "search", "arguments": "{}",
+                "status": "failed", "approval_request_id": null, "output": null, "error": "boom"}
+        ]));
+        assert_eq!(model[1]["output"], "{\"error\":\"boom\"}");
+    }
+
+    #[test]
+    fn replayed_web_search_call_reaches_the_model_as_a_web_search_call() {
+        let model = model_input(json!([
+            {"type": "web_search_call", "id": "ws_1", "status": "completed",
+                "action": {"type": "search", "query": "rust", "queries": ["rust"],
+                    "sources": [{"type": "url", "url": "https://www.rust-lang.org"}]}}
+        ]));
+        assert_eq!(model[0]["type"], "function_call");
+        assert_eq!(model[0]["name"], "web_search");
+        assert_eq!(model[0]["arguments"], "{\"queries\":[\"rust\"]}");
+        assert_eq!(model[1]["call_id"], "ws_1");
+        assert_eq!(
+            model[1]["output"],
+            "{\"sources\":[{\"url\":\"https://www.rust-lang.org\"}]}"
+        );
+    }
+
+    #[test]
+    fn stored_history_keeps_the_public_records() {
+        let input: ResponsesInput = serde_json::from_value(json!([
+            {"type": "mcp_call", "id": "mcp_3", "server_label": "docs", "name": "search", "arguments": "{}",
+                "status": "completed", "approval_request_id": null, "output": "ok", "error": null}
+        ]))
+        .expect("input");
+        let ResponsesInput::Items(items) = &input else {
+            panic!("items")
+        };
+        assert!(matches!(
+            &items[0],
+            InOutItem::Input(crate::types::io::InputItem::McpCall(_))
+        ));
+    }
+}

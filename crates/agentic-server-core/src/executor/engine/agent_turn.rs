@@ -17,7 +17,7 @@ use crate::executor::compaction::maybe_compact_context;
 use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::executor::gateway::{
     BuiltInToolCallBudget, GatewayCallResult, GatewayScheduler, append_gateway_calls_to_new_input,
-    append_output_items_to_input, append_tool_outputs, emit_gateway_start_events, execute_and_emit_output_calls,
+    append_gateway_results, append_output_items_to_input, emit_gateway_start_events, execute_and_emit_output_calls,
     public_output_items, relay_round_events,
 };
 use crate::executor::pipeline::AgentPipeline;
@@ -30,6 +30,7 @@ use crate::executor::upstream::{fetch_blocking_payload, fetch_stream_payload};
 use crate::tool::{ToolRegistry, mcp, record_discovered_mcp_tools, responses_declarations};
 use crate::types::io::{InputItem, OutputItem, ResponsesInput};
 use crate::types::request_response::ResponsePayload;
+use crate::types::tools::ResponsesTool;
 
 /// Outcome of inspecting one inference round's output, deciding whether the
 /// gateway tool loop should run another round, stop, or surface a partial result.
@@ -86,6 +87,12 @@ pub(super) async fn build_tool_registry(
     if let Some(state) = agent.tool_search_state().filter(|state| state.is_active()) {
         registry
             .validate_tool_availability(state.withheld_function_names(), state.synthetic_tool_search().is_some())?;
+        if state.is_hosted() {
+            // The catalog needs each deferred MCP server's discovered tools.
+            let tools = agent.request.enriched_request.tools.as_deref().unwrap_or_default();
+            state.validate_mcp_tool_choice(agent.request.enriched_request.tool_choice.as_ref(), tools)?;
+            registry.bind_hosted_tool_search(state.hosted_catalog(tools));
+        }
     }
     registry.cache_listed_mcp_tools(&agent.request.enriched_request.input);
     Ok(registry)
@@ -117,7 +124,7 @@ fn record_round_history(
         ctx.new_input_items.extend(
             output_items
                 .iter()
-                .filter(|item| !matches!(item, OutputItem::McpListTools(_)))
+                .filter(|item| !matches!(item, OutputItem::McpListTools(_)) && registry.records_output_item(item))
                 .filter_map(OutputItem::to_input_item)
                 .map(Into::into),
         );
@@ -216,6 +223,13 @@ impl<'a> AgentTurn<'a> {
         max_rounds: NonZeroUsize,
     ) -> ExecutorResult<Self> {
         let registry = build_tool_registry(agent, exec_ctx, response_budget).await?;
+        // The Responses API fails a response, before anything is emitted, when a declared MCP server cannot list
+        // its tools. A mid-run refresh keeps the failed listing instead, since output may already be streaming.
+        if let Some(failed) = registry.failed_mcp_list_tools() {
+            let mut failed = failed.clone();
+            failed.error = None;
+            return Err(ExecutorError::McpListToolsFailed(Box::new(failed)));
+        }
         let tool_call_budget = BuiltInToolCallBudget::new(agent.request.original_request.max_tool_calls_limit()?);
         Ok(Self {
             pipeline: agent,
@@ -337,7 +351,10 @@ impl<'a> AgentTurn<'a> {
         if matches!(decision, RoundDecision::Continue) || multi_agent {
             self.append_round_input(&current_output, &payload.output, multi_agent);
         }
+        let hosted_loads = hosted_search_loads(&gateway_results);
         self.record_gateway_results(gateway_results);
+        // Loads persist with the response whatever this round decided.
+        self.load_hosted_tools(&hosted_loads).await?;
         Ok(RoundResult { payload, decision })
     }
 
@@ -391,11 +408,11 @@ impl<'a> AgentTurn<'a> {
                 .filter_map(|item| match item {
                     OutputItem::ShellCall(call) => Some((call.call_id.as_str(), item)),
                     OutputItem::CustomToolCall(call) => Some((call.call_id.as_str(), item)),
-                    OutputItem::ToolSearchCall(call) => Some((call.call_id.as_str(), item)),
+                    OutputItem::ToolSearchCall(call) => call.call_id.as_deref().map(|call_id| (call_id, item)),
                     _ => None,
                 })
                 .collect();
-            for item in output {
+            for item in output.iter().filter(|item| self.registry.records_output_item(item)) {
                 let item = match item {
                     OutputItem::FunctionCall(call) => client_calls.get(call.call_id.as_str()).copied().unwrap_or(item),
                     item => item,
@@ -410,15 +427,28 @@ impl<'a> AgentTurn<'a> {
                 }
             }
         } else {
-            append_output_items_to_input(&mut self.pipeline.request.enriched_request.input, output);
+            let recorded: Vec<_> = output
+                .iter()
+                .filter(|item| self.registry.records_output_item(item))
+                .cloned()
+                .collect();
+            append_output_items_to_input(&mut self.pipeline.request.enriched_request.input, &recorded);
         }
     }
 
+    /// Makes the tools this round's hosted searches loaded callable next round.
+    async fn load_hosted_tools(&mut self, loaded: &[ResponsesTool]) -> ExecutorResult<()> {
+        if loaded.is_empty() {
+            return Ok(());
+        }
+        self.pipeline.apply_hosted_search(loaded)?;
+        let tools = self.pipeline.request.enriched_request.tools.clone().unwrap_or_default();
+        self.registry.refresh_client_tools(&tools).await?;
+        Ok(())
+    }
+
     fn record_gateway_results(&mut self, results: Vec<GatewayCallResult>) {
-        append_tool_outputs(
-            &mut self.pipeline.request,
-            results.into_iter().map(|result| result.input_item).collect(),
-        );
+        append_gateway_results(&mut self.pipeline.request, results);
     }
 
     async fn execute_round_output(
@@ -465,6 +495,18 @@ impl<'a> AgentTurn<'a> {
         .await?;
         Ok(gateway_results)
     }
+}
+
+/// The tools hosted searches returned in this round, in output order.
+fn hosted_search_loads(results: &[GatewayCallResult]) -> Vec<ResponsesTool> {
+    results
+        .iter()
+        .filter_map(|result| match &result.follow_up_output {
+            Some(OutputItem::ToolSearchOutput(output)) => Some(output.tools.iter().cloned()),
+            _ => None,
+        })
+        .flatten()
+        .collect()
 }
 
 fn log_custom_tool_calls(output: &[OutputItem], response_id: &str) {

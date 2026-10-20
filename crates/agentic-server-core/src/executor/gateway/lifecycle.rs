@@ -13,6 +13,7 @@ use crate::executor::request::RequestContext;
 use crate::types::io::output::{McpCallStatus, WebSearchCallStatus};
 use crate::types::io::{CodeInterpreterCallStatus, CodeInterpreterCallStreamEvent, OutputItem};
 use crate::types::request_response::ResponsePayload;
+use crate::types::tools::ToolSearchStatus;
 use crate::utils::common::{deserialize_from_value, serialize_to_value};
 
 fn output_item_value(item: &OutputItem) -> ExecutorResult<serde_json::Value> {
@@ -212,6 +213,7 @@ pub(in crate::executor) async fn emit_gateway_start_events<'a>(
             OutputItem::Message(_)
             | OutputItem::FunctionCall(_)
             | OutputItem::ToolSearchCall(_)
+            | OutputItem::ToolSearchOutput(_)
             | OutputItem::CustomToolCall(_)
             | OutputItem::ShellCall(_)
             | OutputItem::Reasoning(_)
@@ -261,10 +263,14 @@ pub(in crate::executor) async fn emit_gateway_completed_events<'a, T: GatewayPub
                 },
                 list_tools.id.as_str(),
             )),
-            OutputItem::CodeInterpreterCall(_) | OutputItem::Compaction(_) | OutputItem::ShellCall(_) => None,
+            // A hosted search has only the generic added/done events.
+            OutputItem::CodeInterpreterCall(_)
+            | OutputItem::Compaction(_)
+            | OutputItem::ShellCall(_)
+            | OutputItem::ToolSearchCall(_)
+            | OutputItem::ToolSearchOutput(_) => None,
             OutputItem::Message(_)
             | OutputItem::FunctionCall(_)
-            | OutputItem::ToolSearchCall(_)
             | OutputItem::CustomToolCall(_)
             | OutputItem::Reasoning(_)
             | OutputItem::MultiAgentCall(_)
@@ -305,7 +311,29 @@ pub(in crate::executor) async fn emit_gateway_completed_events<'a, T: GatewayPub
             ],
         )?;
         relay.emit_local(&mut done_event).await?;
+        if let Some(follow_up) = &plan.follow_up_output {
+            emit_follow_up_events(output_index.saturating_add(1), follow_up, relay).await?;
+        }
     }
+    Ok(())
+}
+
+/// A follow-up item is complete when planned; it still opens `in_progress`
+/// before completing, as the Responses API streams a `tool_search_output`.
+async fn emit_follow_up_events(output_index: u32, item: &OutputItem, relay: &mut StreamRelay) -> ExecutorResult<()> {
+    let mut added = item.clone();
+    if let OutputItem::ToolSearchOutput(output) = &mut added {
+        output.status = ToolSearchStatus::InProgress;
+    }
+    emit_gateway_added_event(output_index, &added, relay).await?;
+    let mut done_event = synthetic_event(
+        SSEEventType::OutputItemDone,
+        [
+            ("output_index".to_owned(), serde_json::json!(output_index)),
+            ("item".to_owned(), output_item_value(item)?),
+        ],
+    )?;
+    relay.emit_local(&mut done_event).await?;
     Ok(())
 }
 

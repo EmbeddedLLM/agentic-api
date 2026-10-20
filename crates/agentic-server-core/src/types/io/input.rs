@@ -1,6 +1,7 @@
 mod calls;
 mod content;
 mod conversions;
+mod replayed_calls;
 mod validation;
 mod window;
 
@@ -230,16 +231,74 @@ where
     Ok(value)
 }
 
+/// A call id that is `null` for a hosted (server-executed) item and otherwise non-blank.
+pub(super) fn deserialize_optional_non_blank_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<String>::deserialize(deserializer)?;
+    if value.as_deref().is_some_and(|value| value.trim().is_empty()) {
+        return Err(serde::de::Error::custom("value must not be blank"));
+    }
+    Ok(value)
+}
+
+/// Checks the call-id rule shared by every tool-search item: a client search
+/// pairs its call and output by `call_id`, while a hosted search has none.
+pub(super) fn check_tool_search_call_id(
+    execution: ToolSearchExecution,
+    call_id: Option<&str>,
+) -> Result<(), &'static str> {
+    match (execution, call_id) {
+        (ToolSearchExecution::Client, Some(_)) | (ToolSearchExecution::Server, None) => Ok(()),
+        (ToolSearchExecution::Client, None) => Err("a client tool_search item requires a call_id"),
+        (ToolSearchExecution::Server, Some(_)) => Err("a hosted tool_search item must have a null call_id"),
+    }
+}
+
+#[derive(Deserialize)]
+struct InputToolSearchCallWire {
+    #[serde(default)]
+    agent: Option<AgentAttribution>,
+    #[serde(deserialize_with = "deserialize_non_blank_string")]
+    id: String,
+    #[serde(default, deserialize_with = "deserialize_optional_non_blank_string")]
+    call_id: Option<String>,
+    #[serde(default)]
+    execution: ToolSearchExecution,
+    arguments: Value,
+    #[serde(default)]
+    status: ToolSearchStatus,
+}
+
+impl TryFrom<InputToolSearchCallWire> for InputToolSearchCall {
+    type Error = &'static str;
+
+    fn try_from(wire: InputToolSearchCallWire) -> Result<Self, Self::Error> {
+        check_tool_search_call_id(wire.execution, wire.call_id.as_deref())?;
+        Ok(Self {
+            agent: wire.agent,
+            id: wire.id,
+            call_id: wire.call_id,
+            execution: wire.execution,
+            arguments: wire.arguments,
+            status: wire.status,
+        })
+    }
+}
+
 /// A public model-generated tool-search call replayed as Responses input.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(try_from = "InputToolSearchCallWire")]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct InputToolSearchCall {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentAttribution>,
     #[serde(deserialize_with = "deserialize_non_blank_string")]
     pub id: String,
-    #[serde(deserialize_with = "deserialize_non_blank_string")]
-    pub call_id: String,
+    /// Required for client execution; `null` for a hosted search.
+    #[serde(default, deserialize_with = "deserialize_optional_non_blank_string")]
+    pub call_id: Option<String>,
     #[serde(default)]
     pub execution: ToolSearchExecution,
     pub arguments: Value,
@@ -265,12 +324,50 @@ impl TryFrom<&ToolSearchCall> for InputToolSearchCall {
     }
 }
 
-/// Client-returned declarations resolving a public tool-search call.
+#[derive(Deserialize)]
+struct ToolSearchOutputWire {
+    #[serde(default)]
+    agent: Option<AgentAttribution>,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_non_blank_string")]
+    call_id: Option<String>,
+    #[serde(default)]
+    execution: ToolSearchExecution,
+    #[serde(default)]
+    status: ToolSearchStatus,
+    tools: Vec<ResponsesTool>,
+}
+
+impl TryFrom<ToolSearchOutputWire> for ToolSearchOutputMessage {
+    type Error = &'static str;
+
+    fn try_from(wire: ToolSearchOutputWire) -> Result<Self, Self::Error> {
+        check_tool_search_call_id(wire.execution, wire.call_id.as_deref())?;
+        Ok(Self {
+            agent: wire.agent,
+            id: wire.id,
+            call_id: wire.call_id,
+            execution: wire.execution,
+            status: wire.status,
+            tools: wire.tools,
+        })
+    }
+}
+
+/// Declarations resolving a public tool-search call: returned by the client,
+/// or produced by the gateway for a hosted search.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(try_from = "ToolSearchOutputWire")]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct ToolSearchOutputMessage {
-    #[serde(deserialize_with = "deserialize_non_blank_string")]
-    pub call_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<AgentAttribution>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// Required for client execution; `null` for a hosted search.
+    #[serde(default, deserialize_with = "deserialize_optional_non_blank_string")]
+    pub call_id: Option<String>,
     #[serde(default)]
     pub execution: ToolSearchExecution,
     #[serde(default)]
@@ -436,7 +533,8 @@ impl ResponsesInput {
     /// becomes an assistant message containing the locally generated summary.
     /// Items before that checkpoint are superseded and are omitted.
     /// Internal MCP-list records and `compaction_trigger` markers are stripped
-    /// and never reach the model.
+    /// and never reach the model. A replayed `mcp_call` or `web_search_call`
+    /// becomes the function call and output the model saw live.
     #[must_use]
     pub fn model_input(&self) -> Cow<'_, Self> {
         let Self::Items(items) = self else {
@@ -444,23 +542,24 @@ impl ResponsesInput {
         };
 
         if !self.contains_compaction()
-            && items
-                .iter()
-                .all(|item| matches!(item, InOutItem::Input(input) if input.is_model_visible()))
+            && items.iter().all(|item| {
+                matches!(item, InOutItem::Input(input)
+                    if input.is_model_visible() && !replayed_calls::is_replayed_gateway_call(input))
+            })
         {
             return Cow::Borrowed(self);
         }
         let projected = self.input_items().collect();
         let model = model_items(projected)
-            .map(|item| match item.into_owned() {
-                InputItem::Compaction(compaction) => InputItem::Message(InputMessage {
+            .flat_map(|item| match item.into_owned() {
+                InputItem::Compaction(compaction) => vec![InputItem::Message(InputMessage {
                     role: "assistant".to_owned(),
                     content: InputMessageContent::Parts(vec![InputContent::OutputText(InputTextContent::new(
                         compaction.encrypted_content,
                     ))]),
                     ..Default::default()
-                }),
-                other => other,
+                })],
+                other => replayed_calls::model_items(other),
             })
             .collect::<Vec<_>>();
         Cow::Owned(Self::from(model))

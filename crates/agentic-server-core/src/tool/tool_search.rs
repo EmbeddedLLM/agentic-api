@@ -1,4 +1,6 @@
+mod hosted;
 mod validation;
+pub(crate) use hosted::{HostedCatalog, HostedCatalogEntry};
 pub(crate) use validation::ensure_request_prepared;
 use validation::{input_contains_tool_search_state, request_contains_tool_search_state, validate_tool_search_request};
 
@@ -16,8 +18,8 @@ use crate::types::io::{
 };
 use crate::types::request_response::RequestPayload;
 use crate::types::tools::{
-    CodexNamespaceMember, CodexNamespaceToolParam, FunctionToolParam, ResponsesTool, ToolSearchStatus,
-    ToolSearchToolParam,
+    CodexNamespaceMember, CodexNamespaceToolParam, FunctionToolParam, ResponsesTool, ToolSearchExecution,
+    ToolSearchStatus, ToolSearchToolParam,
 };
 use crate::utils::common::{deserialize_from_str, deserialize_from_value, serialize_to_string, serialize_to_value};
 
@@ -29,6 +31,11 @@ use super::registry::{ToolEntry, ToolType};
 pub(crate) const TOOL_SEARCH_NAME: &str = "tool_search";
 const DEFAULT_DESCRIPTION: &str = "Search the client tool catalog";
 const DEFAULT_QUERY_DESCRIPTION: &str = "A concise description of the needed capabilities.";
+const HOSTED_DESCRIPTION: &str = "Load deferred tools before calling them. Pass `paths` with the names of \
+catalog entries to load: a function, a namespace, or an MCP server (`mcp_<server_label>`). A namespace or MCP \
+server path loads all of its tools. `query` is optional and only narrows the load to tools whose own name or \
+description contains it; it does not search documents or answer questions, so omit it unless you know part of a \
+tool's name";
 
 /// Handler for client-executed `type: "tool_search"` declarations.
 ///
@@ -126,19 +133,31 @@ impl ToolHandler for ToolSearchHandler {
     }
 }
 
-pub(crate) fn insert_tool_search_entry(entries: &mut HashMap<String, ToolEntry>, _param: &ToolSearchToolParam) {
-    if entries
-        .insert(
-            TOOL_SEARCH_NAME.to_owned(),
-            ToolEntry::client(ToolType::ToolSearch, None),
-        )
-        .is_some()
-    {
+/// A hosted search is bound to an empty catalog here; the agent turn binds the
+/// response's catalog once MCP discovery has run.
+pub(crate) fn insert_tool_search_entry(entries: &mut HashMap<String, ToolEntry>, param: &ToolSearchToolParam) {
+    let entry = if param.is_hosted() {
+        hosted_tool_search_entry(HostedCatalog::default())
+    } else {
+        ToolEntry::client(ToolType::ToolSearch, None)
+    };
+    if entries.insert(TOOL_SEARCH_NAME.to_owned(), entry).is_some() {
         tracing::warn!(
             name = TOOL_SEARCH_NAME,
             "duplicate tool name — previous definition overwritten"
         );
     }
+}
+
+pub(crate) fn hosted_tool_search_entry(catalog: HostedCatalog) -> ToolEntry {
+    ToolEntry::gateway(
+        ToolType::HostedToolSearch,
+        None,
+        Some(super::GatewayBinding::new(
+            std::sync::Arc::new(hosted::HostedToolSearchExecutor),
+            std::sync::Arc::new(catalog),
+        )),
+    )
 }
 
 fn default_parameters() -> Map<String, Value> {
@@ -186,6 +205,7 @@ impl LoadedToolIdentity {
     }
 }
 
+#[derive(Clone)]
 struct DefinitionRecord {
     identity: LoadedToolIdentity,
     canonical: Value,
@@ -194,12 +214,14 @@ struct DefinitionRecord {
     namespace_members: Option<NamespaceMemberRecords>,
 }
 
+#[derive(Clone)]
 struct NamespaceMemberRecord {
     canonical: Value,
     public_member_index: usize,
     loaded: bool,
 }
 
+#[derive(Clone)]
 struct NamespaceMemberRecords {
     ordered: Vec<NamespaceMemberRecord>,
     indexes: HashMap<String, usize>,
@@ -218,6 +240,7 @@ struct DefinitionAccumulator<'a> {
     definition_indexes: &'a mut HashMap<String, usize>,
     loaded_public_tools: &'a mut Vec<ResponsesTool>,
     withheld_function_names: &'a mut HashSet<String>,
+    mcp_loads: &'a mut McpLoads,
     prior_unknown_namespace_calls: HashMap<String, HashSet<String>>,
     unqualified_call_positions: HashMap<String, usize>,
     current_history_position: Option<usize>,
@@ -229,6 +252,98 @@ struct DefinitionViews<'a> {
     definition_indexes: &'a mut HashMap<String, usize>,
     loaded_public_tools: &'a mut Vec<ResponsesTool>,
     withheld_function_names: &'a mut HashSet<String>,
+    mcp_loads: &'a mut McpLoads,
+}
+
+/// The namespace name under which hosted search lists a deferred MCP server.
+pub(crate) fn mcp_namespace_name(server_label: &str) -> String {
+    format!("mcp_{server_label}")
+}
+
+/// Deferred MCP servers and the tools hosted search has loaded from them.
+///
+/// A deferred server is searchable as the namespace `mcp_<server_label>`.
+/// Loading its members records MCP tool names; it never adds a client
+/// namespace, because the gateway executes MCP calls itself.
+#[derive(Clone, Debug, Default)]
+struct McpLoads {
+    /// `mcp_<server_label>` to server label, in declaration order.
+    servers: indexmap::IndexMap<String, String>,
+    /// Loaded tool names by server label, in first-load order.
+    loaded: HashMap<String, Vec<String>>,
+}
+
+impl McpLoads {
+    fn from_tools(tools: &[ResponsesTool]) -> Self {
+        let servers = tools
+            .iter()
+            .filter_map(|tool| match tool {
+                ResponsesTool::Mcp(server) if server.defer_loading == Some(true) => {
+                    Some((mcp_namespace_name(&server.server_label), server.server_label.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        Self {
+            servers,
+            loaded: HashMap::new(),
+        }
+    }
+
+    fn label(&self, namespace: &str) -> Option<&str> {
+        self.servers.get(namespace).map(String::as_str)
+    }
+
+    fn is_deferred(&self, server_label: &str) -> bool {
+        self.servers.values().any(|label| label == server_label)
+    }
+
+    /// Records `names` as loaded and returns the ones that were not loaded yet.
+    fn load<'n>(&mut self, server_label: &str, names: impl Iterator<Item = &'n str>) -> Vec<String> {
+        let loaded = self.loaded.entry(server_label.to_owned()).or_default();
+        let mut newly_loaded = Vec::new();
+        for name in names {
+            if !loaded.iter().any(|loaded| loaded == name) {
+                loaded.push(name.to_owned());
+                newly_loaded.push(name.to_owned());
+            }
+        }
+        newly_loaded
+    }
+
+    fn loaded_names(&self, server_label: &str) -> Vec<String> {
+        self.loaded.get(server_label).cloned().unwrap_or_default()
+    }
+}
+
+/// A tool hosted search may load: a top-level function or one namespace
+/// member (an MCP tool is a member of its `mcp_<server_label>` namespace).
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+enum LoadedKey {
+    Function(String),
+    Member(String, String),
+}
+
+fn loaded_keys(tools: &[ResponsesTool]) -> HashSet<LoadedKey> {
+    let mut keys = HashSet::new();
+    for tool in tools {
+        match tool {
+            ResponsesTool::Function(function) => {
+                keys.insert(LoadedKey::Function(function.name.as_str().to_owned()));
+            }
+            ResponsesTool::Namespace(namespace) => {
+                keys.extend(namespace.tools.iter().filter_map(|member| match member {
+                    CodexNamespaceMember::Function(function) => Some(LoadedKey::Member(
+                        namespace.name.clone(),
+                        function.name.as_str().to_owned(),
+                    )),
+                    CodexNamespaceMember::Unknown => None,
+                }));
+            }
+            _ => {}
+        }
+    }
+    keys
 }
 
 #[derive(Serialize)]
@@ -275,6 +390,14 @@ pub struct ToolSearchState {
     synthetic_tool_search: Option<ToolSearchToolParam>,
     withheld_function_names: HashSet<String>,
     unqualified_call_positions: HashMap<String, usize>,
+    /// Whether the gateway runs this request's search (`execution: "server"`).
+    hosted: bool,
+    /// Definition records retained so a hosted search can load tools mid-response.
+    definitions: Vec<DefinitionRecord>,
+    definition_indexes: HashMap<String, usize>,
+    mcp_loads: McpLoads,
+    /// Tools loaded before this response; hosted search does not offer them again.
+    loaded_before_response: HashSet<LoadedKey>,
 }
 
 /// Public tool-search state retained only for response persistence.
@@ -303,6 +426,11 @@ impl fmt::Debug for ToolSearchState {
             .field("has_synthetic_tool_search", &self.synthetic_tool_search.is_some())
             .field("withheld_function_count", &self.withheld_function_names.len())
             .field("unqualified_history_call_count", &self.unqualified_call_positions.len())
+            .field("hosted", &self.hosted)
+            .field("definition_count", &self.definitions.len())
+            .field("definition_index_count", &self.definition_indexes.len())
+            .field("deferred_mcp_server_count", &self.mcp_loads.servers.len())
+            .field("loaded_before_response_count", &self.loaded_before_response.len())
             .finish()
     }
 }
@@ -319,6 +447,11 @@ impl Default for ToolSearchState {
             synthetic_tool_search: None,
             withheld_function_names: HashSet::new(),
             unqualified_call_positions: HashMap::new(),
+            hosted: false,
+            definitions: Vec::new(),
+            definition_indexes: HashMap::new(),
+            mcp_loads: McpLoads::default(),
+            loaded_before_response: HashSet::new(),
         }
     }
 }
@@ -353,17 +486,7 @@ impl ToolSearchState {
         restored_loaded_tools: &[ResponsesTool],
         restore_only_declared: bool,
     ) -> Result<Self, ToolError> {
-        let mut active_input = request.input.model_input().into_owned();
-        if let (ResponsesInput::Items(public_items), ResponsesInput::Items(active_items)) =
-            (&request.input, &mut active_input)
-        {
-            active_items.extend(
-                public_items
-                    .iter()
-                    .filter(|item| matches!(item, InOutItem::Input(InputItem::McpListTools(_))))
-                    .cloned(),
-            );
-        }
+        let active_input = active_model_input(&request.input);
         if !validate_tool_search_request(request, &active_input)? {
             return Ok(Self::default());
         }
@@ -393,6 +516,9 @@ impl ToolSearchState {
         let mut definitions = Vec::with_capacity(public_tools.len());
         let mut definition_indexes = HashMap::with_capacity(public_tools.len());
         index_initial_definitions(&public_tools, &mut definitions, &mut definition_indexes)?;
+        let hosted = declaration.is_some_and(ToolSearchToolParam::is_hosted);
+        let mut mcp_loads = McpLoads::from_tools(&public_tools);
+        validate_deferred_catalog(&public_tools, &definition_indexes, &mcp_loads, declaration)?;
         let mut withheld_function_names =
             initial_withheld_function_names(&public_tools, &definitions, &definition_indexes)?;
         let mut unqualified_call_positions = HashMap::new();
@@ -406,6 +532,7 @@ impl ToolSearchState {
                 definition_indexes: &mut definition_indexes,
                 loaded_public_tools: &mut loaded_public_tools,
                 withheld_function_names: &mut withheld_function_names,
+                mcp_loads: &mut mcp_loads,
             },
             restore_only_declared,
         )?;
@@ -417,6 +544,7 @@ impl ToolSearchState {
                 definition_indexes: &mut definition_indexes,
                 loaded_public_tools: &mut loaded_public_tools,
                 withheld_function_names: &mut withheld_function_names,
+                mcp_loads: &mut mcp_loads,
             },
             &mut unqualified_call_positions,
         )?;
@@ -430,7 +558,9 @@ impl ToolSearchState {
             &definitions,
             &definition_indexes,
             synthetic_tool_search.as_ref(),
+            &mcp_loads,
         );
+        let loaded_before_response = loaded_keys(&loaded_public_tools);
         let public_effective_tools = (tools_were_present || !public_tools.is_empty()).then_some(public_tools);
         let private_upstream_tools = (tools_were_present || !private_tools.is_empty()).then_some(private_tools);
 
@@ -444,6 +574,11 @@ impl ToolSearchState {
             synthetic_tool_search,
             withheld_function_names,
             unqualified_call_positions,
+            hosted,
+            definitions,
+            definition_indexes,
+            mcp_loads,
+            loaded_before_response,
         })
     }
 
@@ -464,7 +599,8 @@ impl ToolSearchState {
     #[must_use]
     pub(crate) fn public_response_tools(&self) -> Vec<ResponsesTool> {
         let public_tools = self.public_effective_tools.as_deref().unwrap_or_default();
-        if !self.has_completed_search {
+        // A hosted response echoes the declared tools unchanged, as the Responses API does.
+        if self.hosted || !self.has_completed_search {
             return public_tools.to_vec();
         }
         available_public_tools(public_tools, &self.loaded_public_tools)
@@ -508,12 +644,215 @@ impl ToolSearchState {
         Ok(())
     }
 
+    /// Deferred top-level functions; their calls report their own name as namespace.
+    #[must_use]
+    pub(crate) fn hosted_deferred_functions(&self) -> HashSet<String> {
+        self.public_effective_tools
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|tool| match tool {
+                ResponsesTool::Function(function) if function.defer_loading == Some(true) => {
+                    Some(function.name.as_str().to_owned())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Whether the gateway runs this request's search.
+    #[must_use]
+    pub(crate) const fn is_hosted(&self) -> bool {
+        self.hosted
+    }
+
+    /// The deferred tools a hosted search may load during this response.
+    ///
+    /// `private_tools` are the prepared upstream tools after MCP discovery,
+    /// which supplies each deferred server's members. A server whose listing
+    /// failed has no members and so offers nothing.
+    #[must_use]
+    pub(crate) fn hosted_catalog(&self, private_tools: &[ResponsesTool]) -> HostedCatalog {
+        let offered = |key: LoadedKey| !self.loaded_before_response.contains(&key);
+        let mut entries = Vec::new();
+        for tool in self.public_effective_tools.as_deref().unwrap_or_default() {
+            match tool {
+                ResponsesTool::Function(function)
+                    if function.defer_loading == Some(true)
+                        && offered(LoadedKey::Function(function.name.as_str().to_owned())) =>
+                {
+                    entries.push(HostedCatalogEntry::Function(function.clone()));
+                }
+                ResponsesTool::Namespace(namespace) => {
+                    let tools: Vec<_> = namespace
+                        .tools
+                        .iter()
+                        .filter(|member| {
+                            matches!(member, CodexNamespaceMember::Function(function)
+                                if function.defer_loading == Some(true)
+                                    && offered(LoadedKey::Member(namespace.name.clone(), function.name.as_str().to_owned())))
+                        })
+                        .cloned()
+                        .collect();
+                    if !tools.is_empty() {
+                        entries.push(HostedCatalogEntry::Namespace(CodexNamespaceToolParam {
+                            tools,
+                            ..namespace.clone()
+                        }));
+                    }
+                }
+                ResponsesTool::Mcp(server) if self.mcp_loads.is_deferred(&server.server_label) => {
+                    let name = mcp_namespace_name(&server.server_label);
+                    let discovered = private_tools.iter().find_map(|tool| match tool {
+                        ResponsesTool::Mcp(private) if private.server_label == server.server_label => {
+                            Some(private.discovered_tools.as_slice())
+                        }
+                        _ => None,
+                    });
+                    let tools: Vec<_> = discovered
+                        .unwrap_or_default()
+                        .iter()
+                        .filter(|tool| offered(LoadedKey::Member(name.clone(), tool.tool_name.clone())))
+                        .filter_map(hosted_mcp_member)
+                        .collect();
+                    if !tools.is_empty() {
+                        entries.push(HostedCatalogEntry::Namespace(CodexNamespaceToolParam {
+                            name,
+                            // No fallback: the Responses API leaves the description empty.
+                            description: Some(server.server_description.clone().unwrap_or_default()),
+                            tools,
+                            unsupported_async: None,
+                            extra: HashMap::new(),
+                        }));
+                    }
+                }
+                _ => {}
+            }
+        }
+        HostedCatalog::new(entries)
+    }
+
+    /// Rejects a `tool_choice` naming a deferred MCP tool that is not loaded;
+    /// those names are known only once MCP discovery has run.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ToolError::Config`] when the choice targets such a tool.
+    pub(crate) fn validate_mcp_tool_choice(
+        &self,
+        tool_choice: Option<&ToolChoice>,
+        private_tools: &[ResponsesTool],
+    ) -> Result<(), ToolError> {
+        let withheld = self.withheld_mcp_tool_names(private_tools);
+        if withheld.is_empty() {
+            return Ok(());
+        }
+        validate_effective_tool_choice(tool_choice, &withheld)
+    }
+
+    /// Model-visible names of deferred MCP tools that are not loaded yet.
+    ///
+    /// Kept apart from `withheld_function_names`: discovered MCP tools are
+    /// registry entries, which the withheld-function check forbids.
+    #[must_use]
+    pub(crate) fn withheld_mcp_tool_names(&self, private_tools: &[ResponsesTool]) -> HashSet<String> {
+        private_tools
+            .iter()
+            .filter_map(|tool| match tool {
+                ResponsesTool::Mcp(server) if self.mcp_loads.is_deferred(&server.server_label) => Some(server),
+                _ => None,
+            })
+            .flat_map(|server| {
+                let loaded = self.mcp_loads.loaded.get(&server.server_label);
+                server
+                    .discovered_tools
+                    .iter()
+                    .filter(move |tool| loaded.is_none_or(|loaded| !loaded.contains(&tool.tool_name)))
+                    .map(|tool| tool.internal_name.clone())
+            })
+            .collect()
+    }
+
+    /// Loads the tools one hosted search returned and updates the request's
+    /// private tools for the next inference round, keeping MCP discovery.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ToolError::Config`] when a returned definition conflicts with
+    /// the declared catalog.
+    pub(crate) fn apply_hosted_search(
+        &mut self,
+        loaded_tools: &[ResponsesTool],
+        request: &mut RequestPayload,
+    ) -> Result<(), ToolError> {
+        let mut public_tools = self.public_effective_tools.take().unwrap_or_default();
+        let mut accumulator = DefinitionAccumulator {
+            public_tools: &mut public_tools,
+            definitions: &mut self.definitions,
+            definition_indexes: &mut self.definition_indexes,
+            loaded_public_tools: &mut self.loaded_public_tools,
+            withheld_function_names: &mut self.withheld_function_names,
+            mcp_loads: &mut self.mcp_loads,
+            prior_unknown_namespace_calls: HashMap::new(),
+            unqualified_call_positions: HashMap::new(),
+            current_history_position: None,
+        };
+        let loaded = loaded_tools
+            .iter()
+            .try_for_each(|tool| load_definition(tool, &mut accumulator));
+        self.public_effective_tools = Some(public_tools);
+        loaded?;
+        self.has_completed_search = true;
+        let mut private_tools = build_private_tools(
+            self.public_effective_tools.as_deref().unwrap_or_default(),
+            &self.definitions,
+            &self.definition_indexes,
+            self.synthetic_tool_search.as_ref(),
+            &self.mcp_loads,
+        );
+        for tool in &mut private_tools {
+            let ResponsesTool::Mcp(server) = tool else {
+                continue;
+            };
+            if let Some(discovered) = request
+                .tools
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .find_map(|previous| match previous {
+                    ResponsesTool::Mcp(previous) if previous.server_label == server.server_label => {
+                        Some(&previous.discovered_tools)
+                    }
+                    _ => None,
+                })
+            {
+                server.discovered_tools.clone_from(discovered);
+            }
+        }
+        request.tools = Some(private_tools);
+        Ok(())
+    }
+
     pub(crate) fn into_public_metadata(mut self) -> ToolSearchMetadata {
         ToolSearchMetadata {
             effective_tools: self.public_effective_tools.take(),
             loaded_tools: std::mem::take(&mut self.loaded_public_tools),
         }
     }
+}
+
+/// The model-visible history plus MCP list records, which tool search reads.
+fn active_model_input(input: &ResponsesInput) -> ResponsesInput {
+    let mut active_input = input.model_input().into_owned();
+    if let (ResponsesInput::Items(public_items), ResponsesInput::Items(active_items)) = (input, &mut active_input) {
+        active_items.extend(
+            public_items
+                .iter()
+                .filter(|item| matches!(item, InOutItem::Input(InputItem::McpListTools(_))))
+                .cloned(),
+        );
+    }
+    active_input
 }
 
 fn validate_effective_tool_choice(
@@ -552,6 +891,7 @@ fn restore_loaded_definitions(
         definition_indexes,
         loaded_public_tools,
         withheld_function_names,
+        mcp_loads,
     } = views;
     let mut accumulator = DefinitionAccumulator {
         public_tools,
@@ -559,12 +899,18 @@ fn restore_loaded_definitions(
         definition_indexes,
         loaded_public_tools,
         withheld_function_names,
+        mcp_loads,
         prior_unknown_namespace_calls: HashMap::new(),
         unqualified_call_positions: HashMap::new(),
         current_history_position: None,
     };
     for tool in restored_loaded_tools {
-        let Some(tool) = restored_definition_for_load(tool, accumulator.definition_indexes, restore_only_declared)?
+        let Some(tool) = restored_definition_for_load(
+            tool,
+            accumulator.definition_indexes,
+            accumulator.mcp_loads,
+            restore_only_declared,
+        )?
         else {
             continue;
         };
@@ -576,12 +922,16 @@ fn restore_loaded_definitions(
 fn restored_definition_for_load(
     restored: &ResponsesTool,
     definition_indexes: &HashMap<String, usize>,
+    mcp_loads: &McpLoads,
     restore_only_declared: bool,
 ) -> Result<Option<ResponsesTool>, ToolError> {
     let identity = loaded_tool_identity(restored)?.ok_or_else(|| {
         ToolError::Config("stored tool-search availability contains an unsupported definition".to_owned())
     })?;
-    if restore_only_declared && !definition_indexes.contains_key(identity.name()) {
+    if restore_only_declared
+        && !definition_indexes.contains_key(identity.name())
+        && mcp_loads.label(identity.name()).is_none()
+    {
         return Ok(None);
     }
     Ok(Some(restored.clone()))
@@ -623,7 +973,7 @@ pub(crate) fn started_public_call(call: &FunctionToolCall) -> Result<ToolSearchC
     Ok(ToolSearchCall {
         agent: call.agent.clone(),
         id: public_item_id(&call.id),
-        call_id: call.call_id.clone(),
+        call_id: Some(call.call_id.clone()),
         execution: crate::types::tools::ToolSearchExecution::Client,
         arguments: Value::Object(Map::new()),
         status: ToolSearchStatus::InProgress,
@@ -736,7 +1086,18 @@ pub(crate) fn strict_native_call(item: Value) -> Result<ToolSearchCall, ToolErro
     if item.get("namespace").is_some_and(|namespace| !namespace.is_null()) {
         return Err(invalid_upstream_search_call());
     }
-    deserialize_from_value(item).map_err(|_| invalid_upstream_search_call())
+    let call: ToolSearchCall = deserialize_from_value(item).map_err(|_| invalid_upstream_search_call())?;
+    native_call_id(&call)?;
+    Ok(call)
+}
+
+/// The call id of an upstream-native search, which is always client-executed:
+/// the gateway lowers every declaration it sends upstream to a function.
+pub(crate) fn native_call_id(call: &ToolSearchCall) -> Result<&str, ToolError> {
+    match (call.execution, call.call_id.as_deref()) {
+        (crate::types::tools::ToolSearchExecution::Client, Some(call_id)) => Ok(call_id),
+        _ => Err(invalid_upstream_search_call()),
+    }
 }
 
 fn json_value(arguments: &str) -> Result<Value, ToolError> {
@@ -773,7 +1134,7 @@ pub(crate) fn validate_blocking_response(
         match item.get("type").and_then(Value::as_str) {
             Some("tool_search_call") => {
                 let call = strict_native_call(item.clone())?;
-                if !call_ids.insert(call.call_id.clone()) {
+                if !call_ids.insert(native_call_id(&call)?.to_owned()) {
                     return Err(invalid_upstream_search_call());
                 }
                 if !allow_unfinished && call.status != ToolSearchStatus::Completed {
@@ -981,15 +1342,14 @@ fn prepare_history(
         return Ok(input.clone());
     };
     let mut private_items = Vec::with_capacity(items.len());
-    let mut unresolved_calls = HashSet::new();
-    let mut completed_call_ids = HashSet::new();
-    let mut item_ids = HashSet::new();
+    let mut pairing = SearchPairing::default();
     let DefinitionViews {
         public_tools,
         definitions,
         definition_indexes,
         loaded_public_tools,
         withheld_function_names,
+        mcp_loads,
     } = views;
     let mut definition_accumulator = DefinitionAccumulator {
         public_tools,
@@ -997,6 +1357,7 @@ fn prepare_history(
         definition_indexes,
         loaded_public_tools,
         withheld_function_names,
+        mcp_loads,
         prior_unknown_namespace_calls: HashMap::new(),
         unqualified_call_positions: std::mem::take(unqualified_call_positions),
         current_history_position: None,
@@ -1006,24 +1367,40 @@ fn prepare_history(
         definition_accumulator.current_history_position = Some(position);
         match item.as_ref() {
             InputItem::ToolSearchCall(call) => {
-                private_items.push(prepare_search_call(
-                    call,
-                    &mut unresolved_calls,
-                    &completed_call_ids,
-                    &mut item_ids,
-                )?);
+                private_items.push(prepare_search_call(call, &mut pairing)?);
             }
             InputItem::ToolSearchOutput(output) => {
                 private_items.push(prepare_search_output(
                     output,
-                    &mut unresolved_calls,
-                    &mut completed_call_ids,
+                    &mut pairing,
                     &mut definition_accumulator,
                 )?);
             }
             InputItem::FunctionCall(call) => {
-                ensure_history_call_is_available(call, &mut definition_accumulator)?;
-                private_items.push(item.into_owned());
+                // The Responses API reports a searched top-level function with
+                // its own name as namespace; the model knows it unqualified.
+                let call = match call.namespace.as_deref() {
+                    Some(namespace)
+                        if namespace == call.name
+                            && definition_accumulator
+                                .definition_indexes
+                                .get(namespace)
+                                .is_some_and(|index| {
+                                    matches!(
+                                        definition_accumulator.definitions[*index].identity,
+                                        LoadedToolIdentity::Function(_)
+                                    )
+                                }) =>
+                    {
+                        InputFunctionToolCall {
+                            namespace: None,
+                            ..call.clone()
+                        }
+                    }
+                    _ => call.clone(),
+                };
+                ensure_history_call_is_available(&call, &mut definition_accumulator)?;
+                private_items.push(InputItem::FunctionCall(call));
             }
             InputItem::CompactionTrigger => {}
             InputItem::Message(_)
@@ -1044,7 +1421,7 @@ fn prepare_history(
         }
     }
 
-    if !unresolved_calls.is_empty() {
+    if pairing.has_unresolved() {
         return Err(ToolError::Config(
             "unresolved tool_search_call requires a matching completed tool_search_output".to_owned(),
         ));
@@ -1095,33 +1472,44 @@ fn withheld_function_history_call() -> ToolError {
     ToolError::Config("request history calls a function before its definition is loaded".to_owned())
 }
 
-fn prepare_search_call(
-    call: &InputToolSearchCall,
-    unresolved_calls: &mut HashSet<String>,
-    completed_call_ids: &HashSet<String>,
-    item_ids: &mut HashSet<String>,
+/// Call/output pairing state while projecting public search history.
+///
+/// A client pair is matched by `call_id`. A hosted pair has no call id: its
+/// output resolves the oldest unresolved hosted call, and the private call id
+/// is the call's item id, so the projection is stable across requests.
+#[derive(Default)]
+struct SearchPairing {
+    unresolved_calls: HashSet<String>,
+    unresolved_hosted_calls: std::collections::VecDeque<String>,
+    completed_call_ids: HashSet<String>,
+    item_ids: HashSet<String>,
+}
+
+impl SearchPairing {
+    fn has_unresolved(&self) -> bool {
+        !self.unresolved_calls.is_empty() || !self.unresolved_hosted_calls.is_empty()
+    }
+}
+
+/// The private call id of a hosted search, derived from its public item id.
+pub(crate) fn hosted_private_call_id(item_id: &str) -> String {
+    item_id.to_owned()
+}
+
+/// The private function call the model sees for a public search call.
+pub(crate) fn private_search_call(
+    agent: Option<crate::types::io::AgentAttribution>,
+    item_id: &str,
+    call_id: String,
+    arguments: &Value,
 ) -> Result<InputItem, ToolError> {
-    if call.id.trim().is_empty() {
-        return Err(ToolError::Config("tool_search_call id must not be blank".to_owned()));
-    }
-    if call.call_id.trim().is_empty() {
-        return Err(ToolError::Config(
-            "tool_search_call call_id must not be blank".to_owned(),
-        ));
-    }
-    if !item_ids.insert(call.id.clone()) {
-        return Err(ToolError::Config("duplicate tool_search_call item id".to_owned()));
-    }
-    if completed_call_ids.contains(call.call_id.as_str()) || !unresolved_calls.insert(call.call_id.clone()) {
-        return Err(ToolError::Config("duplicate tool_search_call call_id".to_owned()));
-    }
-    let canonical_arguments = serialize_to_string(&call.arguments)
+    let canonical_arguments = serialize_to_string(arguments)
         .map_err(|_| ToolError::Config("tool_search_call arguments could not be canonicalized safely".to_owned()))?;
     Ok(InputItem::FunctionCall(InputFunctionToolCall {
         async_execution: false,
-        agent: call.agent.clone(),
-        id: Some(call.id.clone()),
-        call_id: call.call_id.clone(),
+        agent,
+        id: Some(item_id.to_owned()),
+        call_id,
         name: TOOL_SEARCH_NAME.to_owned(),
         namespace: None,
         arguments: canonical_arguments,
@@ -1129,25 +1517,92 @@ fn prepare_search_call(
     }))
 }
 
+/// The model-facing text of a search output: functions with their schemas,
+/// namespaces by name and description (members are loaded as tools).
+/// The model-facing text of a hosted search that loaded nothing. It says why, so a model does
+/// not keep repeating a filter that matches nothing or a path it has already loaded.
+const HOSTED_EMPTY_SEARCH_OUTPUT: &str = r#"{"tools":[],"note":"No tools were loaded. `query` keeps only tools whose name or description contains it, and tools loaded earlier in this conversation are not returned again. Search the path again without `query`, or call a tool that is already loaded."}"#;
+
+/// The model-facing text of a hosted search output, live or rebuilt from history.
+pub(crate) fn hosted_search_output_text(tools: &[ResponsesTool]) -> Result<String, ToolError> {
+    if tools.is_empty() {
+        return Ok(HOSTED_EMPTY_SEARCH_OUTPUT.to_owned());
+    }
+    canonical_search_output(tools)
+}
+
+pub(crate) fn canonical_search_output(tools: &[ResponsesTool]) -> Result<String, ToolError> {
+    let projected_tools = model_visible_output_tools(tools)?;
+    let canonical_value = serialize_to_value(&CanonicalToolSearchOutput {
+        tools: &projected_tools,
+    })
+    .map_err(|_| ToolError::Config("tool_search_output could not be canonicalized safely".to_owned()))?;
+    serialize_to_string(&canonical_value)
+        .map_err(|_| ToolError::Config("tool_search_output could not be canonicalized safely".to_owned()))
+}
+
+fn prepare_search_call(call: &InputToolSearchCall, pairing: &mut SearchPairing) -> Result<InputItem, ToolError> {
+    if call.id.trim().is_empty() {
+        return Err(ToolError::Config("tool_search_call id must not be blank".to_owned()));
+    }
+    if !pairing.item_ids.insert(call.id.clone()) {
+        return Err(ToolError::Config("duplicate tool_search_call item id".to_owned()));
+    }
+    let call_id = match (call.execution, call.call_id.as_deref()) {
+        (ToolSearchExecution::Client, Some(call_id)) if !call_id.trim().is_empty() => call_id.to_owned(),
+        (ToolSearchExecution::Server, None) => hosted_private_call_id(&call.id),
+        (ToolSearchExecution::Client, _) => {
+            return Err(ToolError::Config(
+                "tool_search_call call_id must not be blank".to_owned(),
+            ));
+        }
+        (ToolSearchExecution::Server, Some(_)) => {
+            return Err(ToolError::Config(
+                "a hosted tool_search_call must have a null call_id".to_owned(),
+            ));
+        }
+    };
+    if pairing.completed_call_ids.contains(&call_id) || !pairing.unresolved_calls.insert(call_id.clone()) {
+        return Err(ToolError::Config("duplicate tool_search_call call_id".to_owned()));
+    }
+    if call.execution == ToolSearchExecution::Server {
+        pairing.unresolved_calls.remove(&call_id);
+        pairing.unresolved_hosted_calls.push_back(call_id.clone());
+    }
+    private_search_call(call.agent.clone(), &call.id, call_id, &call.arguments)
+}
+
 fn prepare_search_output(
     output: &ToolSearchOutputMessage,
-    unresolved_calls: &mut HashSet<String>,
-    completed_call_ids: &mut HashSet<String>,
+    pairing: &mut SearchPairing,
     definition_accumulator: &mut DefinitionAccumulator<'_>,
 ) -> Result<InputItem, ToolError> {
-    if output.call_id.trim().is_empty() {
-        return Err(ToolError::Config(
-            "tool_search_output call_id must not be blank".to_owned(),
-        ));
-    }
-    if completed_call_ids.contains(output.call_id.as_str()) {
-        return Err(ToolError::Config("duplicate tool_search_output call_id".to_owned()));
-    }
-    if !unresolved_calls.remove(&output.call_id) {
-        return Err(ToolError::Config(
-            "tool_search_output has no matching unresolved call_id".to_owned(),
-        ));
-    }
+    let call_id = match (output.execution, output.call_id.as_deref()) {
+        (ToolSearchExecution::Client, Some(call_id)) if !call_id.trim().is_empty() => {
+            if pairing.completed_call_ids.contains(call_id) {
+                return Err(ToolError::Config("duplicate tool_search_output call_id".to_owned()));
+            }
+            if !pairing.unresolved_calls.remove(call_id) {
+                return Err(ToolError::Config(
+                    "tool_search_output has no matching unresolved call_id".to_owned(),
+                ));
+            }
+            call_id.to_owned()
+        }
+        (ToolSearchExecution::Server, None) => pairing.unresolved_hosted_calls.pop_front().ok_or_else(|| {
+            ToolError::Config("hosted tool_search_output has no preceding hosted tool_search_call".to_owned())
+        })?,
+        (ToolSearchExecution::Client, _) => {
+            return Err(ToolError::Config(
+                "tool_search_output call_id must not be blank".to_owned(),
+            ));
+        }
+        (ToolSearchExecution::Server, Some(_)) => {
+            return Err(ToolError::Config(
+                "a hosted tool_search_output must have a null call_id".to_owned(),
+            ));
+        }
+    };
     if output.status != ToolSearchStatus::Completed {
         return Err(ToolError::Config(
             "tool_search_output must be completed before it may load tool definitions".to_owned(),
@@ -1156,16 +1611,13 @@ fn prepare_search_output(
     for tool in &output.tools {
         load_definition(tool, definition_accumulator)?;
     }
-    let projected_tools = model_visible_output_tools(&output.tools)?;
-    let canonical_value = serialize_to_value(&CanonicalToolSearchOutput {
-        tools: &projected_tools,
-    })
-    .map_err(|_| ToolError::Config("tool_search_output could not be canonicalized safely".to_owned()))?;
-    let canonical_output = serialize_to_string(&canonical_value)
-        .map_err(|_| ToolError::Config("tool_search_output could not be canonicalized safely".to_owned()))?;
-    completed_call_ids.insert(output.call_id.clone());
+    let canonical_output = match output.execution {
+        ToolSearchExecution::Server => hosted_search_output_text(&output.tools)?,
+        ToolSearchExecution::Client => canonical_search_output(&output.tools)?,
+    };
+    pairing.completed_call_ids.insert(call_id.clone());
     Ok(InputItem::FunctionCallOutput(FunctionToolResultMessage {
-        call_id: output.call_id.clone(),
+        call_id,
         output: ToolCallOutput::Text(canonical_output),
     }))
 }
@@ -1198,6 +1650,26 @@ fn model_visible_output_tools(tools: &[ResponsesTool]) -> Result<Vec<ModelVisibl
 }
 
 fn load_definition(tool: &ResponsesTool, definitions: &mut DefinitionAccumulator<'_>) -> Result<(), ToolError> {
+    if let ResponsesTool::Namespace(namespace) = tool
+        && let Some(server_label) = definitions.mcp_loads.label(&namespace.name).map(str::to_owned)
+    {
+        let names = namespace.tools.iter().filter_map(|member| match member {
+            CodexNamespaceMember::Function(function) => Some(function.name.as_str()),
+            CodexNamespaceMember::Unknown => None,
+        });
+        let newly_loaded = definitions.mcp_loads.load(&server_label, names);
+        if !newly_loaded.is_empty() {
+            let mut loaded_subset = namespace.clone();
+            loaded_subset.tools.retain(|member| {
+                matches!(member, CodexNamespaceMember::Function(function)
+                    if newly_loaded.iter().any(|name| name == function.name.as_str()))
+            });
+            definitions
+                .loaded_public_tools
+                .push(ResponsesTool::Namespace(loaded_subset));
+        }
+        return Ok(());
+    }
     let identity = loaded_tool_identity(tool)?
         .ok_or_else(|| ToolError::Config("tool_search_output contains an unsupported tool definition".to_owned()))?;
     let canonical = canonical_definition(tool)?;
@@ -1406,12 +1878,25 @@ fn canonical_definition(tool: &ResponsesTool) -> Result<Value, ToolError> {
         other => other.clone(),
     };
     serialize_to_value(&projected)
+        .map(without_null_output_schema)
         .map_err(|_| ToolError::Config("tool-search definition could not be compared safely".to_owned()))
 }
 
 fn canonical_namespace_member(function: &FunctionToolParam) -> Result<Value, ToolError> {
     serialize_to_value(function)
+        .map(without_null_output_schema)
         .map_err(|_| ToolError::Config("namespace member definition could not be compared safely".to_owned()))
+}
+
+/// The Responses API returns loaded functions with `"output_schema": null`;
+/// that means the same as an absent output schema in the declaration.
+fn without_null_output_schema(mut definition: Value) -> Value {
+    if let Some(object) = definition.as_object_mut()
+        && object.get("output_schema").is_some_and(Value::is_null)
+    {
+        object.remove("output_schema");
+    }
+    definition
 }
 
 fn build_catalog(
@@ -1454,6 +1939,13 @@ fn build_catalog(
                 | ResponsesTool::Unknown => None,
             }
         })
+        .chain(public_tools.iter().filter_map(|tool| match tool {
+            ResponsesTool::Mcp(server) if server.defer_loading == Some(true) => Some(CatalogEntry::Namespace {
+                name: mcp_namespace_name(&server.server_label),
+                description: server.server_description.clone(),
+            }),
+            _ => None,
+        }))
         .collect()
 }
 
@@ -1488,8 +1980,94 @@ fn synthetic_description(description: &str, catalog: &[CatalogEntry]) -> String 
     )
 }
 
+/// The `paths`/`query` arguments the gateway accepts for a hosted search.
+fn hosted_parameters() -> Value {
+    serde_json::json!({
+        "type": "object",
+        "properties": {
+            "paths": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Names of the catalog entries to load."
+            },
+            "query": {
+                "type": "string",
+                "description": "Optional part of a tool name or description to load only matching tools. Omit it to load every tool in the paths."
+            }
+        },
+        "required": ["paths"],
+        "additionalProperties": false
+    })
+}
+
+/// Rejects a deferred catalog the gateway cannot search.
+fn validate_deferred_catalog(
+    public_tools: &[ResponsesTool],
+    definition_indexes: &HashMap<String, usize>,
+    mcp_loads: &McpLoads,
+    declaration: Option<&ToolSearchToolParam>,
+) -> Result<(), ToolError> {
+    if let Some((name, label)) = mcp_loads
+        .servers
+        .iter()
+        .find(|(name, _)| definition_indexes.contains_key(name.as_str()))
+    {
+        return Err(ToolError::Config(format!(
+            "deferred MCP server '{label}' is searched as '{name}', which another tool already uses"
+        )));
+    }
+    let Some(declaration) = declaration else {
+        return Ok(());
+    };
+    if !declaration.is_hosted() {
+        if !mcp_loads.servers.is_empty() {
+            return Err(ToolError::Config(
+                "deferred MCP servers require hosted tool_search; omit execution or set it to \"server\"".to_owned(),
+            ));
+        }
+        return Ok(());
+    }
+    if !public_tools.iter().any(validation::tool_has_deferred_definition) {
+        return Err(ToolError::Config(
+            "Invalid Value: 'tools.tool_search'. tools.tool_search requires at least one deferred tool.".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+/// One discovered MCP tool as a hosted search returns it. Like the Responses
+/// API it carries `"output_schema": null`; its `"strict": null` is left out,
+/// because the typed `strict` field cannot keep a null through storage.
+fn hosted_mcp_member(tool: &crate::types::tools::McpDiscoveredToolParam) -> Option<CodexNamespaceMember> {
+    let name = crate::types::tools::NonEmptyToolName::try_from(tool.tool_name.as_str()).ok()?;
+    let extra = HashMap::from([("output_schema".to_owned(), Value::Null)]);
+    Some(CodexNamespaceMember::Function(FunctionToolParam {
+        name,
+        description: tool.tool.description.as_deref().map(str::to_owned),
+        parameters: Some(Value::Object(tool.tool.input_schema.as_ref().clone())),
+        strict: None,
+        defer_loading: Some(true),
+        async_execution: None,
+        extra,
+    }))
+}
+
 fn synthetic_tool_search(declaration: &ToolSearchToolParam, catalog: &[CatalogEntry]) -> ToolSearchToolParam {
-    let mut normalized = ToolSearchHandler::normalized_param(declaration);
+    let mut normalized = if declaration.is_hosted() {
+        let description = declaration
+            .description
+            .as_deref()
+            .filter(|description| !description.trim().is_empty())
+            .unwrap_or(HOSTED_DESCRIPTION);
+        ToolSearchToolParam {
+            execution: ToolSearchExecution::Server,
+            description: Some(description.to_owned()),
+            parameters: Some(hosted_parameters()),
+            unsupported_async: None,
+        }
+    } else {
+        ToolSearchHandler::normalized_param(declaration)
+    };
     let description = normalized.description.as_deref().unwrap_or_default();
     normalized.description = Some(synthetic_description(description, catalog));
     normalized
@@ -1500,6 +2078,7 @@ fn build_private_tools(
     definitions: &[DefinitionRecord],
     definition_indexes: &HashMap<String, usize>,
     synthetic_tool_search: Option<&ToolSearchToolParam>,
+    mcp_loads: &McpLoads,
 ) -> Vec<ResponsesTool> {
     public_tools
         .iter()
@@ -1507,6 +2086,13 @@ fn build_private_tools(
             ResponsesTool::ToolSearch(_) => synthetic_tool_search.cloned().map(ResponsesTool::ToolSearch),
             ResponsesTool::Function(_) | ResponsesTool::Namespace(_) => {
                 private_definition(tool, definitions, definition_indexes)
+            }
+            // A deferred server stays declared for discovery and execution;
+            // upstream normalization exposes only its loaded tools.
+            ResponsesTool::Mcp(server) if mcp_loads.is_deferred(&server.server_label) => {
+                let mut server = server.clone();
+                server.loaded_tool_names = Some(mcp_loads.loaded_names(&server.server_label));
+                Some(ResponsesTool::Mcp(server))
             }
             ResponsesTool::Mcp(_)
             | ResponsesTool::WebSearch(_)

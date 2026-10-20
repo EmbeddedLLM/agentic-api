@@ -24,7 +24,15 @@ pub(super) fn validate_tool_search_request(
             "tool search accepts at most one tool_search declaration".to_owned(),
         ));
     }
-    if request.parallel_tool_calls == Some(true) {
+    // Hosted search runs inside the response, so parallel calls are allowed,
+    // including for a replay that carries only hosted search history.
+    let hosted = tools
+        .iter()
+        .any(|tool| matches!(tool, ResponsesTool::ToolSearch(declaration) if declaration.is_hosted()))
+        || matches!(input, ResponsesInput::Items(items) if items.iter().any(|item| matches!(item,
+            InOutItem::Input(InputItem::ToolSearchCall(call))
+                if call.execution == crate::types::tools::ToolSearchExecution::Server)));
+    if request.parallel_tool_calls == Some(true) && !hosted {
         return Err(ToolError::Config(
             "parallel_tool_calls must be false when tool search is active".to_owned(),
         ));

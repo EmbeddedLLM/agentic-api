@@ -669,7 +669,14 @@ This omission applies to gateway-emitted output records. Client-submitted
 `InputItem::WebSearchCall` and `InputItem::McpCall` remain input records throughout
 request conversion and storage replay.
 Gateway tool results are already `InputItem`s and are appended through
-`append_tool_outputs`; they do not need an output-to-input conversion.
+`append_gateway_results`; they do not need an output-to-input conversion. Each result
+carries its model input and its history separately. A hosted (`execution: "server"`)
+search is the one tool whose history is its public pair: the executor records the
+`tool_search_call` and `tool_search_output` in round order, so they also return `None`
+here, and the storage writers skip an output whose id the turn's history already holds
+(`OutputItem::is_already_in_history`). Multi-agent rounds keep their own history, so
+there the pair is stored as output. Continuation rebuilds the model's call and output
+from that pair.
 
 Native upstream `code_interpreter_call` output items convert to typed continuation input. A gateway-executed code-interpreter call is marked internally and omitted by the same conversion because its model-facing function call and output are retained separately; storage preserves that origin outside the public wire shape.
 
@@ -992,8 +999,21 @@ Tool-search outputs restore discovered definitions into the requesting agent's
 and custom declarations still use the existing canonical function normalization and
 public-shape translators. MCP, web search and operator-enabled code interpreter execute in the gateway and append their
 canonical call/output pairs during the round, so they require no client output
-continuation. Tool search retains its normal `parallel_tool_calls` validation; enabling
+continuation. Client tool search retains its normal `parallel_tool_calls` validation; enabling
 multi-agent execution does not bypass that rule.
+
+Hosted tool search runs in the gateway like those tools. Its `tool_search` function is
+gateway-owned (`ToolType::HostedToolSearch`) and searches a per-response catalog
+(`HostedCatalog`) of deferred functions, namespace members, and deferred MCP servers
+(as `mcp_<server_label>`), built after MCP discovery and excluding tools loaded by
+earlier responses. The search is pure, so its `tool_search_output` is known when the
+call is planned: the scheduler gives the call two public output indexes (a follow-up
+item), and later items in the round shift by one, the inverse of an omitted refusal.
+After the round, `ToolSearchState::apply_hosted_search` loads the returned tools,
+rebuilds the private tools for the next round, and the registry adds client entries
+for loaded namespace members without listing MCP servers again. A deferred MCP server
+stays declared with `loaded_tool_names`, which limits the tools normalization sends
+upstream.
 
 Code interpreter uses the same canonical function/tool loop in every agent. Agents
 share the ready executor and its process-wide guest permits through `ExecutionContext`;
@@ -1736,8 +1756,9 @@ the operator enables it, and Eryx runtime readiness succeeds.
   client-visible item.
   - **Client-owned** tools implement `ToolHandler` and have a translator association:
     see `function.rs` (`FunctionHandler`), `custom.rs` (`CustomHandler`), `codex.rs`
-    (`CodexNamespaceHandler`), and `tool_search.rs` (`ToolSearchHandler`). Their calls
-    are returned for the client to resolve; the gateway does not execute them.
+    (`CodexNamespaceHandler`), and `tool_search.rs` (`ToolSearchHandler`, for
+    `execution: "client"`). Their calls are returned for the client to resolve; the
+    gateway does not execute them.
   - **Gateway-owned / built-in** tools implement both traits: see `web_search/mod.rs`
     (`WebSearchHandler`, backed by the configured `WebSearchProvider` in `web_search/you.rs`,
     `web_search/brave.rs`, `web_search/tavily.rs`, `web_search/searxng.rs`, or `web_search/serply.rs`) and
@@ -1747,7 +1768,8 @@ the operator enables it, and Eryx runtime readiness succeeds.
     the built-in `web_fetch/http.rs` fetcher — with `web_fetch/policy.rs` for URL and
     address admission, `web_fetch/extract.rs` for HTML-to-text extraction, and the shared
     `domain_policy.rs` for the domain lists both web tools declare) follows the
-    same pattern. They have no client translator association because the gateway owns
+    same pattern, as does `tool_search/hosted.rs` (`HostedToolSearchExecutor`, for hosted
+    search). They have no client translator association because the gateway owns
     their execution and public lifecycle.
 - **`ownership.rs`** — `ToolOwnership::Client` versus
   `ToolOwnership::Gateway(Option<GatewayBinding>)`. A `GatewayBinding` combines the

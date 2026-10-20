@@ -256,10 +256,17 @@ fn scan_calls(items: &[InputItem]) -> ExecutorResult<CallLedger> {
             InputItem::CustomToolCallOutput(output) => ledger.resolve_call(&output.call_id, CallKind::Custom)?,
             InputItem::ShellCall(call) => ledger.add_call(&call.call_id, CallKind::Shell, false, None, false)?,
             InputItem::ShellCallOutput(output) => ledger.resolve_call(&output.call_id, CallKind::Shell)?,
+            // A hosted search (no call id) is resolved by the gateway, not the client.
             InputItem::ToolSearchCall(call) => {
-                ledger.add_call(&call.call_id, CallKind::ToolSearch, false, None, false)?;
+                if let Some(call_id) = call.call_id.as_deref() {
+                    ledger.add_call(call_id, CallKind::ToolSearch, false, None, false)?;
+                }
             }
-            InputItem::ToolSearchOutput(output) => ledger.resolve_call(&output.call_id, CallKind::ToolSearch)?,
+            InputItem::ToolSearchOutput(output) => {
+                if let Some(call_id) = output.call_id.as_deref() {
+                    ledger.resolve_call(call_id, CallKind::ToolSearch)?;
+                }
+            }
             InputItem::Message(_)
             | InputItem::CodeInterpreterCall(_)
             | InputItem::Reasoning(_)
@@ -466,7 +473,7 @@ mod tests {
         let search = InputItem::ToolSearchCall(InputToolSearchCall {
             agent: None,
             id: "ts_search".to_owned(),
-            call_id: "search".to_owned(),
+            call_id: Some("search".to_owned()),
             execution: ToolSearchExecution::Client,
             arguments: serde_json::json!({}),
             status: ToolSearchStatus::Completed,
