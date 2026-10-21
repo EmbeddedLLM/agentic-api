@@ -8,9 +8,11 @@ description: Use when planning or reviewing agentic-api changes that affect exec
 Perform a read-only review that protects the executor's streaming ownership boundaries. Do not edit files, create or
 update issues, post comments, commit, or push.
 
-Use `skills/pr-review/SKILL.md` instead for a broad pull-request review that does not involve these boundaries.
+Use [the PR review skill](../pr-review/SKILL.md) instead for a broad pull-request review that does not involve these boundaries.
 
 ## Authoritative inputs
+
+Apply the shared [engineering preparation](../agentic-api-engineering/SKILL.md) first; reuse any completed discovery.
 
 1. Read `AGENTS.md` and `TERMINOLOGY.md` completely.
 2. Read `ARCHITECTURE.md`, especially "Target streaming pipeline and ownership boundaries" and the affected module

@@ -2,6 +2,14 @@
 
 Instructions for AI coding agents working on this repository.
 
+## Before coding or reviewing
+
+Read [`.agents/skills/agentic-api-engineering/SKILL.md`](.agents/skills/agentic-api-engineering/SKILL.md) before implementing,
+refactoring, fixing, or reviewing code. It defines repository-wide discovery, reuse of existing typed extension
+points, Rust design and Clippy expectations, provider documentation/parity evidence, and the recorder/test workflow.
+Apply its shared preparation once. For Rust changes, use the bundled
+[Rust skill](.agents/skills/rust-skills/SKILL.md); use the focused review skills where relevant.
+
 ## Project Overview
 
 This repository is Rust-first under the `vllm-project` GitHub organization.
@@ -32,7 +40,7 @@ This repository is Rust-first under the `vllm-project` GitHub organization.
 ├── crates/agentic-praxis/       # Praxis integration
 ├── python/agentic_api/          # Python distribution, diagnostics, and launcher
 ├── tests/python/                # Python package and CLI tests
-├── skills/                      # Repository-specific agent review workflows
+├── .agents/skills/              # Engineering, Rust, and focused review skills
 ├── pyproject.toml               # Python wheel build metadata
 ├── Cargo.toml                    # Workspace manifest and shared dependencies/lints
 └── docs/                         # Documentation (MkDocs)
@@ -145,7 +153,7 @@ into synchronous ingestion [#243](https://github.com/vllm-project/agentic-api/is
   semantic event or output-item kind. Test invalid lifecycle order, identifier/index mismatch, duplicate completion,
   terminal finalization, slow consumers, and disconnects when the changed boundary can encounter them.
 
-Use [`skills/executor-architecture-review/SKILL.md`](skills/executor-architecture-review/SKILL.md) for a focused,
+Use [`.agents/skills/executor-architecture-review/SKILL.md`](.agents/skills/executor-architecture-review/SKILL.md) for a focused,
 read-only boundary review while planning or reviewing these changes.
 
 ## Rust Best Practices
