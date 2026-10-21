@@ -469,7 +469,15 @@ impl ToolRegistry {
         let valid = match entry.tool_type {
             ToolType::ToolSearch => matches!(entry.ownership, ToolOwnership::Client),
             ToolType::HostedToolSearch => matches!(entry.ownership, ToolOwnership::Gateway(Some(_))),
-            _ => false,
+            ToolType::Function
+            | ToolType::Custom
+            | ToolType::Shell
+            | ToolType::CodexNamespace
+            | ToolType::Mcp
+            | ToolType::WebSearch
+            | ToolType::WebFetch
+            | ToolType::FileSearch
+            | ToolType::CodeInterpreter => false,
         };
         if !valid {
             return Err(ToolError::Config(

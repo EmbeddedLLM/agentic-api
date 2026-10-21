@@ -10,6 +10,7 @@ mod timing;
 
 pub(crate) use admission::BuiltInToolCallBudget;
 pub(super) use history::{append_gateway_calls_to_new_input, append_gateway_results, append_output_items_to_input};
+use lifecycle::emit_calls_in_order;
 pub(super) use lifecycle::{
     emit_gateway_completed_events, emit_gateway_start_events, emit_response_start_events, relay_round_events,
 };
@@ -25,7 +26,9 @@ pub(super) use public_output::{
 use std::num::NonZeroU64;
 use std::time::Duration;
 
-use futures::future::join_all;
+use std::future::Future;
+
+use futures::stream::FuturesOrdered;
 use tokio::sync::Semaphore;
 
 use crate::executor::error::{ExecutorError, ExecutorResult};
@@ -305,17 +308,50 @@ impl GatewayScheduler {
             .enumerate()
             .take_while(|(offset, call)| call.item_index == first.saturating_add(*offset))
             .count();
-        contiguous.min(self.start_run_before_follow_up_len())
+        contiguous.min(self.start_run_end(0))
     }
 
-    /// Number of leading calls that can be announced before execution without a
+    /// End (exclusive) of the calls from `from` that can be announced without a
     /// later call overtaking a follow-up item: the run ends with the first call
     /// that has one, because that item takes the next public index.
-    fn start_run_before_follow_up_len(&self) -> usize {
+    pub(super) fn start_run_end(&self, from: usize) -> usize {
+        self.calls
+            .get(from..)
+            .and_then(|calls| calls.iter().position(|call| call.events.follow_up_output.is_some()))
+            .map_or(self.calls.len(), |offset| from + offset + 1)
+    }
+
+    pub(super) fn execution_slots(&self) -> Semaphore {
+        Semaphore::new(self.policy.max_concurrent_calls.get())
+    }
+
+    /// Runs the planned calls concurrently within `execution_slots` and yields each
+    /// result in call order as soon as that call and every earlier one finished,
+    /// so a round's lifecycle events never wait for its slowest call.
+    pub(super) fn results_in_order<'a>(
+        &'a self,
+        execution_slots: &'a Semaphore,
+        response_budget: &'a ExecutorResponseBudget,
+    ) -> FuturesOrdered<impl Future<Output = ExecutorResult<GatewayCallResult>> + 'a> {
         self.calls
             .iter()
-            .position(|call| call.events.follow_up_output.is_some())
-            .map_or(self.calls.len(), |index| index + 1)
+            .cloned()
+            .map(|call| self.resolve_call(call, execution_slots, response_budget))
+            .collect()
+    }
+
+    pub(super) fn call_count(&self) -> usize {
+        self.calls.len()
+    }
+
+    /// Records each call's completed public lifecycle on its plan.
+    #[cfg(test)]
+    pub(super) fn record_completed(&mut self, results: &[GatewayCallResult]) {
+        debug_assert_eq!(self.calls.len(), results.len());
+        for (planned, result) in self.calls.iter_mut().zip(results) {
+            debug_assert_eq!(planned.item_index, result.item_index);
+            planned.events.completed_output.clone_from(&result.public_output);
+        }
     }
 
     /// Executes planned calls under the bounded-concurrency policy and records
@@ -325,26 +361,21 @@ impl GatewayScheduler {
         self.execute_with_budget(&ExecutorResponseBudget::new()).await
     }
 
+    #[cfg(test)]
     pub(super) async fn execute_with_budget(
         &mut self,
         response_budget: &ExecutorResponseBudget,
     ) -> ExecutorResult<Vec<GatewayCallResult>> {
-        let execution_slots = Semaphore::new(self.policy.max_concurrent_calls.get());
-        let results = join_all(
-            self.calls
-                .iter()
-                .cloned()
-                .map(|call| self.resolve_call(call, &execution_slots, response_budget)),
-        )
-        .await
-        .into_iter()
-        .collect::<ExecutorResult<Vec<_>>>()?;
-
-        debug_assert_eq!(self.calls.len(), results.len());
-        for (planned, result) in self.calls.iter_mut().zip(&results) {
-            debug_assert_eq!(planned.item_index, result.item_index);
-            planned.events.completed_output.clone_from(&result.public_output);
-        }
+        use futures::StreamExt;
+        let execution_slots = self.execution_slots();
+        // Every call finishes before the first error in call order is returned.
+        let results = self
+            .results_in_order(&execution_slots, response_budget)
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<ExecutorResult<Vec<_>>>()?;
+        self.record_completed(&results);
         Ok(results)
     }
 
@@ -507,20 +538,9 @@ pub(super) async fn execute_and_emit_output_calls(
     relay: &mut StreamRelay,
 ) -> ExecutorResult<Vec<GatewayCallResult>> {
     let policy = exec_ctx.gateway_scheduler_policy.clone();
-    let mut scheduler =
-        GatewayScheduler::plan_with_budget(output_items, registry, output_offset, policy, tool_call_budget)
-            .with_metrics(&exec_ctx.metrics);
-    let started = scheduler.start_run_before_follow_up_len();
-    emit_gateway_start_events(scheduler.event_plans().take(started), relay).await?;
-    let gateway_results = scheduler.execute_with_budget(response_budget).await?;
-    // Calls after a follow-up item are announced once it has been emitted.
-    for (index, plan) in scheduler.event_plans().enumerate() {
-        if index >= started {
-            emit_gateway_start_events(std::iter::once(plan), relay).await?;
-        }
-        emit_gateway_completed_events(&gateway_results[index..=index], std::iter::once(plan), relay).await?;
-    }
-    Ok(gateway_results)
+    let scheduler = GatewayScheduler::plan_with_budget(output_items, registry, output_offset, policy, tool_call_budget)
+        .with_metrics(&exec_ctx.metrics);
+    emit_calls_in_order(&scheduler, response_budget, relay).await
 }
 
 #[cfg(test)]
@@ -989,6 +1009,118 @@ mod tests {
         assert!(
             slow_call_finished.load(Ordering::SeqCst),
             "a peer call started in the same batch must be drained before the scheduler returns"
+        );
+    }
+
+    #[tokio::test]
+    async fn streamed_round_drains_started_calls_before_returning_an_error() {
+        let slow_call_finished = Arc::new(AtomicBool::new(false));
+        let web_search: ResponsesTool =
+            serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).expect("web_search tool param");
+        let mut executors = GatewayExecutors::default();
+        executors.insert(Arc::new(DrainTrackingExecutor {
+            slow_call_finished: Arc::clone(&slow_call_finished),
+        }));
+        let mut tools = [ToolDeclaration::from(web_search)];
+        let registry = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
+            .await
+            .expect("registry builds");
+        let output_items = [
+            OutputItem::FunctionCall(web_search_call("call_fail")),
+            OutputItem::FunctionCall(web_search_call("call_slow")),
+        ];
+        let scheduler = GatewayScheduler::plan(&output_items, &registry, 0, GatewaySchedulerPolicy::default());
+        let (sender, _receiver) = mpsc::channel(32);
+        let mut relay = StreamRelay::client(sender, RelayLimits::default());
+
+        let Err(error) = super::emit_calls_in_order(&scheduler, &ExecutorResponseBudget::new(), &mut relay).await
+        else {
+            panic!("oversized output must fail");
+        };
+
+        assert!(error.to_string().contains("gateway tool output exceeded"));
+        assert!(
+            slow_call_finished.load(Ordering::SeqCst),
+            "a peer call started in the same batch must be drained before the round returns"
+        );
+    }
+
+    /// Finishes call `call_<n>` after `n` × 30 ms and counts it.
+    struct StaggeredExecutor {
+        finished: Arc<AtomicUsize>,
+    }
+
+    impl ToolHandler for StaggeredExecutor {
+        type ToolParams = WebSearchToolParam;
+
+        fn tool_type(&self) -> ToolType {
+            ToolType::WebSearch
+        }
+
+        fn validate(&self, _params: &WebSearchToolParam) -> Result<(), ToolError> {
+            Ok(())
+        }
+
+        fn normalize(&self, _params: &WebSearchToolParam) -> Vec<FunctionTool> {
+            Vec::new()
+        }
+    }
+
+    impl GatewayExecutor for StaggeredExecutor {
+        type ExecutionParams = WebSearchToolParam;
+
+        fn execute(
+            &self,
+            call_id: &str,
+            _tool_name: &str,
+            _arguments: &str,
+            _params: &WebSearchToolParam,
+        ) -> Pin<Box<dyn Future<Output = Result<ToolOutput, ToolError>> + Send + '_>> {
+            let call_id = call_id.to_owned();
+            let finished = Arc::clone(&self.finished);
+            Box::pin(async move {
+                let order: u64 = call_id.trim_start_matches("call_").parse().expect("numbered call");
+                tokio::time::sleep(std::time::Duration::from_millis(order * 30)).await;
+                finished.fetch_add(1, Ordering::SeqCst);
+                Ok(ToolOutput::success(call_id, "ok".to_owned()))
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn calls_keep_running_while_their_emission_is_blocked() {
+        let finished = Arc::new(AtomicUsize::new(0));
+        let web_search: ResponsesTool =
+            serde_json::from_value(serde_json::json!({"type": "web_search_preview"})).expect("web_search tool param");
+        let mut executors = GatewayExecutors::default();
+        executors.insert(Arc::new(StaggeredExecutor {
+            finished: Arc::clone(&finished),
+        }));
+        let mut tools = [ToolDeclaration::from(web_search)];
+        let registry = ToolRegistry::build_with_handlers(&mut tools, &mut executors)
+            .await
+            .expect("registry builds");
+        let output_items: Vec<_> = (1..=3)
+            .map(|order| OutputItem::FunctionCall(web_search_call(&format!("call_{order}"))))
+            .collect();
+        let scheduler = GatewayScheduler::plan(&output_items, &registry, 0, GatewaySchedulerPolicy::default());
+        let budget = ExecutorResponseBudget::new();
+
+        // The emitter takes the first result, then stalls as a client that stopped reading would.
+        let stalled = tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            super::lifecycle::drive_in_order(&scheduler, &budget, async |ordered| {
+                ordered.recv().await;
+                std::future::pending::<crate::executor::error::ExecutorResult<()>>().await
+            }),
+        )
+        .await;
+
+        assert!(stalled.is_err(), "the emitter never finishes");
+        assert_eq!(
+            finished.load(Ordering::SeqCst),
+            3,
+            "every call finished while emission was blocked"
         );
     }
 

@@ -454,7 +454,7 @@ impl<'a> AgentTurn<'a> {
             .await;
         }
 
-        let mut scheduler = GatewayScheduler::plan_with_budget(
+        let scheduler = GatewayScheduler::plan_with_budget(
             output_items,
             &self.registry,
             output_offset,
@@ -465,11 +465,10 @@ impl<'a> AgentTurn<'a> {
         let initial_event_run_len = scheduler.initial_event_run_len(output_items, &self.registry);
         emit_gateway_start_events(scheduler.event_plans().take(initial_event_run_len), relay).await?;
 
-        let gateway_results = scheduler.execute_with_budget(response_budget).await?;
-        // Calls ran concurrently; the wire still follows output order.
-        relay_round_events(
+        // Calls run concurrently; the wire still follows output order.
+        let gateway_results = relay_round_events(
             &scheduler,
-            &gateway_results,
+            response_budget,
             output_items.len(),
             relay,
             ctx,

@@ -1280,6 +1280,118 @@ async fn streaming_searches_around_a_client_call_keep_output_order() {
     );
 }
 
+/// An MCP stub whose `tools/call` waits until `gate` opens.
+async fn spawn_gated_mcp(gate: Arc<tokio::sync::Notify>) -> String {
+    let app = Router::new().route(
+        "/mcp",
+        post(move |axum::Json(request): axum::Json<Value>| {
+            let gate = Arc::clone(&gate);
+            async move {
+                let id = request["id"].clone();
+                if id.is_null() {
+                    return axum::http::StatusCode::ACCEPTED.into_response();
+                }
+                let reply = match request["method"].as_str() {
+                    Some("initialize") => json!({"result": {
+                        "protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
+                        "serverInfo": {"name": "gated", "version": "0"}
+                    }}),
+                    Some("tools/list") => json!({"result": {"tools": [{"name": "slow", "description": "Slow call.",
+                        "inputSchema": {"type": "object", "properties": {}}}]}}),
+                    Some("tools/call") => {
+                        gate.notified().await;
+                        json!({"result": {"content": [{"type": "text", "text": "done"}], "isError": false}})
+                    }
+                    _ => json!({"error": {"code": -32601, "message": "method not found"}}),
+                };
+                let mut body = json!({"jsonrpc": "2.0", "id": id});
+                body.as_object_mut()
+                    .expect("object")
+                    .extend(reply.as_object().expect("object").clone());
+                axum::Json(body).into_response()
+            }
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind MCP");
+    let address = listener.local_addr().expect("MCP address");
+    tokio::spawn(async move { axum::serve(listener, app).await.expect("MCP server") });
+    format!("http://{address}/mcp")
+}
+
+/// Streams one round of `round_items` beside a gated MCP server and asserts that the search output reaches the client,
+/// and the gated call is announced in progress, while that call is still running.
+async fn assert_search_output_does_not_wait_for_the_gated_call(round_items: Vec<Value>) {
+    use futures::StreamExt;
+    let gate = Arc::new(tokio::sync::Notify::new());
+    let mcp_url = spawn_gated_mcp(Arc::clone(&gate)).await;
+    let (llm_url, _) = spawn_streaming_llm(vec![sse("up_1", &round_items), sse("up_2", &[message("done")])]).await;
+    let server = json!({"type": "mcp", "server_label": "gated", "server_url": mcp_url, "require_approval": "never"});
+    let mut payload = request(
+        &json!("x"),
+        &json!([{"type": "tool_search"}, server, deferred_weather(), lookup()]),
+    );
+    payload.stream = true;
+    payload.parallel_tool_calls = Some(true);
+    let Either::Right(mut stream) = ExecuteRequest::new(payload, context(llm_url))
+        .run()
+        .await
+        .expect("streaming execution")
+    else {
+        panic!("streaming request returned JSON")
+    };
+
+    let mut seen = Vec::new();
+    let mut gate_open = false;
+    while let Some(chunk) = tokio::time::timeout(std::time::Duration::from_secs(10), stream.next())
+        .await
+        .expect("the search output must not wait for the gated MCP call")
+    {
+        for line in chunk.lines() {
+            let Some(data) = line.strip_prefix("data: ").filter(|data| *data != "[DONE]") else {
+                continue;
+            };
+            let event: Value = serde_json::from_str(data).expect("event JSON");
+            let kind = event["type"].as_str().unwrap_or_default().to_owned();
+            seen.push((
+                kind.clone(),
+                event["item"]["type"].as_str().unwrap_or_default().to_owned(),
+            ));
+            if kind == "response.mcp_call.in_progress" && !gate_open {
+                assert!(
+                    seen.contains(&("response.output_item.done".to_owned(), "tool_search_output".to_owned())),
+                    "{seen:?}"
+                );
+                gate_open = true;
+                gate.notify_one();
+            }
+        }
+    }
+    assert!(gate_open, "the MCP call was announced in progress: {seen:?}");
+    assert_eq!(seen.last().map(|(kind, _)| kind.as_str()), Some("response.completed"));
+}
+
+/// A search's output is known before anything runs, so it reaches the client while a slower call of the same
+/// round is still running, and that call is announced in progress right after it.
+#[tokio::test]
+async fn streaming_search_output_does_not_wait_for_a_slower_call_in_its_round() {
+    assert_search_output_does_not_wait_for_the_gated_call(vec![
+        function_call("s1", "tool_search", &json!({"paths": ["get_weather"]})),
+        function_call("m1", "mcp__gated__slow", &json!({})),
+    ])
+    .await;
+}
+
+/// The same with a client call between them, whose frames the relay defers until the search before it completes.
+#[tokio::test]
+async fn streaming_search_output_does_not_wait_for_a_slower_call_after_a_client_call() {
+    assert_search_output_does_not_wait_for_the_gated_call(vec![
+        function_call("s1", "tool_search", &json!({"paths": ["get_weather"]})),
+        function_call("l1", "lookup", &json!({})),
+        function_call("m1", "mcp__gated__slow", &json!({})),
+    ])
+    .await;
+}
+
 #[tokio::test]
 async fn streaming_mcp_search_then_call_numbers_every_item() {
     let (mcp_url, _) = spawn_mcp().await;

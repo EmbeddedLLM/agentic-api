@@ -38,8 +38,14 @@ impl AgentTurn<'_> {
             return Ok(());
         }
         self.pipeline.apply_hosted_search(loaded)?;
-        let tools = self.pipeline.request.enriched_request.tools.clone().unwrap_or_default();
-        self.registry.refresh_client_tools(&tools).await?;
+        let tools = self
+            .pipeline
+            .request
+            .enriched_request
+            .tools
+            .as_deref()
+            .unwrap_or_default();
+        self.registry.refresh_client_tools(tools).await?;
         Ok(())
     }
 }

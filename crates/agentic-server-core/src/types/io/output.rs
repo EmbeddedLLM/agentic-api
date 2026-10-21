@@ -1054,7 +1054,20 @@ impl OutputItem {
         match self {
             Self::ToolSearchCall(call) => call.execution == ToolSearchExecution::Server,
             Self::ToolSearchOutput(_) => true,
-            _ => false,
+            Self::Message(_)
+            | Self::FunctionCall(_)
+            | Self::CustomToolCall(_)
+            | Self::ShellCall(_)
+            | Self::CodeInterpreterCall(_)
+            | Self::WebSearchCall(_)
+            | Self::McpCall(_)
+            | Self::McpListTools(_)
+            | Self::Reasoning(_)
+            | Self::Compaction(_)
+            | Self::MultiAgentCall(_)
+            | Self::MultiAgentCallOutput(_)
+            | Self::AgentMessage(_)
+            | Self::Unknown { .. } => false,
         }
     }
 
