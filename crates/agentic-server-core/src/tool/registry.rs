@@ -1,3 +1,6 @@
+mod hosted_search;
+mod mcp_listing;
+
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::hash_map::Entry;
@@ -22,7 +25,6 @@ use super::web_search::insert_web_search_entry;
 use super::{CodexNamespaceHandler, McpHandler, NamespaceMap, ToolError, ToolOutput};
 
 use crate::types::io::output::{FunctionToolCall, McpListTools};
-use crate::types::io::{InOutItem, InputItem, ResponsesInput};
 use crate::types::tools::{CodeInterpreterToolParam, FileSearchToolParam, WebFetchToolParam};
 
 const MAX_MCP_SERVERS_PER_REQUEST: usize = 64;
@@ -447,60 +449,6 @@ impl ToolRegistry {
         self.entries.len()
     }
 
-    #[must_use]
-    pub fn contains_mcp_server_label(&self, server_label: &str) -> bool {
-        self.entries
-            .values()
-            .any(|entry| entry.tool_type == ToolType::Mcp && entry.server_label.as_deref() == Some(server_label))
-    }
-
-    pub(crate) fn cache_listed_mcp_tools(&mut self, input: &ResponsesInput) {
-        if let ResponsesInput::Items(items) = input {
-            for item in items.iter().filter_map(InOutItem::as_input) {
-                let InputItem::McpListTools(list_tools) = &*item else {
-                    continue;
-                };
-                // Only a currently declared MCP server can emit discovery in
-                // this request. Ignore history for labels absent from the
-                // current registry instead of turning it into a new candidate.
-                if let Some(items) = self.mcp_list_tools_items.get_mut(&list_tools.server_label) {
-                    items.push(list_tools.clone());
-                }
-            }
-        }
-    }
-
-    /// Current discovery items without an equivalent successful historical
-    /// lifecycle. Failed or changed discovery remains visible to the client
-    /// when the request continues (see [`Self::failed_mcp_list_tools`]).
-    pub(crate) fn mcp_list_tool_items(&self) -> impl Iterator<Item = &McpListTools> {
-        self.mcp_list_tools_items.values().filter_map(|items| {
-            let (current, history) = items.split_first()?;
-            let already_emitted = current.error.is_none()
-                && history
-                    .iter()
-                    .any(|previous| previous.error.is_none() && previous.tools == current.tools);
-            (!already_emitted).then_some(current)
-        })
-    }
-
-    /// The first declared MCP server whose current tool listing failed and
-    /// whose history holds no successful listing. The Responses API does not
-    /// list a server again while its listing is in context, so a continuation
-    /// keeps going when such a server later fails.
-    #[must_use]
-    pub(crate) fn failed_mcp_list_tools(&self) -> Option<&McpListTools> {
-        self.mcp_list_tools_items.values().find_map(|items| {
-            let (current, history) = items.split_first()?;
-            (current.error.is_some() && history.iter().all(|previous| previous.error.is_some())).then_some(current)
-        })
-    }
-
-    /// Marks the current request's discovery lifecycle as consumed.
-    pub(crate) fn clear_mcp_list_tool_items(&mut self) {
-        self.mcp_list_tools_items.clear();
-    }
-
     /// Check catalog entries against borrowed availability constraints without retaining request state.
     pub(crate) fn validate_tool_availability(
         &self,
@@ -538,65 +486,6 @@ impl ToolRegistry {
             .iter()
             .filter(|c| self.entries.get(&c.name).is_some_and(|e| e.ownership.is_gateway()))
             .collect()
-    }
-
-    /// Adds client entries for tools a hosted search loaded mid-response, and
-    /// rebuilds the namespace and custom maps that restore their public shape.
-    /// Gateway entries, including discovered MCP tools, are kept as built, so
-    /// no MCP server is listed again.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ToolError::Config`] when a loaded name collides with another tool.
-    pub(crate) async fn refresh_client_tools(
-        &mut self,
-        tools: &[crate::types::tools::ResponsesTool],
-    ) -> Result<(), ToolError> {
-        let declarations = super::declaration::responses_declarations(tools);
-        let mut client_declarations: Vec<_> = declarations
-            .iter()
-            .filter(|declaration| {
-                matches!(
-                    declaration,
-                    ToolDeclaration::Function(_) | ToolDeclaration::Namespace(_) | ToolDeclaration::Custom(_)
-                )
-            })
-            .cloned()
-            .collect();
-        let client = Self::build_with_handlers(&mut client_declarations, &mut GatewayExecutors::default()).await?;
-        for (name, entry) in client.entries {
-            self.entries.entry(name).or_insert(entry);
-        }
-        self.namespace_map =
-            CodexNamespaceHandler.build_namespace_map((!declarations.is_empty()).then_some(&declarations))?;
-        self.custom_tool_map = CustomHandler::build_tool_map(&declarations);
-        Ok(())
-    }
-
-    /// Binds the hosted `tool_search` entry to this response's catalog.
-    pub(crate) fn bind_hosted_tool_search(&mut self, catalog: super::tool_search::HostedCatalog) {
-        if self.is_hosted_tool_search_name(TOOL_SEARCH_NAME) {
-            self.entries.insert(
-                TOOL_SEARCH_NAME.to_owned(),
-                super::tool_search::hosted_tool_search_entry(catalog),
-            );
-        }
-    }
-
-    /// Whether `name` is the hosted `tool_search` the gateway runs. Its model
-    /// call is replaced by the call result's own model input and history.
-    #[must_use]
-    pub fn is_hosted_tool_search_name(&self, name: &str) -> bool {
-        self.entries
-            .get(name)
-            .is_some_and(|entry| entry.tool_type == ToolType::HostedToolSearch)
-    }
-
-    /// Whether an upstream output item is recorded as the model saw it. A
-    /// hosted search call is recorded through its call result instead.
-    #[must_use]
-    pub(crate) fn records_output_item(&self, item: &crate::types::io::OutputItem) -> bool {
-        !matches!(item, crate::types::io::OutputItem::FunctionCall(call) if self.is_hosted_tool_search_name(&call.name))
     }
 
     #[must_use]
@@ -676,6 +565,7 @@ mod tests {
     use crate::tool::mcp::{McpDiscoveredHandler, McpHandler};
     use crate::tool::responses_declarations;
     use crate::types::io::output::McpListTool;
+    use crate::types::io::{InputItem, ResponsesInput};
     use crate::types::tools::{McpDiscoveredToolParam, ResponsesTool};
 
     #[test]

@@ -126,6 +126,23 @@ impl UnsupportedParameterError {
     }
 }
 
+impl<T: ?Sized, C> RequestPayload<T, C> {
+    /// Rejects a `tool_choice` the gateway parses but does not support.
+    ///
+    /// Unlike `background` and `prompt`, this is checked on the direct route too: a direct request declares no MCP
+    /// server, so an MCP `tool_choice` there names nothing and the upstream would be asked to honour a dangling choice.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`UnsupportedParameterError::McpToolChoice`] for an MCP selector.
+    pub fn validate_tool_choice(&self) -> Result<(), UnsupportedParameterError> {
+        match &self.tool_choice {
+            Some(choice) if !choice.is_supported() => Err(UnsupportedParameterError::McpToolChoice),
+            _ => Ok(()),
+        }
+    }
+}
+
 impl RequestPayload {
     /// Rejects request members typed execution recognizes but cannot honour.
     ///

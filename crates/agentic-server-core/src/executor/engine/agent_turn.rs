@@ -5,6 +5,7 @@
 //! pipeline. The pipeline owns ingestion, not tool-loop or agent-tree decisions.
 //! These steps neither spawn agents nor finalize/persist a public response.
 
+mod hosted_search;
 mod round_policy;
 
 use super::accumulate_usage;
@@ -30,7 +31,6 @@ use crate::executor::upstream::{fetch_blocking_payload, fetch_stream_payload};
 use crate::tool::{ToolRegistry, mcp, record_discovered_mcp_tools, responses_declarations};
 use crate::types::io::{InputItem, OutputItem, ResponsesInput};
 use crate::types::request_response::ResponsePayload;
-use crate::types::tools::ResponsesTool;
 
 /// Outcome of inspecting one inference round's output, deciding whether the
 /// gateway tool loop should run another round, stop, or surface a partial result.
@@ -223,13 +223,7 @@ impl<'a> AgentTurn<'a> {
         max_rounds: NonZeroUsize,
     ) -> ExecutorResult<Self> {
         let registry = build_tool_registry(agent, exec_ctx, response_budget).await?;
-        // The Responses API fails a response, before anything is emitted, when a declared MCP server cannot list
-        // its tools. A mid-run refresh keeps the failed listing instead, since output may already be streaming.
-        if let Some(failed) = registry.failed_mcp_list_tools() {
-            let mut failed = failed.clone();
-            failed.error = None;
-            return Err(ExecutorError::McpListToolsFailed(Box::new(failed)));
-        }
+        hosted_search::reject_failed_mcp_listing(&registry)?;
         let tool_call_budget = BuiltInToolCallBudget::new(agent.request.original_request.max_tool_calls_limit()?);
         Ok(Self {
             pipeline: agent,
@@ -351,7 +345,7 @@ impl<'a> AgentTurn<'a> {
         if matches!(decision, RoundDecision::Continue) || multi_agent {
             self.append_round_input(&current_output, &payload.output, multi_agent);
         }
-        let hosted_loads = hosted_search_loads(&gateway_results);
+        let hosted_loads = hosted_search::hosted_search_loads(&gateway_results);
         self.record_gateway_results(gateway_results);
         // Loads persist with the response whatever this round decided.
         self.load_hosted_tools(&hosted_loads).await?;
@@ -436,17 +430,6 @@ impl<'a> AgentTurn<'a> {
         }
     }
 
-    /// Makes the tools this round's hosted searches loaded callable next round.
-    async fn load_hosted_tools(&mut self, loaded: &[ResponsesTool]) -> ExecutorResult<()> {
-        if loaded.is_empty() {
-            return Ok(());
-        }
-        self.pipeline.apply_hosted_search(loaded)?;
-        let tools = self.pipeline.request.enriched_request.tools.clone().unwrap_or_default();
-        self.registry.refresh_client_tools(&tools).await?;
-        Ok(())
-    }
-
     fn record_gateway_results(&mut self, results: Vec<GatewayCallResult>) {
         append_gateway_results(&mut self.pipeline.request, results);
     }
@@ -495,18 +478,6 @@ impl<'a> AgentTurn<'a> {
         .await?;
         Ok(gateway_results)
     }
-}
-
-/// The tools hosted searches returned in this round, in output order.
-fn hosted_search_loads(results: &[GatewayCallResult]) -> Vec<ResponsesTool> {
-    results
-        .iter()
-        .filter_map(|result| match &result.follow_up_output {
-            Some(OutputItem::ToolSearchOutput(output)) => Some(output.tools.iter().cloned()),
-            _ => None,
-        })
-        .flatten()
-        .collect()
 }
 
 fn log_custom_tool_calls(output: &[OutputItem], response_id: &str) {

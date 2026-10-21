@@ -5,6 +5,7 @@ mod admission_tests;
 pub(super) mod history;
 mod lifecycle;
 mod policy;
+mod public_output;
 mod timing;
 
 pub(crate) use admission::BuiltInToolCallBudget;
@@ -15,6 +16,11 @@ pub(super) use lifecycle::{
 pub(crate) use policy::GatewaySchedulerPolicy;
 #[cfg(test)]
 pub(super) use policy::MAX_CONCURRENT_MATERIALIZATIONS;
+#[cfg(test)]
+use public_output::complete_gateway_event_plans;
+pub(super) use public_output::{
+    GatewayPublicOutputSource, compaction_event_plans, mcp_list_tools_event_plans, public_output_items,
+};
 
 use std::num::NonZeroU64;
 use std::time::Duration;
@@ -66,23 +72,6 @@ impl GatewayCallResult {
             follow_up_output: None,
             omitted,
         }
-    }
-}
-
-/// Supplies the public output that completes a gateway event plan.
-pub(super) trait GatewayPublicOutputSource {
-    fn public_output(&self) -> Option<&OutputItem>;
-}
-
-impl GatewayPublicOutputSource for GatewayCallResult {
-    fn public_output(&self) -> Option<&OutputItem> {
-        self.public_output.as_ref()
-    }
-}
-
-impl GatewayPublicOutputSource for OutputItem {
-    fn public_output(&self) -> Option<&OutputItem> {
-        Some(self)
     }
 }
 
@@ -504,91 +493,6 @@ fn unexecuted_result(
 fn execution_error_output(call: &FunctionToolCall, message: &str) -> ExecutorResult<ToolOutput> {
     let output = serialize_to_string(&serde_json::json!({ "error": message })).map_err(ExecutorError::JsonError)?;
     Ok(ToolOutput::failure(call.call_id.clone(), output))
-}
-
-pub(super) fn public_output_items(
-    output_items: &[OutputItem],
-    registry: &ToolRegistry,
-    gateway_results: &[GatewayCallResult],
-) -> ExecutorResult<Vec<OutputItem>> {
-    output_items
-        .iter()
-        .enumerate()
-        .filter(|(item_index, _)| {
-            !gateway_results
-                .iter()
-                .any(|result| result.omitted && result.item_index == *item_index)
-        })
-        .map(|(item_index, item)| {
-            Ok(match item {
-                OutputItem::FunctionCall(call) if registry.is_client_custom_name(&call.name) => {
-                    crate::tool::CustomHandler::output_item(call)
-                }
-                OutputItem::FunctionCall(call) if registry.is_client_shell_name(&call.name) => {
-                    crate::tool::ShellHandler::output_item(call).ok_or_else(|| {
-                        ExecutorError::ParseError("shell function call contains invalid action arguments".to_owned())
-                    })?
-                }
-                OutputItem::FunctionCall(call) if registry.is_gateway_owned_name(&call.name) => {
-                    let result = gateway_results.iter().find(|result| result.item_index == item_index);
-                    let public = result
-                        .and_then(|result| result.public_output.clone())
-                        .unwrap_or_else(|| OutputItem::FunctionCall(call.clone()));
-                    return Ok([Some(public), result.and_then(|result| result.follow_up_output.clone())]);
-                }
-                other => other.clone(),
-            })
-            .map(|item| [Some(item), None])
-        })
-        .collect::<ExecutorResult<Vec<_>>>()
-        .map(|items| items.into_iter().flatten().flatten().collect())
-}
-
-pub(super) fn mcp_list_tools_event_plans(
-    public_output_items: &[OutputItem],
-    output_offset: usize,
-) -> Vec<GatewayEventPlan> {
-    public_output_items
-        .iter()
-        .enumerate()
-        .filter_map(|(index, item)| {
-            let OutputItem::McpListTools(list_tools) = item else {
-                return None;
-            };
-            Some(GatewayEventPlan {
-                output_index: u32::try_from(output_offset.saturating_add(index)).unwrap_or(u32::MAX),
-                started_output: Some(crate::tool::mcp::handler::started_list_tools_output_item(list_tools)),
-                completed_output: Some(item.clone()),
-                follow_up_output: None,
-                arguments: None,
-            })
-        })
-        .collect()
-}
-
-pub(super) fn compaction_event_plans(
-    public_output_items: &[OutputItem],
-    output_offset: usize,
-) -> Vec<GatewayEventPlan> {
-    public_output_items
-        .iter()
-        .enumerate()
-        .filter(|(_, item)| matches!(item, OutputItem::Compaction(_)))
-        .map(|(index, item)| GatewayEventPlan {
-            output_index: u32::try_from(output_offset.saturating_add(index)).unwrap_or(u32::MAX),
-            started_output: Some(item.clone()),
-            completed_output: Some(item.clone()),
-            follow_up_output: None,
-            arguments: None,
-        })
-        .collect()
-}
-
-#[cfg(test)]
-fn complete_gateway_event_plans<T: GatewayPublicOutputSource>(plans: &mut [GatewayEventPlan], completed: &[T]) {
-    for (plan, source) in plans.iter_mut().zip(completed) {
-        plan.completed_output = source.public_output().cloned();
-    }
 }
 
 /// Plan, execute and relay one round's gateway calls under the execution
