@@ -7494,7 +7494,7 @@ mod duplex_replay {
         .unwrap();
         request.input = ResponsesInput::from(input.into_canonical_items());
         // to_upstream_request invokes the existing crate-private
-        // ResponsesInput::normalized_model_input, including image defaults.
+        // ResponsesInput::normalized_model_input_with, including image defaults.
         let upstream = request.to_upstream_request(true).unwrap();
         user_messages(&serialize_to_value(&upstream.input).unwrap())
     }

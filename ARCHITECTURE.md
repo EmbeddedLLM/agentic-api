@@ -231,7 +231,7 @@ for failed outcomes. This preserves rejected fields and explicit nulls that shar
 message decoding can discard or normalize. Accepted input becomes ordinary user
 `InputItem`s in the successor, not an output slot in the running response.
 `ResponsesInput::into_canonical_items()` in `types/io/input/conversions.rs`
-preserves submitted item variants; `normalized_model_input()` still runs at the
+preserves submitted item variants; `normalized_model_input_with()` still runs at the
 ordinary upstream request boundary.
 
 The existing `SteeringTarget` owns `SteeringState` in `control.rs`. An optional

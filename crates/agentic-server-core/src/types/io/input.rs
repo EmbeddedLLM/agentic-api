@@ -8,6 +8,7 @@ mod validation;
 mod window;
 
 pub use file_text::InputFileError;
+pub(crate) use replayed_calls::McpToolNames;
 pub(super) use tool_search::check_tool_search_call_id;
 pub use tool_search::{InputToolSearchCall, ToolSearchOutputMessage};
 pub use validation::InputValidationError;
@@ -407,6 +408,21 @@ impl ResponsesInput {
     /// becomes the function call and output the model saw live.
     #[must_use]
     pub fn model_input(&self) -> Cow<'_, Self> {
+        self.project_for_model(Some(&McpToolNames::default()))
+    }
+
+    /// [`Self::model_input`], naming replayed MCP calls as discovery named their tools in this request.
+    pub(crate) fn model_input_with(&self, mcp_names: &McpToolNames<'_>) -> Cow<'_, Self> {
+        self.project_for_model(Some(mcp_names))
+    }
+
+    /// [`Self::model_input`] for a projection that runs before MCP discovery: replayed gateway calls stay
+    /// public records until the upstream request names them with the discovered tools.
+    pub(crate) fn model_input_keeping_gateway_calls(&self) -> Cow<'_, Self> {
+        self.project_for_model(None)
+    }
+
+    fn project_for_model(&self, mcp_names: Option<&McpToolNames<'_>>) -> Cow<'_, Self> {
         let Self::Items(items) = self else {
             return Cow::Borrowed(self);
         };
@@ -414,7 +430,8 @@ impl ResponsesInput {
         if !self.contains_compaction()
             && items.iter().all(|item| {
                 matches!(item, InOutItem::Input(input)
-                    if input.is_model_visible() && !replayed_calls::is_replayed_gateway_call(input))
+                    if input.is_model_visible()
+                        && (mcp_names.is_none() || !replayed_calls::is_replayed_gateway_call(input)))
             })
         {
             return Cow::Borrowed(self);
@@ -429,7 +446,10 @@ impl ResponsesInput {
                     ))]),
                     ..Default::default()
                 })],
-                other => replayed_calls::model_items(other),
+                other => match mcp_names {
+                    Some(mcp_names) => replayed_calls::model_items(other, mcp_names),
+                    None => vec![other],
+                },
             })
             .collect::<Vec<_>>();
         Cow::Owned(Self::from(model))

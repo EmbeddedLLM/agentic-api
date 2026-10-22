@@ -4,6 +4,8 @@
 //! never saw those public records: it called a function and read its output. The model-facing copy therefore
 //! carries each record as that function call and output pair, as stored history does after a live call.
 
+use std::collections::HashMap;
+
 use serde_json::{Value, json};
 
 use super::{FunctionToolResultMessage, InputFunctionToolCall, InputItem, ToolCallOutput};
@@ -11,6 +13,7 @@ use crate::tool::mcp::handler::model_tool_name;
 use crate::types::event::MessageStatus;
 use crate::types::io::AgentAttribution;
 use crate::types::io::output::{McpCall, WebSearchAction, WebSearchCall};
+use crate::types::tools::ResponsesTool;
 use crate::utils::common::{serialize_to_string, serialize_to_value};
 
 /// The function the gateway lowers web search to; see `tool::web_search`.
@@ -21,16 +24,49 @@ pub(super) const fn is_replayed_gateway_call(item: &InputItem) -> bool {
     matches!(item, InputItem::McpCall(_) | InputItem::WebSearchCall(_))
 }
 
+/// The function names MCP discovery assigned this request, by server label and tool name. Discovery gives two tools
+/// whose names sanitize alike distinct names, so a replayed call looks its name up here before deriving one.
+#[derive(Default)]
+pub(crate) struct McpToolNames<'a> {
+    names: HashMap<(&'a str, &'a str), &'a str>,
+}
+
+impl<'a> McpToolNames<'a> {
+    pub(crate) fn from_tools(tools: &'a [ResponsesTool]) -> Self {
+        let names = tools
+            .iter()
+            .filter_map(|tool| match tool {
+                ResponsesTool::Mcp(server) => Some(&server.discovered_tools),
+                _ => None,
+            })
+            .flatten()
+            .map(|tool| {
+                (
+                    (tool.server_label.as_str(), tool.tool_name.as_str()),
+                    tool.internal_name.as_str(),
+                )
+            })
+            .collect();
+        Self { names }
+    }
+
+    fn model_name(&self, server_label: &str, tool_name: &str) -> String {
+        self.names
+            .get(&(server_label, tool_name))
+            .map_or_else(|| model_tool_name(server_label, tool_name), |name| (*name).to_owned())
+    }
+}
+
 /// The model-facing items for one input item: a replayed gateway call becomes its function call and output.
-pub(super) fn model_items(item: InputItem) -> Vec<InputItem> {
+pub(super) fn model_items(item: InputItem, mcp_names: &McpToolNames<'_>) -> Vec<InputItem> {
     match item {
-        InputItem::McpCall(call) => mcp_call_items(&call),
+        InputItem::McpCall(call) => mcp_call_items(&call, mcp_names),
         InputItem::WebSearchCall(call) => web_search_items(&call),
         other => vec![other],
     }
 }
 
-fn mcp_call_items(call: &McpCall) -> Vec<InputItem> {
+fn mcp_call_items(call: &McpCall, mcp_names: &McpToolNames<'_>) -> Vec<InputItem> {
     let output = match (&call.output, &call.error) {
         (Some(output), _) => output.clone(),
         (None, Some(error)) => {
@@ -41,7 +77,7 @@ fn mcp_call_items(call: &McpCall) -> Vec<InputItem> {
     call_pair(
         call,
         &call.id,
-        model_tool_name(&call.server_label, &call.name),
+        mcp_names.model_name(&call.server_label, &call.name),
         call.arguments.clone(),
         output,
     )
@@ -123,6 +159,8 @@ mod tests {
     use serde_json::json;
 
     use crate::types::io::{InOutItem, InputItem, ResponsesInput};
+    use crate::types::request_response::RequestPayload;
+    use crate::types::tools::{McpDiscoveredToolParam, ResponsesTool};
 
     fn model_input(items: serde_json::Value) -> serde_json::Value {
         let input: ResponsesInput = serde_json::from_value(items).expect("input");
@@ -171,6 +209,41 @@ mod tests {
             model[1]["output"],
             "{\"sources\":[{\"url\":\"https://www.rust-lang.org\"}]}"
         );
+    }
+
+    /// Two tools whose names sanitize alike get distinct names at discovery; a replay keeps that assignment.
+    #[test]
+    fn replayed_mcp_call_keeps_the_name_discovery_assigned() {
+        let discovered = |tool_name: &str, internal_name: &str| McpDiscoveredToolParam {
+            server_label: "docs".to_owned(),
+            tool_name: tool_name.to_owned(),
+            internal_name: internal_name.to_owned(),
+            tool: serde_json::from_value(json!({"name": tool_name, "inputSchema": {"type": "object"}})).expect("tool"),
+        };
+        let mut payload: RequestPayload = serde_json::from_value(json!({
+            "model": "test",
+            "input": [{"type": "mcp_call", "id": "mcp_2", "server_label": "docs", "name": "read_file",
+                "arguments": "{}", "status": "completed", "approval_request_id": null, "output": "second",
+                "error": null}],
+            "tools": [{"type": "mcp", "server_label": "docs", "server_url": "https://docs.example/mcp",
+                "require_approval": "never"}]
+        }))
+        .expect("request");
+        let Some(tools) = payload.tools.as_mut() else {
+            panic!("declared tools")
+        };
+        let ResponsesTool::Mcp(server) = &mut tools[0] else {
+            panic!("MCP declaration")
+        };
+        server.discovered_tools = vec![
+            discovered("read.file", "mcp__docs__read_file"),
+            discovered("read_file", "mcp__docs__read_file_2"),
+        ];
+
+        let upstream = serde_json::to_value(payload.to_upstream_request(false).expect("upstream request").input)
+            .expect("upstream input");
+
+        assert_eq!(upstream[0]["name"], "mcp__docs__read_file_2", "{upstream}");
     }
 
     #[test]

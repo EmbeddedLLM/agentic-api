@@ -702,6 +702,78 @@ async fn streaming_unreachable_mcp_server_ends_with_error_and_response_failed() 
     assert!(requests.lock().await.is_empty());
 }
 
+/// An MCP stub that lists `tools` and answers nothing else.
+async fn spawn_listing_mcp(tools: Value) -> String {
+    let app = Router::new().route(
+        "/mcp",
+        post(move |axum::Json(request): axum::Json<Value>| {
+            let tools = tools.clone();
+            async move {
+                let id = request["id"].clone();
+                if id.is_null() {
+                    return axum::http::StatusCode::ACCEPTED.into_response();
+                }
+                let reply = match request["method"].as_str() {
+                    Some("initialize") => json!({"result": {
+                        "protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
+                        "serverInfo": {"name": "listing", "version": "0"}
+                    }}),
+                    Some("tools/list") => json!({"result": {"tools": tools}}),
+                    _ => json!({"error": {"code": -32601, "message": "method not found"}}),
+                };
+                let mut body = json!({"jsonrpc": "2.0", "id": id});
+                body.as_object_mut()
+                    .expect("object")
+                    .extend(reply.as_object().expect("object").clone());
+                axum::Json(body).into_response()
+            }
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind MCP");
+    let address = listener.local_addr().expect("MCP address");
+    tokio::spawn(async move { axum::serve(listener, app).await.expect("MCP server") });
+    format!("http://{address}/mcp")
+}
+
+/// With tool search active, a replayed `mcp_call` to the second of two tools whose names sanitize alike keeps the
+/// name discovery gave that tool, not the first tool's.
+#[tokio::test]
+async fn replayed_mcp_call_keeps_its_discovered_name_when_tool_search_is_active() {
+    let schema = json!({"type": "object", "properties": {}});
+    let mcp_url = spawn_listing_mcp(json!([
+        {"name": "read.file", "description": "First.", "inputSchema": schema},
+        {"name": "read_file", "description": "Second.", "inputSchema": schema}
+    ]))
+    .await;
+    let (llm_url, requests) = spawn_llm(vec![upstream("up_1", json!([message("done")]))]).await;
+    let server = json!({"type": "mcp", "server_label": "docs", "server_url": mcp_url, "require_approval": "never"});
+    let input = json!([
+        {"type": "message", "role": "user", "content": "read it"},
+        {"type": "mcp_call", "id": "mcp_second", "server_label": "docs", "name": "read_file", "arguments": "{}",
+            "status": "completed", "approval_request_id": null, "output": "second file", "error": null},
+        {"type": "message", "role": "user", "content": "again"}
+    ]);
+    let response = run(
+        request(&input, &json!([{"type": "tool_search"}, server, deferred_weather()])),
+        context(llm_url),
+    )
+    .await;
+    assert_eq!(response.status, "completed");
+
+    let requests = requests.lock().await;
+    let offered = tool_names(&requests[0]);
+    let call = requests[0]["input"]
+        .as_array()
+        .expect("upstream input")
+        .iter()
+        .find(|item| item["type"] == "function_call" && item["call_id"] == "mcp_second")
+        .expect("the replayed MCP call")
+        .clone();
+    let name = call["name"].as_str().expect("call name");
+    assert_ne!(name, "mcp__docs__read_file", "the first tool's name: {call}");
+    assert!(offered.iter().any(|offered| offered == name), "{name} in {offered:?}");
+}
+
 /// A `store: false` client replays a hosted MCP response. The model sees each `mcp_call` as the function call and
 /// output it saw live; vLLM does not accept the public record.
 #[tokio::test]
@@ -1390,6 +1462,55 @@ async fn streaming_search_output_does_not_wait_for_a_slower_call_after_a_client_
         function_call("m1", "mcp__gated__slow", &json!({})),
     ])
     .await;
+}
+
+/// A searched top-level function's call carries `namespace` equal to its own name in public output only. When the
+/// function is async, the response continues into another round, and that round's model input must still name the
+/// call plainly: the declared tool is `get_weather`, not a namespace member.
+#[tokio::test]
+async fn async_continuation_after_a_search_keeps_the_call_unqualified_for_the_model() {
+    let mut weather = deferred_weather();
+    weather["async"] = json!(true);
+    let (llm_url, requests) = spawn_llm(vec![
+        upstream(
+            "up_1",
+            json!([function_call("s1", "tool_search", &json!({"paths": ["get_weather"]}))]),
+        ),
+        upstream(
+            "up_2",
+            json!([function_call("w1", "get_weather", &json!({"city": "Paris"}))]),
+        ),
+        upstream("up_3", json!([message("checking")])),
+    ])
+    .await;
+    let response = run(
+        request(&json!("weather?"), &json!([{"type": "tool_search"}, weather])),
+        context(llm_url),
+    )
+    .await;
+
+    let public_call = output(&response)
+        .into_iter()
+        .find(|item| item["type"] == "function_call")
+        .expect("public weather call");
+    assert_eq!(
+        public_call["namespace"], "get_weather",
+        "the public item mirrors the Responses API"
+    );
+    let requests = requests.lock().await;
+    assert_eq!(requests.len(), 3, "the async call continues into another round");
+    let continued_call = requests[2]["input"]
+        .as_array()
+        .expect("upstream input")
+        .iter()
+        .find(|item| item["type"] == "function_call" && item["call_id"] == "call_w1")
+        .expect("the async call in the next round's input")
+        .clone();
+    assert_eq!(continued_call["name"], "get_weather", "{continued_call}");
+    assert!(
+        continued_call.get("namespace").is_none_or(Value::is_null),
+        "{continued_call}"
+    );
 }
 
 #[tokio::test]

@@ -1,7 +1,7 @@
 use crate::types::io::InOutItem;
 
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::handler::{ToolError, ToolHandler};
 use super::registry::{ToolEntry, ToolType};
@@ -285,27 +285,28 @@ impl CodexNamespaceHandler {
     }
 
     /// Rewrite public namespaced function-call history to the exact flat names
-    /// from the request-scoped namespace map used for tool declarations.
+    /// from the request-scoped namespace map used for tool declarations, and
+    /// unqualify a searched top-level function (see [`unqualify_or_flatten_calls`]).
     #[must_use]
     pub fn resolve_input<'a>(
         &self,
         map: Option<&NamespaceMap>,
+        top_level_functions: &HashSet<&str>,
         input: Cow<'a, ResponsesInput>,
     ) -> Cow<'a, ResponsesInput> {
-        let Some(map) = map else {
-            return input;
+        let resolves = |namespace: &str, name: &str| {
+            map.is_some_and(|map| map.mapping_for_member(namespace, name).is_some())
+                || (namespace == name && top_level_functions.contains(name))
         };
         let should_rewrite = matches!(&*input, ResponsesInput::Items(items) if items.iter().any(|item| {
             matches!(item, InOutItem::Input(InputItem::FunctionCall(call))
-                if call.namespace.as_deref().is_some_and(|namespace| {
-                    map.mapping_for_member(namespace, &call.name).is_some()
-                }))
+                if call.namespace.as_deref().is_some_and(|namespace| resolves(namespace, &call.name)))
         }));
         if !should_rewrite {
             return input;
         }
         let mut input = input.into_owned();
-        rewrite_input_with_map(&mut input, map);
+        unqualify_or_flatten_calls(&mut input, map, top_level_functions);
         Cow::Owned(input)
     }
 }
@@ -352,7 +353,15 @@ fn namespace_map_from_tools(tools: Option<&[ToolDeclaration]>) -> Result<Option<
     Ok(Some(builder.finish()))
 }
 
-fn rewrite_input_with_map(input: &mut ResponsesInput, map: &NamespaceMap) {
+/// Lowers namespaced calls to the flat names the model knows. A call whose
+/// namespace is its own name, that no declared namespace maps, and that names a
+/// declared top-level function is a searched function: the public item mirrors
+/// the Responses API, but the model knows the function unqualified.
+fn unqualify_or_flatten_calls(
+    input: &mut ResponsesInput,
+    map: Option<&NamespaceMap>,
+    top_level_functions: &HashSet<&str>,
+) {
     let ResponsesInput::Items(items) = input else {
         return;
     };
@@ -363,11 +372,12 @@ fn rewrite_input_with_map(input: &mut ResponsesInput, map: &NamespaceMap) {
         let Some(namespace) = call.namespace.as_deref() else {
             continue;
         };
-        let Some(mapping) = map.mapping_for_member(namespace, &call.name) else {
-            continue;
-        };
-        call.name.clone_from(&mapping.upstream_name);
-        call.namespace = None;
+        if let Some(mapping) = map.and_then(|map| map.mapping_for_member(namespace, &call.name)) {
+            call.name.clone_from(&mapping.upstream_name);
+            call.namespace = None;
+        } else if namespace == call.name && top_level_functions.contains(call.name.as_str()) {
+            call.namespace = None;
+        }
     }
 }
 

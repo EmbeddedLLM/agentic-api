@@ -291,7 +291,7 @@ mod tests {
     use std::collections::HashSet;
 
     use super::*;
-    use crate::types::io::input::{async_records, open_async_call_ids};
+    use crate::types::io::input::{McpToolNames, async_records, open_async_call_ids};
 
     #[test]
     fn compaction_prefix_never_splits_interleaved_calls_and_outputs() {
@@ -607,7 +607,7 @@ mod tests {
                         }
                         let input =
                             ResponsesInput::from(vec![deserialize_from_value::<InputItem>(item.clone()).unwrap()]);
-                        let normalized = input.normalized_model_input().unwrap();
+                        let normalized = input.normalized_model_input_with(&McpToolNames::default()).unwrap();
                         for history in [&input, normalized.as_ref()] {
                             let required =
                                 pending_calls(&history.input_items().map(Cow::into_owned).collect::<Vec<_>>())
