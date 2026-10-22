@@ -716,6 +716,17 @@ mod tests {
         assert!(estimate_input_tokens(&input) > 0);
     }
 
+    /// A hosted search as the model sees it, captured before the public pair became the stored
+    /// record. Storing the public pair instead must not change when auto-compaction triggers.
+    #[test]
+    fn hosted_search_estimate_counts_what_the_model_sees() {
+        let items: Vec<InputItem> = serde_json::from_str(include_str!(
+            "../../tests/fixtures/multi_agent_private_search_history.json"
+        ))
+        .expect("fixture history");
+        assert_eq!(estimate_history_tokens(&items), 137);
+    }
+
     #[test]
     fn inline_image_payload_size_does_not_affect_user_message_estimate() {
         let small = estimate_input_tokens(&ResponsesInput::from(vec![image_message(100 * 1_024)]));

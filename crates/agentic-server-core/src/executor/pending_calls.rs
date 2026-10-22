@@ -468,6 +468,23 @@ mod tests {
             if call_id.as_str() == "weather" && name == "get_weather"));
     }
 
+    /// A hosted search is answered by the gateway in the same response, so its public pair owes
+    /// the client nothing and a compaction prefix keeps the call with its output.
+    #[test]
+    fn hosted_search_pair_is_never_pending() {
+        let items: Vec<InputItem> = serde_json::from_value(serde_json::json!([
+            {"type": "message", "role": "user", "content": "weather?"},
+            {"type": "tool_search_call", "id": "tsc_h", "call_id": null, "execution": "server",
+                "arguments": {"paths": ["get_weather"]}, "status": "completed"},
+            {"type": "tool_search_output", "id": "tso_h", "call_id": null, "execution": "server",
+                "status": "completed", "tools": []}
+        ]))
+        .unwrap();
+        assert!(pending_calls(&items).unwrap().is_empty());
+        assert_eq!(resolved_prefix_len(&items).unwrap(), items.len());
+        assert_eq!(resolved_prefix_len(&items[..2]).unwrap(), 2);
+    }
+
     #[test]
     fn shell_and_search_steering_obligations_preserve_public_output_kinds() {
         let search = InputItem::ToolSearchCall(InputToolSearchCall {
