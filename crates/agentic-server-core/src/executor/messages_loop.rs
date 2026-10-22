@@ -10,7 +10,7 @@
 //! carrying the `usage` of every round.
 //!
 //! This never touches `RequestPayload`/`ResponsePayload`; it reuses only the
-//! protocol-neutral tool layer (`ToolRegistry::dispatch`) via
+//! protocol-neutral tool bindings and scheduling policy via
 //! [`crate::types::messages::tool_seam`]. Non-streaming only; streaming lives in
 //! `messages_stream`.
 
@@ -202,6 +202,7 @@ async fn run_messages_loop_traced(
             &mut ctx,
             registry,
             &gateway_map,
+            &exec_ctx.gateway_scheduler_policy,
             &exec_ctx.metrics,
         )
         .await;

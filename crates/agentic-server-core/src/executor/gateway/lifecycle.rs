@@ -359,7 +359,7 @@ pub(super) async fn drive_in_order<T>(
     consume: impl AsyncFnOnce(&mut OrderedResults) -> ExecutorResult<T>,
 ) -> ExecutorResult<T> {
     let (sender, mut receiver) = mpsc::channel(scheduler.call_count().max(1));
-    let execution_slots = scheduler.execution_slots();
+    let execution_slots = scheduler.policy.new_round_execution_slots();
     let produce = async move {
         let mut ordered = scheduler.results_in_order(&execution_slots, response_budget);
         while let Some(result) = ordered.next().await {

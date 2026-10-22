@@ -222,6 +222,7 @@ fn messages_stream_body(
                 &mut ctx,
                 &registry,
                 &acc.gateway_map,
+                &exec_ctx.gateway_scheduler_policy,
                 &exec_ctx.metrics,
             ).await;
             if let Err(e) = ctx.append_round(&assistant_content, tool_results) {
@@ -397,6 +398,7 @@ mod tests {
     use std::fmt::Write as _;
 
     use super::*;
+    use crate::executor::gateway::GatewaySchedulerPolicy;
     use crate::executor::telemetry::metrics::ExecutorMetrics;
 
     fn line(v: &Value) -> String {
@@ -864,6 +866,7 @@ mod tests {
             &mut context(),
             &no_op_registry().await,
             &tool_seam::GatewayToolMap::default(),
+            &GatewaySchedulerPolicy::default(),
             &ExecutorMetrics::from_global(),
         )
         .await;

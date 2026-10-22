@@ -305,7 +305,7 @@ allowed_hosts = ["mcp.example.com"]
 max_request_body_size_bytes = 10485760
 
 [tools]
-# Upper bound for gateway-owned calls within one Responses round and for
+# Upper bound for gateway-owned calls within one Responses or Messages round and for
 # provider requests inside a batched web-search call.
 # Must be greater than zero.
 max_concurrent_gateway_calls = 5

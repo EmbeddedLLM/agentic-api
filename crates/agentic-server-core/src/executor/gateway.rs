@@ -323,10 +323,6 @@ impl GatewayScheduler {
             .map_or(self.calls.len(), |offset| from + offset + 1)
     }
 
-    pub(super) fn execution_slots(&self) -> Semaphore {
-        Semaphore::new(self.policy.max_concurrent_calls.get())
-    }
-
     /// Runs the planned calls concurrently within `execution_slots` and yields each
     /// result in call order as soon as that call and every earlier one finished,
     /// so a round's lifecycle events never wait for its slowest call.
@@ -368,7 +364,7 @@ impl GatewayScheduler {
         &mut self,
         response_budget: &ExecutorResponseBudget,
     ) -> ExecutorResult<Vec<GatewayCallResult>> {
-        let execution_slots = self.execution_slots();
+        let execution_slots = self.policy.new_round_execution_slots();
         // Every call finishes before the first error in call order is returned.
         let results = self
             .results_in_order(&execution_slots, response_budget)
@@ -436,12 +432,7 @@ impl GatewayScheduler {
                 .map(|result| (result, GatewayCallStatus::Failed));
         };
 
-        let _permit = match &binding.self_exclusion {
-            Some(semaphore) => Some(semaphore.acquire().await.expect("semaphore is never closed")),
-            None => None,
-        };
-        let _execution_slot = execution_slots.acquire().await.expect("semaphore is never closed");
-        let _materialization_permit = self.policy.acquire_materialization_permit().await;
+        let _permits = self.policy.acquire_execution_permits(&binding, execution_slots).await;
 
         let dispatched = if self.timeout.is_zero() {
             binding.execute(&call.call_id, &call.name, &call.arguments).await
