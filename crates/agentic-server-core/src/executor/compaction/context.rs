@@ -26,8 +26,10 @@ pub(super) fn item_has_meaningful_context(item: &InputItem) -> bool {
                     .flatten()
                     .any(|reference| !reference.trim().is_empty()),
                 InputContent::Refusal(refusal) => !refusal.refusal.trim().is_empty(),
-                // Message files and unmodeled parts are rejected during typed input validation.
-                InputContent::InputFile(_) | InputContent::Unknown(_) => false,
+                // Validation accepts only inline text files, so the file data is the context.
+                InputContent::InputFile(file) => file.file_data.as_deref().is_some_and(|data| !data.trim().is_empty()),
+                // Unmodeled parts are rejected during typed input validation.
+                InputContent::Unknown(_) => false,
             }),
         },
         InputItem::FunctionCall(call) => !call.name.trim().is_empty() || !call.arguments.trim().is_empty(),

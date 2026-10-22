@@ -2,7 +2,8 @@ use crate::types::io::{InOutItem, OutputMessage, OutputMessageContent};
 use serde_json::Value;
 
 use super::{
-    InputContent, InputItem, InputMessage, InputMessageContent, InputMessageType, InputTextContent, ResponsesInput,
+    InputContent, InputItem, InputMessage, InputMessageContent, InputMessageType, InputTextContent,
+    InputValidationError, ResponsesInput,
 };
 use std::borrow::Cow;
 
@@ -70,18 +71,28 @@ impl ResponsesInput {
     }
 
     /// Normalize client tool items only in the model-facing copy of canonical history.
-    pub(crate) fn normalized_model_input(&self) -> Cow<'_, Self> {
+    ///
+    /// Message files become `input_text` parts in place through
+    /// `InputTextContent::try_from(&InputFileContent)`; the canonical history
+    /// keeps the client's `input_file`.
+    ///
+    /// # Errors
+    /// Returns a file that cannot be converted to text. Positions refer to the
+    /// model-facing copy; [`Self::validate`] reports the same failure with the
+    /// request's positions and runs first on typed paths.
+    pub(crate) fn normalized_model_input(&self) -> Result<Cow<'_, Self>, InputValidationError> {
         let input = self.model_input();
         let has_client_tools = matches!(&*input, Self::Items(items) if items.iter().any(|item| matches!(item,
             InOutItem::Input(InputItem::ShellCall(_) | InputItem::ShellCallOutput(_)
                 | InputItem::CustomToolCall(_) | InputItem::CustomToolCallOutput(_))
         )));
-        let has_image_without_detail = matches!(&*input, Self::Items(items) if items.iter().any(|item| matches!(item,
+        let has_parts_to_normalize = matches!(&*input, Self::Items(items) if items.iter().any(|item| matches!(item,
             InOutItem::Input(InputItem::Message(message)) if matches!(&message.content,
                 InputMessageContent::Parts(parts) if parts.iter().any(|part| matches!(part,
-                    InputContent::InputImage(image) if image.detail.is_none()))))));
-        if !has_client_tools && !has_image_without_detail {
-            return input;
+                    InputContent::InputImage(image) if image.detail.is_none())
+                    || matches!(part, InputContent::InputFile(_)))))));
+        if !has_client_tools && !has_parts_to_normalize {
+            return Ok(input);
         }
         let mut model = if has_client_tools {
             Self::from(Vec::<InputItem>::from(input.into_owned()))
@@ -89,19 +100,32 @@ impl ResponsesInput {
             input.into_owned()
         };
         if let Self::Items(items) = &mut model {
-            for item in items {
+            for (item_index, item) in items.iter_mut().enumerate() {
                 if let InOutItem::Input(InputItem::Message(message)) = item
                     && let InputMessageContent::Parts(parts) = &mut message.content
                 {
-                    for part in parts {
-                        if let InputContent::InputImage(image) = part {
-                            image.detail.get_or_insert_with(|| "auto".to_owned());
+                    for (part_index, part) in parts.iter_mut().enumerate() {
+                        match part {
+                            InputContent::InputImage(image) => {
+                                image.detail.get_or_insert_with(|| "auto".to_owned());
+                            }
+                            InputContent::InputFile(file) => {
+                                let text = InputTextContent::try_from(&*file).map_err(|reason| {
+                                    InputValidationError::unsupported_file(item_index, part_index, reason)
+                                })?;
+                                *part = InputContent::InputText(text);
+                            }
+                            InputContent::InputText(_)
+                            | InputContent::OutputText(_)
+                            | InputContent::Refusal(_)
+                            | InputContent::ReasoningText(_)
+                            | InputContent::Unknown(_) => {}
                         }
                     }
                 }
             }
         }
-        Cow::Owned(model)
+        Ok(Cow::Owned(model))
     }
 }
 
@@ -204,7 +228,7 @@ mod tests {
         };
         assert!(matches!(&parts[0], InputContent::InputImage(image) if image.detail.is_none()));
 
-        let model = input.normalized_model_input();
+        let model = input.normalized_model_input().unwrap();
         let ResponsesInput::Items(model_items) = &*model else {
             panic!("model items")
         };
@@ -222,6 +246,47 @@ mod tests {
         assert_eq!(
             serialize_to_value(&input).unwrap(),
             serialize_to_value(&ResponsesInput::from(canonical)).unwrap()
+        );
+    }
+
+    #[test]
+    fn inline_text_files_are_inlined_only_in_the_model_copy() {
+        let file = json!({"type":"input_file", "file_data":"data:text/plain;base64,aGk=", "filename":"notes.txt"});
+        let input: ResponsesInput = deserialize_from_value(json!([
+            {"role":"user", "content":[{"type":"input_text", "text":"before"}, file.clone(),
+                {"type":"input_text", "text":"after"}]}
+        ]))
+        .unwrap();
+        let model = input.normalized_model_input().unwrap();
+        assert!(matches!(model, Cow::Owned(_)));
+        assert_eq!(
+            serialize_to_value(&*model).unwrap()[0]["content"],
+            json!([{"type":"input_text", "text":"before"}, {"type":"input_text", "text":"File: notes.txt\nhi"},
+                {"type":"input_text", "text":"after"}])
+        );
+        let canonical = serialize_to_value(&ResponsesInput::from(input.clone().into_canonical_items())).unwrap();
+        assert_eq!(canonical[0]["content"][1], file);
+
+        let plain: ResponsesInput = deserialize_from_value(json!([
+            {"role":"user", "content":[{"type":"input_text", "text":"hello"}]}
+        ]))
+        .unwrap();
+        assert!(matches!(plain.normalized_model_input().unwrap(), Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn unconvertible_files_fail_normalization_instead_of_reaching_the_model() {
+        let input: ResponsesInput = deserialize_from_value(json!([
+            {"role":"user", "content":[{"type":"input_text", "text":"read"},
+                {"type":"input_file", "file_data":"data:application/pdf;base64,JVBERi0=", "filename":"a.pdf"}]}
+        ]))
+        .unwrap();
+        let error = input.normalized_model_input().unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .starts_with("input[0].content[1]: input_file content is not supported"),
+            "{error}"
         );
     }
 }

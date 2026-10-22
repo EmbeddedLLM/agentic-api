@@ -484,6 +484,7 @@ These files use `sessions`, not the HTTP `turns` schema or synthesized SSE.
 | `record_code_interpreter_cassettes.sh` | One code-interpreter calculation; OpenAI blocking/SSE and gateway blocking/SSE/WebSocket | gateway and OpenAI reference |
 | `record_messages_tool_choice.py` | Forced `any` and named Messages searches followed by an automatic answer (JSON + SSE) | gateway's upstream traffic to vLLM |
 | `record_image_input_cassettes.sh` | Matching two-turn image-input conversations (streaming + non-streaming) | gateway and OpenAI reference |
+| `record_text_file_input_cassettes.sh` | Inline text-file turns, `previous_response_id` continuation, and compaction (streaming + non-streaming) | gateway (compaction calls: direct vLLM) and OpenAI reference |
 | `record_dynamo_cassettes.sh` | Stateful two-turn and client-executed function tool call cassettes (streaming + non-streaming) | NVIDIA Dynamo frontend |
 | `record_dynamo_messages_cassettes.sh` | Two-round Messages web-search cassettes (streaming + non-streaming), validated before replacement | Existing NVIDIA Dynamo frontend |
 | `record_sglang_cassettes.sh` | Same shared executor scenarios as Dynamo, staged validation and sanitized provenance | SGLang |
@@ -844,6 +845,49 @@ Use `IMAGE_RECORD_SET=gateway` or `IMAGE_RECORD_SET=openai` to record one provid
 changes the cassette file names; update `GATEWAY_MODEL` and `GATEWAY_MODEL_SLUG` in `image_input_test.rs` to match.
 The `tool-image` scenario uses `tool_choice: auto` so the recording proves the model chose to call the tool; if a
 small model answers without calling it, validation fails and the scenario can simply be re-run.
+
+### Text file input (gateway → vLLM text model, and OpenAI)
+
+Every turn carries `text_files/inputs/notes.txt` as an inline `input_file` (`data:text/plain;base64,...`). Its release
+codeword `PAPAYA-7` appears only in the file, and every recording is validated to answer with it, so a cassette shows
+that the model read the attachment. `text_file_input_test.rs` replays each recording through the gateway against a
+mock upstream and checks that the model receives a `File: notes.txt` `input_text` part with no `input_file` or
+`file_data`, that stored history and the compacted window keep the client's original `input_file`, and that a
+`previous_response_id` continuation decodes the stored file again. Every scenario is recorded for the gateway and,
+as the reference, against the OpenAI Responses API (`gpt-4o`).
+
+| Scenario | Recorded through | What it proves |
+|---|---|---|
+| `single` | gateway, streaming + non-streaming | the question and inline file (`inputs/single-file.json`) reach the model as text; storage keeps the file |
+| `continuation` | gateway, streaming + non-streaming | a text follow-up by `previous_response_id` re-inlines the stored file |
+| `compact` + `compact-followup` | direct vLLM, non-streaming | the summarizer receives exactly the decoded-text input (`inputs/compact-text-file.json`), and a follow-up on the compacted window answers from the summary |
+
+The gateway makes its compaction calls internally, so those two recordings capture the model-facing requests directly
+against the model server, like `compaction/`. The follow-up input is built from the recorded summary. The replay checks
+that the gateway, given the original `input_file`, sends exactly the recorded summary input, and the recorded
+follow-up input apart from the `id` and `status` that compaction assigns to the retained message.
+
+**Recorded configuration.** vLLM 0.32.0 serving `Qwen/Qwen2.5-3B-Instruct` on one 12 GB GPU (RTX 4070 Ti, WSL2),
+started with `vllm serve Qwen/Qwen2.5-3B-Instruct --port 8000 --max-model-len 8192 --gpu-memory-utilization 0.85
+--enable-auto-tool-choice --tool-call-parser hermes` (no tools are declared in these scenarios),
+and the gateway started with `cargo run -p agentic-server -- --llm-api-base http://127.0.0.1:8000` on port 9000.
+
+```bash
+# Gateway set (no API key): conversations through the gateway, compaction calls against vLLM.
+GATEWAY_URL=http://localhost:9000 VLLM_URL=http://localhost:8000 MODEL=Qwen/Qwen2.5-3B-Instruct \
+TEXT_FILE_RECORD_SET=gateway \
+bash crates/agentic-server-core/tests/cassettes/record_text_file_input_cassettes.sh
+
+# OpenAI reference set.
+OPENAI_API_KEY=sk-... TEXT_FILE_RECORD_SET=openai \
+bash crates/agentic-server-core/tests/cassettes/record_text_file_input_cassettes.sh
+```
+
+Use `TEXT_FILE_SCENARIOS="compact"` (space-separated) to record a subset, and `OPENAI_MODEL` to change the reference
+model. Recordings are staged and replace final files only after every selected recording validates. The replay test
+requires both sets: it replays the gateway and OpenAI recordings and checks that the gateway builds the same
+model-facing file turn and summary input for both. A different model changes the file names; update
+`GATEWAY_MODEL_SLUG` or `OPENAI_MODEL_SLUG` in `text_file_input_test.rs` to match.
 
 ### Custom tool (gateway and OpenAI)
 

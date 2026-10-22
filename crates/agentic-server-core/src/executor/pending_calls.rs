@@ -607,7 +607,7 @@ mod tests {
                         }
                         let input =
                             ResponsesInput::from(vec![deserialize_from_value::<InputItem>(item.clone()).unwrap()]);
-                        let normalized = input.normalized_model_input();
+                        let normalized = input.normalized_model_input().unwrap();
                         for history in [&input, normalized.as_ref()] {
                             let required =
                                 pending_calls(&history.input_items().map(Cow::into_owned).collect::<Vec<_>>())

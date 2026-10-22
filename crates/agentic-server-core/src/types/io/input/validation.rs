@@ -4,6 +4,7 @@ use std::fmt;
 
 use thiserror::Error;
 
+use super::file_text::InputFileError;
 use super::{InputContent, InputItem, InputMessageContent, ResponsesInput};
 use crate::types::io::{InOutItem, OutputItem};
 
@@ -18,10 +19,22 @@ pub struct InputValidationError {
 impl fmt::Display for InputValidationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "input[{}].content", self.item_index)?;
-        if let MessageContentError::UnsupportedPart { part_index, .. } = &self.source {
+        if let MessageContentError::UnsupportedPart { part_index, .. }
+        | MessageContentError::UnsupportedFile { part_index, .. } = &self.source
+        {
             write!(f, "[{part_index}]")?;
         }
         write!(f, ": {}", self.source)
+    }
+}
+
+impl InputValidationError {
+    /// A message file at `input[item_index].content[part_index]` that cannot be converted to text.
+    pub(super) fn unsupported_file(item_index: usize, part_index: usize, reason: InputFileError) -> Self {
+        Self {
+            item_index,
+            source: MessageContentError::UnsupportedFile { part_index, reason },
+        }
     }
 }
 
@@ -31,9 +44,11 @@ enum MessageContentError {
     Empty,
     #[error(
         "message content part type `{kind}` is not supported by the typed Responses executor; \
-         provide input_text or input_image content instead"
+         provide input_text, input_image, or inline text input_file content instead"
     )]
     UnsupportedPart { part_index: usize, kind: String },
+    #[error("{reason}")]
+    UnsupportedFile { part_index: usize, reason: InputFileError },
 }
 
 impl InputMessageContent {
@@ -43,7 +58,11 @@ impl InputMessageContent {
             Self::Parts(parts) if parts.is_empty() => Err(MessageContentError::Empty),
             Self::Parts(parts) => parts.iter().enumerate().try_for_each(|(part_index, part)| {
                 let kind = match part {
-                    InputContent::InputFile(_) => "input_file",
+                    InputContent::InputFile(file) => {
+                        return file
+                            .validate()
+                            .map_err(|reason| MessageContentError::UnsupportedFile { part_index, reason });
+                    }
                     InputContent::Unknown(kind) => kind,
                     InputContent::InputText(_)
                     | InputContent::InputImage(_)
@@ -88,8 +107,9 @@ impl ResponsesInput {
     /// contract and can contain files.
     ///
     /// # Errors
-    /// Returns the item and content-part location of an empty message array or
-    /// a message content type the typed executor cannot convey.
+    /// Returns the item and content-part location of an empty message array, a
+    /// message content type the typed executor cannot convey, or a message
+    /// file that is not an inline base64 UTF-8 text file.
     pub fn validate(&self) -> Result<(), InputValidationError> {
         match self {
             Self::Text(_) => Ok(()),
@@ -110,19 +130,51 @@ mod tests {
 
     #[test]
     fn validation_preserves_original_item_and_content_positions() {
-        for kind in ["input_file", "future_content"] {
-            let input: ResponsesInput = serde_json::from_value(json!([
-                {"type":"function_call_output", "call_id":"call_1", "output":"done"},
-                {"role":"user", "content":[{"type":"input_text", "text":"hello"}, {"type":kind}]}
-            ]))
-            .unwrap();
-            let error = input.validate().unwrap_err();
-            assert_eq!(error.item_index, 1);
-            assert!(
-                matches!(&error.source, MessageContentError::UnsupportedPart { part_index: 1, kind: actual } if actual == kind)
-            );
-            assert!(error.to_string().starts_with("input[1].content[1]:"));
-        }
+        let input: ResponsesInput = serde_json::from_value(json!([
+            {"type":"function_call_output", "call_id":"call_1", "output":"done"},
+            {"role":"user", "content":[{"type":"input_text", "text":"hello"}, {"type":"future_content"}]}
+        ]))
+        .unwrap();
+        let error = input.validate().unwrap_err();
+        assert_eq!(error.item_index, 1);
+        assert!(
+            matches!(&error.source, MessageContentError::UnsupportedPart { part_index: 1, kind } if kind == "future_content")
+        );
+        assert!(error.to_string().starts_with("input[1].content[1]:"));
+    }
+
+    #[test]
+    fn unsupported_files_keep_positions_without_echoing_references() {
+        let file = json!({"type":"input_file", "file_url":"https://example.invalid/document.pdf"});
+        let input: ResponsesInput = serde_json::from_value(json!([
+            {"type":"function_call_output", "call_id":"call_1", "output":"done"},
+            {"role":"user", "content":[{"type":"input_text", "text":"hello"}, file]}
+        ]))
+        .unwrap();
+        let error = input.validate().unwrap_err();
+        assert_eq!(error.item_index, 1);
+        assert!(matches!(
+            error.source,
+            MessageContentError::UnsupportedFile {
+                part_index: 1,
+                reason: InputFileError::FileUrl
+            }
+        ));
+        let message = error.to_string();
+        assert!(message.starts_with("input[1].content[1]: input_file with file_url is not supported"));
+        assert!(!message.contains("example.invalid"), "{message}");
+    }
+
+    #[test]
+    fn inline_text_files_pass_in_new_input_and_restored_history() {
+        let file = json!({"type":"input_file", "file_data":"data:text/plain;base64,aGk=", "filename":"a.txt"});
+        let input: ResponsesInput = serde_json::from_value(json!([
+            {"role":"user", "content":[file.clone()]},
+            {"type":"message", "role":"assistant", "content":[{"type":"output_text", "text":"ok"}]},
+            {"role":"user", "content":[{"type":"input_text", "text":"again"}, file]}
+        ]))
+        .unwrap();
+        input.validate().unwrap();
     }
 
     #[test]
