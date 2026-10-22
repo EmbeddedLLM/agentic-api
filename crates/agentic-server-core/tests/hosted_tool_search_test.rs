@@ -8,19 +8,26 @@ mod support;
 
 use std::collections::VecDeque;
 use std::fmt::Write as _;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::time::Duration;
 
-use agentic_core::executor::{ConversationHandler, ExecuteRequest, ExecutionContext, ResponseHandler};
-use agentic_core::storage::{ConversationStore, ResponseStore};
+use agentic_core::config::ToolRuntimeConfig;
+use agentic_core::executor::{ConversationHandler, ExecuteRequest, ExecutionContext, ResponseHandler, ResponseSession};
+use agentic_core::storage::{ConversationStore, ResponseStore, create_pool_with_schema};
+use agentic_core::tool::mcp::McpServerEntry;
+use agentic_core::tool::{GatewayExecutors, model_visible_namespace_member_name};
 use agentic_core::types::request_response::{RequestPayload, ResponsePayload};
 use axum::Router;
 use axum::body::Bytes;
 use axum::response::IntoResponse;
 use axum::routing::post;
 use either::Either;
+use futures::StreamExt;
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 
 type Requests = Arc<Mutex<Vec<Value>>>;
 
@@ -63,9 +70,10 @@ fn context(llm_url: String) -> Arc<ExecutionContext> {
     ))
 }
 
-#[allow(clippy::needless_pass_by_value)] // Owned JSON fixtures read naturally at call sites.
 fn upstream(id: &str, output: Value) -> Value {
-    json!({"id": id, "object": "response", "status": "completed", "model": "test", "created_at": 0, "output": output})
+    let mut response = json!({"id": id, "object": "response", "status": "completed", "model": "test", "created_at": 0});
+    response["output"] = output;
+    response
 }
 
 fn function_call(suffix: &str, name: &str, arguments: &Value) -> Value {
@@ -236,7 +244,7 @@ fn travel() -> Value {
 
 #[tokio::test]
 async fn query_loads_one_namespace_member_and_its_call_keeps_the_namespace() {
-    let member = agentic_core::tool::model_visible_namespace_member_name("travel", "get_timezone");
+    let member = model_visible_namespace_member_name("travel", "get_timezone");
     let (llm_url, requests) = spawn_llm(vec![
         upstream(
             "up_1",
@@ -352,7 +360,6 @@ async fn parallel_tool_calls_is_allowed_for_hosted_search() {
 
 /// A minimal streamable-HTTP MCP server with two tools; counts `tools/call`.
 async fn spawn_mcp() -> (String, Arc<std::sync::atomic::AtomicUsize>) {
-    use std::sync::atomic::{AtomicUsize, Ordering};
     let calls = Arc::new(AtomicUsize::new(0));
     let counter = Arc::clone(&calls);
     let app = Router::new().route(
@@ -453,7 +460,7 @@ async fn deferred_mcp_server_is_listed_searched_as_a_namespace_and_called() {
     );
     assert_eq!(items[3]["name"], "echo");
     assert_eq!(items[3]["server_label"], "stub");
-    assert_eq!(mcp_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(mcp_calls.load(Ordering::SeqCst), 1);
 
     let requests = requests.lock().await;
     assert_eq!(
@@ -530,7 +537,7 @@ async fn search_does_not_count_toward_max_tool_calls() {
             "message"
         ]
     );
-    assert_eq!(mcp_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(mcp_calls.load(Ordering::SeqCst), 1);
     // After the call budget is spent, built-in tools are withheld but search stays.
     assert_eq!(tool_names(&requests.lock().await[3])[0], "tool_search");
 }
@@ -878,7 +885,6 @@ async fn spawn_streaming_llm(bodies: Vec<String>) -> (String, Requests) {
 }
 
 async fn run_streaming(request: RequestPayload, context: Arc<ExecutionContext>) -> Vec<Value> {
-    use futures::StreamExt;
     let Either::Right(mut stream) = ExecuteRequest::new(request, context)
         .run()
         .await
@@ -970,15 +976,12 @@ async fn durable_context(llm_url: String) -> Arc<ExecutionContext> {
 }
 
 async fn durable_context_with_conversations(llm_url: String) -> (Arc<ExecutionContext>, ConversationStore) {
-    use std::sync::atomic::{AtomicU64, Ordering};
     static DATABASE: AtomicU64 = AtomicU64::new(0);
     let url = format!(
         "sqlite:file:hosted_tool_search_{}?mode=memory&cache=shared",
         DATABASE.fetch_add(1, Ordering::Relaxed)
     );
-    let pool = agentic_core::storage::create_pool_with_schema(Some(&url))
-        .await
-        .expect("storage pool");
+    let pool = create_pool_with_schema(Some(&url)).await.expect("storage pool");
     let conversations = ConversationStore::new(Arc::clone(&pool));
     let context = Arc::new(ExecutionContext::new(
         ConversationHandler::new(conversations.clone()),
@@ -1066,8 +1069,6 @@ async fn stored_search_continues_by_previous_response_id_without_offering_loaded
 
 #[tokio::test]
 async fn conversation_and_session_continuations_restore_hosted_loads() {
-    use agentic_core::executor::ResponseSession;
-    use std::num::NonZeroUsize;
     for use_session in [false, true] {
         for store in [false, true] {
             let case = format!("session={use_session}, store={store}");
@@ -1250,7 +1251,7 @@ async fn streaming_search_with_an_eager_mcp_call_in_one_round_keeps_output_order
         ]
         .concat()
     );
-    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]
@@ -1281,7 +1282,7 @@ async fn streaming_searches_around_a_client_call_keep_output_order() {
 }
 
 /// An MCP stub whose `tools/call` waits until `gate` opens.
-async fn spawn_gated_mcp(gate: Arc<tokio::sync::Notify>) -> String {
+async fn spawn_gated_mcp(gate: Arc<Notify>) -> String {
     let app = Router::new().route(
         "/mcp",
         post(move |axum::Json(request): axum::Json<Value>| {
@@ -1321,8 +1322,7 @@ async fn spawn_gated_mcp(gate: Arc<tokio::sync::Notify>) -> String {
 /// Streams one round of `round_items` beside a gated MCP server and asserts that the search output reaches the client,
 /// and the gated call is announced in progress, while that call is still running.
 async fn assert_search_output_does_not_wait_for_the_gated_call(round_items: Vec<Value>) {
-    use futures::StreamExt;
-    let gate = Arc::new(tokio::sync::Notify::new());
+    let gate = Arc::new(Notify::new());
     let mcp_url = spawn_gated_mcp(Arc::clone(&gate)).await;
     let (llm_url, _) = spawn_streaming_llm(vec![sse("up_1", &round_items), sse("up_2", &[message("done")])]).await;
     let server = json!({"type": "mcp", "server_label": "gated", "server_url": mcp_url, "require_approval": "never"});
@@ -1342,7 +1342,7 @@ async fn assert_search_output_does_not_wait_for_the_gated_call(round_items: Vec<
 
     let mut seen = Vec::new();
     let mut gate_open = false;
-    while let Some(chunk) = tokio::time::timeout(std::time::Duration::from_secs(10), stream.next())
+    while let Some(chunk) = tokio::time::timeout(Duration::from_secs(10), stream.next())
         .await
         .expect("the search output must not wait for the gated MCP call")
     {
@@ -1429,9 +1429,6 @@ async fn streaming_mcp_search_then_call_numbers_every_item() {
 
 #[tokio::test]
 async fn operator_configured_server_can_default_to_deferred_with_a_catalog_description() {
-    use agentic_core::config::ToolRuntimeConfig;
-    use agentic_core::tool::GatewayExecutors;
-    use agentic_core::tool::mcp::McpServerEntry;
     let (mcp_url, _) = spawn_mcp().await;
     let (llm_url, requests) = spawn_llm(vec![
         upstream(
@@ -1663,7 +1660,7 @@ async fn two_searches_in_one_round_each_get_a_call_and_output() {
         .map(|item| item["id"].as_str().unwrap_or_default().to_owned())
         .collect();
     assert_eq!(ids[..4], ["tsc_s1", "tso_s1", "tsc_s2", "tso_s2"]);
-    let member = agentic_core::tool::model_visible_namespace_member_name("travel", "get_coordinates");
+    let member = model_visible_namespace_member_name("travel", "get_coordinates");
     assert_eq!(
         tool_names(&requests.lock().await[1]),
         ["tool_search", "get_weather", member.as_str()]

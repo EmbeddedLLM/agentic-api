@@ -1,5 +1,6 @@
 //! Tool-search declaration parameters: who runs the search, and how a hosted declaration is echoed.
 
+use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -61,8 +62,6 @@ impl ToolSearchToolParam {
 
 impl Serialize for ToolSearchToolParam {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeMap;
-
         let mut map = serializer.serialize_map(None)?;
         match self.execution {
             ToolSearchExecution::Server => {

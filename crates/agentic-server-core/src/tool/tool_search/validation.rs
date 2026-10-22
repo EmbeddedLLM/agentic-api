@@ -3,7 +3,7 @@ use crate::tool::ToolError;
 use crate::tool::declaration::responses_declarations;
 use crate::types::io::{InOutItem, InputItem, ResponsesInput};
 use crate::types::request_response::RequestPayload;
-use crate::types::tools::{CodexNamespaceMember, ResponsesTool};
+use crate::types::tools::{CodexNamespaceMember, ResponsesTool, ToolSearchExecution};
 
 pub(super) fn validate_tool_search_request(
     request: &RequestPayload,
@@ -31,7 +31,7 @@ pub(super) fn validate_tool_search_request(
         .any(|tool| matches!(tool, ResponsesTool::ToolSearch(declaration) if declaration.is_hosted()))
         || matches!(input, ResponsesInput::Items(items) if items.iter().any(|item| matches!(item,
             InOutItem::Input(InputItem::ToolSearchCall(call))
-                if call.execution == crate::types::tools::ToolSearchExecution::Server)));
+                if call.execution == ToolSearchExecution::Server)));
     if request.parallel_tool_calls == Some(true) && !hosted {
         return Err(ToolError::Config(
             "parallel_tool_calls must be false when tool search is active".to_owned(),

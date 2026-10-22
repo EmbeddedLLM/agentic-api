@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use serde_json::Value;
 
 use crate::tool::handler::ToolError;
+use crate::tool::model_visible_namespace_member_name;
 use crate::types::tools::{CodexNamespaceMember, CodexNamespaceToolParam, FunctionToolParam, ResponsesTool};
 use crate::utils::common::serialize_to_value;
 
@@ -116,7 +117,7 @@ fn ensure_namespace_members_do_not_resolve_prior_calls<'a>(
             continue;
         };
         let public_match = prior_public_members.is_some_and(|members| members.contains(function.name.as_str()));
-        let flat_name = crate::tool::model_visible_namespace_member_name(&namespace.name, function.name.as_str());
+        let flat_name = model_visible_namespace_member_name(&namespace.name, function.name.as_str());
         if public_match || unqualified_call_positions.contains_key(&flat_name) {
             return Err(withheld_function_history_call());
         }
@@ -179,10 +180,7 @@ fn load_namespace_members(
                 })?;
                 member_record.loaded = true;
                 members.unloaded_count = unloaded_count;
-                withheld_function_names.remove(&crate::tool::model_visible_namespace_member_name(
-                    &returned.name,
-                    member_name,
-                ));
+                withheld_function_names.remove(&model_visible_namespace_member_name(&returned.name, member_name));
                 newly_loaded.push(public_namespace.tools[member_record.public_member_index].clone());
             }
             continue;

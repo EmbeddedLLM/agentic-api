@@ -2,7 +2,8 @@
 
 use super::{GatewayCallResult, GatewayEventPlan};
 use crate::executor::error::{ExecutorError, ExecutorResult};
-use crate::tool::ToolRegistry;
+use crate::tool::mcp::handler::started_list_tools_output_item;
+use crate::tool::{CustomHandler, ShellHandler, ToolRegistry};
 use crate::types::io::OutputItem;
 
 /// Supplies the public output that completes a gateway event plan.
@@ -38,10 +39,10 @@ pub(in crate::executor) fn public_output_items(
         .map(|(item_index, item)| {
             Ok(match item {
                 OutputItem::FunctionCall(call) if registry.is_client_custom_name(&call.name) => {
-                    crate::tool::CustomHandler::output_item(call)
+                    CustomHandler::output_item(call)
                 }
                 OutputItem::FunctionCall(call) if registry.is_client_shell_name(&call.name) => {
-                    crate::tool::ShellHandler::output_item(call).ok_or_else(|| {
+                    ShellHandler::output_item(call).ok_or_else(|| {
                         ExecutorError::ParseError("shell function call contains invalid action arguments".to_owned())
                     })?
                 }
@@ -73,7 +74,7 @@ pub(in crate::executor) fn mcp_list_tools_event_plans(
             };
             Some(GatewayEventPlan {
                 output_index: u32::try_from(output_offset.saturating_add(index)).unwrap_or(u32::MAX),
-                started_output: Some(crate::tool::mcp::handler::started_list_tools_output_item(list_tools)),
+                started_output: Some(started_list_tools_output_item(list_tools)),
                 completed_output: Some(item.clone()),
                 follow_up_output: None,
                 arguments: None,

@@ -20,15 +20,15 @@ use crate::types::io::output::FunctionToolCall;
 use crate::types::io::{FunctionTool, InOutItem, InputItem, ResponsesInput, ToolChoice, ToolSearchCall};
 use crate::types::request_response::RequestPayload;
 use crate::types::tools::{
-    CodexNamespaceMember, CodexNamespaceToolParam, FunctionToolParam, ResponsesTool, ToolSearchExecution,
-    ToolSearchStatus, ToolSearchToolParam,
+    CodexNamespaceMember, CodexNamespaceToolParam, FunctionToolParam, McpDiscoveredToolParam, NonEmptyToolName,
+    ResponsesTool, ToolSearchExecution, ToolSearchStatus, ToolSearchToolParam,
 };
 use crate::utils::common::{deserialize_from_str, deserialize_from_value};
 
-use super::CodexNamespaceHandler;
 use super::declaration::responses_declarations;
 use super::handler::{ToolError, ToolHandler};
 use super::registry::{ToolEntry, ToolType};
+use super::{CodexNamespaceHandler, GatewayBinding};
 
 pub(crate) const TOOL_SEARCH_NAME: &str = "tool_search";
 const DEFAULT_DESCRIPTION: &str = "Search the client tool catalog";
@@ -155,7 +155,7 @@ pub(crate) fn hosted_tool_search_entry(catalog: HostedCatalog) -> ToolEntry {
     ToolEntry::gateway(
         ToolType::HostedToolSearch,
         None,
-        Some(super::GatewayBinding::new(
+        Some(GatewayBinding::new(
             std::sync::Arc::new(hosted::HostedToolSearchExecutor),
             std::sync::Arc::new(catalog),
         )),
@@ -1097,7 +1097,7 @@ pub(crate) fn strict_native_call(item: Value) -> Result<ToolSearchCall, ToolErro
 /// the gateway lowers every declaration it sends upstream to a function.
 pub(crate) fn native_call_id(call: &ToolSearchCall) -> Result<&str, ToolError> {
     match (call.execution, call.call_id.as_deref()) {
-        (crate::types::tools::ToolSearchExecution::Client, Some(call_id)) => Ok(call_id),
+        (ToolSearchExecution::Client, Some(call_id)) => Ok(call_id),
         _ => Err(invalid_upstream_search_call()),
     }
 }
@@ -1443,8 +1443,8 @@ fn validate_deferred_catalog(
 /// One discovered MCP tool as a hosted search returns it. Like the Responses
 /// API it carries `"output_schema": null`; its `"strict": null` is left out,
 /// because the typed `strict` field cannot keep a null through storage.
-fn hosted_mcp_member(tool: &crate::types::tools::McpDiscoveredToolParam) -> Option<CodexNamespaceMember> {
-    let name = crate::types::tools::NonEmptyToolName::try_from(tool.tool_name.as_str()).ok()?;
+fn hosted_mcp_member(tool: &McpDiscoveredToolParam) -> Option<CodexNamespaceMember> {
+    let name = NonEmptyToolName::try_from(tool.tool_name.as_str()).ok()?;
     let extra = HashMap::from([("output_schema".to_owned(), Value::Null)]);
     Some(CodexNamespaceMember::Function(FunctionToolParam {
         name,

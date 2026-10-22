@@ -12,7 +12,7 @@ use super::web_fetch::{WebFetchExecutor, WebFetchHandler};
 use super::web_search::{WebSearchExecutor, WebSearchHandler};
 use super::{GatewayExecutor, ToolError};
 use crate::config::{DEFAULT_MAX_CONCURRENT_GATEWAY_CALLS, ToolRuntimeConfig, WebFetchConfig};
-use crate::types::tools::McpToolParam;
+use crate::types::tools::{McpToolParam, ResponsesTool};
 
 use super::code_interpreter::CodeInterpreterExecutor;
 
@@ -242,9 +242,9 @@ impl GatewayExecutors {
     /// Applies operator defaults to request declarations of configured MCP
     /// servers: `defer_loading` and the catalog `description` fill fields the
     /// request leaves unset.
-    pub(crate) fn apply_configured_mcp_defaults(&self, tools: Option<&mut [crate::types::tools::ResponsesTool]>) {
+    pub(crate) fn apply_configured_mcp_defaults(&self, tools: Option<&mut [ResponsesTool]>) {
         for tool in tools.into_iter().flatten() {
-            let crate::types::tools::ResponsesTool::Mcp(param) = tool else {
+            let ResponsesTool::Mcp(param) = tool else {
                 continue;
             };
             let Some(entry) = self.mcp_configs.get(param.server_label.trim()) else {

@@ -2,6 +2,7 @@
 use crate::types::io::InOutItem;
 use serde_json::json;
 
+use crate::types::tools::McpDiscoveredToolParam;
 use crate::utils::common::serialize_to_value;
 
 use super::*;
@@ -527,14 +528,12 @@ fn restored_mcp_loads_survive_compaction_and_offer_only_the_rest() {
 
     // With discovery, the catalog offers only the tool not loaded before this response.
     for name in ["echo", "reverse"] {
-        server
-            .discovered_tools
-            .push(crate::types::tools::McpDiscoveredToolParam {
-                server_label: "stub".to_owned(),
-                tool_name: name.to_owned(),
-                internal_name: format!("mcp__stub__{name}"),
-                tool: serde_json::from_value(json!({"name": name, "inputSchema": {"type": "object"}})).unwrap(),
-            });
+        server.discovered_tools.push(McpDiscoveredToolParam {
+            server_label: "stub".to_owned(),
+            tool_name: name.to_owned(),
+            internal_name: format!("mcp__stub__{name}"),
+            tool: serde_json::from_value(json!({"name": name, "inputSchema": {"type": "object"}})).unwrap(),
+        });
     }
     let tools = prepared.tools.clone().unwrap();
     let found = state.hosted_catalog(&tools).search_raw(r#"{"paths":["mcp_stub"]}"#);
@@ -555,7 +554,7 @@ fn restored_mcp_loads_survive_compaction_and_offer_only_the_rest() {
 
 #[test]
 fn hosted_mcp_member_survives_a_storage_round_trip_unchanged() {
-    let discovered = crate::types::tools::McpDiscoveredToolParam {
+    let discovered = McpDiscoveredToolParam {
         server_label: "stub".to_owned(),
         tool_name: "echo".to_owned(),
         internal_name: "mcp__stub__echo".to_owned(),

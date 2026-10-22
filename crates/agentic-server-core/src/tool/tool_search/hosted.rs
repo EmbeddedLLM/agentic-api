@@ -20,7 +20,7 @@ use crate::tool::handler::{GatewayExecutor, GatewayToolEventPlan, ToolError, Too
 use crate::tool::registry::ToolType;
 use crate::types::io::output::{FunctionToolCall, GatewayCallStatus};
 use crate::types::io::{FunctionTool, FunctionToolResultMessage, InputItem, OutputItem, ToolSearchCall};
-use crate::types::io::{InputToolSearchCall, ToolCallOutput, ToolSearchOutputMessage};
+use crate::types::io::{InputFunctionToolCall, InputToolSearchCall, ToolCallOutput, ToolSearchOutputMessage};
 use crate::types::tools::{
     CodexNamespaceMember, CodexNamespaceToolParam, FunctionToolParam, ResponsesTool, ToolSearchExecution,
     ToolSearchStatus, ToolSearchToolParam,
@@ -209,7 +209,7 @@ impl GatewayExecutor for HostedToolSearchExecutor {
         };
         let call_item = private_search_call(call.agent.clone(), &public.id, call_id.clone(), &public.arguments)
             .unwrap_or_else(|_| {
-                InputItem::FunctionCall(crate::types::io::InputFunctionToolCall {
+                InputItem::FunctionCall(InputFunctionToolCall {
                     async_execution: false,
                     agent: call.agent.clone(),
                     id: Some(public.id.clone()),

@@ -7,6 +7,9 @@
 use serde_json::{Value, json};
 
 use super::{FunctionToolResultMessage, InputFunctionToolCall, InputItem, ToolCallOutput};
+use crate::tool::mcp::handler::model_tool_name;
+use crate::types::event::MessageStatus;
+use crate::types::io::AgentAttribution;
 use crate::types::io::output::{McpCall, WebSearchAction, WebSearchCall};
 use crate::utils::common::{serialize_to_string, serialize_to_value};
 
@@ -38,7 +41,7 @@ fn mcp_call_items(call: &McpCall) -> Vec<InputItem> {
     call_pair(
         call,
         &call.id,
-        crate::tool::mcp::handler::model_tool_name(&call.server_label, &call.name),
+        model_tool_name(&call.server_label, &call.name),
         call.arguments.clone(),
         output,
     )
@@ -89,7 +92,7 @@ fn call_pair(
             name,
             namespace: None,
             arguments,
-            status: Some(crate::types::event::MessageStatus::Completed),
+            status: Some(MessageStatus::Completed),
             async_execution: false,
         }),
         InputItem::FunctionCallOutput(FunctionToolResultMessage {
@@ -100,17 +103,17 @@ fn call_pair(
 }
 
 trait Attributed {
-    fn agent(&self) -> Option<crate::types::io::AgentAttribution>;
+    fn agent(&self) -> Option<AgentAttribution>;
 }
 
 impl Attributed for McpCall {
-    fn agent(&self) -> Option<crate::types::io::AgentAttribution> {
+    fn agent(&self) -> Option<AgentAttribution> {
         self.agent.clone()
     }
 }
 
 impl Attributed for WebSearchCall {
-    fn agent(&self) -> Option<crate::types::io::AgentAttribution> {
+    fn agent(&self) -> Option<AgentAttribution> {
         self.agent.clone()
     }
 }
@@ -119,7 +122,7 @@ impl Attributed for WebSearchCall {
 mod tests {
     use serde_json::json;
 
-    use crate::types::io::{InOutItem, ResponsesInput};
+    use crate::types::io::{InOutItem, InputItem, ResponsesInput};
 
     fn model_input(items: serde_json::Value) -> serde_json::Value {
         let input: ResponsesInput = serde_json::from_value(items).expect("input");
@@ -180,9 +183,6 @@ mod tests {
         let ResponsesInput::Items(items) = &input else {
             panic!("items")
         };
-        assert!(matches!(
-            &items[0],
-            InOutItem::Input(crate::types::io::InputItem::McpCall(_))
-        ));
+        assert!(matches!(&items[0], InOutItem::Input(InputItem::McpCall(_))));
     }
 }

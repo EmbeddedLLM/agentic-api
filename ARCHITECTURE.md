@@ -1375,16 +1375,20 @@ round:
 - `GatewayScheduler::plan` creates one slot per gateway-owned function call. Each slot
   owns the original item index, public output index, typed `GatewayBinding`, and
   lifecycle projection; a missing executor is represented by an explicit slot rather
-  than omitted from a parallel vector. `GatewayScheduler::execute_with_budget` then returns one
-  ordered `GatewayCallResult` per slot. `futures::future::join_all` polls all planned
-  calls, while a `tokio::sync::Semaphore` created by each `execute_with_budget` invocation limits
-  active tool executions in that round using `tools.max_concurrent_gateway_calls`
+  than omitted from a parallel vector. `GatewayScheduler::results_in_order` runs the planned
+  calls as a `FuturesOrdered` and yields one `GatewayCallResult` per slot in model call order,
+  each as soon as it and every earlier call have finished. A `tokio::sync::Semaphore` from
+  `GatewayScheduler::execution_slots` limits active tool executions in that round using
+  `tools.max_concurrent_gateway_calls`
   (default `5`, configurable through `AGENTIC_MAX_CONCURRENT_GATEWAY_CALLS`). This
   nonzero setting is carried by the owning `ExecutionContext` into each scheduler;
   the permits are local to the round, not a process-wide or cross-request limit.
-  Completion may occur out of order, but `join_all` preserves model call order in
-  the collected results. The permit limit bounds execution, not the number of
-  planned call futures waiting for permits.
+  Completion may occur out of order, but results are delivered in model call order.
+  `gateway/lifecycle.rs::drive_in_order` runs that stream in a producer joined with the
+  event emitter: each result goes into a channel with one slot per call, so a slow client
+  never stalls tool execution, and every started call is drained before the round returns,
+  even after an error. The permit limit bounds execution, not the number of planned call
+  futures waiting for permits.
 - A normalized `web_search` function call may batch at most five queries. The JSON
   Schema advertises the ceiling and the handler enforces it again because normalized
   web search currently uses non-strict arguments. Provider searches acquire a shared
@@ -1426,12 +1430,15 @@ round:
   `function_call` lifecycle after classifying the call as gateway-executed. Native upstream
   `code_interpreter_call` items instead follow the accumulator's typed lifecycle and pass through;
   contradictory item kinds at one output index are handled by ingestion before translation. The
-  ordinary path emits all planned start events, executes the round concurrently, then emits ordered
-  completed/failed events.
+  ordinary path (`emit_calls_in_order`) announces the calls up to the first follow-up item (a
+  hosted `tool_search_output`), executes the round concurrently, and emits each completed/failed
+  lifecycle in call order as soon as the call and every earlier one have finished; after a
+  follow-up item it announces the calls up to the next one.
 - Streaming may receive client-visible output interleaved with gateway calls. In that
   case `engine/agent_turn.rs::execute_round_output` executes the same `GatewayScheduler`
-  concurrently, then `gateway/lifecycle.rs::relay_round_events` walks the output items in
-  order: each item's synthetic gateway lifecycle is presented, followed by that item's
+  concurrently while `gateway/lifecycle.rs::relay_round_events` walks the output items in
+  order: each item's synthetic gateway lifecycle is presented as soon as its call finished
+  (a call not announced up front is announced just before), followed by that item's
   deferred upstream frames through `StreamRelay::release_deferred` with `Release::Item`,
   which presents them at the item's `public_item_index`. Concurrency and wire ordering
   are therefore separate concerns.
@@ -1757,7 +1764,8 @@ the operator enables it, and Eryx runtime readiness succeeds.
   - **Client-owned** tools implement `ToolHandler` and have a translator association:
     see `function.rs` (`FunctionHandler`), `custom.rs` (`CustomHandler`), `codex.rs`
     (`CodexNamespaceHandler`), and `tool_search.rs` (`ToolSearchHandler`, for
-    `execution: "client"`). Their calls are returned for the client to resolve; the
+    `execution: "client"`; `tool_search/history.rs` turns replayed search items into the model's call and
+    output pairs, and `tool_search/definitions.rs` loads the definitions they carry). Their calls are returned for the client to resolve; the
     gateway does not execute them.
   - **Gateway-owned / built-in** tools implement both traits: see `web_search/mod.rs`
     (`WebSearchHandler`, backed by the configured `WebSearchProvider` in `web_search/you.rs`,

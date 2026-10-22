@@ -28,6 +28,8 @@ use std::time::Duration;
 
 use std::future::Future;
 
+#[cfg(test)]
+use futures::StreamExt;
 use futures::stream::FuturesOrdered;
 use tokio::sync::Semaphore;
 
@@ -37,7 +39,7 @@ use crate::executor::request::ExecutionContext;
 use crate::executor::response_budget::{ExecutorResponseBudget, RetainedSize};
 use crate::executor::telemetry::metrics::ExecutorMetrics;
 use crate::tool::handler::MAX_GATEWAY_TOOL_OUTPUT_BYTES;
-use crate::tool::{GatewayBinding, ToolError, ToolOutput, ToolOwnership, ToolRegistry};
+use crate::tool::{GatewayBinding, ToolError, ToolOutput, ToolOwnership, ToolRegistry, ToolType};
 use crate::types::io::output::{FunctionToolCall, GatewayCallStatus};
 use crate::types::io::{InputItem, OutputItem};
 use crate::utils::common::serialize_to_string;
@@ -196,7 +198,7 @@ impl GatewayScheduler {
                         GatewayExecutionPlan::Bound(binding.clone())
                     });
                 // A hosted search does not count toward `max_tool_calls`.
-                let admission = if entry.tool_type == crate::tool::ToolType::HostedToolSearch {
+                let admission = if entry.tool_type == ToolType::HostedToolSearch {
                     admission::Admission::Dispatch
                 } else {
                     budget.admit()
@@ -366,7 +368,6 @@ impl GatewayScheduler {
         &mut self,
         response_budget: &ExecutorResponseBudget,
     ) -> ExecutorResult<Vec<GatewayCallResult>> {
-        use futures::StreamExt;
         let execution_slots = self.execution_slots();
         // Every call finishes before the first error in call order is returned.
         let results = self
@@ -391,7 +392,7 @@ impl GatewayScheduler {
             return self.timed_run(plan, execution_slots, response_budget).await;
         };
         // Admission never refuses a hosted search, whose model input must pair a call with its output.
-        debug_assert_ne!(plan.tool_type, crate::tool::ToolType::HostedToolSearch);
+        debug_assert_ne!(plan.tool_type, ToolType::HostedToolSearch);
         let message = admission::limit_reached_message(limit);
         let omitted = plan.events.completed_output.is_none();
         let public_output = plan.events.completed_output;
@@ -423,7 +424,7 @@ impl GatewayScheduler {
             ..
         } = plan;
         let GatewayExecutionPlan::Bound(binding) = execution else {
-            if tool_type == crate::tool::ToolType::HostedToolSearch {
+            if tool_type == ToolType::HostedToolSearch {
                 // A hosted search entry is always bound; an unbound one would
                 // leave the model an output without its call.
                 return Err(ExecutorError::Tool(ToolError::Config(
@@ -546,7 +547,9 @@ pub(super) async fn execute_and_emit_output_calls(
 #[cfg(test)]
 mod tests {
     use super::GatewayCallResult;
+    use super::lifecycle::drive_in_order;
     use crate::executor::accumulator::ResponseAccumulator;
+    use crate::executor::error::ExecutorResult;
     use crate::executor::gateway_accumulator::StreamEvent;
     use crate::executor::relay::{RelayLimits, StreamRelay};
     use crate::types::io::output::{FunctionToolCall, McpListTool, McpListTools};
@@ -1109,9 +1112,9 @@ mod tests {
         // The emitter takes the first result, then stalls as a client that stopped reading would.
         let stalled = tokio::time::timeout(
             std::time::Duration::from_millis(500),
-            super::lifecycle::drive_in_order(&scheduler, &budget, async |ordered| {
+            drive_in_order(&scheduler, &budget, async |ordered| {
                 ordered.recv().await;
-                std::future::pending::<crate::executor::error::ExecutorResult<()>>().await
+                std::future::pending::<ExecutorResult<()>>().await
             }),
         )
         .await;

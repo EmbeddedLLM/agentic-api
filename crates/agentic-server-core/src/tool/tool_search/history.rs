@@ -8,6 +8,7 @@ use serde_json::Value;
 
 use crate::tool::handler::ToolError;
 use crate::types::event::MessageStatus;
+use crate::types::io::AgentAttribution;
 use crate::types::io::{
     FunctionToolResultMessage, InOutItem, InputFunctionToolCall, InputItem, InputToolSearchCall, ResponsesInput,
     ToolCallOutput, ToolSearchOutputMessage,
@@ -214,7 +215,7 @@ pub(crate) fn hosted_private_call_id(item_id: &str) -> String {
 
 /// The private function call the model sees for a public search call.
 pub(crate) fn private_search_call(
-    agent: Option<crate::types::io::AgentAttribution>,
+    agent: Option<AgentAttribution>,
     item_id: &str,
     call_id: String,
     arguments: &Value,

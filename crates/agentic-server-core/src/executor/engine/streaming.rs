@@ -21,6 +21,7 @@ use crate::tool::{ToolSearchMetadata, ToolSearchState};
 use crate::types::io::OutputItem;
 use crate::types::io::output::McpListTools;
 use crate::types::request_response::ResponsePayload;
+use crate::types::tools::ResponsesTool;
 use crate::utils::common::serialize_to_value;
 use crate::utils::common::utcnow_str;
 use async_stream::stream;
@@ -248,7 +249,7 @@ pub(super) struct StreamFailureContext {
     instructions: Option<String>,
     max_tool_calls: Option<u64>,
     /// The public declarations, stripped of credentials and discovery details, as every lifecycle frame echoes them.
-    tools: Option<Vec<crate::types::tools::ResponsesTool>>,
+    tools: Option<Vec<ResponsesTool>>,
     standard_fields: crate::types::request_response::StandardResponseFields,
 }
 

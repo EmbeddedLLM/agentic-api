@@ -4,6 +4,7 @@ use thiserror::Error;
 use crate::StorageError;
 use crate::tool::ToolError;
 use crate::types::io::input::InputValidationError;
+use crate::types::io::output::McpListTools;
 use crate::types::request_response::{
     MAX_TOOL_CALLS_PARAM, MaxToolCallsError, PromptCacheOptionsError, UnsupportedParameterError, UpstreamRequestError,
 };
@@ -153,7 +154,7 @@ pub enum ExecutorError {
         "Error retrieving tool list from MCP server: '{}'. Http status code: 424 (Failed Dependency)",
         .0.server_label
     )]
-    McpListToolsFailed(Box<crate::types::io::output::McpListTools>),
+    McpListToolsFailed(Box<McpListTools>),
 }
 
 impl From<UpstreamRequestError> for ExecutorError {
