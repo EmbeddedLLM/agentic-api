@@ -1,4 +1,3 @@
-use std::net::SocketAddr;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
@@ -6,7 +5,7 @@ use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 use axum::Router;
 use axum::middleware;
 use axum::routing::{get, post};
-use axum::serve::{Listener, ListenerExt as _};
+use axum::serve::{ListenerExt as _, TapIo};
 use http::HeaderValue;
 use tokio::net::{TcpListener, TcpStream};
 #[cfg(debug_assertions)]
@@ -27,6 +26,7 @@ use crate::handler::{
     translations, update_conversation,
 };
 use crate::model_capabilities::ModelCapabilities;
+use crate::rate_limit::{RateLimitConfig, RateLimiter, enforce_rate_limit};
 use crate::telemetry::http::{HttpMetrics, track_request};
 use crate::telemetry::websocket::WebSocketMetrics;
 
@@ -225,6 +225,8 @@ pub struct ServerConfig {
     /// Controlled by `ENABLE_OPENAPI_DOCS=true`; disabled by default.
     #[cfg(feature = "openapi")]
     pub enable_openapi_docs: bool,
+    /// Per-caller request rate on protected routes; `None` disables it.
+    pub rate_limit: Option<RateLimitConfig>,
 }
 
 impl ServerConfig {
@@ -247,6 +249,7 @@ impl ServerConfig {
             cors_allowed_origins,
             #[cfg(feature = "openapi")]
             enable_openapi_docs,
+            rate_limit: None,
         }
     }
 
@@ -317,12 +320,17 @@ pub struct AppState {
 /// acknowledgement (about 40 ms on Linux), which stalled every streamed
 /// response and WebSocket turn. A connection whose option cannot be set is
 /// still served.
-pub fn gateway_listener(listener: TcpListener) -> impl Listener<Io = TcpStream, Addr = SocketAddr> {
-    listener.tap_io(|stream: &mut TcpStream| {
-        if let Err(error) = stream.set_nodelay(true) {
-            tracing::warn!(%error, "failed to disable Nagle's algorithm on an accepted connection");
-        }
-    })
+///
+/// The concrete type lets the server record each connection's peer address,
+/// which rate limiting uses to tell callers apart.
+pub fn gateway_listener(listener: TcpListener) -> TapIo<TcpListener, fn(&mut TcpStream)> {
+    listener.tap_io(disable_nagle as fn(&mut TcpStream))
+}
+
+fn disable_nagle(stream: &mut TcpStream) {
+    if let Err(error) = stream.set_nodelay(true) {
+        tracing::warn!(%error, "failed to disable Nagle's algorithm on an accepted connection");
+    }
 }
 
 pub fn build_router(state: AppState, server_config: &ServerConfig) -> Router {
@@ -377,6 +385,14 @@ pub fn build_router_with_auth(
         .route("/v1/responses", post(responses).get(responses_ws_with_auth))
         .route("/v1/responses/compact", post(compact_response))
         .route("/v1/responses/{response_id}", retrieval_route);
+    // Layered before authentication, so it runs after it and sees the principal.
+    let protected_routes = match server_config.rate_limit {
+        Some(config) => protected_routes.route_layer(middleware::from_fn_with_state(
+            Arc::new(RateLimiter::new(config)),
+            enforce_rate_limit,
+        )),
+        None => protected_routes,
+    };
     let protected_routes = match authenticator {
         Some(authenticator) => {
             protected_routes.route_layer(middleware::from_fn_with_state(authenticator, require_oidc))

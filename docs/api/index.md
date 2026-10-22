@@ -46,6 +46,58 @@ identity-provider dependency failure from rejected credentials. See
 For a complete GitHub-backed deployment example, see
 [GitHub authentication with Dex](../deploying/github-oidc.md).
 
+## Rate limits
+
+Per-caller request rate limiting is off unless `server.rate_limit_requests_per_minute` is set in the configuration
+file, or `AGENTIC_RATE_LIMIT_REQUESTS_PER_MINUTE` or `--rate-limit-requests-per-minute` is given. A caller may send
+`rate_limit_burst` requests at once (default: the per-minute rate) and then one request every
+`60 / rate_limit_requests_per_minute` seconds.
+
+Each request is charged to a caller the gateway can verify:
+
+1. the OIDC token's issuer and subject, when OIDC is configured;
+2. otherwise the connection's peer address. An IPv6 address counts as its /64 network, since one host commonly holds a
+   whole /64.
+
+A bearer token or `x-api-key` never chooses the bucket. Without OIDC the gateway does not verify them, and on executor
+routes it may call the upstream with its own key, so a client could send a fresh made-up credential with every request.
+Forwarded-for headers are not trusted either, since any client can set them. Behind a proxy or ingress, every request
+arrives from the proxy's address, so all callers share one bucket. Enable OIDC to enforce per-caller limits against
+untrusted clients. A WebSocket's `response.create` messages are charged to the caller of its upgrade request.
+
+Every API route is limited except `/health`, `/ready`, and Swagger. A limited request never reaches the upstream.
+It receives `429 Too Many Requests` with these headers:
+
+| Header | Value |
+| --- | --- |
+| `retry-after` | Whole seconds until the caller's next request is allowed |
+| `retry-after-ms` | The same wait in milliseconds |
+| `x-ratelimit-limit-requests` | The configured requests per minute |
+| `x-ratelimit-remaining-requests` | `0` |
+| `x-ratelimit-reset-requests` | Time until the caller's full burst is available again, such as `1.5s` or `2m3s` |
+
+The body uses the OpenAI format:
+
+```json
+{"error": {"message": "rate limit exceeded; retry after 2 seconds", "type": "rate_limit_error", "param": null, "code": "rate_limit_exceeded"}}
+```
+
+`/v1/messages` and `/v1/messages/count_tokens` answer in the Anthropic format, with the same `req_` identifier in the
+`request-id` header:
+
+```json
+{"type": "error", "error": {"type": "rate_limit_error", "message": "rate limit exceeded; retry after 2 seconds"}, "request_id": "req_..."}
+```
+
+On the Responses WebSocket, the upgrade request is charged, and so is each `response.create` the client sends. A
+limited create receives an `error` event with `status: 429` and the same `type` and `code`, and the connection stays
+open. `response.steer` and `response.inject` act on a response that was already admitted and are not charged, nor are
+continuations the gateway starts itself.
+
+The limit is kept in each process's memory: with N replicas, a caller can send up to N times the configured rate. The
+gateway tracks up to 100,000 callers. When that many are tracked, it forgets idle callers at most once a second, and new
+callers share one bucket until a sweep frees room.
+
 ## Chat Completions and Embeddings
 
 ### `POST /v1/chat/completions` · `POST /v1/completions` · `POST /v1/embeddings`
