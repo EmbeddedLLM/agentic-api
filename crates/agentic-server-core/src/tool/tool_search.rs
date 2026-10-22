@@ -10,7 +10,7 @@ pub(crate) use validation::ensure_request_prepared;
 use validation::{input_contains_tool_search_state, request_contains_tool_search_state, validate_tool_search_request};
 
 use std::collections::{HashMap, HashSet};
-use std::fmt;
+use std::{fmt, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -156,8 +156,8 @@ pub(crate) fn hosted_tool_search_entry(catalog: HostedCatalog) -> ToolEntry {
         ToolType::HostedToolSearch,
         None,
         Some(GatewayBinding::new(
-            std::sync::Arc::new(hosted::HostedToolSearchExecutor),
-            std::sync::Arc::new(catalog),
+            Arc::new(hosted::HostedToolSearchExecutor),
+            Arc::new(catalog),
         )),
     )
 }

@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::handler::{ToolError, ToolHandler};
 use super::registry::{ToolEntry, ToolType};
-use crate::types::io::{FunctionTool, InputItem, ResponsesInput, ToolChoice};
+use crate::types::io::{FunctionTool, InputFunctionToolCall, InputItem, ResponsesInput, ToolChoice};
 use crate::types::tools::{CodexNamespaceMember, CodexNamespaceToolParam, NonEmptyToolName};
 
 use super::declaration::ToolDeclaration;
@@ -294,13 +294,14 @@ impl CodexNamespaceHandler {
         top_level_functions: &HashSet<&str>,
         input: Cow<'a, ResponsesInput>,
     ) -> Cow<'a, ResponsesInput> {
-        let resolves = |namespace: &str, name: &str| {
-            map.is_some_and(|map| map.mapping_for_member(namespace, name).is_some())
-                || (namespace == name && top_level_functions.contains(name))
+        let resolves = |call: &InputFunctionToolCall| {
+            call.namespace
+                .as_deref()
+                .is_some_and(|namespace| map.is_some_and(|map| map.mapping_for_member(namespace, &call.name).is_some()))
+                || is_searched_function_call(call, |name| top_level_functions.contains(name))
         };
         let should_rewrite = matches!(&*input, ResponsesInput::Items(items) if items.iter().any(|item| {
-            matches!(item, InOutItem::Input(InputItem::FunctionCall(call))
-                if call.namespace.as_deref().is_some_and(|namespace| resolves(namespace, &call.name)))
+            matches!(item, InOutItem::Input(InputItem::FunctionCall(call)) if resolves(call))
         }));
         if !should_rewrite {
             return input;
@@ -375,10 +376,17 @@ fn unqualify_or_flatten_calls(
         if let Some(mapping) = map.and_then(|map| map.mapping_for_member(namespace, &call.name)) {
             call.name.clone_from(&mapping.upstream_name);
             call.namespace = None;
-        } else if namespace == call.name && top_level_functions.contains(call.name.as_str()) {
+        } else if is_searched_function_call(call, |name| top_level_functions.contains(name)) {
             call.namespace = None;
         }
     }
+}
+
+/// Whether `call` is to a searched top-level function: the Responses API reports such a call with its own name as
+/// namespace, and `is_function` confirms that name is a top-level function of this request. The model knows the
+/// function unqualified, so every model-facing projection drops that namespace.
+pub(crate) fn is_searched_function_call(call: &InputFunctionToolCall, is_function: impl Fn(&str) -> bool) -> bool {
+    call.namespace.as_deref() == Some(call.name.as_str()) && is_function(&call.name)
 }
 
 /// Returns `namespace` with its function members' names rewritten to their

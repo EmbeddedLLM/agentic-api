@@ -6,7 +6,7 @@
 
 mod support;
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::fmt::Write as _;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -359,7 +359,7 @@ async fn parallel_tool_calls_is_allowed_for_hosted_search() {
 }
 
 /// A minimal streamable-HTTP MCP server with two tools; counts `tools/call`.
-async fn spawn_mcp() -> (String, Arc<std::sync::atomic::AtomicUsize>) {
+async fn spawn_mcp() -> (String, Arc<AtomicUsize>) {
     let calls = Arc::new(AtomicUsize::new(0));
     let counter = Arc::clone(&calls);
     let app = Router::new().route(
@@ -1607,7 +1607,7 @@ async fn operator_configured_server_can_default_to_deferred_with_a_catalog_descr
     }))
     .expect("configured server");
     let config = ToolRuntimeConfig {
-        mcp_servers: std::collections::HashMap::from([("stub".to_owned(), entry)]),
+        mcp_servers: HashMap::from([("stub".to_owned(), entry)]),
         ..ToolRuntimeConfig::default()
     };
     let mut context = (*context(llm_url)).clone();

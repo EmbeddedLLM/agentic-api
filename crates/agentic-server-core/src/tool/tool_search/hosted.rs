@@ -8,7 +8,7 @@
 //! name or description contains the whole query, ignoring case.
 
 use std::collections::{HashMap, HashSet};
-use std::future::Future;
+use std::future::{Future, ready};
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -162,7 +162,7 @@ impl GatewayExecutor for HostedToolSearchExecutor {
         params: &Self::ExecutionParams,
     ) -> Pin<Box<dyn Future<Output = Result<ToolOutput, ToolError>> + Send + '_>> {
         let output = model_output(&params.search_raw(arguments));
-        Box::pin(std::future::ready(Ok(ToolOutput::success(call_id, output))))
+        Box::pin(ready(Ok(ToolOutput::success(call_id, output))))
     }
 
     fn supports_parallel_execution(&self) -> bool {

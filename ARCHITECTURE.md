@@ -568,7 +568,8 @@ access happen — those live in `tool/`, `executor/`, and `storage/` respectivel
   checks runtime availability before it calls this conversion. Every
   declaration that does reach vLLM is `type: "function"`, because that's the only
   tool type it speaks. The conversion also resolves/validates `tool_choice`
-  and applies `ResponsesInput::model_input()`. It's called from
+  and applies `ResponsesInput::normalized_model_input_with`, the model projection that names replayed MCP calls
+  with the tools this request's discovery found. It's called from
   `executor/upstream.rs`'s `fetch_blocking_payload` and `fetch_stream_payload` — the
   two functions that actually build the outbound request to vLLM.
   Input validation also runs before and after rehydration. It is separate from
@@ -579,9 +580,10 @@ access happen — those live in `tool/`, `executor/`, and `storage/` respectivel
   search/MCP calls, reasoning — plus the `ApplyDone` trait described below), `tools.rs`
   (the normalized `FunctionTool` and `ToolChoice`, distinct from tool *declarations*),
   `reasoning.rs` (typed reasoning content, summaries, item status, and bounded opaque
-  state), and `usage.rs` (token accounting structs). `ResponsesInput::model_input()` is the final
-  model-visibility boundary used by `RequestPayload::to_upstream_request`: it removes
-  orchestration-only `McpListTools`, `CompactionTrigger`, and public collaboration input items. A persisted
+  state), and `usage.rs` (token accounting structs). `ResponsesInput::model_input_with` (through
+  `normalized_model_input_with`) is the final model-visibility boundary used by
+  `RequestPayload::to_upstream_request`; `model_input()` is the same projection without discovered MCP names.
+  It removes orchestration-only `McpListTools`, `CompactionTrigger`, and public collaboration input items. A persisted
   `Compaction` item is different: the latest checkpoint supersedes earlier model
   context and is converted into an assistant `output_text` summary, while canonical
   retained user messages and items after the checkpoint remain. This keeps rich
@@ -647,7 +649,7 @@ filter_map(OutputItem::to_input_item)   ← the conversion policy
 ResponsesInput                         ← append only
         │
         ▼
-ResponsesInput::model_input()          ← final upstream-visibility filter
+ResponsesInput::model_input_with()     ← final upstream-visibility filter
 ```
 
 There are two adapters around that one policy:
@@ -1624,8 +1626,8 @@ round that omits `usage` still reports the hidden rounds' counters.
   history still contains `InputItem::Compaction`, `InputItem::CompactionTrigger`, and
   `InputItem::McpListTools` for executor/registry decisions. Immediately before an
   upstream request, `RequestPayload::to_upstream_request` calls
-  `ResponsesInput::model_input()`: the latest compaction checkpoint is converted to an
-  assistant summary and supersedes older context, while compaction triggers and MCP
+  `ResponsesInput::normalized_model_input_with` with the discovered MCP names: the latest compaction
+  checkpoint is converted to an assistant summary and supersedes older context, while compaction triggers and MCP
   list-tools records and public collaboration items are removed. In particular, MCP
   list-tools remains available long enough for the registry to remember which server labels have already been listed,
   but it is never serialized to vLLM.
@@ -1883,7 +1885,7 @@ router, reusing the same core logic in-process.
 | Change client streaming order, buffering, or backpressure | `executor/relay.rs` and `executor/relay/`; keep parsing in `events/` and response assembly in `executor/accumulator/` |
 | Move streaming ingestion to a worker | Benchmark the equivalent inline and worker paths under [#245](https://github.com/vllm-project/agentic-api/issues/245) before changing executor placement |
 | Feed response output into the next inference round | `types/io/output.rs::OutputItem::to_input_item`; use `executor/gateway.rs::append_output_items_to_input` only to append those converted items |
-| Change continuation history visibility | `types/io/item.rs::InOutItem::into_input_items` → `types/io/output.rs::to_input_item` (preservation) → `types/io/input.rs::model_input` (upstream visibility) |
+| Change continuation history visibility | `types/io/item.rs::InOutItem::into_input_items` → `types/io/output.rs::to_input_item` (preservation) → `types/io/input.rs::model_input_with` (upstream visibility) |
 | Add a CRUD operation beyond persist/rehydrate | `executor/modes/conversation.rs` or `modes/response.rs`, backed by `storage/conversation.rs` / `storage/response.rs` |
 | Change how output items are assembled from a stream | `executor/accumulator/` — extend the typed slot and transition matches through the existing `RoundIngestion` path |
 | Add a new Responses/Messages wire field | `types/io/` or `types/messages/` — shape only, no behavior |

@@ -569,10 +569,14 @@ mod tests {
         event
     }
 
+    use std::future;
+    use std::iter;
     use std::num::NonZeroUsize;
     use std::pin::Pin;
+    use std::slice;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::time::{Duration, Instant};
 
     use serde_json::Value;
 
@@ -621,7 +625,7 @@ mod tests {
         ) -> Pin<Box<dyn Future<Output = Result<ToolOutput, ToolError>> + Send + '_>> {
             let call_id = call_id.to_owned();
             Box::pin(async move {
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                tokio::time::sleep(Duration::from_millis(50)).await;
                 Ok(ToolOutput::success(call_id, "unreachable"))
             })
         }
@@ -770,7 +774,7 @@ mod tests {
                 let output = if call_id == "call_fail" {
                     "x".repeat(crate::tool::handler::MAX_GATEWAY_TOOL_OUTPUT_BYTES + 1)
                 } else {
-                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                    tokio::time::sleep(Duration::from_millis(25)).await;
                     slow_call_finished.store(true, Ordering::SeqCst);
                     "ok".to_owned()
                 };
@@ -881,7 +885,7 @@ mod tests {
         // the stuck call becomes an error output the loop can feed back.
         let output_items = [OutputItem::FunctionCall(web_search_call("call_hang"))];
         let mut scheduler =
-            GatewayScheduler::plan_with_test_timeout(&output_items, &registry, 0, std::time::Duration::from_millis(1));
+            GatewayScheduler::plan_with_test_timeout(&output_items, &registry, 0, Duration::from_millis(1));
         let result = scheduler
             .execute()
             .await
@@ -918,8 +922,7 @@ mod tests {
             .expect("registry builds");
 
         let output_items = [OutputItem::FunctionCall(web_search_call("call_no_handler"))];
-        let mut scheduler =
-            GatewayScheduler::plan_with_test_timeout(&output_items, &registry, 0, std::time::Duration::ZERO);
+        let mut scheduler = GatewayScheduler::plan_with_test_timeout(&output_items, &registry, 0, Duration::ZERO);
         let result = scheduler
             .execute()
             .await
@@ -1083,7 +1086,7 @@ mod tests {
             let finished = Arc::clone(&self.finished);
             Box::pin(async move {
                 let order: u64 = call_id.trim_start_matches("call_").parse().expect("numbered call");
-                tokio::time::sleep(std::time::Duration::from_millis(order * 30)).await;
+                tokio::time::sleep(Duration::from_millis(order * 30)).await;
                 finished.fetch_add(1, Ordering::SeqCst);
                 Ok(ToolOutput::success(call_id, "ok".to_owned()))
             })
@@ -1111,10 +1114,10 @@ mod tests {
 
         // The emitter takes the first result, then stalls as a client that stopped reading would.
         let stalled = tokio::time::timeout(
-            std::time::Duration::from_millis(500),
+            Duration::from_millis(500),
             drive_in_order(&scheduler, &budget, async |ordered| {
                 ordered.recv().await;
-                std::future::pending::<ExecutorResult<()>>().await
+                future::pending::<ExecutorResult<()>>().await
             }),
         )
         .await;
@@ -1163,14 +1166,14 @@ mod tests {
         let second_task = tokio::spawn(async move { second.execute().await });
 
         for _ in 0..MAX_CONCURRENT_MATERIALIZATIONS {
-            tokio::time::timeout(std::time::Duration::from_secs(1), entered_rx.recv())
+            tokio::time::timeout(Duration::from_secs(1), entered_rx.recv())
                 .await
                 .expect("the shared materialization window should fill")
                 .expect("probe sender should remain open");
         }
         assert_eq!(peak.load(Ordering::SeqCst), MAX_CONCURRENT_MATERIALIZATIONS);
         assert!(
-            tokio::time::timeout(std::time::Duration::from_millis(50), entered_rx.recv())
+            tokio::time::timeout(Duration::from_millis(50), entered_rx.recv())
                 .await
                 .is_err(),
             "materialization started beyond the shared limit of {MAX_CONCURRENT_MATERIALIZATIONS}"
@@ -1241,7 +1244,7 @@ mod tests {
             .await
             .expect("completed events");
 
-        let events = std::iter::from_fn(|| receiver.try_recv().ok().map(StreamEvent::into_frame))
+        let events = iter::from_fn(|| receiver.try_recv().ok().map(StreamEvent::into_frame))
             .map(|event| parse_named_sse_event(&event.content))
             .collect::<Vec<_>>();
         assert!(!events.is_empty());
@@ -1272,7 +1275,7 @@ mod tests {
             .map(|call_id| OutputItem::FunctionCall(web_search_call(call_id)))
             .collect();
 
-        let started = std::time::Instant::now();
+        let started = Instant::now();
         let mut scheduler = GatewayScheduler::plan(&output_items, &registry, 0, GatewaySchedulerPolicy::default());
         let results = scheduler.execute().await.expect("all calls execute");
         let elapsed = started.elapsed();
@@ -1281,7 +1284,7 @@ mod tests {
         // Well under the ~200ms four sequential 50ms calls would take, and close to
         // one 50ms slot -- proves the calls actually overlapped in wall-clock time.
         assert!(
-            elapsed < std::time::Duration::from_millis(150),
+            elapsed < Duration::from_millis(150),
             "four concurrent 50ms calls took {elapsed:?}, expected well under 150ms"
         );
         // The scheduler restores original item order regardless of completion order.
@@ -1307,14 +1310,14 @@ mod tests {
             .collect::<Vec<_>>();
         let policy = GatewaySchedulerPolicy::new(NonZeroUsize::MIN);
 
-        let started = std::time::Instant::now();
+        let started = Instant::now();
         let mut scheduler = GatewayScheduler::plan(&output_items, &registry, 0, policy);
         let results = scheduler.execute().await.expect("all calls execute");
         let elapsed = started.elapsed();
 
         assert_eq!(results.len(), 4);
         assert!(
-            elapsed >= std::time::Duration::from_millis(180),
+            elapsed >= Duration::from_millis(180),
             "a one-call scheduler window completed four 50ms calls in {elapsed:?}"
         );
     }
@@ -1350,7 +1353,7 @@ mod tests {
         ) -> Pin<Box<dyn Future<Output = Result<ToolOutput, ToolError>> + Send + '_>> {
             let call_id = call_id.to_owned();
             Box::pin(async move {
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                tokio::time::sleep(Duration::from_millis(50)).await;
                 Ok(ToolOutput::success(call_id, "unreachable"))
             })
         }
@@ -1372,7 +1375,7 @@ mod tests {
             .map(|call_id| OutputItem::FunctionCall(web_search_call(call_id)))
             .collect();
 
-        let started = std::time::Instant::now();
+        let started = Instant::now();
         let mut scheduler = GatewayScheduler::plan(&output_items, &registry, 0, GatewaySchedulerPolicy::default());
         let results = scheduler.execute().await.expect("all calls execute");
         let elapsed = started.elapsed();
@@ -1381,7 +1384,7 @@ mod tests {
         // Four 50ms calls run sequentially (one at a time) should take close to
         // 200ms -- well above what four *concurrent* 50ms calls would take.
         assert!(
-            elapsed >= std::time::Duration::from_millis(180),
+            elapsed >= Duration::from_millis(180),
             "four exclusive 50ms calls took {elapsed:?}, expected close to 200ms"
         );
     }
@@ -1489,15 +1492,15 @@ mod tests {
             omitted_items: Vec::new(),
             expanded_items: Vec::new(),
             policy: GatewaySchedulerPolicy::new(NonZeroUsize::new(2).expect("nonzero test limit")),
-            timeout: std::time::Duration::ZERO,
+            timeout: Duration::ZERO,
             metrics: None,
         };
 
         let execution = tokio::spawn(async move { scheduler.execute().await });
-        tokio::time::timeout(std::time::Duration::from_secs(1), blocked_started.notified())
+        tokio::time::timeout(Duration::from_secs(1), blocked_started.notified())
             .await
             .expect("first same-tool call starts");
-        tokio::time::timeout(std::time::Duration::from_secs(1), unrelated_started.notified())
+        tokio::time::timeout(Duration::from_secs(1), unrelated_started.notified())
             .await
             .expect("unrelated call starts while the same-tool waiter remains queued");
         release_blocked.notify_one();
@@ -1536,15 +1539,15 @@ mod tests {
             omitted_items: Vec::new(),
             expanded_items: Vec::new(),
             policy: GatewaySchedulerPolicy::new(NonZeroUsize::new(2).expect("nonzero test limit")),
-            timeout: std::time::Duration::ZERO,
+            timeout: Duration::ZERO,
             metrics: None,
         };
 
         let execution = tokio::spawn(async move { scheduler.execute().await });
-        tokio::time::timeout(std::time::Duration::from_secs(1), blocked_started.notified())
+        tokio::time::timeout(Duration::from_secs(1), blocked_started.notified())
             .await
             .expect("first call starts");
-        tokio::time::timeout(std::time::Duration::from_secs(1), refilled_call_started.notified())
+        tokio::time::timeout(Duration::from_secs(1), refilled_call_started.notified())
             .await
             .expect("third call refills the slot released by the completed second call");
         release_blocked.notify_one();
@@ -1593,7 +1596,7 @@ mod tests {
             .await
             .expect("completed events");
 
-        let events = std::iter::from_fn(|| receiver.try_recv().ok().map(StreamEvent::into_frame))
+        let events = iter::from_fn(|| receiver.try_recv().ok().map(StreamEvent::into_frame))
             .map(|event| parse_named_sse_event(&event.content))
             .collect::<Vec<_>>();
         assert_eq!(
@@ -1637,7 +1640,7 @@ mod tests {
             .await
             .expect("completed events");
 
-        let chunks = std::iter::from_fn(|| receiver.try_recv().ok().map(StreamEvent::into_frame))
+        let chunks = iter::from_fn(|| receiver.try_recv().ok().map(StreamEvent::into_frame))
             .map(|event| event.content)
             .collect::<Vec<_>>();
         let events = chunks
@@ -1696,12 +1699,12 @@ mod tests {
         super::emit_gateway_start_events(&plans, &mut relay)
             .await
             .expect("start events");
-        super::complete_gateway_event_plans(&mut plans, std::slice::from_ref(&final_item));
-        super::emit_gateway_completed_events(std::slice::from_ref(&final_item), &plans, &mut relay)
+        super::complete_gateway_event_plans(&mut plans, slice::from_ref(&final_item));
+        super::emit_gateway_completed_events(slice::from_ref(&final_item), &plans, &mut relay)
             .await
             .expect("completed events");
 
-        let events = std::iter::from_fn(|| receiver.try_recv().ok().map(StreamEvent::into_frame))
+        let events = iter::from_fn(|| receiver.try_recv().ok().map(StreamEvent::into_frame))
             .map(|event| parse_named_sse_event(&event.content))
             .collect::<Vec<_>>();
         assert_eq!(
@@ -1914,7 +1917,7 @@ mod tests {
             .await
             .expect("failed events");
 
-        let events = std::iter::from_fn(|| receiver.try_recv().ok().map(StreamEvent::into_frame))
+        let events = iter::from_fn(|| receiver.try_recv().ok().map(StreamEvent::into_frame))
             .map(|event| parse_named_sse_event(&event.content))
             .collect::<Vec<_>>();
         assert_eq!(

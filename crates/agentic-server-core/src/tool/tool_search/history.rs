@@ -1,11 +1,13 @@
 //! Replayed tool-search history: public search items become the model's private call and output pairs, and the
 //! definitions they loaded are collected for this request.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::mem;
 
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::tool::codex::is_searched_function_call;
 use crate::tool::handler::ToolError;
 use crate::types::event::MessageStatus;
 use crate::types::io::AgentAttribution;
@@ -76,7 +78,7 @@ pub(super) fn prepare_history(
         withheld_function_names,
         mcp_loads,
         prior_unknown_namespace_calls: HashMap::new(),
-        unqualified_call_positions: std::mem::take(unqualified_call_positions),
+        unqualified_call_positions: mem::take(unqualified_call_positions),
         current_history_position: None,
     };
 
@@ -94,27 +96,24 @@ pub(super) fn prepare_history(
                 )?);
             }
             InputItem::FunctionCall(call) => {
-                // The Responses API reports a searched top-level function with
-                // its own name as namespace; the model knows it unqualified.
-                let call = match call.namespace.as_deref() {
-                    Some(namespace)
-                        if namespace == call.name
-                            && definition_accumulator
-                                .definition_indexes
-                                .get(namespace)
-                                .is_some_and(|index| {
-                                    matches!(
-                                        definition_accumulator.definitions[*index].identity,
-                                        LoadedToolIdentity::Function(_)
-                                    )
-                                }) =>
-                    {
-                        InputFunctionToolCall {
-                            namespace: None,
-                            ..call.clone()
-                        }
+                let is_function = |name: &str| {
+                    definition_accumulator
+                        .definition_indexes
+                        .get(name)
+                        .is_some_and(|index| {
+                            matches!(
+                                definition_accumulator.definitions[*index].identity,
+                                LoadedToolIdentity::Function(_)
+                            )
+                        })
+                };
+                let call = if is_searched_function_call(call, is_function) {
+                    InputFunctionToolCall {
+                        namespace: None,
+                        ..call.clone()
                     }
-                    _ => call.clone(),
+                } else {
+                    call.clone()
                 };
                 ensure_history_call_is_available(&call, &mut definition_accumulator)?;
                 private_items.push(InputItem::FunctionCall(call));
@@ -197,7 +196,7 @@ pub(super) fn withheld_function_history_call() -> ToolError {
 #[derive(Default)]
 struct SearchPairing {
     unresolved_calls: HashSet<String>,
-    unresolved_hosted_calls: std::collections::VecDeque<String>,
+    unresolved_hosted_calls: VecDeque<String>,
     completed_call_ids: HashSet<String>,
     item_ids: HashSet<String>,
 }
@@ -234,8 +233,6 @@ pub(crate) fn private_search_call(
     }))
 }
 
-/// The model-facing text of a search output: functions with their schemas,
-/// namespaces by name and description (members are loaded as tools).
 /// The model-facing text of a hosted search that loaded nothing. It says why, so a model does
 /// not keep repeating a filter that matches nothing or a path it has already loaded.
 const HOSTED_EMPTY_SEARCH_OUTPUT: &str = r#"{"tools":[],"note":"No tools were loaded. `query` keeps only tools whose name or description contains it, and tools loaded earlier in this conversation are not returned again. Search the path again without `query`, or call a tool that is already loaded."}"#;
@@ -248,6 +245,8 @@ pub(crate) fn hosted_search_output_text(tools: &[ResponsesTool]) -> Result<Strin
     canonical_search_output(tools)
 }
 
+/// The model-facing text of a search output: functions with their schemas,
+/// namespaces by name and description (members are loaded as tools).
 pub(crate) fn canonical_search_output(tools: &[ResponsesTool]) -> Result<String, ToolError> {
     let projected_tools = model_visible_output_tools(tools)?;
     let canonical_value = serialize_to_value(&CanonicalToolSearchOutput {

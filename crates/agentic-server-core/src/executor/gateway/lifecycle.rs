@@ -4,6 +4,8 @@
 //! those plans and the calls' public outputs into synthetic events. Indexes come
 //! from the plans, and sequence numbers from the [`StreamRelay`] that presents them.
 
+use std::{iter, slice};
+
 use futures::StreamExt;
 use tokio::sync::mpsc;
 
@@ -394,7 +396,7 @@ pub(in crate::executor) async fn emit_calls_in_order(
         while results.len() < scheduler.call_count() {
             let result = next_result(ordered).await?;
             let plan = planned_event(scheduler, results.len())?;
-            emit_gateway_completed_events(std::slice::from_ref(&result), std::iter::once(plan), relay).await?;
+            emit_gateway_completed_events(slice::from_ref(&result), iter::once(plan), relay).await?;
             let next_run_end = scheduler.start_run_end(results.len() + 1);
             emit_gateway_start_events(scheduler.event_plans().take(next_run_end).skip(announced), relay).await?;
             announced = announced.max(next_run_end);
@@ -427,11 +429,11 @@ pub(in crate::executor) async fn relay_round_events(
             if let Some(call_index) = scheduler.call_index_for_item(index) {
                 let plan = planned_event(scheduler, call_index)?;
                 if public_index.is_some() && call_index >= initial_event_run_len {
-                    emit_gateway_start_events(std::iter::once(plan), relay).await?;
+                    emit_gateway_start_events(iter::once(plan), relay).await?;
                 }
                 let result = next_result(ordered).await?;
                 if public_index.is_some() {
-                    emit_gateway_completed_events(std::slice::from_ref(&result), std::iter::once(plan), relay).await?;
+                    emit_gateway_completed_events(slice::from_ref(&result), iter::once(plan), relay).await?;
                 }
                 results.push(result);
             }
