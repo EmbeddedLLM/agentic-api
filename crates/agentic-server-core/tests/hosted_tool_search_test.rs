@@ -774,6 +774,49 @@ async fn replayed_mcp_call_keeps_its_discovered_name_when_tool_search_is_active(
     assert!(offered.iter().any(|offered| offered == name), "{name} in {offered:?}");
 }
 
+/// Compaction summarizes the history in a request of its own, without tools. A replayed `mcp_call` there still
+/// takes the name discovery gave its tool, so two tools whose names sanitize alike stay distinct in the summary.
+#[tokio::test]
+async fn compaction_summary_keeps_discovered_mcp_names_for_replayed_calls() {
+    let schema = json!({"type": "object", "properties": {}});
+    let mcp_url = spawn_listing_mcp(json!([
+        {"name": "read.file", "description": "First.", "inputSchema": schema},
+        {"name": "read_file", "description": "Second.", "inputSchema": schema}
+    ]))
+    .await;
+    let (llm_url, requests) = spawn_llm(vec![
+        upstream("up_summary", json!([message("summary of the files")])),
+        upstream("up_1", json!([message("done")])),
+    ])
+    .await;
+    let server = json!({"type": "mcp", "server_label": "docs", "server_url": mcp_url, "require_approval": "never"});
+    let input = json!([
+        {"type": "message", "role": "user", "content": "read it"},
+        {"type": "mcp_call", "id": "mcp_second", "server_label": "docs", "name": "read_file", "arguments": "{}",
+            "status": "completed", "approval_request_id": null, "output": "second file", "error": null},
+        {"type": "message", "role": "user", "content": "again"}
+    ]);
+    let mut payload = request(&input, &json!([server]));
+    payload.context_management =
+        serde_json::from_value(json!([{"type": "compaction", "compact_threshold": 1}])).expect("compaction settings");
+    let response = run(payload, context(llm_url)).await;
+    assert_eq!(response.status, "completed");
+
+    let requests = requests.lock().await;
+    assert_eq!(requests.len(), 2, "a summary request, then the answer");
+    let offered = tool_names(&requests[1]);
+    let summarized_call = requests[0]["input"]
+        .as_array()
+        .expect("summary input")
+        .iter()
+        .find(|item| item["type"] == "function_call" && item["call_id"] == "mcp_second")
+        .expect("the replayed MCP call in the summary input")
+        .clone();
+    let name = summarized_call["name"].as_str().expect("call name");
+    assert_ne!(name, "mcp__docs__read_file", "the first tool's name: {summarized_call}");
+    assert!(offered.iter().any(|offered| offered == name), "{name} in {offered:?}");
+}
+
 /// A `store: false` client replays a hosted MCP response. The model sees each `mcp_call` as the function call and
 /// output it saw live; vLLM does not accept the public record.
 #[tokio::test]

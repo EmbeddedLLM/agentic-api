@@ -8,7 +8,7 @@ mod validation;
 mod window;
 
 pub use file_text::InputFileError;
-pub(crate) use replayed_calls::McpToolNames;
+pub(crate) use replayed_calls::{McpToolNames, name_replayed_gateway_calls};
 pub(super) use tool_search::check_tool_search_call_id;
 pub use tool_search::{InputToolSearchCall, ToolSearchOutputMessage};
 pub use validation::InputValidationError;

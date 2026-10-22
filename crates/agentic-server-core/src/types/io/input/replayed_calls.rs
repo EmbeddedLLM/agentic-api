@@ -57,6 +57,15 @@ impl<'a> McpToolNames<'a> {
     }
 }
 
+/// Gives each replayed gateway call in `items` the function call and output the model saw live, named by
+/// `mcp_names`, for a model request that carries no tools of its own (a compaction summary).
+pub(crate) fn name_replayed_gateway_calls(items: Vec<InputItem>, mcp_names: &McpToolNames<'_>) -> Vec<InputItem> {
+    items
+        .into_iter()
+        .flat_map(|item| model_items(item, mcp_names))
+        .collect()
+}
+
 /// The model-facing items for one input item: a replayed gateway call becomes its function call and output.
 pub(super) fn model_items(item: InputItem, mcp_names: &McpToolNames<'_>) -> Vec<InputItem> {
     match item {
