@@ -174,12 +174,12 @@ fn model_search_output(output: &ToolSearchOutputMessage, call_id: String) -> Inp
 }
 
 /// The private call id of a hosted search, derived from its public item id.
-pub(crate) fn hosted_private_call_id(item_id: &str) -> String {
+fn hosted_private_call_id(item_id: &str) -> String {
     item_id.to_owned()
 }
 
 /// The private function call the model sees for a public search call.
-pub(crate) fn private_search_call(
+fn private_search_call(
     agent: Option<AgentAttribution>,
     item_id: &str,
     call_id: String,
@@ -192,8 +192,8 @@ pub(crate) fn private_search_call(
         call_id,
         name: TOOL_SEARCH_NAME.to_owned(),
         namespace: None,
-        // A JSON value always serializes.
-        arguments: serialize_to_string(arguments).unwrap_or_default(),
+        // A JSON value always serializes; an empty object stands in if that ever fails.
+        arguments: serialize_to_string(arguments).unwrap_or_else(|_| "{}".to_owned()),
         status: Some(MessageStatus::Completed),
     })
 }

@@ -38,7 +38,7 @@ use crate::executor::relay::StreamRelay;
 use crate::executor::request::ExecutionContext;
 use crate::executor::response_budget::{ExecutorResponseBudget, RetainedSize};
 use crate::executor::telemetry::metrics::ExecutorMetrics;
-use crate::tool::handler::MAX_GATEWAY_TOOL_OUTPUT_BYTES;
+use crate::tool::handler::{MAX_GATEWAY_TOOL_OUTPUT_BYTES, PlannedResult};
 use crate::tool::{GatewayBinding, ToolError, ToolOutput, ToolOwnership, ToolRegistry, ToolType};
 use crate::types::io::output::{FunctionToolCall, GatewayCallStatus};
 use crate::types::io::{InputItem, OutputItem};
@@ -56,10 +56,9 @@ const GATEWAY_TOOL_TIMEOUT: Duration = Duration::from_secs(60);
 #[derive(Clone)]
 pub(super) struct GatewayCallResult {
     pub(super) item_index: usize,
-    /// Appended to the model's context for the next inference round.
-    pub(super) model_input: Vec<InputItem>,
-    /// Recorded as the turn's history; usually the model input.
-    pub(super) history_input: Vec<InputItem>,
+    /// Recorded as the turn's history and appended for the model's next round; the upstream projection lowers any
+    /// public record among them.
+    pub(super) input: Vec<InputItem>,
     pub(super) public_output: Option<OutputItem>,
     /// A second public item at the next output index (a hosted `tool_search_output`).
     pub(super) follow_up_output: Option<OutputItem>,
@@ -68,11 +67,10 @@ pub(super) struct GatewayCallResult {
 }
 
 impl GatewayCallResult {
-    fn new(item_index: usize, model_input: Vec<InputItem>, public_output: Option<OutputItem>, omitted: bool) -> Self {
+    fn new(item_index: usize, input: Vec<InputItem>, public_output: Option<OutputItem>, omitted: bool) -> Self {
         Self {
             item_index,
-            history_input: model_input.clone(),
-            model_input,
+            input,
             public_output,
             follow_up_output: None,
             omitted,
@@ -109,6 +107,8 @@ struct GatewayCallPlan {
     /// The response's `max_tool_calls` limit when admission refused this call;
     /// a refused call is never executed.
     refused: Option<NonZeroU64>,
+    /// The call's result when its tool knows it at planning time; such a call is recorded, never executed.
+    planned_result: Option<PlannedResult>,
     events: GatewayEventPlan,
 }
 
@@ -183,7 +183,7 @@ impl GatewayScheduler {
                     return None;
                 };
 
-                let (started_output, follow_up_output) = binding
+                let (started_output, planned_result) = binding
                     .as_ref()
                     .map(|binding| binding.plan_gateway_events(call).into_parts())
                     .unwrap_or_default();
@@ -218,7 +218,8 @@ impl GatewayScheduler {
                         (Some(limit), started_output.filter(|_| shown.is_some()), shown)
                     }
                 };
-                let follow_up_output = follow_up_output.filter(|_| refused.is_none());
+                let planned_result = planned_result.filter(|_| refused.is_none());
+                let follow_up_output = planned_result.as_ref().map(PlannedResult::follow_up_output);
                 if follow_up_output.is_some() {
                     expanded_items.push(item_index);
                 }
@@ -228,6 +229,7 @@ impl GatewayScheduler {
                     call: call.clone(),
                     execution,
                     refused,
+                    planned_result,
                     events: GatewayEventPlan {
                         output_index: u32::try_from(public_index).unwrap_or(u32::MAX),
                         started_output,
@@ -416,6 +418,7 @@ impl GatewayScheduler {
             item_index,
             call,
             execution,
+            planned_result,
             events,
             ..
         } = plan;
@@ -432,6 +435,10 @@ impl GatewayScheduler {
                 .map(|result| (result, GatewayCallStatus::Failed));
         };
 
+        if let Some(result) = planned_result {
+            return planned_call_result(item_index, &result, events.follow_up_output, response_budget)
+                .map(|result| (result, GatewayCallStatus::Completed));
+        }
         let _permits = self.policy.acquire_execution_permits(&binding, execution_slots).await;
 
         let dispatched = if self.timeout.is_zero() {
@@ -465,23 +472,38 @@ impl GatewayScheduler {
         };
         enforce_gateway_tool_output_size(output.output.len())?;
         response_budget.consume(output.output.len())?;
-        let follow_up_output = events.follow_up_output;
-        if let Some(follow_up) = &follow_up_output {
-            response_budget.consume(follow_up.retained_bytes())?;
-        }
         let public_output = binding.public_output(&call, &output, status);
-        let history_input = binding.history_input(&call, follow_up_output.as_ref());
-        let model_input = binding.model_input(&call, output, follow_up_output.as_ref());
-        let result = GatewayCallResult {
+        let result = GatewayCallResult::new(
             item_index,
-            history_input: history_input.unwrap_or_else(|| model_input.clone()),
-            model_input,
+            vec![InputItem::FunctionCallOutput(output.into())],
             public_output,
-            follow_up_output,
-            omitted: false,
-        };
+            false,
+        );
         Ok((result, status))
     }
+}
+
+/// Records a call its tool answered when it was planned: no permit, timeout or execution. The model-facing output is
+/// bounded and budgeted as an executed call's would be, and so is the follow-up item.
+fn planned_call_result(
+    item_index: usize,
+    result: &PlannedResult,
+    follow_up_output: Option<OutputItem>,
+    response_budget: &ExecutorResponseBudget,
+) -> ExecutorResult<GatewayCallResult> {
+    let model_output_len = result.model_output_len();
+    enforce_gateway_tool_output_size(model_output_len)?;
+    response_budget.consume(model_output_len)?;
+    if let Some(follow_up) = &follow_up_output {
+        response_budget.consume(follow_up.retained_bytes())?;
+    }
+    Ok(GatewayCallResult {
+        item_index,
+        input: result.input_items(),
+        public_output: Some(result.completed_output()),
+        follow_up_output,
+        omitted: false,
+    })
 }
 
 fn enforce_gateway_tool_output_size(bytes: usize) -> ExecutorResult<()> {
@@ -548,6 +570,7 @@ mod tests {
         CodeInterpreterCall, CodeInterpreterCallOutput, CodeInterpreterCallStatus, CompactionItem, InOutItem,
         InputItem, McpCallStatus,
     };
+    use futures::StreamExt;
     use tokio::sync::{Notify, Semaphore, mpsc};
 
     fn parse_named_sse_event(content: &str) -> Value {
@@ -573,7 +596,7 @@ mod tests {
 
     use super::{
         GatewayCallPlan, GatewayEventPlan, GatewayExecutionPlan, GatewayScheduler, GatewaySchedulerPolicy,
-        MAX_CONCURRENT_MATERIALIZATIONS,
+        MAX_CONCURRENT_MATERIALIZATIONS, PlannedResult,
     };
     use crate::executor::response_budget::ExecutorResponseBudget;
     use crate::tool::ToolDeclaration;
@@ -887,7 +910,7 @@ mod tests {
         // A failed web_search still yields a public web_search_call item.
         assert!(matches!(result.public_output, Some(OutputItem::WebSearchCall(_))));
         // The fed-back tool output is an error JSON mentioning the timeout.
-        let InputItem::FunctionCallOutput(msg) = &result.model_input[0] else {
+        let InputItem::FunctionCallOutput(msg) = &result.input[0] else {
             panic!("expected a function_call_output");
         };
         let body = serde_json::to_string(msg).expect("serialize output");
@@ -922,7 +945,7 @@ mod tests {
 
         assert_eq!(result.item_index, 0);
         assert!(matches!(result.public_output, Some(OutputItem::WebSearchCall(_))));
-        let InputItem::FunctionCallOutput(msg) = &result.model_input[0] else {
+        let InputItem::FunctionCallOutput(msg) = &result.input[0] else {
             panic!("expected a function_call_output");
         };
         let body = serde_json::to_string(msg).expect("serialize output");
@@ -1455,6 +1478,7 @@ mod tests {
             call,
             execution: GatewayExecutionPlan::Bound(binding),
             refused: None,
+            planned_result: None,
         }
     }
 
@@ -1504,6 +1528,63 @@ mod tests {
             results.iter().map(|result| result.item_index).collect::<Vec<_>>(),
             vec![0, 1, 2]
         );
+    }
+
+    /// A hosted search is answered when it is planned: it takes no execution permit and never reaches its executor,
+    /// which here would block forever, with no permit left to take.
+    #[tokio::test]
+    async fn a_planned_call_is_recorded_without_a_permit_or_execution() {
+        let executor = Arc::new(SchedulingProbeExecutor {
+            blocked_call_id: "call_s",
+            observed_call_id: "call_unused",
+            blocked_started: Arc::new(Notify::new()),
+            observed_started: Arc::new(Notify::new()),
+            release_blocked: Arc::new(Notify::new()),
+            supports_parallel_execution: true,
+        });
+        let mut plan = gateway_call_plan(
+            0,
+            "call_s",
+            "tool_search",
+            GatewayBinding::new(executor, scheduler_test_params()),
+        );
+        let planned = PlannedResult::search_pair(
+            serde_json::from_value(
+                serde_json::json!({"type": "tool_search_call", "id": "tsc_s", "call_id": null,
+                "execution": "server", "arguments": {"paths": ["f"]}, "status": "in_progress"}),
+            )
+            .expect("public call"),
+            serde_json::from_value(
+                serde_json::json!({"type": "tool_search_output", "id": "tso_s", "call_id": null,
+                "execution": "server", "status": "completed", "tools": []}),
+            )
+            .expect("public output"),
+        );
+        plan.events.follow_up_output = Some(planned.follow_up_output());
+        plan.planned_result = Some(planned);
+        let scheduler = GatewayScheduler {
+            calls: vec![plan],
+            omitted_items: Vec::new(),
+            expanded_items: vec![0],
+            policy: GatewaySchedulerPolicy::new(NonZeroUsize::new(1).expect("nonzero test limit")),
+            timeout: Duration::ZERO,
+            metrics: None,
+        };
+        let no_permits = Semaphore::new(0);
+        let budget = ExecutorResponseBudget::new();
+        let result = tokio::time::timeout(Duration::from_secs(1), async {
+            scheduler.results_in_order(&no_permits, &budget).next().await
+        })
+        .await
+        .expect("a planned call needs no permit")
+        .expect("one result")
+        .expect("recorded");
+        let input = serde_json::to_value(&result.input).expect("input items");
+        assert_eq!(input[0]["type"], "tool_search_call");
+        assert_eq!(input[0]["status"], "completed");
+        assert_eq!(input[1]["type"], "tool_search_output");
+        assert!(matches!(result.public_output, Some(OutputItem::ToolSearchCall(_))));
+        assert!(matches!(result.follow_up_output, Some(OutputItem::ToolSearchOutput(_))));
     }
 
     #[tokio::test]
@@ -1826,8 +1907,7 @@ mod tests {
         ));
         let results = vec![GatewayCallResult {
             item_index: 0,
-            model_input: vec![InputItem::FunctionCallOutput(ToolOutput::success("call_1", "1").into())],
-            history_input: Vec::new(),
+            input: vec![InputItem::FunctionCallOutput(ToolOutput::success("call_1", "1").into())],
             follow_up_output: None,
             public_output: Some(final_item),
             omitted: false,
@@ -1881,10 +1961,9 @@ mod tests {
         }];
         let results = vec![GatewayCallResult {
             item_index: 0,
-            model_input: vec![InputItem::FunctionCallOutput(
+            input: vec![InputItem::FunctionCallOutput(
                 ToolOutput::failure("call_1", r#"{"error":"boom"}"#).into(),
             )],
-            history_input: Vec::new(),
             follow_up_output: None,
             public_output: Some(OutputItem::McpCall(crate::types::io::McpCall::new(
                 "mcp_1",

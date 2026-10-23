@@ -12,9 +12,8 @@ pub(in crate::executor) fn append_output_items_to_input(input: &mut ResponsesInp
 /// Records each gateway call's history and gives the model its input for the next round.
 pub(in crate::executor) fn append_gateway_results(ctx: &mut RequestContext, results: Vec<GatewayCallResult>) {
     for result in results {
-        ctx.new_input_items
-            .extend(result.history_input.into_iter().map(Into::into));
-        for item in result.model_input {
+        ctx.new_input_items.extend(result.input.iter().cloned().map(Into::into));
+        for item in result.input {
             ctx.enriched_request.input.push(item);
         }
     }

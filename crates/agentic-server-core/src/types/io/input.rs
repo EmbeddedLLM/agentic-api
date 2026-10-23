@@ -11,8 +11,7 @@ mod window;
 pub use file_text::InputFileError;
 pub(crate) use replayed_calls::{McpToolNames, name_replayed_gateway_calls};
 pub(crate) use search_history::{
-    SearchHistory, SearchPairing, TOOL_SEARCH_NAME, hosted_private_call_id, hosted_search_output_text, is_search_item,
-    private_search_call,
+    SearchHistory, SearchPairing, TOOL_SEARCH_NAME, hosted_search_output_text, is_search_item,
 };
 pub(super) use tool_search::check_tool_search_call_id;
 pub use tool_search::{InputToolSearchCall, ToolSearchOutputMessage};

@@ -106,8 +106,7 @@ mod tests {
     fn gateway_results() -> [GatewayCallResult; 1] {
         [GatewayCallResult {
             item_index: 0,
-            model_input: Vec::new(),
-            history_input: Vec::new(),
+            input: Vec::new(),
             follow_up_output: None,
             public_output: None,
             omitted: false,

@@ -16,12 +16,11 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 
 use super::{ToolSearchHandler, public_item_id};
-use crate::tool::handler::{GatewayExecutor, GatewayToolEventPlan, ToolError, ToolHandler, ToolOutput};
+use crate::tool::handler::{GatewayExecutor, GatewayToolEventPlan, PlannedResult, ToolError, ToolHandler, ToolOutput};
 use crate::tool::registry::ToolType;
-use crate::types::io::input::{hosted_private_call_id, hosted_search_output_text, private_search_call};
-use crate::types::io::output::{FunctionToolCall, GatewayCallStatus};
-use crate::types::io::{FunctionTool, FunctionToolResultMessage, InputItem, OutputItem, ToolSearchCall};
-use crate::types::io::{InputToolSearchCall, ToolCallOutput, ToolSearchOutputMessage};
+use crate::types::io::input::hosted_search_output_text;
+use crate::types::io::output::FunctionToolCall;
+use crate::types::io::{FunctionTool, OutputItem, ToolSearchCall, ToolSearchOutputMessage};
 use crate::types::tools::{
     CodexNamespaceMember, CodexNamespaceToolParam, FunctionToolParam, ResponsesTool, ToolSearchExecution,
     ToolSearchStatus, ToolSearchToolParam,
@@ -155,6 +154,8 @@ impl ToolHandler for HostedToolSearchExecutor {
 impl GatewayExecutor for HostedToolSearchExecutor {
     type ExecutionParams = Arc<HostedCatalog>;
 
+    /// The planned result answers a hosted search (see [`Self::plan_gateway_events`]); this runs the same search for
+    /// the trait.
     fn execute(
         &self,
         call_id: &str,
@@ -170,65 +171,18 @@ impl GatewayExecutor for HostedToolSearchExecutor {
         true
     }
 
+    /// The search is pure, so its result is known now: the gateway records the public pair without executing the
+    /// call, and the upstream projection shows the model its `tool_search` call and output.
     fn plan_gateway_events(&self, call: &FunctionToolCall, params: &Self::ExecutionParams) -> GatewayToolEventPlan {
+        let output = public_output_item(call, params.search_raw(&call.arguments));
         GatewayToolEventPlan::new(Some(OutputItem::ToolSearchCall(public_call(
             call,
             ToolSearchStatus::InProgress,
         ))))
-        .with_follow_up(OutputItem::ToolSearchOutput(public_output_item(
-            call,
-            params.search_raw(&call.arguments),
-        )))
-    }
-
-    fn public_output(
-        &self,
-        call: &FunctionToolCall,
-        _output: &ToolOutput,
-        _status: GatewayCallStatus,
-        _params: &Self::ExecutionParams,
-    ) -> Option<OutputItem> {
-        Some(OutputItem::ToolSearchCall(public_call(
-            call,
-            ToolSearchStatus::Completed,
-        )))
-    }
-
-    /// The model sees the same call and output a continuation rebuilds from
-    /// the public pair, so later prompts share this response's prefix.
-    fn model_input(
-        &self,
-        call: &FunctionToolCall,
-        output: ToolOutput,
-        follow_up: Option<&OutputItem>,
-    ) -> Vec<InputItem> {
-        let public = public_call(call, ToolSearchStatus::Completed);
-        let call_id = hosted_private_call_id(&public.id);
-        let tools = match follow_up {
-            Some(OutputItem::ToolSearchOutput(item)) => hosted_search_output_text(&item.tools),
-            _ => output.output,
-        };
-        let call_item = private_search_call(call.agent.clone(), &public.id, call_id.clone(), &public.arguments);
-        vec![
-            call_item,
-            InputItem::FunctionCallOutput(FunctionToolResultMessage {
-                call_id,
-                output: ToolCallOutput::Text(tools),
-            }),
-        ]
-    }
-
-    /// History keeps the public pair; continuation rebuilds the model's view from it.
-    fn history_input(&self, call: &FunctionToolCall, follow_up: Option<&OutputItem>) -> Option<Vec<InputItem>> {
-        let public = public_call(call, ToolSearchStatus::Completed);
-        let Some(OutputItem::ToolSearchOutput(output)) = follow_up else {
-            return None;
-        };
-        let call = InputToolSearchCall::try_from(&public).ok()?;
-        Some(vec![
-            InputItem::ToolSearchCall(call),
-            InputItem::ToolSearchOutput(output.clone()),
-        ])
+        .with_planned_result(PlannedResult::search_pair(
+            public_call(call, ToolSearchStatus::Completed),
+            output,
+        ))
     }
 }
 

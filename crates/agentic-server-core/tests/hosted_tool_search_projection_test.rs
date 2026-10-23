@@ -3,14 +3,15 @@
 //! A live round, a `previous_response_id` continuation and a `store: false` replay must show the
 //! model the same call and output, so later prompts share the live round's prefix. Multi-agent
 //! histories stored before the public pair became the canonical record hold the model's private
-//! pair; `tests/fixtures/multi_agent_private_search_history.json` is one, captured from this code.
+//! pair; `tests/fixtures/multi_agent_private_search_history.json` is one, captured from the gateway
+//! as it stored them then.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use agentic_core::executor::{ConversationHandler, ExecuteRequest, ExecutionContext, ResponseHandler};
-use agentic_core::storage::{ConversationStore, ResponseStore, create_pool_with_schema};
+use agentic_core::storage::{ConversationStore, DbPool, ResponseStore, create_pool_with_schema};
 use agentic_core::types::request_response::{RequestPayload, ResponsePayload};
 use axum::Router;
 use axum::body::Bytes;
@@ -55,7 +56,7 @@ async fn spawn_llm(responses: Vec<Value>) -> (String, Requests) {
     (format!("http://{address}"), requests)
 }
 
-async fn durable_context(llm_url: String) -> (Arc<ExecutionContext>, ResponseStore) {
+async fn durable_context(llm_url: String) -> (Arc<ExecutionContext>, ResponseStore, Arc<DbPool>) {
     static DATABASE: AtomicU64 = AtomicU64::new(0);
     let url = format!(
         "sqlite:file:hosted_tool_search_projection_{}?mode=memory&cache=shared",
@@ -64,12 +65,12 @@ async fn durable_context(llm_url: String) -> (Arc<ExecutionContext>, ResponseSto
     let pool = create_pool_with_schema(Some(&url)).await.expect("storage pool");
     let responses = ResponseStore::new(Arc::clone(&pool));
     let context = Arc::new(ExecutionContext::new(
-        ConversationHandler::new(ConversationStore::new(pool)),
+        ConversationHandler::new(ConversationStore::new(Arc::clone(&pool))),
         ResponseHandler::new(responses.clone()),
         Arc::new(reqwest::Client::new()),
         llm_url,
     ));
-    (context, responses)
+    (context, responses, pool)
 }
 
 fn upstream(id: &str, output: Value) -> Value {
@@ -123,7 +124,7 @@ async fn live_continuation_and_replay_show_the_model_the_same_search() {
         upstream("up_4", json!([message("replayed")])),
     ])
     .await;
-    let (context, _) = durable_context(llm_url).await;
+    let (context, _, _) = durable_context(llm_url).await;
     let first = run(
         json!({"model": "test", "input": [user("weather?")], "tools": tools(), "store": true}),
         &context,
@@ -161,44 +162,95 @@ async fn live_continuation_and_replay_show_the_model_the_same_search() {
     }
 }
 
+fn multi_agent_request(input: &Value) -> Value {
+    json!({"model": "test", "input": input, "store": true, "multi_agent": {"enabled": true}, "tools": tools()})
+}
+
+/// Multi-agent history records the public pair, as single-agent history does; the projection lowers it.
 #[tokio::test]
-async fn multi_agent_history_holds_the_models_private_search_pair() {
+async fn multi_agent_history_holds_the_public_search_pair() {
     let (llm_url, _) = spawn_llm(vec![
         upstream("up_1", json!([search_call("s1")])),
         upstream("up_2", json!([message("done")])),
     ])
     .await;
-    let (context, responses) = durable_context(llm_url).await;
-    let response = run(
-        json!({"model": "test", "input": "weather?", "store": true, "multi_agent": {"enabled": true},
-            "tools": tools()}),
-        &context,
-    )
-    .await;
+    let (context, responses, _) = durable_context(llm_url).await;
+    let response = run(multi_agent_request(&json!("weather?")), &context).await;
     let stored = responses.get(&response.id).await.expect("stored response");
     let tree = stored.metadata.multi_agent_tree.expect("multi-agent tree");
     let history = serde_json::to_value(&tree.agents[0].history).expect("history JSON");
-    let items = history.as_array().expect("history items");
-    let call = items
+    let types: Vec<_> = history
+        .as_array()
+        .expect("history items")
         .iter()
-        .find(|item| item["type"] == "function_call" && item["name"] == "tool_search")
-        .expect("the model's search call");
-    assert!(
-        items
-            .iter()
-            .any(|item| item["type"] == "function_call_output" && item["call_id"] == call["call_id"]),
+        .map(|item| item["type"].as_str().unwrap_or_default().to_owned())
+        .collect();
+    assert_eq!(
+        types,
+        ["message", "tool_search_call", "tool_search_output", "message"],
         "{history:#}"
     );
+}
+
+/// A history stored with the model's private pair (the fixture) still restores and continues: the model sees the
+/// search once, and the tool it loaded is offered again.
+#[tokio::test]
+async fn multi_agent_history_stored_with_the_private_pair_still_continues() {
+    let (llm_url, requests) = spawn_llm(vec![
+        upstream("up_1", json!([search_call("s1")])),
+        upstream("up_2", json!([message("done")])),
+        upstream("up_3", json!([message("again")])),
+    ])
+    .await;
+    let (context, _, pool) = durable_context(llm_url).await;
+    let first = run(multi_agent_request(&json!("weather?")), &context).await;
+    let (metadata,): (String,) = sqlx::query_as("SELECT metadata FROM responses WHERE id = $1")
+        .bind(&first.id)
+        .fetch_one(pool.as_ref())
+        .await
+        .expect("stored metadata");
+    let mut metadata: Value = serde_json::from_str(&metadata).expect("metadata JSON");
+    let fixture = std::fs::read_to_string(PRIVATE_HISTORY_FIXTURE).expect("fixture");
+    let mut history: Value = serde_json::from_str(&fixture).expect("fixture JSON");
+    // Marks the rewritten history, so the continuation provably restores it rather than the stored public pair.
+    history[0]["content"] = json!("weather, as stored before");
+    metadata["multi_agent_tree"]["agents"][0]["history"] = history;
+    sqlx::query("UPDATE responses SET metadata = $1 WHERE id = $2")
+        .bind(metadata.to_string())
+        .bind(&first.id)
+        .execute(pool.as_ref())
+        .await
+        .expect("rewrite the stored history");
+
+    let mut second = multi_agent_request(&json!([user("more")]));
+    second["previous_response_id"] = json!(first.id);
+    let response = run(second, &context).await;
+    assert_eq!(response.status, "completed");
+
+    let requests = requests.lock().await;
+    let input = model_input(&requests[2]);
     assert!(
-        !items
-            .iter()
-            .any(|item| item["type"] == "tool_search_call" || item["type"] == "tool_search_output"),
-        "{history:#}"
+        input.iter().any(|item| item["content"] == "weather, as stored before"),
+        "{input:#?}"
     );
-    if std::env::var_os("AGENTIC_WRITE_FIXTURES").is_some() {
-        let text = serde_json::to_string_pretty(&history).expect("fixture JSON");
-        std::fs::write(PRIVATE_HISTORY_FIXTURE, text + "\n").expect("write fixture");
-    }
+    let searches: Vec<_> = input.iter().filter(|item| item["name"] == "tool_search").collect();
+    assert_eq!(searches.len(), 1, "{input:#?}");
+    assert_eq!(searches[0]["call_id"], "tsc_s1");
+    assert_eq!(
+        input
+            .iter()
+            .filter(|item| item["type"] == "function_call_output" && item["call_id"] == "tsc_s1")
+            .count(),
+        1,
+        "{input:#?}"
+    );
+    let offered: Vec<_> = requests[2]["tools"]
+        .as_array()
+        .expect("tools")
+        .iter()
+        .map(|tool| &tool["name"])
+        .collect();
+    assert!(offered.iter().any(|name| *name == "get_weather"), "{offered:?}");
 }
 
 /// The summary request carries no tools, yet the model still reads the search as its private
@@ -210,7 +262,7 @@ async fn compaction_summary_shows_the_search_and_its_call_as_the_model_saw_them(
         upstream("up_1", json!([message("done")])),
     ])
     .await;
-    let (context, _) = durable_context(llm_url).await;
+    let (context, _, _) = durable_context(llm_url).await;
     let input = json!([
         user("weather?"),
         {"type": "tool_search_call", "id": "tsc_s1", "call_id": null, "execution": "server",

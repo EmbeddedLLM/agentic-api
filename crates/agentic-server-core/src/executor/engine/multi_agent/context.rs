@@ -274,7 +274,7 @@ pub(super) async fn prepare_agent(
         &stored.loaded_tools,
         parent.original_request.tools.is_some(),
     )?;
-    // Discovery resolves public search pairs before this private history is used for inference.
+    // Preparation loads the definitions its public search pairs carry; the upstream projection lowers the pairs.
     stored.history = request.input.input_items().map(Cow::into_owned).collect();
     let ctx = RequestContext {
         multi_agent_tree: None,
