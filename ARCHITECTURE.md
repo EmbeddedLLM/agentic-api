@@ -554,6 +554,9 @@ intentionally omitted from continuation input.
 This module's job is JSON ⇄ Rust type conversion and shape validation for the
 Responses and Messages APIs. It is not where tool execution, state transitions, or DB
 access happen — those live in `tool/`, `executor/`, and `storage/` respectively.
+`types/io/input` also owns the one model-facing projection of input: every upstream request
+goes through it, so it lowers the public records the model never read (replayed gateway calls,
+search items, compaction checkpoints) and holds the MCP tool naming that lowering needs.
 
 - **`types/request_response.rs`** — `RequestPayload` is the deserialized incoming
   request. Its `to_upstream_request(&self, stream: bool) -> Result<UpstreamRequest<'_>, UpstreamRequestError>`
@@ -568,8 +571,10 @@ access happen — those live in `tool/`, `executor/`, and `storage/` respectivel
   checks runtime availability before it calls this conversion. Every
   declaration that does reach vLLM is `type: "function"`, because that's the only
   tool type it speaks. The conversion also resolves/validates `tool_choice`
-  and applies `ResponsesInput::normalized_model_input_with`, the model projection that names replayed MCP calls
-  with the tools this request's discovery found. It's called from
+  and applies `ResponsesInput::normalized_model_input_with`, the model projection: a replayed `mcp_call` or
+  `web_search_call` and each `tool_search_call`/`tool_search_output` become the function call and output the
+  model saw, an MCP call named as this request's discovery named it, else by the server's latest successful listing
+  in the input, else by its derived name. It's called from
   `executor/upstream.rs`'s `fetch_blocking_payload` and `fetch_stream_payload` — the
   two functions that actually build the outbound request to vLLM.
   Input validation also runs before and after rehydration. It is separate from
@@ -582,7 +587,10 @@ access happen — those live in `tool/`, `executor/`, and `storage/` respectivel
   `reasoning.rs` (typed reasoning content, summaries, item status, and bounded opaque
   state), and `usage.rs` (token accounting structs). `ResponsesInput::model_input_with` (through
   `normalized_model_input_with`) is the final model-visibility boundary used by
-  `RequestPayload::to_upstream_request`; `model_input()` is the same projection without discovered MCP names.
+  `RequestPayload::to_upstream_request`; `model_input()` is the same projection without this request's discovered
+  MCP names. `input/search_history.rs` pairs search items (a client item by its `call_id`, a hosted output with the
+  oldest open hosted call, whose item id is the model's call id) and lowers them; `input/mcp_names.rs` names MCP
+  tools as discovery does: this request's discovered names first, then each server's latest successful listing.
   It removes orchestration-only `McpListTools`, `CompactionTrigger`, and public collaboration input items. A persisted
   `Compaction` item is different: the latest checkpoint supersedes earlier model
   context and is converted into an assistant `output_text` summary, while canonical
@@ -672,13 +680,13 @@ This omission applies to gateway-emitted output records. Client-submitted
 request conversion and storage replay.
 Gateway tool results are already `InputItem`s and are appended through
 `append_gateway_results`; they do not need an output-to-input conversion. Each result
-carries its model input and its history separately. A hosted (`execution: "server"`)
-search is the one tool whose history is its public pair: the executor records the
-`tool_search_call` and `tool_search_output` in round order, so they also return `None`
-here, and the storage writers skip an output whose id the turn's history already holds
-(`OutputItem::is_already_in_history`). Multi-agent rounds keep their own history, so
-there the pair is stored as output. Continuation rebuilds the model's call and output
-from that pair.
+carries one `input`: the turn's history and the model's next-round input alike. A hosted
+(`execution: "server"`) search is the one tool whose input is its public pair: the executor
+records the `tool_search_call` and `tool_search_output` in round order, so they also return
+`None` here, and the storage writers skip an output whose id the turn's history already holds
+(`OutputItem::is_already_in_history`). Multi-agent rounds keep the pair in each agent's
+history. The upstream projection lowers the pair the same way live, on continuation, and on
+replay, so later prompts share the live round's prefix.
 
 Native upstream `code_interpreter_call` output items convert to typed continuation input. A gateway-executed code-interpreter call is marked internally and omitted by the same conversion because its model-facing function call and output are retained separately; storage preserves that origin outside the public wire shape.
 
@@ -731,7 +739,10 @@ call inference, run the tool loop, persist. `agentic-server` never reaches past 
   `InputItem::McpListTools` records so `ToolRegistry` can suppress repeated MCP
   discovery lifecycle output. After stored history and the new request input are
   combined, `pending_calls.rs` validates the complete continuation's function/custom
-  call sequence. Every call and call output must have a non-empty `call_id`; call IDs
+  call sequence. A request without stored history runs the same check when its input
+  replays search items, since the ledger owns how client search calls and outputs pair;
+  tool search keeps only the rules it alone sees (item ids, hosted pairs, output status).
+  Every call and call output must have a non-empty `call_id`; call IDs
   must be unique across the sequence; and each output must resolve a call of the same
   item kind. An output whose `call_id` matches no call is rejected with the `OpenAI`
   unknown-call error; a second output for a resolved synchronous call or a
@@ -1400,7 +1411,10 @@ round:
 - Each bound call first acquires its optional same-tool exclusion permit, then a
   round execution permit, then a materialization permit shared by cloned scheduler
   policies (also used by MCP discovery, with a limit of 16). Waiting for same-tool
-  exclusion does not consume a round permit; waiting for materialization does. The
+  exclusion does not consume a round permit; waiting for materialization does. A call
+  whose plan carries a `PlannedResult` (a hosted search, answered when it is planned) takes
+  no permit and is never executed: its result is recorded within the same
+  `agentic.tool.execute` span, bounded and budgeted like an executed output. The
   independent 60-second timeout wraps `GatewayBinding::execute` only after all
   permits are acquired. These permit waits do not count toward it, so it is not a
   deadline for the entire round or total call latency. Timeout, execution, and tool-config
@@ -1433,7 +1447,8 @@ round:
   `code_interpreter_call` items instead follow the accumulator's typed lifecycle and pass through;
   contradictory item kinds at one output index are handled by ingestion before translation. The
   ordinary path (`emit_calls_in_order`) announces the calls up to the first follow-up item (a
-  hosted `tool_search_output`), executes the round concurrently, and emits each completed/failed
+  hosted `tool_search_output`, from the call's `PlannedResult`), executes the round
+  concurrently, and emits each completed/failed
   lifecycle in call order as soon as the call and every earlier one have finished; after a
   follow-up item it announces the calls up to the next one.
 - Streaming may receive client-visible output interleaved with gateway calls. In that
@@ -1640,11 +1655,12 @@ round that omits `usage` still reports the hidden rounds' counters.
   history still contains `InputItem::Compaction`, `InputItem::CompactionTrigger`, and
   `InputItem::McpListTools` for executor/registry decisions. Immediately before an
   upstream request, `RequestPayload::to_upstream_request` calls
-  `ResponsesInput::normalized_model_input_with` with the discovered MCP names: the latest compaction
+  `ResponsesInput::normalized_model_input_with`: the latest compaction
   checkpoint is converted to an assistant summary and supersedes older context, while compaction triggers and MCP
   list-tools records and public collaboration items are removed. In particular, MCP
   list-tools remains available long enough for the registry to remember which server labels have already been listed,
-  but it is never serialized to vLLM.
+  and for the projection to name replayed MCP calls by it, but it is never serialized to vLLM. A compaction summary
+  therefore needs no tools of its own: the listings in its input name the calls it summarizes.
 - **`conversation.rs`, `response.rs`** — `ConversationStore` and `ResponseStore`: the
   CRUD-with-transactions layer (`create`, `get`, `get_or_create`, `rehydrate[_snapshot]`,
   `persist`/`persist_if_version` — each transactional, via `pool.begin()` /
@@ -1775,13 +1791,16 @@ the operator enables it, and Eryx runtime readiness succeeds.
   tool returned by that server. Gateway-owned registry types may also lack an executor
   entirely. The trait owns three runtime hooks: `supports_parallel_execution()`
   controls same-tool self-exclusion, `plan_gateway_events()` creates the typed public
-  lifecycle projection, and `public_output()` shapes the completed/failed
-  client-visible item.
+  lifecycle projection (and, for a tool that knows its result when planning, the
+  `PlannedResult` recorded instead of executing), and `public_output()` shapes the
+  completed/failed client-visible item. No hook builds model input: the gateway records
+  the result's items, and the upstream projection lowers them.
   - **Client-owned** tools implement `ToolHandler` and have a translator association:
     see `function.rs` (`FunctionHandler`), `custom.rs` (`CustomHandler`), `codex.rs`
     (`CodexNamespaceHandler`), and `tool_search.rs` (`ToolSearchHandler`, for
-    `execution: "client"`; `tool_search/history.rs` turns replayed search items into the model's call and
-    output pairs, and `tool_search/definitions.rs` loads the definitions they carry). Their calls are returned for the client to resolve; the
+    `execution: "client"`; `tool_search/history.rs` loads the definitions replayed search
+    outputs carry, through `tool_search/definitions.rs`, and checks the search rules the
+    pending-call ledger cannot see). Their calls are returned for the client to resolve; the
     gateway does not execute them.
   - **Gateway-owned / built-in** tools implement both traits: see `web_search/mod.rs`
     (`WebSearchHandler`, backed by the configured `WebSearchProvider` in `web_search/you.rs`,
@@ -1901,7 +1920,7 @@ router, reusing the same core logic in-process.
 | Change client streaming order, buffering, or backpressure | `executor/relay.rs` and `executor/relay/`; keep parsing in `events/` and response assembly in `executor/accumulator/` |
 | Move streaming ingestion to a worker | Benchmark the equivalent inline and worker paths under [#245](https://github.com/vllm-project/agentic-api/issues/245) before changing executor placement |
 | Feed response output into the next inference round | `types/io/output.rs::OutputItem::to_input_item`; use `executor/gateway.rs::append_output_items_to_input` only to append those converted items |
-| Change continuation history visibility | `types/io/item.rs::InOutItem::into_input_items` → `types/io/output.rs::to_input_item` (preservation) → `types/io/input.rs::model_input_with` (upstream visibility) |
+| Change continuation history visibility | `types/io/item.rs::InOutItem::into_input_items` → `types/io/output.rs::to_input_item` (preservation) → `types/io/input.rs::model_input_with` (upstream visibility; search items via `types/io/input/search_history.rs`, MCP names via `types/io/input/mcp_names.rs`) |
 | Add a CRUD operation beyond persist/rehydrate | `executor/modes/conversation.rs` or `modes/response.rs`, backed by `storage/conversation.rs` / `storage/response.rs` |
 | Change how output items are assembled from a stream | `executor/accumulator/` — extend the typed slot and transition matches through the existing `RoundIngestion` path |
 | Add a new Responses/Messages wire field | `types/io/` or `types/messages/` — shape only, no behavior |

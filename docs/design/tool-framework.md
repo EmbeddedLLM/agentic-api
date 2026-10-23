@@ -294,7 +294,10 @@ graph LR
   keeping the item index, typed binding, and lifecycle projection together; it then
   executes those slots through the configured sliding window and per-binding
   same-tool policy and yields results in model call order, each as soon as it and every
-  earlier call have finished.
+  earlier call have finished. A slot whose plan carries a `PlannedResult` (a hosted search,
+  known when the call is planned) is recorded without a permit or execution. Each result is
+  one set of input items, the turn's history and the next round's input alike; the upstream
+  projection lowers any public record among them.
 - **Multi-round orchestration (`classify_round` + the loop):** decides whether
   the turn continues, is done, hands back to the client, or exhausts the round
   budget, then re-infers when gateway results require another round.

@@ -156,7 +156,9 @@ rounds and gateway tool output.
 
 A client that replays a response's items (`store: false`) may send back the `mcp_call` and `web_search_call` items it
 returned. The model sees each one as the function call and output it saw live; a replayed web search carries its
-sources when the item has them, since its result text is not part of the item.
+sources when the item has them, since its result text is not part of the item. Replayed `tool_search_call` and
+`tool_search_output` items are checked as a continuation's history is, so a malformed client search history gets the
+same error with `store: false` as after a `previous_response_id`.
 
 #### Hosted tool search
 
