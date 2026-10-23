@@ -2,6 +2,7 @@ mod calls;
 mod content;
 mod conversions;
 mod file_text;
+mod mcp_names;
 mod replayed_calls;
 mod search_history;
 mod tool_search;
@@ -9,7 +10,7 @@ mod validation;
 mod window;
 
 pub use file_text::InputFileError;
-pub(crate) use replayed_calls::{McpToolNames, name_replayed_gateway_calls};
+pub(crate) use mcp_names::{McpToolNames, internal_mcp_tool_name, stable_name_hash};
 pub(crate) use search_history::{
     SearchHistory, SearchPairing, TOOL_SEARCH_NAME, hosted_search_output_text, is_search_item,
 };
@@ -416,8 +417,9 @@ impl ResponsesInput {
         self.project_for_model(Some(&McpToolNames::default()))
     }
 
-    /// [`Self::model_input`], naming replayed MCP calls as discovery named their tools in this request.
-    pub(crate) fn model_input_with(&self, mcp_names: &McpToolNames<'_>) -> Cow<'_, Self> {
+    /// [`Self::model_input`], naming replayed MCP calls by the listings in this input, else as discovery named their
+    /// tools in this request.
+    pub(crate) fn model_input_with(&self, mcp_names: &McpToolNames) -> Cow<'_, Self> {
         self.project_for_model(Some(mcp_names))
     }
 
@@ -427,7 +429,7 @@ impl ResponsesInput {
         self.project_for_model(None)
     }
 
-    fn project_for_model(&self, mcp_names: Option<&McpToolNames<'_>>) -> Cow<'_, Self> {
+    fn project_for_model(&self, mcp_names: Option<&McpToolNames>) -> Cow<'_, Self> {
         let Self::Items(items) = self else {
             return Cow::Borrowed(self);
         };
@@ -443,7 +445,8 @@ impl ResponsesInput {
         {
             return Cow::Borrowed(self);
         }
-        let projected = self.input_items().collect();
+        let projected: Vec<_> = self.input_items().collect();
+        let mcp_names = mcp_names.map(|names| names.with_listings(projected.iter().map(AsRef::as_ref)));
         let model = model_items(projected)
             .flat_map(|item| match item.into_owned() {
                 InputItem::Compaction(compaction) => vec![InputItem::Message(InputMessage {
@@ -453,7 +456,7 @@ impl ResponsesInput {
                     ))]),
                     ..Default::default()
                 })],
-                other => match mcp_names {
+                other => match &mcp_names {
                     Some(mcp_names) => replayed_calls::model_items(other, mcp_names),
                     None => vec![other],
                 },

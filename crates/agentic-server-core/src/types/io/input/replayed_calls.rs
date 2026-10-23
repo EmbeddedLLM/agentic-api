@@ -4,16 +4,13 @@
 //! never saw those public records: it called a function and read its output. The model-facing copy therefore
 //! carries each record as that function call and output pair, as stored history does after a live call.
 
-use std::collections::HashMap;
-
 use serde_json::{Value, json};
 
+use super::mcp_names::McpToolNames;
 use super::{FunctionToolResultMessage, InputFunctionToolCall, InputItem, ToolCallOutput};
-use crate::tool::mcp::handler::model_tool_name;
 use crate::types::event::MessageStatus;
 use crate::types::io::AgentAttribution;
 use crate::types::io::output::{McpCall, WebSearchAction, WebSearchCall};
-use crate::types::tools::ResponsesTool;
 use crate::utils::common::{serialize_to_string, serialize_to_value};
 
 /// The function the gateway lowers web search to; see `tool::web_search`.
@@ -24,50 +21,8 @@ pub(super) const fn is_replayed_gateway_call(item: &InputItem) -> bool {
     matches!(item, InputItem::McpCall(_) | InputItem::WebSearchCall(_))
 }
 
-/// The function names MCP discovery assigned this request, by server label and tool name. Discovery gives two tools
-/// whose names sanitize alike distinct names, so a replayed call looks its name up here before deriving one.
-#[derive(Default)]
-pub(crate) struct McpToolNames<'a> {
-    names: HashMap<(&'a str, &'a str), &'a str>,
-}
-
-impl<'a> McpToolNames<'a> {
-    pub(crate) fn from_tools(tools: &'a [ResponsesTool]) -> Self {
-        let names = tools
-            .iter()
-            .filter_map(|tool| match tool {
-                ResponsesTool::Mcp(server) => Some(&server.discovered_tools),
-                _ => None,
-            })
-            .flatten()
-            .map(|tool| {
-                (
-                    (tool.server_label.as_str(), tool.tool_name.as_str()),
-                    tool.internal_name.as_str(),
-                )
-            })
-            .collect();
-        Self { names }
-    }
-
-    fn model_name(&self, server_label: &str, tool_name: &str) -> String {
-        self.names
-            .get(&(server_label, tool_name))
-            .map_or_else(|| model_tool_name(server_label, tool_name), |name| (*name).to_owned())
-    }
-}
-
-/// Gives each replayed gateway call in `items` the function call and output the model saw live, named by
-/// `mcp_names`, for a model request that carries no tools of its own (a compaction summary).
-pub(crate) fn name_replayed_gateway_calls(items: Vec<InputItem>, mcp_names: &McpToolNames<'_>) -> Vec<InputItem> {
-    items
-        .into_iter()
-        .flat_map(|item| model_items(item, mcp_names))
-        .collect()
-}
-
 /// The model-facing items for one input item: a replayed gateway call becomes its function call and output.
-pub(super) fn model_items(item: InputItem, mcp_names: &McpToolNames<'_>) -> Vec<InputItem> {
+pub(super) fn model_items(item: InputItem, mcp_names: &McpToolNames) -> Vec<InputItem> {
     match item {
         InputItem::McpCall(call) => mcp_call_items(&call, mcp_names),
         InputItem::WebSearchCall(call) => web_search_items(&call),
@@ -75,7 +30,7 @@ pub(super) fn model_items(item: InputItem, mcp_names: &McpToolNames<'_>) -> Vec<
     }
 }
 
-fn mcp_call_items(call: &McpCall, mcp_names: &McpToolNames<'_>) -> Vec<InputItem> {
+fn mcp_call_items(call: &McpCall, mcp_names: &McpToolNames) -> Vec<InputItem> {
     let output = match (&call.output, &call.error) {
         (Some(output), _) => output.clone(),
         (None, Some(error)) => {

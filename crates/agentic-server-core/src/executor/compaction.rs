@@ -30,7 +30,7 @@ use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::executor::upstream::fetch_blocking_payload;
 use crate::tool::ToolSearchState;
 use crate::types::event::MessageStatus;
-use crate::types::io::input::{InputTextContent, McpToolNames, latest_compaction_window, name_replayed_gateway_calls};
+use crate::types::io::input::{InputTextContent, latest_compaction_window};
 use crate::types::io::{
     CompactionItem, InOutItem, InputContent, InputItem, InputMessage, InputMessageContent, ResponseUsage,
     ResponsesInput,
@@ -160,15 +160,10 @@ async fn summarize_items(
     }
 
     let compacted = retained_user_window(&original_items);
-    // The summary request carries no tools, so replayed MCP calls take this request's discovered names here.
-    let mcp_names = McpToolNames::from_tools(request.tools.as_deref().unwrap_or_default());
-    let mut summary_items = name_replayed_gateway_calls(
-        original_items
-            .into_iter()
-            .filter(|item| !item.is_compaction_trigger())
-            .collect(),
-        &mcp_names,
-    );
+    let mut summary_items: Vec<InputItem> = original_items
+        .into_iter()
+        .filter(|item| !item.is_compaction_trigger())
+        .collect();
     summary_items.push(InputItem::Message(InputMessage {
         role: "user".to_owned(),
         content: InputMessageContent::Text(COMPACTION_PROMPT.to_owned()),
@@ -413,6 +408,7 @@ pub async fn compact_response(
 #[cfg(test)]
 mod tests {
     use super::estimate::ESTIMATED_IMAGE_TOKENS;
+    use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 
     use axum::Router;
@@ -425,12 +421,12 @@ mod tests {
     use crate::types::agent::AgentIdentity;
     use crate::types::event::MessageStatus;
     use crate::types::io::InOutItem;
+    use crate::types::io::input::internal_mcp_tool_name;
     use crate::types::io::{
         CompactionItem, CustomToolCallOutputMessage, FunctionToolResultMessage, InputContent, InputImageContent,
         InputItem, InputMessage, InputMessageContent, ResponsesInput, ToolCallOutput, ToolOutputContent,
     };
     use crate::types::request_response::{ContextManagement, RequestPayload};
-    use crate::types::tools::{McpDiscoveredToolParam, ResponsesTool};
 
     use super::{
         build_compacted_window, compact_response, completed_summary_text, estimate_history_tokens,
@@ -1065,36 +1061,25 @@ mod tests {
     /// The summary request carries no tools; a replayed call still takes the name discovery gave its tool, so two
     /// tools whose names sanitize alike stay distinct in a multi-agent compaction summary.
     #[tokio::test]
-    async fn multi_agent_compaction_summary_keeps_discovered_mcp_names() {
+    async fn multi_agent_compaction_summary_names_replayed_mcp_calls_from_the_listing() {
         let (exec, requests, server) = mock_execution_context(ResponseStore::disabled()).await;
-        let mut request: RequestPayload = serde_json::from_value(serde_json::json!({
-            "model": "test-model",
-            "input": [],
-            "tools": [{"type": "mcp", "server_label": "docs", "server_url": "https://docs.example/mcp",
-                "require_approval": "never"}]
-        }))
-        .expect("request");
-        let Some(ResponsesTool::Mcp(server_declaration)) = request.tools.as_mut().and_then(|tools| tools.first_mut())
-        else {
-            panic!("MCP declaration")
-        };
-        let discovered = |tool_name: &str, internal_name: &str| McpDiscoveredToolParam {
-            server_label: "docs".to_owned(),
-            tool_name: tool_name.to_owned(),
-            internal_name: internal_name.to_owned(),
-            tool: serde_json::from_value(serde_json::json!({"name": tool_name, "inputSchema": {"type": "object"}}))
-                .expect("tool"),
-        };
-        server_declaration.discovered_tools = vec![
-            discovered("read.file", "mcp__docs__read_file"),
-            discovered("read_file", "mcp__docs__read_file_2"),
-        ];
+        let request: RequestPayload =
+            serde_json::from_value(serde_json::json!({"model": "test-model", "input": []})).expect("request");
+        // Discovery named both tools in listing order; the second one's name collides once sanitized.
         let history: Vec<InputItem> = serde_json::from_value(serde_json::json!([
+            {"type": "mcp_list_tools", "id": "mcpl_1", "server_label": "docs", "tools": [
+                {"name": "read.file", "input_schema": {"type": "object"}},
+                {"name": "read_file", "input_schema": {"type": "object"}}
+            ]},
             {"type": "message", "role": "user", "content": "read it"},
             {"type": "mcp_call", "id": "mcp_2", "server_label": "docs", "name": "read_file", "arguments": "{}",
                 "status": "completed", "approval_request_id": null, "output": "second", "error": null}
         ]))
         .expect("history");
+        let mut used = HashMap::new();
+        internal_mcp_tool_name("docs", "read.file", &mut used);
+        let discovered = internal_mcp_tool_name("docs", "read_file", &mut used);
+        assert_ne!(discovered, "mcp__docs__read_file");
         let plan = CompactionPlan::prepare_explicit(&AgentIdentity::root(), 0, &history, &request)
             .expect("plan")
             .expect("a resolved prefix");
@@ -1102,6 +1087,7 @@ mod tests {
         plan.execute(&exec, None).await.expect("compaction");
 
         let requests = requests.lock().expect("request capture lock");
+        assert!(requests[0]["tools"].is_null(), "the summary offers no tools");
         let call = requests[0]["input"]
             .as_array()
             .expect("summary input")
@@ -1109,7 +1095,7 @@ mod tests {
             .find(|item| item["type"] == "function_call" && item["call_id"] == "mcp_2")
             .expect("the replayed MCP call")
             .clone();
-        assert_eq!(call["name"], "mcp__docs__read_file_2", "{call}");
+        assert_eq!(call["name"], discovered.as_str(), "{call}");
         server.abort();
     }
 

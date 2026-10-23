@@ -83,7 +83,7 @@ impl ResponsesInput {
     /// request's positions and runs first on typed paths.
     pub(crate) fn normalized_model_input_with(
         &self,
-        mcp_names: &McpToolNames<'_>,
+        mcp_names: &McpToolNames,
     ) -> Result<Cow<'_, Self>, InputValidationError> {
         let input = self.model_input_with(mcp_names);
         let has_client_tools = matches!(&*input, Self::Items(items) if items.iter().any(|item| matches!(item,

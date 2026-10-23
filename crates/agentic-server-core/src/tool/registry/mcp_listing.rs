@@ -42,6 +42,14 @@ impl ToolRegistry {
         })
     }
 
+    /// Each declared MCP server's successful listing from this request's discovery, emitted or not.
+    pub(crate) fn current_mcp_list_tools(&self) -> impl Iterator<Item = &McpListTools> {
+        self.mcp_list_tools_items
+            .values()
+            .filter_map(|items| items.first())
+            .filter(|listing| listing.error.is_none())
+    }
+
     /// The first declared MCP server whose current tool listing failed and
     /// whose history holds no successful listing. The Responses API does not
     /// list a server again while its listing is in context, so a continuation
