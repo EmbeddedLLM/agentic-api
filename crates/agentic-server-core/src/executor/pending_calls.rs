@@ -625,7 +625,14 @@ mod tests {
                         let input =
                             ResponsesInput::from(vec![deserialize_from_value::<InputItem>(item.clone()).unwrap()]);
                         let normalized = input.normalized_model_input_with(&McpToolNames::default()).unwrap();
-                        for history in [&input, normalized.as_ref()] {
+                        // Only the upstream projection lowers a search call; the session history that steering reads
+                        // keeps it public, so its obligation is read from the public history alone.
+                        let histories = if output_type == "tool_search_output" {
+                            vec![&input]
+                        } else {
+                            vec![&input, normalized.as_ref()]
+                        };
+                        for history in histories {
                             let required =
                                 pending_calls(&history.input_items().map(Cow::into_owned).collect::<Vec<_>>())
                                     .unwrap()

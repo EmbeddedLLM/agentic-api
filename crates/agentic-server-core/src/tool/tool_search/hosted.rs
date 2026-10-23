@@ -15,12 +15,13 @@ use std::sync::Arc;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use super::{TOOL_SEARCH_NAME, ToolSearchHandler, hosted_search_output_text, private_search_call, public_item_id};
+use super::{ToolSearchHandler, public_item_id};
 use crate::tool::handler::{GatewayExecutor, GatewayToolEventPlan, ToolError, ToolHandler, ToolOutput};
 use crate::tool::registry::ToolType;
+use crate::types::io::input::{hosted_private_call_id, hosted_search_output_text, private_search_call};
 use crate::types::io::output::{FunctionToolCall, GatewayCallStatus};
 use crate::types::io::{FunctionTool, FunctionToolResultMessage, InputItem, OutputItem, ToolSearchCall};
-use crate::types::io::{InputFunctionToolCall, InputToolSearchCall, ToolCallOutput, ToolSearchOutputMessage};
+use crate::types::io::{InputToolSearchCall, ToolCallOutput, ToolSearchOutputMessage};
 use crate::types::tools::{
     CodexNamespaceMember, CodexNamespaceToolParam, FunctionToolParam, ResponsesTool, ToolSearchExecution,
     ToolSearchStatus, ToolSearchToolParam,
@@ -161,7 +162,7 @@ impl GatewayExecutor for HostedToolSearchExecutor {
         arguments: &str,
         params: &Self::ExecutionParams,
     ) -> Pin<Box<dyn Future<Output = Result<ToolOutput, ToolError>> + Send + '_>> {
-        let output = model_output(&params.search_raw(arguments));
+        let output = hosted_search_output_text(&params.search_raw(arguments));
         Box::pin(ready(Ok(ToolOutput::success(call_id, output))))
     }
 
@@ -202,24 +203,12 @@ impl GatewayExecutor for HostedToolSearchExecutor {
         follow_up: Option<&OutputItem>,
     ) -> Vec<InputItem> {
         let public = public_call(call, ToolSearchStatus::Completed);
-        let call_id = super::hosted_private_call_id(&public.id);
+        let call_id = hosted_private_call_id(&public.id);
         let tools = match follow_up {
-            Some(OutputItem::ToolSearchOutput(item)) => model_output(&item.tools),
+            Some(OutputItem::ToolSearchOutput(item)) => hosted_search_output_text(&item.tools),
             _ => output.output,
         };
-        let call_item = private_search_call(call.agent.clone(), &public.id, call_id.clone(), &public.arguments)
-            .unwrap_or_else(|_| {
-                InputItem::FunctionCall(InputFunctionToolCall {
-                    async_execution: false,
-                    agent: call.agent.clone(),
-                    id: Some(public.id.clone()),
-                    call_id: call_id.clone(),
-                    name: TOOL_SEARCH_NAME.to_owned(),
-                    namespace: None,
-                    arguments: call.arguments.clone(),
-                    status: None,
-                })
-            });
+        let call_item = private_search_call(call.agent.clone(), &public.id, call_id.clone(), &public.arguments);
         vec![
             call_item,
             InputItem::FunctionCallOutput(FunctionToolResultMessage {
@@ -241,12 +230,6 @@ impl GatewayExecutor for HostedToolSearchExecutor {
             InputItem::ToolSearchOutput(output.clone()),
         ])
     }
-}
-
-/// Model-facing text of a hosted output. The projection serializes known
-/// types; an empty result stands in if that ever fails.
-fn model_output(tools: &[ResponsesTool]) -> String {
-    hosted_search_output_text(tools).unwrap_or_else(|_| r#"{"tools":[]}"#.to_owned())
 }
 
 fn public_call(call: &FunctionToolCall, status: ToolSearchStatus) -> ToolSearchCall {

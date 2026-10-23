@@ -3,12 +3,17 @@ mod content;
 mod conversions;
 mod file_text;
 mod replayed_calls;
+mod search_history;
 mod tool_search;
 mod validation;
 mod window;
 
 pub use file_text::InputFileError;
 pub(crate) use replayed_calls::{McpToolNames, name_replayed_gateway_calls};
+pub(crate) use search_history::{
+    SearchHistory, SearchPairing, TOOL_SEARCH_NAME, hosted_private_call_id, hosted_search_output_text, is_search_item,
+    private_search_call,
+};
 pub(super) use tool_search::check_tool_search_call_id;
 pub use tool_search::{InputToolSearchCall, ToolSearchOutputMessage};
 pub use validation::InputValidationError;
@@ -404,8 +409,9 @@ impl ResponsesInput {
     /// becomes an assistant message containing the locally generated summary.
     /// Items before that checkpoint are superseded and are omitted.
     /// Internal MCP-list records and `compaction_trigger` markers are stripped
-    /// and never reach the model. A replayed `mcp_call` or `web_search_call`
-    /// becomes the function call and output the model saw live.
+    /// and never reach the model. A replayed `mcp_call` or `web_search_call`,
+    /// and each paired `tool_search_call` and `tool_search_output`, become the
+    /// function call and output the model saw live.
     #[must_use]
     pub fn model_input(&self) -> Cow<'_, Self> {
         self.project_for_model(Some(&McpToolNames::default()))
@@ -416,8 +422,8 @@ impl ResponsesInput {
         self.project_for_model(Some(mcp_names))
     }
 
-    /// [`Self::model_input`] for a projection that runs before MCP discovery: replayed gateway calls stay
-    /// public records until the upstream request names them with the discovered tools.
+    /// [`Self::model_input`] for a projection that runs before MCP discovery: replayed gateway calls and search
+    /// items stay public records, for discovery and definition loading, until the upstream request lowers them.
     pub(crate) fn model_input_keeping_gateway_calls(&self) -> Cow<'_, Self> {
         self.project_for_model(None)
     }
@@ -431,7 +437,9 @@ impl ResponsesInput {
             && items.iter().all(|item| {
                 matches!(item, InOutItem::Input(input)
                     if input.is_model_visible()
-                        && (mcp_names.is_none() || !replayed_calls::is_replayed_gateway_call(input)))
+                        && (mcp_names.is_none()
+                            || !(replayed_calls::is_replayed_gateway_call(input)
+                                || search_history::is_search_item(input))))
             })
         {
             return Cow::Borrowed(self);
@@ -452,6 +460,11 @@ impl ResponsesInput {
                 },
             })
             .collect::<Vec<_>>();
+        let model = if mcp_names.is_some() {
+            SearchHistory::lower(model)
+        } else {
+            model
+        };
         Cow::Owned(Self::from(model))
     }
 }

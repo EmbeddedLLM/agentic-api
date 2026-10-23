@@ -1,7 +1,7 @@
 use crate::types::io::InOutItem;
 
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use super::handler::{ToolError, ToolHandler};
 use super::registry::{ToolEntry, ToolType};
@@ -286,19 +286,18 @@ impl CodexNamespaceHandler {
 
     /// Rewrite public namespaced function-call history to the exact flat names
     /// from the request-scoped namespace map used for tool declarations, and
-    /// unqualify a searched top-level function (see [`unqualify_or_flatten_calls`]).
+    /// unqualify a call that names itself (see [`unqualify_or_flatten_calls`]).
     #[must_use]
     pub fn resolve_input<'a>(
         &self,
         map: Option<&NamespaceMap>,
-        top_level_functions: &HashSet<&str>,
         input: Cow<'a, ResponsesInput>,
     ) -> Cow<'a, ResponsesInput> {
         let resolves = |call: &InputFunctionToolCall| {
             call.namespace
                 .as_deref()
                 .is_some_and(|namespace| map.is_some_and(|map| map.mapping_for_member(namespace, &call.name).is_some()))
-                || is_searched_function_call(call, |name| top_level_functions.contains(name))
+                || names_itself(call)
         };
         let should_rewrite = matches!(&*input, ResponsesInput::Items(items) if items.iter().any(|item| {
             matches!(item, InOutItem::Input(InputItem::FunctionCall(call)) if resolves(call))
@@ -307,7 +306,7 @@ impl CodexNamespaceHandler {
             return input;
         }
         let mut input = input.into_owned();
-        unqualify_or_flatten_calls(&mut input, map, top_level_functions);
+        unqualify_or_flatten_calls(&mut input, map);
         Cow::Owned(input)
     }
 }
@@ -355,14 +354,11 @@ fn namespace_map_from_tools(tools: Option<&[ToolDeclaration]>) -> Result<Option<
 }
 
 /// Lowers namespaced calls to the flat names the model knows. A call whose
-/// namespace is its own name, that no declared namespace maps, and that names a
-/// declared top-level function is a searched function: the public item mirrors
-/// the Responses API, but the model knows the function unqualified.
-fn unqualify_or_flatten_calls(
-    input: &mut ResponsesInput,
-    map: Option<&NamespaceMap>,
-    top_level_functions: &HashSet<&str>,
-) {
+/// namespace is its own name and that no declared namespace maps is to a
+/// searched function: the public item mirrors the Responses API, but the model
+/// knows the function unqualified. This needs no declaration, so a request that
+/// offers no tools (a compaction summary) still shows the call as the model saw it.
+fn unqualify_or_flatten_calls(input: &mut ResponsesInput, map: Option<&NamespaceMap>) {
     let ResponsesInput::Items(items) = input else {
         return;
     };
@@ -376,7 +372,7 @@ fn unqualify_or_flatten_calls(
         if let Some(mapping) = map.and_then(|map| map.mapping_for_member(namespace, &call.name)) {
             call.name.clone_from(&mapping.upstream_name);
             call.namespace = None;
-        } else if is_searched_function_call(call, |name| top_level_functions.contains(name)) {
+        } else if names_itself(call) {
             call.namespace = None;
         }
     }
@@ -386,7 +382,12 @@ fn unqualify_or_flatten_calls(
 /// namespace, and `is_function` confirms that name is a top-level function of this request. The model knows the
 /// function unqualified, so every model-facing projection drops that namespace.
 pub(crate) fn is_searched_function_call(call: &InputFunctionToolCall, is_function: impl Fn(&str) -> bool) -> bool {
-    call.namespace.as_deref() == Some(call.name.as_str()) && is_function(&call.name)
+    names_itself(call) && is_function(&call.name)
+}
+
+/// Whether `call` reports its own name as namespace, as the Responses API does for a searched top-level function.
+fn names_itself(call: &InputFunctionToolCall) -> bool {
+    call.namespace.as_deref() == Some(call.name.as_str())
 }
 
 /// Returns `namespace` with its function members' names rewritten to their

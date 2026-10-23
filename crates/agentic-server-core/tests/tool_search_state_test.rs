@@ -79,8 +79,10 @@ fn private_tool_values(state: &mut ToolSearchState, public: &RequestPayload) -> 
     tool_values(private.tools.as_deref())
 }
 
+/// What the model reads of the prepared input: it keeps the public search items, which the upstream projection
+/// lowers to the private `tool_search` call and output.
 fn private_input_value(state: &mut ToolSearchState, public: &RequestPayload) -> Value {
-    serde_json::to_value(private_request(state, public).input).expect("private input serializes")
+    serde_json::to_value(private_request(state, public).input.model_input()).expect("private input serializes")
 }
 
 fn synthetic_description(state: &ToolSearchState) -> &str {
@@ -363,8 +365,10 @@ fn one_history_pass_prepares_canonical_private_input_without_mutating_public_inp
     );
 }
 
+/// How client search calls and outputs pair by `call_id` is checked by the pending-call ledger before the state is
+/// built, on every executor path (`tool_search_pairing_characterization_test.rs`); the state only loads definitions.
 #[test]
-fn invalid_history_order_and_linkage_are_rejected() {
+fn client_search_linkage_is_left_to_the_pending_call_ledger() {
     let deferred = function("get_weather", "Get weather", "string", true);
     let base_tools = json!([search_declaration(), deferred.clone()]);
     let mut blank_call = request(base_tools.clone(), json!([search_call("call_search_1")]));
@@ -433,7 +437,10 @@ fn invalid_history_order_and_linkage_are_rejected() {
     ];
 
     for (case, request) in cases {
-        assert!(ToolSearchState::build(&request).is_err(), "{case} must be rejected");
+        assert!(
+            ToolSearchState::build(&request).is_ok(),
+            "{case} is the ledger's to reject"
+        );
     }
 }
 
@@ -588,7 +595,7 @@ fn loaded_namespace_model_output_is_identity_only_while_private_tools_retain_mem
     let mut state = ToolSearchState::build(&public).expect("loaded namespace prepares without transport behavior");
 
     let private = private_request(&mut state, &public);
-    let private_input = serde_json::to_value(&private.input).expect("private input serializes");
+    let private_input = serde_json::to_value(private.input.model_input()).expect("private input serializes");
     assert_eq!(
         private_input[1]["output"],
         r#"{"tools":[{"type":"namespace","name":"weather","description":"Weather tools"}]}"#
@@ -1129,11 +1136,12 @@ fn prepare_inference_request_consumes_prepared_views_without_mutating_public_sou
         "private lowering must not mutate the public request"
     );
     let private_value = serde_json::to_value(&private).expect("private request serializes");
-    assert_eq!(private_value["input"][1]["type"], "function_call");
-    assert_eq!(private_value["input"][1]["name"], "tool_search");
-    assert_eq!(private_value["input"][1]["call_id"], "call_search_1");
-    assert_eq!(private_value["input"][2]["type"], "function_call_output");
-    assert_eq!(private_value["input"][2]["call_id"], "call_search_1");
+    let model_input = serde_json::to_value(private.input.model_input()).expect("model input serializes");
+    assert_eq!(model_input[1]["type"], "function_call");
+    assert_eq!(model_input[1]["name"], "tool_search");
+    assert_eq!(model_input[1]["call_id"], "call_search_1");
+    assert_eq!(model_input[2]["type"], "function_call_output");
+    assert_eq!(model_input[2]["call_id"], "call_search_1");
     assert_eq!(private_value["tools"].as_array().map(Vec::len), Some(2));
     assert_eq!(private_value["tools"][0]["type"], "tool_search");
     assert_eq!(private_value["tools"][0]["execution"], "client");

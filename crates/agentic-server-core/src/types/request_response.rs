@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::num::NonZeroU64;
 
 use serde::{Deserialize, Serialize};
@@ -369,17 +369,8 @@ impl RequestPayload {
         let tools = tools.filter(|tools| !tools.is_empty());
         let namespace_map = CodexNamespaceHandler.build_namespace_map(declarations.as_deref())?;
         let mcp_names = McpToolNames::from_tools(self.tools.as_deref().unwrap_or_default());
-        let top_level_functions: HashSet<&str> = declarations
-            .iter()
-            .flatten()
-            .filter_map(|declaration| match declaration {
-                ToolDeclaration::Function(function) => Some(function.name.as_str()),
-                _ => None,
-            })
-            .collect();
         let input = lower_async_calls(CodexNamespaceHandler.resolve_input(
             namespace_map.as_ref(),
-            &top_level_functions,
             self.input.normalized_model_input_with(&mcp_names)?,
         ));
         let tool_choice = CodexNamespaceHandler.resolve_tool_choice(namespace_map.as_ref(), self.tool_choice.as_ref());

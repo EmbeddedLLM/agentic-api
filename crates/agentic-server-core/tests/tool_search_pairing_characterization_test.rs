@@ -1,8 +1,9 @@
-//! How the gateway answers malformed tool-search history today, on the direct path (`store: false`
-//! input) and on a `previous_response_id` continuation, where the pending-call ledger runs first.
+//! How the gateway answers malformed tool-search history, on the direct path (`store: false` input)
+//! and on a `previous_response_id` continuation.
 //!
-//! These pin current answers so that moving pairing and validation to one owner changes them only
-//! where it means to; such a change updates the expected answer here and the CHANGELOG.
+//! The pending-call ledger checks how client search calls and outputs pair, on both paths; tool
+//! search checks the rest (item ids, hosted pairs, output status). Both paths therefore answer alike.
+//! A request without search items still skips the ledger on the direct path, as before.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -110,6 +111,10 @@ fn function_call(call_id: &str) -> Value {
         "arguments": "{\"city\":\"Paris\"}", "status": "completed"})
 }
 
+fn function_output(call_id: &str) -> Value {
+    json!({"type": "function_call_output", "call_id": call_id, "output": "18C"})
+}
+
 const INVALID_CONFIG: &str = "tool error: invalid tool config: ";
 
 /// One malformed history and today's answer on each path: `OK`, or the error's status, `param`
@@ -176,7 +181,7 @@ fn client_cases() -> Vec<Case> {
                 client_output("call_1", "completed")
             ]),
             tools: client_tools(),
-            direct: config("duplicate tool_search_call call_id"),
+            direct: invalid("duplicate call_id 'call_1' in tool_search_call"),
             continuation: invalid("duplicate call_id 'call_1' in tool_search_call"),
         },
         Case {
@@ -187,14 +192,14 @@ fn client_cases() -> Vec<Case> {
                 client_output("call_1", "completed")
             ]),
             tools: client_tools(),
-            direct: config("duplicate tool_search_output call_id"),
+            direct: invalid("tool_search_output references call_id 'call_1' without a pending call"),
             continuation: invalid("tool_search_output references call_id 'call_1' without a pending call"),
         },
         Case {
             name: "client output without its call",
             input: json!([client_output("call_missing", "completed")]),
             tools: client_tools(),
-            direct: config("tool_search_output has no matching unresolved call_id"),
+            direct: on_input("No tool call found for function call output with call_id call_missing."),
             continuation: on_input("No tool call found for function call output with call_id call_missing."),
         },
         Case {
@@ -205,10 +210,24 @@ fn client_cases() -> Vec<Case> {
             continuation: config(INCOMPLETE),
         },
         Case {
+            name: "client output before its call",
+            input: json!([client_output("call_1", "completed"), client_call("tsc_a", "call_1")]),
+            tools: client_tools(),
+            direct: on_input("No tool call found for function call output with call_id call_1."),
+            continuation: on_input("No tool call found for function call output with call_id call_1."),
+        },
+        Case {
+            name: "client output for another call",
+            input: json!([client_call("tsc_a", "call_1"), client_output("call_2", "completed")]),
+            tools: client_tools(),
+            direct: on_input("No tool call found for function call output with call_id call_2."),
+            continuation: on_input("No tool call found for function call output with call_id call_2."),
+        },
+        Case {
             name: "client call without its output",
             input: json!([client_call("tsc_a", "call_1")]),
             tools: client_tools(),
-            direct: config(UNRESOLVED),
+            direct: on_input("No tool output found for function call call_1."),
             continuation: on_input("No tool output found for function call call_1."),
         },
         Case {
@@ -219,7 +238,7 @@ fn client_cases() -> Vec<Case> {
                 function_call("call_f")
             ]),
             tools: client_tools(),
-            direct: Answer::Ok,
+            direct: on_input("No tool output found for function call call_f."),
             continuation: on_input("No tool output found for function call call_f."),
         },
     ]
@@ -235,6 +254,18 @@ fn hosted_and_plain_cases() -> Vec<Case> {
                 client_output("tsc_h", "completed"),
                 hosted_call("tsc_h"),
                 hosted_output("tso_h", "completed")
+            ]),
+            tools: hosted_tools(),
+            direct: config("duplicate tool_search_call call_id"),
+            continuation: config("duplicate tool_search_call call_id"),
+        },
+        Case {
+            name: "hosted call id equal to a function call's call_id",
+            input: json!([
+                hosted_call("tsc_h"),
+                hosted_output("tso_h", "completed"),
+                function_call("tsc_h"),
+                function_output("tsc_h")
             ]),
             tools: hosted_tools(),
             direct: config("duplicate tool_search_call call_id"),
@@ -305,7 +336,7 @@ async fn continuation_answer(input: &Value, tools: &Value) -> Answer {
 }
 
 #[tokio::test]
-async fn malformed_search_history_gets_todays_answer_on_each_path() {
+async fn malformed_search_history_gets_the_same_answer_on_each_path() {
     for case in client_cases().into_iter().chain(hosted_and_plain_cases()) {
         let direct = answer(
             json!({"model": "test", "input": case.input, "tools": case.tools, "store": false}),

@@ -1,4 +1,4 @@
-use super::{TOOL_SEARCH_NAME, ToolSearchHandler};
+use super::TOOL_SEARCH_NAME;
 use crate::tool::ToolError;
 use crate::tool::declaration::responses_declarations;
 use crate::types::io::{InOutItem, InputItem, ResponsesInput};
@@ -95,8 +95,15 @@ pub(super) fn tool_has_deferred_definition(tool: &ResponsesTool) -> bool {
     }
 }
 
+/// A request whose declarations defer tools or declare a search needs prepared state, which withholds the deferred
+/// tools from the model. Replayed search items alone need none: the upstream projection lowers them, so a summary
+/// request that offers no tools can carry them.
 pub(crate) fn ensure_request_prepared(request: &RequestPayload, prepared: bool) -> Result<(), ToolError> {
-    if ToolSearchHandler::request_has_state(request) && !prepared {
+    let declares_search = request
+        .tools
+        .as_deref()
+        .is_some_and(|tools| tools.iter().any(tool_activates_tool_search));
+    if declares_search && !prepared {
         return Err(ToolError::Config(
             "tool_search requests require prepared request-scoped state before upstream conversion".to_owned(),
         ));

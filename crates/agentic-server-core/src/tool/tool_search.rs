@@ -3,8 +3,7 @@ mod history;
 mod hosted;
 mod validation;
 use definitions::{canonical_definition, canonical_namespace_member, load_definition, loaded_tool_identity};
-use history::prepare_history;
-pub(crate) use history::{hosted_private_call_id, hosted_search_output_text, private_search_call};
+use history::load_history_definitions;
 pub(crate) use hosted::{HostedCatalog, HostedCatalogEntry};
 pub(crate) use validation::ensure_request_prepared;
 use validation::{input_contains_tool_search_state, request_contains_tool_search_state, validate_tool_search_request};
@@ -16,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::types::event::{MessageStatus, ResponseStatus};
+pub(crate) use crate::types::io::input::TOOL_SEARCH_NAME;
 use crate::types::io::output::FunctionToolCall;
 use crate::types::io::{FunctionTool, InOutItem, InputItem, ResponsesInput, ToolChoice, ToolSearchCall};
 use crate::types::request_response::RequestPayload;
@@ -30,7 +30,6 @@ use super::handler::{ToolError, ToolHandler};
 use super::registry::{ToolEntry, ToolType};
 use super::{CodexNamespaceHandler, GatewayBinding};
 
-pub(crate) const TOOL_SEARCH_NAME: &str = "tool_search";
 const DEFAULT_DESCRIPTION: &str = "Search the client tool catalog";
 const DEFAULT_QUERY_DESCRIPTION: &str = "A concise description of the needed capabilities.";
 const HOSTED_DESCRIPTION: &str = "Load deferred tools before calling them. Pass `paths` with the names of \
@@ -387,7 +386,7 @@ pub struct ToolSearchState {
     has_completed_search: bool,
     public_effective_tools: Option<Vec<ResponsesTool>>,
     private_upstream_tools: Option<Vec<ResponsesTool>>,
-    private_upstream_input: Option<ResponsesInput>,
+    inference_input: Option<ResponsesInput>,
     loaded_public_tools: Vec<ResponsesTool>,
     synthetic_tool_search: Option<ToolSearchToolParam>,
     withheld_function_names: HashSet<String>,
@@ -424,7 +423,7 @@ impl fmt::Debug for ToolSearchState {
                 &self.private_upstream_tools.as_ref().map_or(0, Vec::len),
             )
             .field("loaded_public_tool_count", &self.loaded_public_tools.len())
-            .field("has_private_upstream_input", &self.private_upstream_input.is_some())
+            .field("has_inference_input", &self.inference_input.is_some())
             .field("has_synthetic_tool_search", &self.synthetic_tool_search.is_some())
             .field("withheld_function_count", &self.withheld_function_names.len())
             .field("unqualified_history_call_count", &self.unqualified_call_positions.len())
@@ -444,7 +443,7 @@ impl Default for ToolSearchState {
             has_completed_search: false,
             public_effective_tools: None,
             private_upstream_tools: None,
-            private_upstream_input: None,
+            inference_input: None,
             loaded_public_tools: Vec::new(),
             synthetic_tool_search: None,
             withheld_function_names: HashSet::new(),
@@ -538,7 +537,7 @@ impl ToolSearchState {
             },
             restore_only_declared,
         )?;
-        let private_upstream_input = prepare_history(
+        load_history_definitions(
             &active_input,
             DefinitionViews {
                 public_tools: &mut public_tools,
@@ -571,7 +570,7 @@ impl ToolSearchState {
             has_completed_search,
             public_effective_tools,
             private_upstream_tools,
-            private_upstream_input: Some(private_upstream_input),
+            inference_input: Some(active_input),
             loaded_public_tools,
             synthetic_tool_search,
             withheld_function_names,
@@ -628,9 +627,9 @@ impl ToolSearchState {
         &self.withheld_function_names
     }
 
-    /// Replace the request's public tool-search views with the prepared private
-    /// input and tools used for inference. The retained state then contains
-    /// only public metadata needed after inference.
+    /// Replace the request's public tool-search views with the prepared input, whose search items the upstream
+    /// projection lowers, and the private tools used for inference. The retained state then contains only public
+    /// metadata needed after inference.
     ///
     /// # Errors
     ///
@@ -638,9 +637,10 @@ impl ToolSearchState {
     /// with the prepared private tool set.
     pub fn prepare_inference_request(&mut self, request: &mut RequestPayload) -> Result<(), ToolError> {
         validate_effective_tool_choice(request.tool_choice.as_ref(), &self.withheld_function_names)?;
-        let input = self.private_upstream_input.take().ok_or_else(|| {
-            ToolError::Config("tool-search private inference input has already been consumed".to_owned())
-        })?;
+        let input = self
+            .inference_input
+            .take()
+            .ok_or_else(|| ToolError::Config("tool-search inference input has already been consumed".to_owned()))?;
         request.input = input;
         request.tools = self.private_upstream_tools.take();
         Ok(())
