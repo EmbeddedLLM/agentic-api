@@ -16,14 +16,13 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 
 use super::{ToolSearchHandler, public_item_id};
-use crate::tool::handler::{GatewayExecutor, GatewayToolEventPlan, PlannedResult, ToolError, ToolHandler, ToolOutput};
-use crate::tool::registry::ToolType;
+use crate::tool::handler::{GatewayExecutor, GatewayToolEventPlan, PlannedResult, ToolError, ToolOutput};
 use crate::types::io::input::hosted_search_output_text;
 use crate::types::io::output::FunctionToolCall;
-use crate::types::io::{FunctionTool, OutputItem, ToolSearchCall, ToolSearchOutputMessage};
+use crate::types::io::{OutputItem, ToolSearchCall, ToolSearchOutputMessage};
 use crate::types::tools::{
     CodexNamespaceMember, CodexNamespaceToolParam, FunctionToolParam, ResponsesTool, ToolSearchExecution,
-    ToolSearchStatus, ToolSearchToolParam,
+    ToolSearchStatus,
 };
 use crate::utils::common::deserialize_from_str;
 
@@ -64,7 +63,7 @@ impl HostedCatalogEntry {
 /// so a repeated search in a later response returns only what is new, while a
 /// repeated search within this response returns the same tools again.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct HostedCatalog {
+pub struct HostedCatalog {
     entries: Vec<HostedCatalogEntry>,
     indexes: HashMap<String, usize>,
 }
@@ -130,28 +129,9 @@ impl HostedCatalog {
     }
 }
 
-/// Runs hosted searches for one response. The search is a pure lookup, so the
-/// public `tool_search_output` is already known when the call is planned.
-#[derive(Debug, Default)]
-pub(crate) struct HostedToolSearchExecutor;
-
-impl ToolHandler for HostedToolSearchExecutor {
-    type ToolParams = ToolSearchToolParam;
-
-    fn tool_type(&self) -> ToolType {
-        ToolType::HostedToolSearch
-    }
-
-    fn validate(&self, params: &ToolSearchToolParam) -> Result<(), ToolError> {
-        ToolSearchHandler.validate(params)
-    }
-
-    fn normalize(&self, params: &ToolSearchToolParam) -> Vec<FunctionTool> {
-        ToolSearchHandler.normalize(params)
-    }
-}
-
-impl GatewayExecutor for HostedToolSearchExecutor {
+/// A hosted search runs in the gateway: a pure lookup over the response's catalog, so the public
+/// `tool_search_output` is already known when the call is planned. Validation and lowering are the handler's own.
+impl GatewayExecutor for ToolSearchHandler {
     type ExecutionParams = Arc<HostedCatalog>;
 
     /// The planned result answers a hosted search (see [`Self::plan_gateway_events`]); this runs the same search for

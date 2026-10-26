@@ -9,7 +9,7 @@ pub(crate) use validation::ensure_request_prepared;
 use validation::{input_contains_tool_search_state, request_contains_tool_search_state, validate_tool_search_request};
 
 use std::collections::{HashMap, HashSet};
-use std::{fmt, sync::Arc};
+use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -25,10 +25,10 @@ use crate::types::tools::{
 };
 use crate::utils::common::{deserialize_from_str, deserialize_from_value};
 
+use super::CodexNamespaceHandler;
 use super::declaration::responses_declarations;
 use super::handler::{ToolError, ToolHandler};
-use super::registry::{ToolEntry, ToolType};
-use super::{CodexNamespaceHandler, GatewayBinding};
+use super::registry::ToolType;
 
 const DEFAULT_DESCRIPTION: &str = "Search the client tool catalog";
 const DEFAULT_QUERY_DESCRIPTION: &str = "A concise description of the needed capabilities.";
@@ -132,33 +132,6 @@ impl ToolHandler for ToolSearchHandler {
     fn normalize(&self, param: &ToolSearchToolParam) -> Vec<FunctionTool> {
         vec![Self::function_tool(param)]
     }
-}
-
-/// A hosted search is bound to an empty catalog here; the agent turn binds the
-/// response's catalog once MCP discovery has run.
-pub(crate) fn insert_tool_search_entry(entries: &mut HashMap<String, ToolEntry>, param: &ToolSearchToolParam) {
-    let entry = if param.is_hosted() {
-        hosted_tool_search_entry(HostedCatalog::default())
-    } else {
-        ToolEntry::client(ToolType::ToolSearch, None)
-    };
-    if entries.insert(TOOL_SEARCH_NAME.to_owned(), entry).is_some() {
-        tracing::warn!(
-            name = TOOL_SEARCH_NAME,
-            "duplicate tool name — previous definition overwritten"
-        );
-    }
-}
-
-pub(crate) fn hosted_tool_search_entry(catalog: HostedCatalog) -> ToolEntry {
-    ToolEntry::gateway(
-        ToolType::HostedToolSearch,
-        None,
-        Some(GatewayBinding::new(
-            Arc::new(hosted::HostedToolSearchExecutor),
-            Arc::new(catalog),
-        )),
-    )
 }
 
 fn default_parameters() -> Map<String, Value> {

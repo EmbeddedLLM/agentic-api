@@ -19,10 +19,11 @@ use super::mcp::registry::insert_discovered_mcp_entry;
 use super::normalize::code_interpreter_unavailable_error;
 use super::ownership::{GatewayBinding, ToolOwnership};
 use super::shell::insert_shell_entry;
-use super::tool_search::{TOOL_SEARCH_NAME, insert_tool_search_entry};
+use super::tool_search::TOOL_SEARCH_NAME;
 use super::web_fetch::insert_web_fetch_entry;
 use super::web_search::insert_web_search_entry;
 use super::{CodexNamespaceHandler, McpHandler, NamespaceMap, ToolError, ToolOutput};
+use hosted_search::insert_tool_search_entry;
 
 use crate::types::io::output::{FunctionToolCall, McpListTools};
 use crate::types::tools::{CodeInterpreterToolParam, FileSearchToolParam, WebFetchToolParam};
@@ -35,9 +36,9 @@ const MAX_MCP_DISCOVERY_BYTES: usize = 1024 * 1024;
 #[serde(rename_all = "snake_case")]
 pub enum ToolType {
     Function,
+    /// Tool search, run by the client or by the gateway as its declaration's `execution` says; the registry
+    /// entry's ownership records which.
     ToolSearch,
-    /// Tool search the gateway runs itself (`execution: "server"`).
-    HostedToolSearch,
     Custom,
     Shell,
     CodexNamespace,
@@ -58,7 +59,6 @@ impl ToolType {
         match self {
             Self::Function => "function tool",
             Self::ToolSearch => "tool search",
-            Self::HostedToolSearch => "hosted tool search",
             Self::Custom => "custom tool",
             Self::Shell => "shell tool",
             Self::CodexNamespace => "Codex namespace tool",
@@ -467,8 +467,7 @@ impl ToolRegistry {
             ToolError::Config("prepared tool-search declaration is missing from the private registry".to_owned())
         })?;
         let valid = match entry.tool_type {
-            ToolType::ToolSearch => matches!(entry.ownership, ToolOwnership::Client),
-            ToolType::HostedToolSearch => matches!(entry.ownership, ToolOwnership::Gateway(Some(_))),
+            ToolType::ToolSearch => matches!(entry.ownership, ToolOwnership::Client | ToolOwnership::Gateway(Some(_))),
             ToolType::Function
             | ToolType::Custom
             | ToolType::Shell

@@ -197,8 +197,8 @@ impl GatewayScheduler {
                     .map_or(GatewayExecutionPlan::MissingHandler, |binding| {
                         GatewayExecutionPlan::Bound(binding.clone())
                     });
-                // A hosted search does not count toward `max_tool_calls`.
-                let admission = if entry.tool_type == ToolType::HostedToolSearch {
+                // A hosted search (the one search the gateway runs) does not count toward `max_tool_calls`.
+                let admission = if entry.tool_type == ToolType::ToolSearch {
                     admission::Admission::Dispatch
                 } else {
                     budget.admit()
@@ -390,7 +390,7 @@ impl GatewayScheduler {
             return self.timed_run(plan, execution_slots, response_budget).await;
         };
         // Admission never refuses a hosted search, whose model input must pair a call with its output.
-        debug_assert_ne!(plan.tool_type, ToolType::HostedToolSearch);
+        debug_assert_ne!(plan.tool_type, ToolType::ToolSearch);
         let message = admission::limit_reached_message(limit);
         let omitted = plan.events.completed_output.is_none();
         let public_output = plan.events.completed_output;
@@ -423,7 +423,7 @@ impl GatewayScheduler {
             ..
         } = plan;
         let GatewayExecutionPlan::Bound(binding) = execution else {
-            if tool_type == ToolType::HostedToolSearch {
+            if tool_type == ToolType::ToolSearch {
                 // A hosted search entry is always bound; an unbound one would
                 // leave the model an output without its call.
                 return Err(ExecutorError::Tool(ToolError::Config(

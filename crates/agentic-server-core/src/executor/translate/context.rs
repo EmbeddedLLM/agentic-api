@@ -166,10 +166,7 @@ impl TranslationContext {
 
     pub(in crate::executor) fn tool_type(&self, name: &str) -> ToolType {
         if self.tool_search_active && name == crate::tool::tool_search::TOOL_SEARCH_NAME {
-            match self.tool_types.get(name) {
-                Some(ToolType::HostedToolSearch) => ToolType::HostedToolSearch,
-                _ => ToolType::ToolSearch,
-            }
+            ToolType::ToolSearch
         } else {
             self.tool_types.get(name).copied().unwrap_or(ToolType::Function)
         }
@@ -178,7 +175,7 @@ impl TranslationContext {
     /// Whether `name` is the client-executed search the client must resolve,
     /// as opposed to a hosted search the gateway runs.
     pub(super) fn is_client_tool_search(&self, name: &str) -> bool {
-        self.tool_type(name) == ToolType::ToolSearch
+        self.tool_type(name) == ToolType::ToolSearch && !self.is_gateway_owned(name)
     }
 
     pub(super) fn is_withheld_function(&self, name: &str) -> bool {
