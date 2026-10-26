@@ -1044,7 +1044,8 @@ the one `ToolType::ToolSearch`, gateway-owned because the declaration's `executi
 checking the pairing), restored loads after compaction, and hosted results. Preparation
 builds it, so an invalid history is a 400 before inference; the response's
 `ToolRegistry` then owns it, offers the model its loaded definitions, withholds the
-deferred ones (dispatch refuses them too), and runs a hosted search over it: deferred
+deferred ones (the round's call check refuses a call to one before any tool runs, behind
+ingestion's rejection), and runs a hosted search over it: deferred
 functions, namespace members, and deferred MCP servers (as `mcp_<server_label>`, with the
 members MCP discovery listed), excluding tools loaded by earlier responses. The search is
 pure, so its `tool_search_output` is known when the call is planned: the scheduler gives

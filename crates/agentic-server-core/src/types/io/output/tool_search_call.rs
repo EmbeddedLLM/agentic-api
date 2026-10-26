@@ -5,7 +5,7 @@ use serde_json::{Map, Value};
 
 use crate::types::io::ToolSearchOutputMessage;
 use crate::types::io::input::{
-    check_tool_search_call_id, deserialize_non_blank_string, deserialize_optional_non_blank_string,
+    check_tool_search_call_id, deserialize_non_blank_string, deserialize_optional_non_blank_string, stable_name_hash,
 };
 use crate::types::io::multi_agent::AgentAttribution;
 use crate::types::io::output::FunctionToolCall;
@@ -106,11 +106,5 @@ pub(crate) fn public_tool_search_item_id(item_id: &str) -> String {
         return format!("tsc_{suffix}");
     }
     let domain_separated = format!("tool_search_item:{item_id}");
-    format!("tsc_{:016x}", stable_hash(&domain_separated))
-}
-
-fn stable_hash(value: &str) -> u64 {
-    value.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
-        (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
-    })
+    format!("tsc_{:016x}", stable_name_hash(&domain_separated))
 }

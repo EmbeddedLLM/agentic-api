@@ -3,7 +3,7 @@ use crate::events::{EventFrame, EventPayload, SSEEventType, SSEItemType};
 use crate::executor::accumulator::AccumulatedFunctionCall;
 use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::executor::gateway_accumulator::synthetic_event;
-use crate::tool::{ToolType, tool_search};
+use crate::tool::tool_search;
 use crate::types::event::ResponseStatus;
 use crate::types::io::OutputItem;
 use crate::types::tools::{ToolSearchExecution, ToolSearchStatus};
@@ -144,7 +144,7 @@ impl ToolSearchStreamState {
             } if item
                 .get("name")
                 .and_then(Value::as_str)
-                .is_some_and(|name| context.tool_type(name) == ToolType::ToolSearch) =>
+                .is_some_and(|name| context.is_client_tool_search(name)) =>
             {
                 tool_search::strict_function_call(item)?;
             }
@@ -178,7 +178,7 @@ impl ToolSearchStreamState {
                 Some("function_call") => {
                     let name = item.get("name").and_then(Value::as_str).unwrap_or_default();
                     tool_search::ensure_function_is_available(context.is_withheld_function(name))?;
-                    if context.tool_type(name) == ToolType::ToolSearch {
+                    if context.is_client_tool_search(name) {
                         let call = tool_search::strict_function_call(item)?;
                         if !call_ids.insert(call.call_id.clone()) {
                             return Err(tool_search::invalid_upstream_search_call().into());

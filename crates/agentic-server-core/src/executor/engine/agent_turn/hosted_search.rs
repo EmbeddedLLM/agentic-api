@@ -5,7 +5,7 @@ use super::AgentTurn;
 use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::executor::gateway::GatewayCallResult;
 use crate::executor::pipeline::AgentPipeline;
-use crate::tool::ToolRegistry;
+use crate::tool::{ToolError, ToolRegistry};
 use crate::types::io::OutputItem;
 use crate::types::tools::ResponsesTool;
 
@@ -20,21 +20,16 @@ pub(super) fn reject_failed_mcp_listing(registry: &ToolRegistry) -> ExecutorResu
     Ok(())
 }
 
-/// With tool search active, the registry takes the request's catalog: the one preparation built, or else the one
-/// `previous` (the registry this replaces) held. It then checks availability and, for a hosted search, an MCP
-/// `tool_choice` against the discovered tools.
-pub(super) fn attach_tool_search(
-    agent: &mut AgentPipeline,
-    registry: &mut ToolRegistry,
-    previous: Option<&ToolRegistry>,
-) -> ExecutorResult<()> {
+/// With tool search active, the registry takes the request's catalog, which preparation built for this registry (a
+/// rebuild follows a new preparation). It then checks availability and, for a hosted search, an MCP `tool_choice`
+/// against the discovered tools.
+pub(super) fn attach_tool_search(agent: &mut AgentPipeline, registry: &mut ToolRegistry) -> ExecutorResult<()> {
     if let Some(state) = agent.tool_search_state_mut().filter(|state| state.is_active()) {
         let synthetic = state.synthetic_tool_search().cloned();
         let hosted = state.is_hosted();
         let catalog = state
             .take_catalog()
-            .or_else(|| previous.and_then(ToolRegistry::tool_catalog).cloned())
-            .unwrap_or_default();
+            .ok_or_else(|| ToolError::Config("prepared tool-search catalog is missing for the registry".to_owned()))?;
         // A hosted search needs each deferred MCP server's discovered tools.
         let tools = agent.request.enriched_request.tools.as_deref().unwrap_or_default();
         registry.attach_tool_search(catalog, synthetic, hosted, tools);

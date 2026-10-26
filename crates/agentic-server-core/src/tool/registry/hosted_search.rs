@@ -14,7 +14,7 @@ use super::super::executors::GatewayExecutors;
 use super::super::handler::{GatewayExecutor, GatewayToolEventPlan, PlannedResult, ToolOutput};
 use super::super::ownership::{GatewayBinding, ToolOwnership};
 use super::super::tool_search::{TOOL_SEARCH_NAME, ToolSearchHandler, offered_tools};
-use super::super::{CodexNamespaceHandler, ToolError};
+use super::super::{CodexNamespaceHandler, ToolError, model_visible_namespace_member_name};
 use super::{CustomHandler, ToolEntry, ToolRegistry, ToolType};
 use crate::types::io::OutputItem;
 use crate::types::io::input::hosted_search_output_text;
@@ -89,7 +89,13 @@ impl ToolRegistry {
         let Some(search) = &self.tool_search else {
             return Ok(());
         };
-        self.validate_tool_availability(&search.catalog.withheld_function_names, search.synthetic.is_some())
+        self.validate_tool_availability(&search.catalog.withheld_function_names, search.synthetic.is_some())?;
+        if search.synthetic.is_some() && self.is_hosted_tool_search_name(TOOL_SEARCH_NAME) != search.hosted {
+            return Err(ToolError::Config(
+                "prepared tool-search declaration has invalid private registry ownership".to_owned(),
+            ));
+        }
+        Ok(())
     }
 
     /// Model-visible names the model may not call yet: deferred functions, namespace members and MCP tools no search
@@ -117,9 +123,17 @@ impl ToolRegistry {
     ///
     /// Returns [`ToolError::UpstreamWithheldFunctionCall`], as ingestion does.
     pub(crate) fn ensure_loaded_calls(&self, output: &[OutputItem]) -> Result<(), ToolError> {
+        // Calls are restored to their public shape by now: a namespace member's `{namespace, name}` has a withheld
+        // flat name, and a searched top-level function's call names itself as namespace.
+        let deferred = |call: &FunctionToolCall| {
+            self.is_deferred(&call.name)
+                || call.namespace.as_deref().is_some_and(|namespace| {
+                    self.is_deferred(&model_visible_namespace_member_name(namespace, &call.name))
+                })
+        };
         if output
             .iter()
-            .any(|item| matches!(item, OutputItem::FunctionCall(call) if self.is_deferred(&call.name)))
+            .any(|item| matches!(item, OutputItem::FunctionCall(call) if deferred(call)))
         {
             return Err(ToolError::UpstreamWithheldFunctionCall);
         }

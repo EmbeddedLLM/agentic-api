@@ -2,7 +2,6 @@
 //! them.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
 
 use super::{PriorCalls, ToolCatalog, ToolIdentity, history_call_before_load};
 use crate::tool::codex::is_searched_function_call;
@@ -17,20 +16,13 @@ impl ToolCatalog {
     /// The pending-call ledger (`executor::pending_calls`) checks how client calls and outputs pair by `call_id`, and
     /// [`SearchHistory`] the rest of the search items (item ids, hosted pairs, output status); this applies its verdicts
     /// in order and adds the one timing rule: a call cannot use a definition before it is loaded.
-    pub(crate) fn load_history(
-        &mut self,
-        input: &ResponsesInput,
-        unqualified_call_positions: &mut HashMap<String, usize>,
-    ) -> Result<(), ToolError> {
+    pub(crate) fn load_history(&mut self, input: &ResponsesInput) -> Result<(), ToolError> {
         let ResponsesInput::Items(items) = input else {
             return Ok(());
         };
         let items: Vec<Cow<'_, InputItem>> = items.iter().filter_map(InOutItem::as_input).collect();
         let history = SearchHistory::scan(&items);
-        let mut prior = PriorCalls {
-            unknown_namespace_calls: HashMap::new(),
-            unqualified_call_positions: std::mem::take(unqualified_call_positions),
-        };
+        let mut prior = PriorCalls::default();
         for (position, item) in items.iter().enumerate() {
             if let Some(defect) = history.defect(position) {
                 return Err(ToolError::Config(defect.to_string()));
@@ -58,7 +50,6 @@ impl ToolCatalog {
         if history.has_open_hosted_call() {
             return Err(ToolError::Config(SearchHistoryDefect::OpenHostedCall.to_string()));
         }
-        *unqualified_call_positions = prior.unqualified_call_positions;
         Ok(())
     }
 }

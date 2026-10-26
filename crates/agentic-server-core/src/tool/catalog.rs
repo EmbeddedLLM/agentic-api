@@ -22,7 +22,7 @@ use serde_json::Value;
 use super::declaration::responses_declarations;
 use super::handler::ToolError;
 use super::tool_search::TOOL_SEARCH_NAME;
-use super::{ToolType, model_visible_namespace_member_name};
+use super::{CodexNamespaceHandler, model_visible_namespace_member_name};
 use crate::types::tools::{CodexNamespaceMember, CodexNamespaceToolParam, ResponsesTool};
 
 /// Stable public identity used to compare definitions accumulated from search outputs.
@@ -221,51 +221,15 @@ impl ToolCatalog {
             .is_some_and(|record| matches!(record.identity, ToolIdentity::Function(_)))
     }
 
-    /// Checks the model-visible names of the whole inventory together: a flattened namespace member name must not
-    /// repeat a top-level tool's name or another member's.
+    /// Checks the model-visible names of the whole inventory together, with the one rule codex's namespace map applies:
+    /// a flattened namespace member name must not repeat a top-level tool's name or another member's.
     ///
     /// # Errors
     ///
     /// Returns [`ToolError::Config`] naming the first colliding member.
     pub(crate) fn validate_model_visible_names(&self) -> Result<(), ToolError> {
         let declarations = responses_declarations(&self.public_tools);
-        let top_level: HashMap<String, ToolType> = declarations
-            .iter()
-            .filter_map(|declaration| {
-                let tool_type = declaration.tool_type()?;
-                declaration.top_level_registry_key().map(|key| (key, tool_type))
-            })
-            .collect();
-        let mut members: HashMap<String, (&str, &str)> = HashMap::new();
-        for tool in &self.public_tools {
-            let ResponsesTool::Namespace(namespace) = tool else {
-                continue;
-            };
-            for member in &namespace.tools {
-                let CodexNamespaceMember::Function(function) = member else {
-                    continue;
-                };
-                let member_name = function.name.as_str();
-                let flat_name = model_visible_namespace_member_name(&namespace.name, member_name);
-                if let Some(tool_type) = top_level.get(&flat_name) {
-                    return Err(ToolError::Config(format!(
-                        "codex namespace member {}.{member_name} generates name {flat_name}, which collides with a declared {}",
-                        namespace.name,
-                        tool_type.description()
-                    )));
-                }
-                if let Some((existing_namespace, existing_member)) = members.get(&flat_name)
-                    && (*existing_namespace != namespace.name || *existing_member != member_name)
-                {
-                    return Err(ToolError::Config(format!(
-                        "codex namespace member {}.{member_name} collides with {existing_namespace}.{existing_member} at generated name {flat_name}",
-                        namespace.name
-                    )));
-                }
-                members.insert(flat_name, (&namespace.name, member_name));
-            }
-        }
-        Ok(())
+        CodexNamespaceHandler.build_namespace_map(Some(&declarations)).map(drop)
     }
 
     fn initial_withheld_function_names(&self) -> Result<HashSet<String>, ToolError> {

@@ -203,7 +203,6 @@ pub struct ToolSearchState {
     private_upstream_tools: Option<Vec<ResponsesTool>>,
     inference_input: Option<ResponsesInput>,
     synthetic_tool_search: Option<ToolSearchToolParam>,
-    unqualified_call_positions: HashMap<String, usize>,
     /// Whether the gateway runs this request's search (`execution: "server"`).
     hosted: bool,
     /// The request's definitions until the registry takes them.
@@ -234,7 +233,6 @@ impl fmt::Debug for ToolSearchState {
             )
             .field("has_inference_input", &self.inference_input.is_some())
             .field("has_synthetic_tool_search", &self.synthetic_tool_search.is_some())
-            .field("unqualified_history_call_count", &self.unqualified_call_positions.len())
             .field("hosted", &self.hosted)
             .field("holds_catalog", &self.catalog.is_some())
             .finish()
@@ -251,7 +249,6 @@ impl Default for ToolSearchState {
             private_upstream_tools: None,
             inference_input: None,
             synthetic_tool_search: None,
-            unqualified_call_positions: HashMap::new(),
             hosted: false,
             catalog: None,
         }
@@ -317,9 +314,8 @@ impl ToolSearchState {
         let mut catalog = ToolCatalog::build(request.tools.clone().unwrap_or_default())?;
         let hosted = declaration.is_some_and(ToolSearchToolParam::is_hosted);
         validate_search_mode(&catalog.public_tools, &catalog.mcp_loads, declaration)?;
-        let mut unqualified_call_positions = HashMap::new();
         restore_loaded_definitions(restored_loaded_tools, &mut catalog, restore_only_declared)?;
-        catalog.load_history(&active_input, &mut unqualified_call_positions)?;
+        catalog.load_history(&active_input)?;
         catalog.validate_model_visible_names()?;
 
         let entries = catalog_entries(&catalog);
@@ -338,7 +334,6 @@ impl ToolSearchState {
             private_upstream_tools,
             inference_input: Some(active_input),
             synthetic_tool_search,
-            unqualified_call_positions,
             hosted,
             catalog: Some(catalog),
         })

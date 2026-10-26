@@ -58,13 +58,11 @@ pub(super) struct RoundResult {
     pub(super) decision: RoundDecision,
 }
 
-/// Builds the agent's registry. With tool search active, the registry takes the request's catalog: the one preparation
-/// built, or else the one `previous` (the registry this replaces) held.
+/// Builds the agent's registry. With tool search active, the registry takes the request's prepared catalog.
 pub(super) async fn build_tool_registry(
     agent: &mut AgentPipeline,
     exec_ctx: &ExecutionContext,
     response_budget: &ExecutorResponseBudget,
-    previous: Option<&ToolRegistry>,
 ) -> ExecutorResult<ToolRegistry> {
     let mut executors = exec_ctx.gateway_executors.request_scoped();
     let mut registry: ToolRegistry = match agent.request.enriched_request.tools.as_mut() {
@@ -87,7 +85,7 @@ pub(super) async fn build_tool_registry(
         }
         None => ToolRegistry::default(),
     };
-    hosted_search::attach_tool_search(agent, &mut registry, previous)?;
+    hosted_search::attach_tool_search(agent, &mut registry)?;
     registry.cache_listed_mcp_tools(&agent.request.enriched_request.input);
     Ok(registry)
 }
@@ -162,7 +160,7 @@ impl AgentExecutionState {
         exec: &ExecutionContext,
         budget: &ExecutorResponseBudget,
     ) -> ExecutorResult<()> {
-        self.registry = build_tool_registry(agent, exec, budget, Some(&self.registry)).await?;
+        self.registry = build_tool_registry(agent, exec, budget).await?;
         Ok(())
     }
 
@@ -216,7 +214,7 @@ impl<'a> AgentTurn<'a> {
         response_budget: &ExecutorResponseBudget,
         max_rounds: NonZeroUsize,
     ) -> ExecutorResult<Self> {
-        let registry = build_tool_registry(agent, exec_ctx, response_budget, None).await?;
+        let registry = build_tool_registry(agent, exec_ctx, response_budget).await?;
         hosted_search::reject_failed_mcp_listing(&registry)?;
         let tool_call_budget = BuiltInToolCallBudget::new(agent.request.original_request.max_tool_calls_limit()?);
         Ok(Self {

@@ -1986,3 +1986,32 @@ async fn an_unloaded_deferred_mcp_tool_is_never_called() {
 
     assert_eq!(calls.load(Ordering::SeqCst), 0, "no tools/call reached the MCP server");
 }
+
+/// A hosted search whose arguments are not JSON loads nothing. Streaming carries on with the next round, as it did
+/// before hosted and client searches shared one tool kind; blocking still refuses the upstream response, as it did.
+#[tokio::test]
+async fn malformed_hosted_search_arguments_keep_their_blocking_and_streaming_answers() {
+    let malformed = json!({"type": "function_call", "id": "fc_s1", "call_id": "call_s1", "name": "tool_search",
+        "arguments": "not json", "status": "completed"});
+    let tools = json!([{"type": "tool_search"}, deferred_weather()]);
+
+    let (llm_url, _) = spawn_llm(vec![upstream("up_1", json!([malformed.clone()]))]).await;
+    let blocking = Box::pin(ExecuteRequest::new(request(&json!("weather?"), &tools), context(llm_url)).run()).await;
+    assert!(blocking.is_err(), "blocking validation refuses the call");
+
+    let (llm_url, _) = spawn_streaming_llm(vec![
+        sse("up_1", &[malformed]),
+        sse("up_2", &[message("no tool loaded")]),
+    ])
+    .await;
+    let mut streaming = request(&json!("weather?"), &tools);
+    streaming.stream = true;
+    let events = run_streaming(streaming, context(llm_url)).await;
+    let last = events.last().expect("a terminal event");
+    assert_eq!(last["type"], "response.completed", "{last}");
+    let search_output = events
+        .iter()
+        .find(|event| event["type"] == "response.output_item.done" && event["item"]["type"] == "tool_search_output")
+        .expect("the search answers");
+    assert_eq!(search_output["item"]["tools"], json!([]));
+}

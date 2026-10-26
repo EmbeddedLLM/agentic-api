@@ -625,6 +625,15 @@ async fn the_registry_refuses_deferred_definitions_until_a_search_loads_them() {
         registry.ensure_loaded_calls(std::slice::from_ref(&call)),
         Err(ToolError::UpstreamWithheldFunctionCall)
     ));
+    // A hosted search's function call is restored with its own name as namespace.
+    let self_named: OutputItem =
+        serde_json::from_value(json!({"type": "function_call", "id": "fc_w", "call_id": "call_w",
+        "name": "weather", "namespace": "weather", "arguments": "{}", "status": "completed"}))
+        .unwrap();
+    assert!(matches!(
+        registry.ensure_loaded_calls(std::slice::from_ref(&self_named)),
+        Err(ToolError::UpstreamWithheldFunctionCall)
+    ));
 
     let loaded: ResponsesTool = serde_json::from_value(weather).unwrap();
     let snapshot = registry
@@ -635,5 +644,34 @@ async fn the_registry_refuses_deferred_definitions_until_a_search_loads_them() {
     assert_eq!(snapshot.1.len(), 1);
     assert!(!registry.is_deferred("weather"));
     assert!(registry.is_deferred("mcp__stub__echo"));
-    assert!(registry.ensure_loaded_calls(&[call]).is_ok());
+    assert!(registry.ensure_loaded_calls(&[call, self_named]).is_ok());
+}
+
+/// A namespace member's call reaches the registry restored to its public `{namespace, name}`; a deferred member is
+/// still refused.
+#[test]
+fn the_registry_refuses_a_restored_call_to_a_deferred_namespace_member() {
+    let request: RequestPayload = serde_json::from_value(json!({
+        "model": "m",
+        "input": "time?",
+        "tools": [
+            {"type": "tool_search"},
+            {"type": "namespace", "name": "travel", "description": "Travel tools", "tools": [
+                {"type": "function", "name": "get_timezone", "defer_loading": true, "parameters": {"type": "object"}}
+            ]}
+        ]
+    }))
+    .unwrap();
+    let mut state = ToolSearchState::build(&request).unwrap();
+    let mut registry = crate::tool::ToolRegistry::default();
+    let catalog = state.take_catalog().expect("prepared catalog");
+    registry.attach_tool_search(catalog, state.synthetic_tool_search().cloned(), true, &[]);
+    let call: OutputItem = serde_json::from_value(json!({"type": "function_call", "id": "fc_t", "call_id": "call_t",
+        "name": "get_timezone", "namespace": "travel", "arguments": "{}", "status": "completed"}))
+    .unwrap();
+
+    assert!(matches!(
+        registry.ensure_loaded_calls(&[call]),
+        Err(ToolError::UpstreamWithheldFunctionCall)
+    ));
 }
