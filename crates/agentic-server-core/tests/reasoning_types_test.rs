@@ -88,6 +88,10 @@ fn nullable_reasoning_fields_keep_the_existing_wire_contract() {
         assert!(reasoning.summary.is_empty());
         assert!(reasoning.encrypted_content.is_none());
         assert!(reasoning.status.is_none());
+        assert_eq!(
+            serde_json::to_value(reasoning).unwrap(),
+            json!({"id":"rs_1", "content":[], "summary":[]})
+        );
     }
 }
 

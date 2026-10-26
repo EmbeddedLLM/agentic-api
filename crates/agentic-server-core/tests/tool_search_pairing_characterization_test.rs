@@ -130,11 +130,16 @@ struct Case {
 #[derive(Debug, PartialEq)]
 enum Answer {
     Ok,
-    Rejected { param: Option<String>, message: String },
+    Rejected {
+        code: &'static str,
+        param: Option<String>,
+        message: String,
+    },
 }
 
 fn config(message: &str) -> Answer {
     Answer::Rejected {
+        code: "invalid_request_error",
         param: None,
         message: format!("{INVALID_CONFIG}{message}"),
     }
@@ -142,6 +147,7 @@ fn config(message: &str) -> Answer {
 
 fn invalid(message: &str) -> Answer {
     Answer::Rejected {
+        code: "invalid_request_error",
         param: None,
         message: format!("invalid request: {message}"),
     }
@@ -149,8 +155,18 @@ fn invalid(message: &str) -> Answer {
 
 fn on_input(message: &str) -> Answer {
     Answer::Rejected {
+        code: "invalid_request_error",
         param: Some("input".to_owned()),
         message: message.to_owned(),
+    }
+}
+
+/// Admission rejects an input that repeats an item id before any history check runs, as `OpenAI` does.
+fn duplicate_item(id: &str) -> Answer {
+    Answer::Rejected {
+        code: "unsupported_value",
+        param: Some("input".to_owned()),
+        message: format!("Duplicate item found with id {id}. Remove duplicate items from your input and try again."),
     }
 }
 
@@ -169,8 +185,8 @@ fn client_cases() -> Vec<Case> {
                 client_output("call_2", "completed")
             ]),
             tools: client_tools(),
-            direct: config("duplicate tool_search_call item id"),
-            continuation: config("duplicate tool_search_call item id"),
+            direct: duplicate_item("tsc_a"),
+            continuation: duplicate_item("tsc_a"),
         },
         Case {
             name: "duplicate client call_id",
@@ -310,8 +326,8 @@ async fn answer(body: Value, context: Arc<ExecutionContext>) -> Answer {
         Err(error) => {
             assert_eq!(error.http_status().as_u16(), 400);
             assert_eq!(error.error_type(), "invalid_request_error");
-            assert_eq!(error.error_code(), "invalid_request_error");
             Answer::Rejected {
+                code: error.error_code(),
                 param: error.error_param().map(ToOwned::to_owned),
                 message: error.error_message(),
             }

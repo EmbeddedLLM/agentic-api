@@ -84,6 +84,10 @@ impl Default for InputMessageContent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct FunctionToolResultMessage {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<MessageStatus>,
     pub call_id: String,
     pub output: ToolCallOutput,
 }
@@ -216,18 +220,6 @@ impl From<ShellCall> for InputFunctionToolCall {
     }
 }
 
-impl From<ShellCallOutputMessage> for FunctionToolResultMessage {
-    fn from(output: ShellCallOutputMessage) -> Self {
-        Self {
-            call_id: output.call_id,
-            // Command outputs contain only JSON-compatible values and string map keys.
-            output: serde_json::to_string(&output.output)
-                .expect("shell outputs serialize to JSON")
-                .into(),
-        }
-    }
-}
-
 pub(super) fn deserialize_non_blank_string<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -266,19 +258,14 @@ pub struct CompactionItem {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 pub struct CustomToolCallOutputMessage {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<MessageStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     pub call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     pub output: ToolCallOutput,
-}
-
-impl From<CustomToolCallOutputMessage> for FunctionToolResultMessage {
-    fn from(output: CustomToolCallOutputMessage) -> Self {
-        Self {
-            call_id: output.call_id,
-            output: output.output,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

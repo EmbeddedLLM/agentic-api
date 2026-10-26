@@ -328,13 +328,23 @@ async fn session_explicit_conversation_generated_turns_match_no_session_history(
             }
             let requests = model.requests.lock().await;
             let input = requests[1]["input"].as_array().unwrap();
-            assert_eq!(input.len(), 3, "session={use_session}, store={store}: {input:?}");
-            assert!(input[0].to_string().contains("first question"));
-            assert!(input[1].to_string().contains("first answer"));
-            assert!(input[2].to_string().contains("second question"));
+            assert_eq!(
+                input.len(),
+                if store { 3 } else { 1 },
+                "session={use_session}, store={store}: {input:?}"
+            );
+            if store {
+                assert!(input[0].to_string().contains("first question"));
+                assert!(input[1].to_string().contains("first answer"));
+            }
+            assert!(input.last().unwrap().to_string().contains("second question"));
             drop(requests);
             let history = conversations.rehydrate(&conversation.conversation_id).await.unwrap();
-            assert_eq!(history.len(), 4, "session={use_session}, store={store}");
+            assert_eq!(
+                history.len(),
+                if store { 4 } else { 0 },
+                "session={use_session}, store={store}"
+            );
             model.close().await;
             pool.close().await;
         }
@@ -363,8 +373,15 @@ async fn explicit_conversation_tool_history(use_session: bool, gateway_tool: boo
     let session = session();
     let next_input = if gateway_tool {
         json!("second question")
-    } else {
+    } else if store {
         json!([{"type":"function_call_output", "call_id":"client", "output":"sunny"}])
+    } else {
+        // Unstored conversation turns require the client to replay the call too.
+        json!([
+            {"role":"user", "content":"first question"},
+            function_call("client"),
+            {"type":"function_call_output", "call_id":"client", "output":"sunny"}
+        ])
     };
     for (index, input) in [json!("first question"), next_input].into_iter().enumerate() {
         let mut payload = request(None, input);
@@ -395,10 +412,26 @@ async fn explicit_conversation_tool_history(use_session: bool, gateway_tool: boo
     assert_eq!(calls.load(Ordering::Relaxed), usize::from(gateway_tool));
     let requests = model.requests.lock().await;
     assert_eq!(requests.len(), if gateway_tool { 3 } else { 2 });
-    let model_history = requests.last().unwrap()["input"].clone();
+    let mut model_history = requests.last().unwrap()["input"].clone();
     drop(requests);
     let history = conversations.rehydrate(&conversation.conversation_id).await.unwrap();
-    let stored_history = serde_json::to_value(InOutItem::into_input_items(history)).unwrap();
+    let mut stored_history = serde_json::to_value(InOutItem::into_input_items(history)).unwrap();
+    // Independently executed sessions generate different result item IDs. Check
+    // persistence within each execution before comparing their semantic history.
+    for item in model_history.as_array_mut().unwrap() {
+        if item["type"] == "function_call_output" && !item["id"].is_null() {
+            assert!(item["id"].as_str().unwrap().starts_with("fc_"));
+            let stored = stored_history
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|stored| stored["type"] == "function_call_output" && stored["call_id"] == item["call_id"])
+                .unwrap();
+            assert_eq!(stored["id"], item["id"]);
+            item.as_object_mut().unwrap().remove("id");
+            stored.as_object_mut().unwrap().remove("id");
+        }
+    }
     model.close().await;
     pool.close().await;
     (model_history, stored_history)
@@ -507,7 +540,10 @@ async fn grouped_session_late_fork_does_not_restore_an_evicted_transient_parent(
     )
     .await
     .unwrap_err();
-    assert!(matches!(error, ExecutorError::PreviousResponseNotFound { .. }));
+    assert!(matches!(
+        error,
+        ExecutorError::Storage(StorageError::PreviousResponseNotFound { .. })
+    ));
 }
 
 #[tokio::test]
@@ -548,7 +584,10 @@ async fn session_cache_miss_does_not_mask_disabled_durable_storage() {
     let missing = rehydrate_in_session(payload.clone(), &exec, &session)
         .await
         .unwrap_err();
-    assert!(matches!(missing, ExecutorError::PreviousResponseNotFound { .. }));
+    assert!(matches!(
+        missing,
+        ExecutorError::Storage(StorageError::PreviousResponseNotFound { .. })
+    ));
     payload.store = true;
     let unavailable = rehydrate_in_session(payload, &exec, &session).await.unwrap_err();
     assert!(matches!(
@@ -772,7 +811,10 @@ async fn session_failed_response_evicts_only_a_referenced_parent() {
         assert_eq!(failed.error.as_ref().unwrap()["code"], "upstream_error");
         let result = rehydrate_in_session(request(Some(&first.id), json!("retry")), &model.exec, &session).await;
         if references_parent {
-            assert!(matches!(result, Err(ExecutorError::PreviousResponseNotFound { .. })));
+            assert!(matches!(
+                result,
+                Err(ExecutorError::Storage(StorageError::PreviousResponseNotFound { .. }))
+            ));
         } else {
             assert!(result.is_ok(), "an unrelated failed turn must not erase the checkpoint");
         }
@@ -784,7 +826,7 @@ async fn session_failed_response_evicts_only_a_referenced_parent() {
                 &session
             )
             .await,
-            Err(ExecutorError::PreviousResponseNotFound { .. })
+            Err(ExecutorError::Storage(StorageError::PreviousResponseNotFound { .. }))
         ));
         model.close().await;
     }
@@ -867,7 +909,7 @@ async fn session_tool_round_compaction_does_not_restore_superseded_output() {
         } else {
             assert!(matches!(
                 store.get(&result.id).await,
-                Err(StorageError::NotFound { .. })
+                Err(StorageError::ResponseNotFound { .. })
             ));
         }
         model.close().await;
@@ -1037,7 +1079,7 @@ async fn grouped_aggregate_sql_failure_rolls_back_items_and_releases_capacity() 
         assert_eq!(after.created_at, existing.created_at);
         assert!(matches!(
             rehydrate_in_session(request(Some(&failed_id), json!("no failed checkpoint")), &exec, target).await,
-            Err(ExecutorError::PreviousResponseNotFound { .. })
+            Err(ExecutorError::Storage(StorageError::PreviousResponseNotFound { .. }))
         ));
 
         // With a leaked prepared checkpoint neither size fits. A failed fork
@@ -1062,7 +1104,7 @@ async fn grouped_aggregate_sql_failure_rolls_back_items_and_releases_capacity() 
         } else {
             assert!(matches!(
                 source_result,
-                Err(ExecutorError::PreviousResponseNotFound { .. })
+                Err(ExecutorError::Storage(StorageError::PreviousResponseNotFound { .. }))
             ));
         }
         pool.close().await;
@@ -1154,7 +1196,7 @@ async fn grouped_aggregate_cancellation_while_waiting_for_storage_releases_capac
         } else {
             assert!(matches!(
                 source_result,
-                Err(ExecutorError::PreviousResponseNotFound { .. })
+                Err(ExecutorError::Storage(StorageError::PreviousResponseNotFound { .. }))
             ));
         }
         pool.close().await;
@@ -1248,7 +1290,7 @@ async fn session_budget_rejection_does_not_partially_store_a_child() {
             assert_eq!(after, before, "a failed budget check must precede durable writes");
             assert!(matches!(
                 rehydrate_in_session(request(Some(&parent.id), json!("next")), &model.exec, &session).await,
-                Err(ExecutorError::PreviousResponseNotFound { .. })
+                Err(ExecutorError::Storage(StorageError::PreviousResponseNotFound { .. }))
             ));
             let recovery = execute_local(&model, &session, request(None, json!("fresh"))).await;
             assert_eq!(

@@ -97,6 +97,7 @@ async fn serve_gateway(
     let websocket_tracker = state.websocket_tracker.clone();
     let router = build_router_with_auth(state, &server_config, authenticator);
     let listener = TcpListener::bind(&addr).await?;
+    let addr = listener.local_addr()?;
     info!("gateway listening on {addr}");
     // Rate limiting tells callers apart by peer address when OIDC is off.
     axum::serve(

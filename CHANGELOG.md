@@ -114,8 +114,8 @@ All notable changes to Agentic API are documented here.
   listing's `response.mcp_list_tools.failed`, an `error` event, and `response.failed`. A continuation whose history
   already holds a successful listing for that server keeps going. An MCP server whose `allowed_tools` matches none
   of its tools is no longer rejected with HTTP 400; its listing is empty and the response completes. An MCP
-  `tool_choice` (`{"type": "mcp", ...}`) is rejected with HTTP 400 `unsupported_value` on `tool_choice`, also on
-  the direct route, instead of a generic parse error.
+  `tool_choice` (`{"type": "mcp", ...}`) is rejected with HTTP 400 `unsupported_value` on `tool_choice` instead of
+  a generic parse error.
 - Replayed tool-search history is checked the same way on every path (#448). A `store: false` request carrying
   `tool_search_call` / `tool_search_output` items now runs the pending-call check a `previous_response_id` or
   conversation continuation runs, so a duplicate client `call_id` or output, an output with no call, or a client

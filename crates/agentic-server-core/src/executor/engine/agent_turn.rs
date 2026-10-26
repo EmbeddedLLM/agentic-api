@@ -23,11 +23,11 @@ use crate::executor::gateway::{
 };
 use crate::executor::pipeline::AgentPipeline;
 use crate::executor::rehydrate::prepare_reasoning_for_vllm;
-use crate::executor::relay::Release;
 use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::executor::response_budget::ExecutorResponseBudget;
 use crate::executor::telemetry::metrics::Stage;
 use crate::executor::upstream::{fetch_blocking_payload, fetch_stream_payload};
+use crate::executor::{inference::UpstreamHeaders, relay::Release};
 use crate::tool::{ToolRegistry, mcp, record_discovered_mcp_tools, responses_declarations};
 use crate::types::io::output::McpListTools;
 use crate::types::io::{InputItem, OutputItem, ResponsesInput};
@@ -255,7 +255,7 @@ impl<'a> AgentTurn<'a> {
     pub(super) async fn run_round(
         &mut self,
         output_offset: usize,
-        auth: Option<&str>,
+        auth: Option<&UpstreamHeaders>,
         stream_upstream: bool,
         response_budget: &ExecutorResponseBudget,
     ) -> ExecutorResult<RoundResult> {

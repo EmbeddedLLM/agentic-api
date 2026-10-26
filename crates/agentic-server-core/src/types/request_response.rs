@@ -5,10 +5,9 @@ use std::num::NonZeroU64;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::io::input::{InputValidationError, McpToolNames};
+use super::io::input::InputValidationError;
 use super::io::{FunctionTool, InputItem, MultiAgentConfig, OutputItem, ResponseUsage, ResponsesInput, ToolChoice};
 use super::tools::ResponsesTool;
-use crate::tool::async_execution::lower_async_calls;
 use crate::tool::{
     CodexNamespaceHandler, CustomHandler, ToolDeclaration, ToolError, declares_async, responses_declarations,
 };
@@ -21,6 +20,7 @@ mod serde_helpers;
 mod standard_response;
 mod text_config;
 mod unsupported;
+mod upstream_input;
 pub use max_tool_calls::{JsonKind, MAX_TOOL_CALLS_PARAM, MaxToolCalls, MaxToolCallsError, OutOfRangeInteger};
 use serde_helpers::{
     default_true, deserialize_conversation, is_absent_or_default_tool_choice, serialize_conversation_object,
@@ -123,6 +123,10 @@ pub struct RequestPayload<T: ?Sized = ResponseTextConfig, C = PromptCacheOptions
     /// Detection only, never serialized: typed execution rejects any non-null value.
     #[serde(default, skip_serializing)]
     pub prompt: Option<RejectedValue>,
+    /// Unmodeled provider parameters (for example, `chat_template_kwargs`), forwarded unchanged.
+    /// Modeled request fields retain their typed validation and upstream conversion.
+    #[serde(flatten)]
+    pub extra: HashMap<String, Value>,
 }
 
 /// Validation failures while constructing a typed upstream request.
@@ -136,6 +140,9 @@ pub enum UpstreamRequestError {
 
 #[derive(Debug, Serialize)]
 pub struct UpstreamRequest<'a> {
+    /// Disable upstream storage when the caller disables gateway storage.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub store: Option<bool>,
     pub model: &'a str,
     pub input: Cow<'a, ResponsesInput>,
     pub stream: bool,
@@ -181,6 +188,8 @@ pub struct UpstreamRequest<'a> {
     pub service_tier: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_salt: Option<&'a str>,
+    #[serde(flatten)]
+    pub extra: &'a HashMap<String, Value>,
 }
 
 /// A normalized tool declaration supported by the upstream Responses endpoint.
@@ -300,6 +309,7 @@ impl<T: ?Sized, C> RequestPayload<T, C> {
             context_management: self.context_management,
             background: self.background,
             prompt: self.prompt,
+            extra: self.extra,
         })
     }
 }
@@ -368,19 +378,11 @@ impl RequestPayload {
         });
         let tools = tools.filter(|tools| !tools.is_empty());
         let namespace_map = CodexNamespaceHandler.build_namespace_map(declarations.as_deref())?;
-        let mcp_names = McpToolNames::from_tools(self.tools.as_deref().unwrap_or_default());
-        // A call naming itself is to a searched function only if this request declares that function or a search output
-        // in its input loaded it (a compaction summary declares no tools).
-        let mut functions = self.input.searched_function_names();
-        functions.extend(declarations.iter().flatten().filter_map(ToolDeclaration::function_name));
-        let input = lower_async_calls(CodexNamespaceHandler.resolve_input(
-            namespace_map.as_ref(),
-            &functions,
-            self.input.normalized_model_input_with(&mcp_names)?,
-        ));
+        let input = self.upstream_input(declarations.as_deref(), namespace_map.as_ref())?;
         let tool_choice = CodexNamespaceHandler.resolve_tool_choice(namespace_map.as_ref(), self.tool_choice.as_ref());
         CustomHandler::validate_tool_choice(declarations.as_deref(), &tool_choice)?;
         Ok(UpstreamRequest {
+            store: (!self.store).then_some(false),
             model: &self.model,
             input,
             stream,
@@ -402,6 +404,7 @@ impl RequestPayload {
             prompt_cache_options: self.prompt_cache_options.as_ref(),
             service_tier: self.service_tier.as_deref(),
             cache_salt: self.cache_salt.as_deref(),
+            extra: &self.extra,
         })
     }
 }
@@ -498,6 +501,45 @@ pub struct ResponsePayload {
 mod tests {
     use super::*;
     use crate::types::io::InOutItem;
+
+    #[test]
+    fn provider_extensions_survive_mapping_and_request_round_trip() {
+        let wire = serde_json::json!({
+            "model": "test", "input": "hello", "store": false,
+            "conversation_id": "conv_test", "background": false, "prompt": null,
+            "context_management": [], "max_tool_calls": 2,
+            "chat_template_kwargs": {"enable_thinking": false}, "top_k": 20,
+            "x_provider_option": null
+        });
+        let routing: RequestPayload<serde_json::value::RawValue> = serde_json::from_value(wire.clone()).unwrap();
+        let request = routing
+            .try_map_text(|text| serde_json::from_str::<ResponseTextConfig>(text.get()).map(Box::new))
+            .unwrap();
+        let restored: RequestPayload = serde_json::from_value(serde_json::to_value(&request).unwrap()).unwrap();
+        assert_eq!(
+            restored.extra.len(),
+            3,
+            "known fields must not enter provider extensions"
+        );
+        for stream in [false, true] {
+            let upstream = serde_json::to_value(restored.to_upstream_request(stream).unwrap()).unwrap();
+            assert_eq!(upstream["stream"], stream);
+            assert_eq!(upstream["store"], false);
+            for key in ["chat_template_kwargs", "top_k", "x_provider_option"] {
+                assert_eq!(upstream.get(key), wire.get(key));
+            }
+            for key in [
+                "conversation_id",
+                "conversation",
+                "background",
+                "prompt",
+                "context_management",
+                "max_tool_calls",
+            ] {
+                assert!(upstream.get(key).is_none(), "gateway field {key} must not be forwarded");
+            }
+        }
+    }
 
     #[test]
     fn prompt_cache_retention_survives_text_mapping_and_request_round_trip() {

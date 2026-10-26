@@ -98,6 +98,8 @@ fn call_pair(
             async_execution: false,
         }),
         InputItem::FunctionCallOutput(FunctionToolResultMessage {
+            id: None,
+            status: None,
             call_id: item_id.to_owned(),
             output: ToolCallOutput::Text(output),
         }),

@@ -9,7 +9,7 @@ use crate::executor::multi_agent::{CheckpointLimits, ValidatedTreeCheckpoint};
 use crate::executor::pending_calls::first_unanswered_sync_call;
 use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::executor::telemetry::metrics::Stage;
-use crate::storage::ResponseMetadata;
+use crate::storage::{ResponseMetadata, StorageError};
 use crate::tool::ToolError;
 use crate::types::io::InOutItem;
 use crate::types::io::input::is_search_item;
@@ -154,7 +154,8 @@ async fn rehydrate_request(
     let response_id = uuid7_str("resp_");
     // Persistence keeps the public items. Tool lowering belongs to the enriched
     // inference copy, including when a later turn loads these items from storage.
-    let new_input_items = request.input.clone().into_canonical_items();
+    let mut new_input_items = request.input.clone().into_canonical_items();
+    exec_ctx.resp_handler.resolve_input_items(&mut new_input_items).await?;
 
     // One clone for the unmodified original; `request` is moved as enriched_request.
     let original_request = request.clone();
@@ -180,7 +181,7 @@ async fn rehydrate_request(
     } else if ctx.original_request.previous_response_id.is_some() {
         from_response(&mut ctx, exec_ctx).await?;
     } else {
-        let items = Vec::from(&ctx.original_request.input);
+        let items = InOutItem::into_input_items(ctx.new_input_items.clone());
         // The ledger owns how client search calls and outputs pair, so replayed search history is checked as a
         // continuation's is.
         if items.iter().any(is_search_item) {
@@ -234,8 +235,9 @@ fn validate_multi_agent_request(request: &RequestPayload) -> ExecutorResult<()> 
     // `parallel_tool_calls` to false, so only an explicit `true` conflicts.
     if request.parallel_tool_calls == Some(true) && request.declares_async_tools() {
         return Err(ExecutorError::UnsupportedValue {
-            param: "multi_agent",
-            message: "Async parallel tool calls are not yet supported in multi-agent mode.",
+            param: "multi_agent".into(),
+            code: Some("unsupported_value"),
+            message: "Async parallel tool calls are not yet supported in multi-agent mode.".into(),
         });
     }
     if request
@@ -260,7 +262,13 @@ async fn from_response(ctx: &mut RequestContext, exec_ctx: &ExecutionContext) ->
     if ctx.continuation.is_some() {
         return from_session_response(ctx, exec_ctx).await;
     }
-    let stored = exec_ctx.resp_handler.get(ctx).await?;
+    let stored = exec_ctx.resp_handler.get(ctx).await.map_err(|error| match error {
+        ExecutorError::Storage(ref source) if source.is_not_found() => StorageError::PreviousResponseNotFound {
+            id: ctx.original_request.previous_response_id.clone().unwrap_or_default(),
+        }
+        .into(),
+        other => other,
+    })?;
     if restore_agent_tree(ctx, &stored.metadata, exec_ctx.responses_config.max_retained_bytes)? {
         return Ok(());
     }
@@ -268,7 +276,7 @@ async fn from_response(ctx: &mut RequestContext, exec_ctx: &ExecutionContext) ->
 
     let mut items = InOutItem::into_input_items(history);
     items.reserve(ctx.new_input_items.len());
-    items.extend(Vec::from(&ctx.original_request.input));
+    items.extend(InOutItem::into_input_items(ctx.new_input_items.clone()));
     reject_unanswered_sync_call(&items)?;
 
     ctx.enriched_request.previous_response_id = None;
@@ -287,14 +295,16 @@ async fn from_session_response(ctx: &mut RequestContext, exec_ctx: &ExecutionCon
     } else {
         let previous_id = ctx.original_request.previous_response_id.as_deref().unwrap_or_default();
         if !ctx.original_request.store {
-            return Err(ExecutorError::PreviousResponseNotFound {
+            return Err(StorageError::PreviousResponseNotFound {
                 id: previous_id.to_owned(),
-            });
+            }
+            .into());
         }
         let map_missing = |error| match error {
-            ExecutorError::Storage(ref source) if source.is_not_found() => ExecutorError::PreviousResponseNotFound {
+            ExecutorError::Storage(ref source) if source.is_not_found() => StorageError::PreviousResponseNotFound {
                 id: previous_id.to_owned(),
-            },
+            }
+            .into(),
             other => other,
         };
         let stored = exec_ctx.resp_handler.get(ctx).await.map_err(map_missing)?;
@@ -320,7 +330,7 @@ async fn from_session_response(ctx: &mut RequestContext, exec_ctx: &ExecutionCon
     let mut items = parent.history.clone();
     // Match durable rehydration: lower custom/shell call outputs only in the
     // inference copy. new_input_items retains their public wire types.
-    items.extend(Vec::from(&ctx.original_request.input));
+    items.extend(InOutItem::into_input_items(ctx.new_input_items.clone()));
     let items = canonical_session_history(items);
     reject_unanswered_sync_call(&items)?;
     ctx.enriched_request.previous_response_id = None;
@@ -370,7 +380,7 @@ async fn from_conversation(ctx: &mut RequestContext, exec_ctx: &ExecutionContext
 
     let mut items = InOutItem::into_input_items(snapshot.items);
     items.reserve(ctx.new_input_items.len());
-    items.extend(Vec::from(&ctx.original_request.input));
+    items.extend(InOutItem::into_input_items(ctx.new_input_items.clone()));
     reject_unanswered_sync_call(&items)?;
 
     ctx.enriched_request.input = ResponsesInput::from(items);
@@ -768,9 +778,10 @@ mod tests {
         assert!(matches!(
             error,
             ExecutorError::UnsupportedValue {
-                param: "multi_agent",
-                message: "Async parallel tool calls are not yet supported in multi-agent mode."
-            }
+                param,
+                code,
+                message,
+            } if param == "multi_agent" && code == Some("unsupported_value") && message == "Async parallel tool calls are not yet supported in multi-agent mode."
         ));
         for (parallel, async_tool) in [
             (serde_json::json!(false), true),

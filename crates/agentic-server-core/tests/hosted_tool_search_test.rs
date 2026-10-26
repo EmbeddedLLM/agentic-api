@@ -861,6 +861,113 @@ async fn replayed_mcp_call_reaches_the_model_as_its_function_call_and_output() {
     assert_eq!(output["output"], "echoed");
 }
 
+/// The upstream input of the last request, with each lowered call's `(name, call_id)` and each output's `call_id`.
+async fn lowered_calls(requests: &tokio::sync::Mutex<Vec<Value>>) -> (Vec<(String, String)>, Vec<String>) {
+    let requests = requests.lock().await;
+    let input = requests.last().expect("replay request")["input"]
+        .as_array()
+        .expect("upstream input")
+        .clone();
+    assert!(
+        input
+            .iter()
+            .all(|item| item["type"] != "mcp_call" && item["type"] != "tool_search_call"),
+        "{input:?}"
+    );
+    let calls = input
+        .iter()
+        .filter(|item| item["type"] == "function_call")
+        .map(|item| {
+            (
+                item["name"].as_str().unwrap_or_default().to_owned(),
+                item["call_id"].to_string(),
+            )
+        })
+        .collect();
+    let outputs = input
+        .iter()
+        .filter(|item| item["type"] == "function_call_output")
+        .map(|item| item["call_id"].to_string())
+        .collect();
+    (calls, outputs)
+}
+
+/// Replaying a stored response's output resolves each item id to its stored record, which must still reach the model
+/// as the call and output it saw.
+#[tokio::test]
+async fn a_stored_mcp_call_replayed_as_input_reaches_the_model() {
+    let (mcp_url, _) = spawn_mcp().await;
+    let (llm_url, requests) = spawn_llm(vec![
+        upstream(
+            "up_1",
+            json!([function_call("s1", "tool_search", &json!({"paths": ["mcp_stub"]}))]),
+        ),
+        upstream("up_2", json!([function_call("e1", "mcp__stub__echo", &json!({}))])),
+        upstream("up_3", json!([message("first")])),
+        upstream("up_4", json!([message("second")])),
+    ])
+    .await;
+    let tools = json!([{"type": "tool_search"}, deferred_mcp(&mcp_url, None)]);
+    let context = durable_context(llm_url).await;
+    let first: RequestPayload =
+        serde_json::from_value(json!({"model": "test", "input": "echo", "tools": tools, "store": true}))
+            .expect("stored request");
+    let first_output = output(&run(first, Arc::clone(&context)).await);
+    assert!(first_output.iter().any(|item| item["type"] == "mcp_call"));
+
+    let mut replay = vec![json!({"type": "message", "role": "user", "content": "echo"})];
+    replay.extend(first_output);
+    replay.push(json!({"type": "message", "role": "user", "content": "again"}));
+    let second = run(request(&Value::Array(replay), &tools), context).await;
+    assert_eq!(second.status, "completed");
+
+    let (calls, outputs) = lowered_calls(&requests).await;
+    for name in ["tool_search", "mcp__stub__echo"] {
+        let (_, call_id) = calls.iter().find(|(called, _)| called == name).expect(name);
+        assert!(outputs.contains(call_id), "{name}: {calls:?} {outputs:?}");
+    }
+}
+
+/// A multi-agent response stores its hosted pair as output; a client replaying that output still loads the searched
+/// function.
+#[tokio::test]
+async fn a_stored_multi_agent_search_replayed_as_input_loads_its_function() {
+    let (llm_url, requests) = spawn_llm(vec![
+        upstream(
+            "up_1",
+            json!([function_call("s1", "tool_search", &json!({"paths": ["get_weather"]}))]),
+        ),
+        upstream(
+            "up_2",
+            json!([function_call("w1", "get_weather", &json!({"city": "Paris"}))]),
+        ),
+        upstream("up_3", json!([message("18C")])),
+    ])
+    .await;
+    let context = durable_context(llm_url).await;
+    let tools = json!([{"type": "tool_search"}, deferred_weather()]);
+    let first: RequestPayload = serde_json::from_value(json!({"model": "test", "input": "weather?", "store": true,
+        "multi_agent": {"enabled": true}, "tools": tools}))
+    .expect("stored request");
+    let first_output = output(&run(first, Arc::clone(&context)).await);
+
+    let mut replay = vec![json!({"type": "message", "role": "user", "content": "weather?"})];
+    replay.extend(first_output);
+    replay.push(json!({"type": "function_call_output", "call_id": "call_w1", "output": "18C"}));
+    let replay: RequestPayload =
+        serde_json::from_value(json!({"model": "test", "input": replay, "store": false, "tools": tools}))
+            .expect("replay request");
+    let second = run(replay, context).await;
+    assert_eq!(second.status, "completed");
+
+    let (calls, outputs) = lowered_calls(&requests).await;
+    let (_, search_id) = calls
+        .iter()
+        .find(|(name, _)| name == "tool_search")
+        .expect("lowered search");
+    assert!(outputs.contains(search_id), "{calls:?} {outputs:?}");
+}
+
 #[tokio::test]
 async fn recorded_openai_hosted_transcript_replays_as_input() {
     // Items copied from the OpenAI reference cassette (validation, explicit-server leg).
@@ -1206,13 +1313,20 @@ async fn conversation_and_session_continuations_restore_hosted_loads() {
                 NonZeroUsize::new(100_000).expect("nonzero"),
             );
             let mut previous_id = None;
-            for (turn, input) in [
-                json!("weather?"),
-                json!([{"type": "function_call_output", "call_id": "call_w1", "output": "18C"}]),
-            ]
-            .into_iter()
-            .enumerate()
-            {
+            let mut first_output = Vec::new();
+            for turn in 0..2 {
+                let answer = json!({"type": "function_call_output", "call_id": "call_w1", "output": "18C"});
+                let input = match turn {
+                    0 => json!("weather?"),
+                    // An unstored conversation turn is not appended, so the client replays the first turn.
+                    _ if !store && !use_session => {
+                        let mut items = vec![json!({"type": "message", "role": "user", "content": "weather?"})];
+                        items.extend(first_output.iter().cloned());
+                        items.push(answer);
+                        Value::Array(items)
+                    }
+                    _ => json!([answer]),
+                };
                 // A conversation does not inherit tools, so each turn declares them.
                 let mut payload = json!({"model": "test", "input": input, "store": store,
                     "tools": [{"type": "tool_search"}, deferred_weather()]});
@@ -1235,6 +1349,9 @@ async fn conversation_and_session_continuations_restore_hosted_loads() {
                     panic!("blocking response expected")
                 };
                 session.wait_until_idle().await.expect("idle session");
+                if turn == 0 {
+                    first_output = output(&response);
+                }
                 previous_id = Some(response.id);
             }
             let requests = requests.lock().await;

@@ -19,7 +19,7 @@ use super::{
 use crate::types::event::MessageStatus;
 use crate::types::io::{AgentAttribution, InOutItem, OutputItem};
 use crate::types::tools::{FunctionToolParam, ResponsesTool, ToolSearchExecution, ToolSearchStatus};
-use crate::utils::common::{serialize_to_string, serialize_to_value};
+use crate::utils::common::serialize_to_string;
 
 /// The function the model calls to search; see `tool::tool_search`.
 pub(crate) const TOOL_SEARCH_NAME: &str = "tool_search";
@@ -200,6 +200,8 @@ fn model_search_output(output: &ToolSearchOutputMessage, call_id: String) -> Inp
         ToolSearchExecution::Client => canonical_search_output(&output.tools),
     };
     InputItem::FunctionCallOutput(FunctionToolResultMessage {
+        id: None,
+        status: None,
         call_id,
         output: ToolCallOutput::Text(text),
     })
@@ -260,10 +262,9 @@ fn canonical_search_output(tools: &[ResponsesTool]) -> String {
             | ResponsesTool::Unknown => None,
         })
         .collect();
-    serialize_to_value(&CanonicalToolSearchOutput {
+    serialize_to_string(&CanonicalToolSearchOutput {
         tools: &projected_tools,
     })
-    .and_then(|value| serialize_to_string(&value))
     .unwrap_or_else(|_| UNSERIALIZABLE_SEARCH_OUTPUT.to_owned())
 }
 
