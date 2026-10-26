@@ -9,8 +9,11 @@
 
 mod history;
 mod load;
+mod search;
 
 pub(crate) use load::{canonical_definition, canonical_namespace_member, history_call_before_load};
+#[cfg(test)]
+pub(crate) use search::hosted_mcp_member;
 
 use std::collections::{HashMap, HashSet};
 
@@ -143,7 +146,7 @@ pub(crate) struct PriorCalls {
 
 /// The request's model-visible definitions, in declaration and then first-load order.
 #[derive(Clone, Default)]
-pub(crate) struct ToolCatalog {
+pub struct ToolCatalog {
     /// Public declarations, followed by definitions a load introduced.
     pub(crate) public_tools: Vec<ResponsesTool>,
     pub(crate) definitions: Vec<DefinitionRecord>,
@@ -153,6 +156,10 @@ pub(crate) struct ToolCatalog {
     /// Model-visible names of deferred functions and namespace members not loaded yet.
     pub(crate) withheld_function_names: HashSet<String>,
     pub(crate) mcp_loads: McpLoads,
+    /// The tools discovery listed for each deferred MCP server, as hosted search returns them.
+    pub(crate) mcp_members: HashMap<String, Vec<CodexNamespaceMember>>,
+    /// Tools loaded before this response; hosted search does not offer them again.
+    pub(crate) loaded_before_response: HashSet<search::LoadedKey>,
 }
 
 impl ToolCatalog {

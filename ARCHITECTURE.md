@@ -1036,10 +1036,10 @@ continuation. Client tool search retains its normal `parallel_tool_calls` valida
 multi-agent execution does not bypass that rule.
 
 Hosted tool search runs in the gateway like those tools. Its `tool_search` function is
-gateway-owned (`ToolType::HostedToolSearch`) and searches a per-response catalog
-(`HostedCatalog`) of deferred functions, namespace members, and deferred MCP servers
-(as `mcp_<server_label>`), built after MCP discovery and excluding tools loaded by
-earlier responses. The search is pure, so its `tool_search_output` is known when the
+the one `ToolType::ToolSearch`, gateway-owned because the declaration's `execution` is
+`"server"`, and it searches the request's `ToolCatalog` (`tool/catalog.rs`): deferred
+functions, namespace members, and deferred MCP servers (as `mcp_<server_label>`, with the
+members MCP discovery listed), excluding tools loaded by earlier responses. The search is pure, so its `tool_search_output` is known when the
 call is planned: the scheduler gives the call two public output indexes (a follow-up
 item), and later items in the round shift by one, the inverse of an omitted refusal.
 After the round, `ToolSearchState::apply_hosted_search` loads the returned tools,

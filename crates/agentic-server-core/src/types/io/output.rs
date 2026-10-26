@@ -1,5 +1,5 @@
 mod apply_done;
-mod tool_search_call;
+pub(crate) mod tool_search_call;
 mod web_search_status;
 pub use apply_done::ApplyDone;
 pub use tool_search_call::ToolSearchCall;

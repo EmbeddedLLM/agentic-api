@@ -1,13 +1,16 @@
 //! The public tool-search call item, client-executed or hosted.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
+use crate::types::io::ToolSearchOutputMessage;
 use crate::types::io::input::{
     check_tool_search_call_id, deserialize_non_blank_string, deserialize_optional_non_blank_string,
 };
 use crate::types::io::multi_agent::AgentAttribution;
-use crate::types::tools::{ToolSearchExecution, ToolSearchStatus};
+use crate::types::io::output::FunctionToolCall;
+use crate::types::tools::{ResponsesTool, ToolSearchExecution, ToolSearchStatus};
+use crate::utils::common::deserialize_from_str;
 
 #[derive(Deserialize)]
 struct ToolSearchCallWire {
@@ -56,4 +59,58 @@ pub struct ToolSearchCall {
     pub execution: ToolSearchExecution,
     pub arguments: Value,
     pub status: ToolSearchStatus,
+}
+
+impl ToolSearchCall {
+    /// The public call for a hosted search the model made as `call`.
+    pub(crate) fn hosted(call: &FunctionToolCall, status: ToolSearchStatus) -> Self {
+        let arguments = match status {
+            ToolSearchStatus::Completed => {
+                deserialize_from_str::<Value>(&call.arguments).unwrap_or_else(|_| Value::Object(Map::new()))
+            }
+            // Arguments arrive whole on `output_item.done`, as the Responses API streams them.
+            ToolSearchStatus::InProgress | ToolSearchStatus::Incomplete => Value::Object(Map::new()),
+        };
+        Self {
+            agent: call.agent.clone(),
+            id: public_tool_search_item_id(&call.id),
+            call_id: None,
+            execution: ToolSearchExecution::Server,
+            arguments,
+            status,
+        }
+    }
+}
+
+impl ToolSearchOutputMessage {
+    /// The public output of the hosted search the model made as `call`, which loaded `tools`.
+    pub(crate) fn hosted(call: &FunctionToolCall, tools: Vec<ResponsesTool>) -> Self {
+        let call_item_id = public_tool_search_item_id(&call.id);
+        Self {
+            agent: call.agent.clone(),
+            id: Some(format!("tso_{}", call_item_id.trim_start_matches("tsc_"))),
+            call_id: None,
+            execution: ToolSearchExecution::Server,
+            status: ToolSearchStatus::Completed,
+            tools,
+        }
+    }
+}
+
+/// The public `tsc_` item id of the tool-search call the model made with item id `item_id`.
+pub(crate) fn public_tool_search_item_id(item_id: &str) -> String {
+    if item_id.strip_prefix("tsc_").is_some_and(|suffix| !suffix.is_empty()) {
+        return item_id.to_owned();
+    }
+    if let Some(suffix) = item_id.strip_prefix("fc_").filter(|suffix| !suffix.is_empty()) {
+        return format!("tsc_{suffix}");
+    }
+    let domain_separated = format!("tool_search_item:{item_id}");
+    format!("tsc_{:016x}", stable_hash(&domain_separated))
+}
+
+fn stable_hash(value: &str) -> u64 {
+    value.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
 }

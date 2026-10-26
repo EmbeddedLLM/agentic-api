@@ -6,6 +6,7 @@ use crate::types::tools::McpDiscoveredToolParam;
 use crate::utils::common::serialize_to_value;
 
 use super::*;
+use crate::tool::catalog::hosted_mcp_member;
 
 fn param(value: Value) -> ToolSearchToolParam {
     let ResponsesTool::ToolSearch(param) = serde_json::from_value(value).expect("valid tool_search declaration") else {

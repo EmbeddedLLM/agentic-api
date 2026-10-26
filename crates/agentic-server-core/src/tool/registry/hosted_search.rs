@@ -2,17 +2,24 @@
 //! catalog binding, and the tools a search loads.
 
 use std::collections::HashMap;
+use std::future::{Future, ready};
+use std::pin::Pin;
 use std::sync::Arc;
 
+use super::super::catalog::ToolCatalog;
 use super::super::declaration::{ToolDeclaration, responses_declarations};
 use super::super::executors::GatewayExecutors;
+use super::super::handler::{GatewayExecutor, GatewayToolEventPlan, PlannedResult, ToolOutput};
 use super::super::ownership::{GatewayBinding, ToolOwnership};
-use super::super::tool_search::{HostedCatalog, TOOL_SEARCH_NAME, ToolSearchHandler};
+use super::super::tool_search::{TOOL_SEARCH_NAME, ToolSearchHandler};
 use super::super::{CodexNamespaceHandler, ToolError};
 use super::{CustomHandler, ToolEntry, ToolRegistry, ToolType};
 use crate::types::io::OutputItem;
+use crate::types::io::input::hosted_search_output_text;
+use crate::types::io::output::FunctionToolCall;
+use crate::types::io::{ToolSearchCall, ToolSearchOutputMessage};
 use crate::types::tools::ResponsesTool;
-use crate::types::tools::ToolSearchToolParam;
+use crate::types::tools::{ToolSearchStatus, ToolSearchToolParam};
 
 impl ToolRegistry {
     /// Adds client entries for tools a hosted search loaded mid-response, and
@@ -46,7 +53,7 @@ impl ToolRegistry {
     }
 
     /// Binds the hosted `tool_search` entry to this response's catalog.
-    pub(crate) fn bind_hosted_tool_search(&mut self, catalog: HostedCatalog) {
+    pub(crate) fn bind_hosted_tool_search(&mut self, catalog: ToolCatalog) {
         if self.is_hosted_tool_search_name(TOOL_SEARCH_NAME) {
             self.entries
                 .insert(TOOL_SEARCH_NAME.to_owned(), hosted_tool_search_entry(catalog));
@@ -74,7 +81,7 @@ impl ToolRegistry {
 /// response's catalog once MCP discovery has run.
 pub(crate) fn insert_tool_search_entry(entries: &mut HashMap<String, ToolEntry>, param: &ToolSearchToolParam) {
     let entry = if param.is_hosted() {
-        hosted_tool_search_entry(HostedCatalog::default())
+        hosted_tool_search_entry(ToolCatalog::default())
     } else {
         tool_search_entry(ToolOwnership::Client)
     };
@@ -87,7 +94,7 @@ pub(crate) fn insert_tool_search_entry(entries: &mut HashMap<String, ToolEntry>,
 }
 
 /// The gateway runs a hosted search with [`ToolSearchHandler`] over this response's catalog.
-pub(crate) fn hosted_tool_search_entry(catalog: HostedCatalog) -> ToolEntry {
+pub(crate) fn hosted_tool_search_entry(catalog: ToolCatalog) -> ToolEntry {
     tool_search_entry(ToolOwnership::Gateway(Some(GatewayBinding::new(
         Arc::new(ToolSearchHandler),
         Arc::new(catalog),
@@ -101,5 +108,42 @@ fn tool_search_entry(ownership: ToolOwnership) -> ToolEntry {
         server_label: None,
         ownership,
         async_execution: false,
+    }
+}
+
+/// A hosted search runs in the gateway: a pure lookup over the response's catalog, so the public
+/// `tool_search_output` is already known when the call is planned. Validation and lowering are the handler's own.
+impl GatewayExecutor for ToolSearchHandler {
+    type ExecutionParams = Arc<ToolCatalog>;
+
+    /// The planned result answers a hosted search (see [`Self::plan_gateway_events`]); this runs the same search for
+    /// the trait.
+    fn execute(
+        &self,
+        call_id: &str,
+        _tool_name: &str,
+        arguments: &str,
+        params: &Self::ExecutionParams,
+    ) -> Pin<Box<dyn Future<Output = Result<ToolOutput, ToolError>> + Send + '_>> {
+        let output = hosted_search_output_text(&params.search_raw(arguments));
+        Box::pin(ready(Ok(ToolOutput::success(call_id, output))))
+    }
+
+    fn supports_parallel_execution(&self) -> bool {
+        true
+    }
+
+    /// The search is pure, so its result is known now: the gateway records the public pair without executing the
+    /// call, and the upstream projection shows the model its `tool_search` call and output.
+    fn plan_gateway_events(&self, call: &FunctionToolCall, params: &Self::ExecutionParams) -> GatewayToolEventPlan {
+        let output = ToolSearchOutputMessage::hosted(call, params.search_raw(&call.arguments));
+        GatewayToolEventPlan::new(Some(OutputItem::ToolSearchCall(ToolSearchCall::hosted(
+            call,
+            ToolSearchStatus::InProgress,
+        ))))
+        .with_planned_result(PlannedResult::search_pair(
+            ToolSearchCall::hosted(call, ToolSearchStatus::Completed),
+            output,
+        ))
     }
 }

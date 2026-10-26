@@ -1,6 +1,4 @@
-mod hosted;
 mod validation;
-pub(crate) use hosted::{HostedCatalog, HostedCatalogEntry};
 pub(crate) use validation::ensure_request_prepared;
 use validation::{input_contains_tool_search_state, request_contains_tool_search_state, validate_tool_search_request};
 
@@ -16,8 +14,8 @@ use crate::types::io::output::FunctionToolCall;
 use crate::types::io::{FunctionTool, InOutItem, InputItem, ResponsesInput, ToolChoice, ToolSearchCall};
 use crate::types::request_response::RequestPayload;
 use crate::types::tools::{
-    CodexNamespaceMember, CodexNamespaceToolParam, FunctionToolParam, McpDiscoveredToolParam, NonEmptyToolName,
-    ResponsesTool, ToolSearchExecution, ToolSearchStatus, ToolSearchToolParam,
+    CodexNamespaceMember, CodexNamespaceToolParam, ResponsesTool, ToolSearchExecution, ToolSearchStatus,
+    ToolSearchToolParam,
 };
 use crate::utils::common::{deserialize_from_str, deserialize_from_value};
 
@@ -25,6 +23,7 @@ pub(crate) use super::catalog::mcp_namespace_name;
 use super::catalog::{McpLoads, NamespaceMemberRecords, PriorCalls, ToolCatalog, tool_identity};
 use super::handler::{ToolError, ToolHandler};
 use super::registry::ToolType;
+pub(crate) use crate::types::io::output::tool_search_call::public_tool_search_item_id as public_item_id;
 
 const DEFAULT_DESCRIPTION: &str = "Search the client tool catalog";
 const DEFAULT_QUERY_DESCRIPTION: &str = "A concise description of the needed capabilities.";
@@ -156,36 +155,6 @@ enum ToolSearchActivity {
     Active,
 }
 
-/// A tool hosted search may load: a top-level function or one namespace
-/// member (an MCP tool is a member of its `mcp_<server_label>` namespace).
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-enum LoadedKey {
-    Function(String),
-    Member(String, String),
-}
-
-fn loaded_keys(tools: &[ResponsesTool]) -> HashSet<LoadedKey> {
-    let mut keys = HashSet::new();
-    for tool in tools {
-        match tool {
-            ResponsesTool::Function(function) => {
-                keys.insert(LoadedKey::Function(function.name.as_str().to_owned()));
-            }
-            ResponsesTool::Namespace(namespace) => {
-                keys.extend(namespace.tools.iter().filter_map(|member| match member {
-                    CodexNamespaceMember::Function(function) => Some(LoadedKey::Member(
-                        namespace.name.clone(),
-                        function.name.as_str().to_owned(),
-                    )),
-                    CodexNamespaceMember::Unknown => None,
-                }));
-            }
-            _ => {}
-        }
-    }
-    keys
-}
-
 #[derive(Serialize)]
 #[serde(untagged)]
 enum CatalogEntry {
@@ -233,8 +202,6 @@ pub struct ToolSearchState {
     hosted: bool,
     /// The request's definitions and what is loaded, kept so a hosted search can load tools mid-response.
     catalog: ToolCatalog,
-    /// Tools loaded before this response; hosted search does not offer them again.
-    loaded_before_response: HashSet<LoadedKey>,
 }
 
 /// Public tool-search state retained only for response persistence.
@@ -268,7 +235,6 @@ impl fmt::Debug for ToolSearchState {
             .field("definition_count", &self.catalog.definitions.len())
             .field("definition_index_count", &self.catalog.definition_indexes.len())
             .field("deferred_mcp_server_count", &self.catalog.mcp_loads.servers.len())
-            .field("loaded_before_response_count", &self.loaded_before_response.len())
             .finish()
     }
 }
@@ -285,7 +251,6 @@ impl Default for ToolSearchState {
             unqualified_call_positions: HashMap::new(),
             hosted: false,
             catalog: ToolCatalog::default(),
-            loaded_before_response: HashSet::new(),
         }
     }
 }
@@ -357,7 +322,7 @@ impl ToolSearchState {
         let entries = catalog_entries(&catalog);
         let synthetic_tool_search = declaration.map(|declaration| synthetic_tool_search(declaration, &entries));
         let private_tools = build_private_tools(&catalog, synthetic_tool_search.as_ref());
-        let loaded_before_response = loaded_keys(&catalog.loaded_public_tools);
+        catalog.begin_response();
         let has_effective_tools = tools_were_present || !catalog.public_tools.is_empty();
         let private_upstream_tools = (tools_were_present || !private_tools.is_empty()).then_some(private_tools);
 
@@ -371,7 +336,6 @@ impl ToolSearchState {
             unqualified_call_positions,
             hosted,
             catalog,
-            loaded_before_response,
         })
     }
 
@@ -465,64 +429,10 @@ impl ToolSearchState {
     /// which supplies each deferred server's members. A server whose listing
     /// failed has no members and so offers nothing.
     #[must_use]
-    pub(crate) fn hosted_catalog(&self, private_tools: &[ResponsesTool]) -> HostedCatalog {
-        let offered = |key: LoadedKey| !self.loaded_before_response.contains(&key);
-        let mut entries = Vec::new();
-        for tool in self.public_effective_tools().unwrap_or_default() {
-            match tool {
-                ResponsesTool::Function(function)
-                    if function.defer_loading == Some(true)
-                        && offered(LoadedKey::Function(function.name.as_str().to_owned())) =>
-                {
-                    entries.push(HostedCatalogEntry::Function(function.clone()));
-                }
-                ResponsesTool::Namespace(namespace) => {
-                    let tools: Vec<_> = namespace
-                        .tools
-                        .iter()
-                        .filter(|member| {
-                            matches!(member, CodexNamespaceMember::Function(function)
-                                if function.defer_loading == Some(true)
-                                    && offered(LoadedKey::Member(namespace.name.clone(), function.name.as_str().to_owned())))
-                        })
-                        .cloned()
-                        .collect();
-                    if !tools.is_empty() {
-                        entries.push(HostedCatalogEntry::Namespace(CodexNamespaceToolParam {
-                            tools,
-                            ..namespace.clone()
-                        }));
-                    }
-                }
-                ResponsesTool::Mcp(server) if self.catalog.mcp_loads.is_deferred(&server.server_label) => {
-                    let name = mcp_namespace_name(&server.server_label);
-                    let discovered = private_tools.iter().find_map(|tool| match tool {
-                        ResponsesTool::Mcp(private) if private.server_label == server.server_label => {
-                            Some(private.discovered_tools.as_slice())
-                        }
-                        _ => None,
-                    });
-                    let tools: Vec<_> = discovered
-                        .unwrap_or_default()
-                        .iter()
-                        .filter(|tool| offered(LoadedKey::Member(name.clone(), tool.tool_name.clone())))
-                        .filter_map(hosted_mcp_member)
-                        .collect();
-                    if !tools.is_empty() {
-                        entries.push(HostedCatalogEntry::Namespace(CodexNamespaceToolParam {
-                            name,
-                            // No fallback: the Responses API leaves the description empty.
-                            description: Some(server.server_description.clone().unwrap_or_default()),
-                            tools,
-                            unsupported_async: None,
-                            extra: HashMap::new(),
-                        }));
-                    }
-                }
-                _ => {}
-            }
-        }
-        HostedCatalog::new(entries)
+    pub(crate) fn hosted_catalog(&self, private_tools: &[ResponsesTool]) -> ToolCatalog {
+        let mut catalog = self.catalog.clone();
+        catalog.discover_mcp(private_tools);
+        catalog
     }
 
     /// Rejects a `tool_choice` naming a deferred MCP tool that is not loaded;
@@ -687,23 +597,6 @@ fn restored_definition_for_load(
         return Ok(None);
     }
     Ok(Some(restored.clone()))
-}
-
-pub(crate) fn public_item_id(item_id: &str) -> String {
-    if item_id.strip_prefix("tsc_").is_some_and(|suffix| !suffix.is_empty()) {
-        return item_id.to_owned();
-    }
-    if let Some(suffix) = item_id.strip_prefix("fc_").filter(|suffix| !suffix.is_empty()) {
-        return format!("tsc_{suffix}");
-    }
-    let domain_separated = format!("tool_search_item:{item_id}");
-    format!("tsc_{:016x}", stable_hash(&domain_separated))
-}
-
-fn stable_hash(value: &str) -> u64 {
-    value.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
-        (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
-    })
 }
 
 pub(crate) fn invalid_upstream_search_call() -> ToolError {
@@ -1037,23 +930,6 @@ fn validate_search_mode(
         ));
     }
     Ok(())
-}
-
-/// One discovered MCP tool as a hosted search returns it. Like the Responses
-/// API it carries `"output_schema": null`; its `"strict": null` is left out,
-/// because the typed `strict` field cannot keep a null through storage.
-fn hosted_mcp_member(tool: &McpDiscoveredToolParam) -> Option<CodexNamespaceMember> {
-    let name = NonEmptyToolName::try_from(tool.tool_name.as_str()).ok()?;
-    let extra = HashMap::from([("output_schema".to_owned(), Value::Null)]);
-    Some(CodexNamespaceMember::Function(FunctionToolParam {
-        name,
-        description: tool.tool.description.as_deref().map(str::to_owned),
-        parameters: Some(Value::Object(tool.tool.input_schema.as_ref().clone())),
-        strict: None,
-        defer_loading: Some(true),
-        async_execution: None,
-        extra,
-    }))
 }
 
 fn synthetic_tool_search(declaration: &ToolSearchToolParam, catalog: &[CatalogEntry]) -> ToolSearchToolParam {
