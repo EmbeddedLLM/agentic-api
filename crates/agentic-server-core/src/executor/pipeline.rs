@@ -34,6 +34,8 @@ pub(super) struct AgentPipeline {
     agent_guidance: Option<InputMessage>,
     /// Set after a `max_tool_calls` refusal; later rounds omit gateway-executed tools.
     builtin_tools_withheld: bool,
+    /// Top-level functions the history knows beyond the request's own declarations; naming context only.
+    history_functions: Vec<String>,
     /// Timing state of the execution this pipeline serves, when it streams.
     clock: Option<ExecutionClock>,
 }
@@ -68,6 +70,16 @@ impl AgentPipeline {
 
     pub(super) const fn builtin_tools_withheld(&self) -> bool {
         self.builtin_tools_withheld
+    }
+
+    /// Names `functions` as top-level functions the history knows, so a call naming itself reaches the model
+    /// unqualified although this request declares no such function.
+    pub(super) fn set_history_functions(&mut self, functions: Vec<String>) {
+        self.history_functions = functions;
+    }
+
+    pub(super) fn history_functions(&self) -> &[String] {
+        &self.history_functions
     }
 
     pub(super) fn has_live_agent_items(&self, agent: &AgentIdentity) -> bool {
@@ -106,6 +118,7 @@ impl AgentPipeline {
             control: None,
             steering: None,
             builtin_tools_withheld: false,
+            history_functions: Vec::new(),
             clock: None,
         }
     }

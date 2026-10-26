@@ -19,6 +19,8 @@ pub struct CompactionPlan {
     prompt_cache_retention: Option<PromptCacheRetention>,
     prompt_cache_options: Option<PromptCacheOptions>,
     service_tier: Option<String>,
+    /// The agent request's top-level functions, naming context for its summary.
+    history_functions: Vec<String>,
 }
 
 pub struct CompactionResult {
@@ -80,6 +82,7 @@ impl CompactionPlan {
             prompt_cache_retention: request.prompt_cache_retention,
             prompt_cache_options: request.prompt_cache_options,
             service_tier: request.service_tier.clone(),
+            history_functions: request.top_level_function_names(),
         }))
     }
 
@@ -114,8 +117,14 @@ impl CompactionPlan {
             service_tier: self.service_tier,
             ..Default::default()
         };
-        let (mut replacement, usage, service_tier) =
-            compact_items(&request, ResponsesInput::from(self.prefix), exec, auth).await?;
+        let (mut replacement, usage, service_tier) = compact_items(
+            &request,
+            self.history_functions,
+            ResponsesInput::from(self.prefix),
+            exec,
+            auth,
+        )
+        .await?;
         let at = replacement
             .iter()
             .rposition(|item| matches!(item, InputItem::Compaction(_)))

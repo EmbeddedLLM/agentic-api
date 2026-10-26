@@ -215,7 +215,9 @@ async fn run_compaction_trigger(
         )
         .stored
         .into_inputs();
-        let (mut compacted, usage, service_tier) = compact_items(&ctx.enriched_request, input, exec_ctx, auth).await?;
+        let functions = ctx.enriched_request.top_level_function_names();
+        let (mut compacted, usage, service_tier) =
+            compact_items(&ctx.enriched_request, functions, input, exec_ctx, auth).await?;
         let Some(InputItem::Compaction(compaction)) = compacted.pop() else {
             unreachable!("compact_items always appends a compaction item");
         };

@@ -125,8 +125,9 @@ All notable changes to Agentic API are documented here.
   call's `call_id` is rejected (`duplicate tool_search_call call_id`), since the model would otherwise see two calls
   with one id. A `function_call` whose `namespace` equals its `name`, that no declared namespace maps, and whose
   name is a top-level function the request declares or a search output in its input loaded reaches the model
-  unqualified, as a searched top-level function does; any other call keeps its namespace, since a namespace may
-  hold a member of its own name. Compaction's token estimate counts a search output as the text the model reads
+  unqualified, as a searched top-level function does; a compaction summary, which declares no tools, uses its
+  source request's functions. Any other call keeps its namespace, since a namespace may hold a member of its own
+  name. Compaction's token estimate counts a search output as the text the model reads
   (functions with their schemas, namespaces by name and description), as it already did during a response.
   `agentic_core`: `CodexNamespaceHandler::resolve_input` takes the request's top-level function names
   (`&HashSet<&str>`) between the namespace map and the input.

@@ -350,6 +350,16 @@ impl RequestPayload {
     /// member, or when a custom tool declares a format whose constrained
     /// decoding cannot be preserved upstream.
     pub fn to_upstream_request(&self, stream: bool) -> Result<UpstreamRequest<'_>, UpstreamRequestError> {
+        self.to_upstream_request_with(stream, &[])
+    }
+
+    /// [`Self::to_upstream_request`] for a request whose history knows the top-level functions `history_functions`
+    /// beyond those it declares or its input shows, such as a compaction summary of a request that restored them.
+    pub(crate) fn to_upstream_request_with(
+        &self,
+        stream: bool,
+        history_functions: &[String],
+    ) -> Result<UpstreamRequest<'_>, UpstreamRequestError> {
         self.input.validate()?;
         // This is only the upstream model-generation preference: it controls
         // whether the model may emit parallel calls, not how the gateway
@@ -360,25 +370,9 @@ impl RequestPayload {
         let parallel_tool_calls = Some(self.parallel_tool_calls.unwrap_or(false));
 
         let declarations = self.tool_declarations();
-        let renamed_tools = declarations
-            .as_deref()
-            .map(|tools| CodexNamespaceHandler.resolve_namespace_members(tools))
-            .transpose()?;
-        if let Some(tools) = &renamed_tools {
-            for tool in tools {
-                tool.validate()?;
-            }
-        }
-        let tools: Option<Vec<UpstreamTool>> = renamed_tools.map(|tools| {
-            tools
-                .iter()
-                .flat_map(ToolDeclaration::to_function_tools)
-                .map(UpstreamTool::Function)
-                .collect()
-        });
-        let tools = tools.filter(|tools| !tools.is_empty());
+        let tools = Self::upstream_tools(declarations.as_deref())?;
         let namespace_map = CodexNamespaceHandler.build_namespace_map(declarations.as_deref())?;
-        let input = self.upstream_input(declarations.as_deref(), namespace_map.as_ref())?;
+        let input = self.upstream_input(declarations.as_deref(), namespace_map.as_ref(), history_functions)?;
         let tool_choice = CodexNamespaceHandler.resolve_tool_choice(namespace_map.as_ref(), self.tool_choice.as_ref());
         CustomHandler::validate_tool_choice(declarations.as_deref(), &tool_choice)?;
         Ok(UpstreamRequest {

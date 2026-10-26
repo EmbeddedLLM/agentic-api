@@ -71,7 +71,7 @@ struct NamespaceMemberName {
 }
 
 #[derive(Clone, Debug)]
-struct NamespaceCallMapping {
+pub(crate) struct NamespaceCallMapping {
     member: NamespaceMemberName,
     upstream_name: String,
 }
@@ -96,7 +96,7 @@ impl NamespaceMap {
         self.calls.get(name)
     }
 
-    fn mapping_for_member(&self, namespace: &str, name: &str) -> Option<&NamespaceCallMapping> {
+    pub(crate) fn mapping_for_member(&self, namespace: &str, name: &str) -> Option<&NamespaceCallMapping> {
         let member = NamespaceMemberName {
             namespace: namespace.to_string(),
             name: name.to_string(),

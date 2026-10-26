@@ -79,18 +79,23 @@ fn translation_context(registry: &ToolRegistry, agent: &AgentPipeline) -> Transl
 /// # Errors
 /// Unsupported message content, a tool-configuration error, or a serialization failure.
 pub fn upstream_request(ctx: &RequestContext, stream: bool) -> ExecutorResult<String> {
-    upstream_request_with_guidance(ctx, stream, None, None)
+    upstream_request_with_guidance(ctx, stream, None, None, &[])
 }
 
 /// `withheld` names the registry whose gateway-executed tools are left out
 /// after a `max_tool_calls` refusal, without changing the persisted tools.
+/// `history_functions` are top-level functions the history knows beyond the
+/// request's declarations (see [`AgentPipeline::set_history_functions`]).
 fn upstream_request_with_guidance(
     ctx: &RequestContext,
     stream: bool,
     guidance: Option<&InputMessage>,
     withheld: Option<&ToolRegistry>,
+    history_functions: &[String],
 ) -> ExecutorResult<String> {
-    let mut request = ctx.enriched_request.to_upstream_request(stream)?;
+    let mut request = ctx
+        .enriched_request
+        .to_upstream_request_with(stream, history_functions)?;
     if let Some(registry) = withheld {
         if let Some(tools) = request.tools.as_mut() {
             // Hosted search does not count toward `max_tool_calls`, so it stays available.
@@ -133,7 +138,13 @@ pub(super) async fn fetch_blocking_payload(
 ) -> ExecutorResult<ResponsePayload> {
     agent.ensure_request_prepared()?;
     let withheld = agent.builtin_tools_withheld().then_some(registry);
-    let upstream_json = upstream_request_with_guidance(&agent.request, false, agent.agent_guidance(), withheld)?;
+    let upstream_json = upstream_request_with_guidance(
+        &agent.request,
+        false,
+        agent.agent_guidance(),
+        withheld,
+        agent.history_functions(),
+    )?;
     let body = fetch_response_json_limited(
         upstream_json,
         &exec_ctx.responses_url(),
@@ -199,7 +210,13 @@ pub(super) async fn fetch_stream_payload(
 ) -> ExecutorResult<ResponsePayload> {
     agent.ensure_request_prepared()?;
     let withheld = agent.builtin_tools_withheld().then_some(registry);
-    let upstream_json = upstream_request_with_guidance(&agent.request, true, agent.agent_guidance(), withheld)?;
+    let upstream_json = upstream_request_with_guidance(
+        &agent.request,
+        true,
+        agent.agent_guidance(),
+        withheld,
+        agent.history_functions(),
+    )?;
     let lines = call_inference_with_headers_limited(
         upstream_json,
         exec_ctx.responses_url(),
@@ -249,9 +266,10 @@ pub(super) mod tests {
         .unwrap();
         let baseline: Value = serde_json::from_str(&upstream_request(&ctx, false).unwrap()).unwrap();
         for stream in [false, true] {
-            let body: Value =
-                serde_json::from_str(&upstream_request_with_guidance(&ctx, stream, Some(&guidance), None).unwrap())
-                    .unwrap();
+            let body: Value = serde_json::from_str(
+                &upstream_request_with_guidance(&ctx, stream, Some(&guidance), None, &[]).unwrap(),
+            )
+            .unwrap();
             assert_eq!(body["instructions"], "caller instructions");
             let items = body["input"].as_array().unwrap();
             assert_eq!(&items[..3], baseline["input"].as_array().unwrap());

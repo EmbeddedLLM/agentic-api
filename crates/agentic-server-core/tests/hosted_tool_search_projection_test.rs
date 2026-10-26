@@ -344,3 +344,119 @@ async fn compaction_summary_keeps_a_namespace_member_named_like_its_namespace() 
     assert_eq!(summary[3]["name"], "weather");
     assert_eq!(summary[3]["namespace"], "weather", "{}", summary[3]);
 }
+
+/// Once a compaction drops the search that loaded a function, the function stays loaded from the
+/// stored metadata, and a later call to it still names itself. A second summary, which declares no
+/// tools and no longer holds that search, must still show the call as the model saw it.
+async fn second_compaction_summary_of_a_restored_function_call(multi_agent: bool) {
+    let weather_call = json!({"type": "function_call", "id": "fc_w1", "call_id": "call_w1", "name": "get_weather",
+        "arguments": "{\"city\":\"Paris\"}", "status": "completed"});
+    let (llm_url, requests) = spawn_llm(vec![
+        upstream("up_1", json!([search_call("s1")])),
+        upstream("up_2", json!([message("loaded")])),
+        upstream("up_summary_1", json!([message("summary one")])),
+        upstream("up_3", json!([weather_call])),
+        upstream("up_summary_2", json!([message("summary two")])),
+        upstream("up_4", json!([message("done")])),
+    ])
+    .await;
+    let (context, _, _) = durable_context(llm_url).await;
+    let turn = |input: Value, previous: Option<&str>| {
+        let mut body = json!({"model": "test", "input": input, "tools": tools(), "store": true});
+        if multi_agent {
+            body["multi_agent"] = json!({"enabled": true});
+        }
+        if let Some(previous) = previous {
+            body["previous_response_id"] = json!(previous);
+            body["context_management"] = json!([{"type": "compaction", "compact_threshold": 1}]);
+        }
+        body
+    };
+    let first = run(turn(json!([user("weather?")]), None), &context).await;
+    let second = run(turn(json!([user("Paris?")]), Some(&first.id)), &context).await;
+    let call = serde_json::to_value(second.output.last().expect("call")).expect("call JSON");
+    assert_eq!(call["namespace"], "get_weather", "{call}");
+    let answer = json!([{"type": "function_call_output", "call_id": "call_w1", "output": "18C"}]);
+    let third = run(turn(answer, Some(&second.id)), &context).await;
+    assert_eq!(third.status, "completed");
+
+    let requests = requests.lock().await;
+    assert_eq!(
+        requests.len(),
+        6,
+        "two rounds, a summary and a call, a summary and an answer"
+    );
+    let summary = &requests[4];
+    assert!(summary["tools"].is_null(), "{}", summary["tools"]);
+    let offered: Vec<_> = requests[5]["tools"]
+        .as_array()
+        .expect("tools")
+        .iter()
+        .map(|tool| &tool["name"])
+        .collect();
+    assert!(
+        offered.iter().any(|name| *name == "get_weather"),
+        "restored from metadata: {offered:?}"
+    );
+    let input = model_input(summary);
+    assert!(
+        input.iter().all(|item| item["name"] != "tool_search"),
+        "the search was compacted away"
+    );
+    let call = input
+        .iter()
+        .find(|item| item["call_id"] == "call_w1" && item["type"] == "function_call")
+        .expect("the restored function's call");
+    assert_eq!(call["name"], "get_weather");
+    assert!(call.get("namespace").is_none(), "{call}");
+}
+
+#[tokio::test]
+async fn a_second_compaction_summary_shows_a_restored_function_call_unqualified() {
+    second_compaction_summary_of_a_restored_function_call(false).await;
+}
+
+#[tokio::test]
+async fn a_multi_agent_second_compaction_summary_shows_a_restored_function_call_unqualified() {
+    second_compaction_summary_of_a_restored_function_call(true).await;
+}
+
+/// A request that declares a namespace `weather` with a member `weather` and a top-level `weather`
+/// reads a call to `weather` in namespace `weather` as that member; its summary must too.
+#[tokio::test]
+async fn compaction_summary_keeps_a_namespace_member_beside_a_top_level_function_of_its_name() {
+    let (llm_url, requests) = spawn_llm(vec![
+        upstream("up_summary", json!([message("summary")])),
+        upstream("up_1", json!([message("done")])),
+    ])
+    .await;
+    let (context, _, _) = durable_context(llm_url).await;
+    let function = |description: &str| {
+        json!({"type": "function", "name": "weather", "description": description,
+            "parameters": {"type": "object", "properties": {}}})
+    };
+    let tools = json!([{"type": "namespace", "name": "weather", "description": "Weather tools",
+        "tools": [function("Member weather")]}, function("Top-level weather")]);
+    let input = json!([
+        user("weather?"),
+        {"type": "function_call", "id": "fc_w1", "call_id": "call_w1", "name": "weather", "namespace": "weather",
+            "arguments": "{}", "status": "completed"},
+        {"type": "function_call_output", "call_id": "call_w1", "output": "18C"},
+        user("again")
+    ]);
+    let response = run(
+        json!({"model": "test", "input": input, "tools": tools, "store": false,
+            "context_management": [{"type": "compaction", "compact_threshold": 1}]}),
+        &context,
+    )
+    .await;
+    assert_eq!(response.status, "completed");
+
+    let requests = requests.lock().await;
+    let summary = model_input(&requests[0]);
+    let call = summary
+        .iter()
+        .find(|item| item["call_id"] == "call_w1" && item["type"] == "function_call")
+        .expect("the member's call");
+    assert_eq!(call["namespace"], "weather", "{call}");
+}
