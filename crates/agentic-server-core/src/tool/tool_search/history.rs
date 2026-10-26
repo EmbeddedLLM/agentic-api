@@ -5,14 +5,12 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::mem;
 
+use crate::tool::catalog::{PriorCalls, ToolCatalog, ToolIdentity, history_call_before_load};
 use crate::tool::codex::is_searched_function_call;
 use crate::tool::handler::ToolError;
 use crate::types::io::input::{SearchHistory, SearchPairing};
 use crate::types::io::{InOutItem, InputFunctionToolCall, InputItem, ResponsesInput, ToolSearchOutputMessage};
 use crate::types::tools::{ToolSearchExecution, ToolSearchStatus};
-
-use super::definitions::load_definition;
-use super::{DefinitionAccumulator, DefinitionViews, LoadedToolIdentity};
 
 /// Loads the definitions each completed search output in `input` returned, in history order, and checks each
 /// function call against them.
@@ -22,7 +20,7 @@ use super::{DefinitionAccumulator, DefinitionViews, LoadedToolIdentity};
 /// call and a hosted call is answered, and only a completed output loads definitions.
 pub(super) fn load_history_definitions(
     input: &ResponsesInput,
-    views: DefinitionViews<'_>,
+    catalog: &mut ToolCatalog,
     unqualified_call_positions: &mut HashMap<String, usize>,
 ) -> Result<(), ToolError> {
     let ResponsesInput::Items(items) = input else {
@@ -35,28 +33,12 @@ pub(super) fn load_history_definitions(
     let client_call_ids: HashSet<&str> = items.iter().filter_map(|item| item.call_id()).collect();
     let mut call_item_ids = HashSet::new();
     let mut hosted_call_ids = HashSet::new();
-    let DefinitionViews {
-        public_tools,
-        definitions,
-        definition_indexes,
-        loaded_public_tools,
-        withheld_function_names,
-        mcp_loads,
-    } = views;
-    let mut definition_accumulator = DefinitionAccumulator {
-        public_tools,
-        definitions,
-        definition_indexes,
-        loaded_public_tools,
-        withheld_function_names,
-        mcp_loads,
-        prior_unknown_namespace_calls: HashMap::new(),
+    let mut prior = PriorCalls {
+        unknown_namespace_calls: HashMap::new(),
         unqualified_call_positions: mem::take(unqualified_call_positions),
-        current_history_position: None,
     };
 
     for (position, item) in items.iter().enumerate() {
-        definition_accumulator.current_history_position = Some(position);
         match (item.as_ref(), search_history.pairing(position)) {
             (InputItem::ToolSearchCall(call), pairing) => {
                 if !call_item_ids.insert(call.id.as_str()) {
@@ -70,21 +52,10 @@ pub(super) fn load_history_definitions(
                 }
             }
             (InputItem::ToolSearchOutput(output), pairing) => {
-                load_output_definitions(output, pairing, &mut definition_accumulator)?;
+                load_output_definitions(output, pairing, catalog, &prior)?;
             }
             (InputItem::FunctionCall(call), _) => {
-                let is_function = |name: &str| {
-                    definition_accumulator
-                        .definition_indexes
-                        .get(name)
-                        .is_some_and(|index| {
-                            matches!(
-                                definition_accumulator.definitions[*index].identity,
-                                LoadedToolIdentity::Function(_)
-                            )
-                        })
-                };
-                let call = if is_searched_function_call(call, is_function) {
+                let call = if is_searched_function_call(call, |name| catalog.is_function(name)) {
                     Cow::Owned(InputFunctionToolCall {
                         namespace: None,
                         ..call.clone()
@@ -92,7 +63,7 @@ pub(super) fn load_history_definitions(
                 } else {
                     Cow::Borrowed(call)
                 };
-                ensure_history_call_is_available(&call, &mut definition_accumulator)?;
+                ensure_history_call_is_available(&call, catalog, &mut prior, position)?;
             }
             _ => {}
         }
@@ -107,14 +78,15 @@ pub(super) fn load_history_definitions(
             "unresolved tool_search_call requires a matching completed tool_search_output".to_owned(),
         ));
     }
-    *unqualified_call_positions = definition_accumulator.unqualified_call_positions;
+    *unqualified_call_positions = prior.unqualified_call_positions;
     Ok(())
 }
 
 fn load_output_definitions(
     output: &ToolSearchOutputMessage,
     pairing: Option<&SearchPairing>,
-    definition_accumulator: &mut DefinitionAccumulator<'_>,
+    catalog: &mut ToolCatalog,
+    prior: &PriorCalls,
 ) -> Result<(), ToolError> {
     if output.execution == ToolSearchExecution::Server && pairing == Some(&SearchPairing::UnmatchedOutput) {
         return Err(ToolError::Config(
@@ -127,49 +99,42 @@ fn load_output_definitions(
         ));
     }
     for tool in &output.tools {
-        load_definition(tool, definition_accumulator)?;
+        catalog.load(tool, prior)?;
     }
     Ok(())
 }
 
 fn ensure_history_call_is_available(
     call: &InputFunctionToolCall,
-    definitions: &mut DefinitionAccumulator<'_>,
+    catalog: &ToolCatalog,
+    prior: &mut PriorCalls,
+    position: usize,
 ) -> Result<(), ToolError> {
     if let Some(namespace) = call.namespace.as_deref() {
-        let member = definitions
-            .definition_indexes
-            .get(namespace)
-            .and_then(|index| definitions.definitions.get(*index))
-            .filter(|record| matches!(record.identity, LoadedToolIdentity::Namespace(_)))
+        let member = catalog
+            .definition(namespace)
+            .filter(|record| matches!(record.identity, ToolIdentity::Namespace(_)))
             .and_then(|record| record.namespace_members.as_ref())
             .and_then(|members| members.indexes.get(&call.name).map(|index| &members.ordered[*index]));
         match member {
-            Some(member) if !member.loaded => return Err(withheld_function_history_call()),
+            Some(member) if !member.loaded => return Err(history_call_before_load()),
             Some(_) => {}
             None => {
-                definitions
-                    .prior_unknown_namespace_calls
+                prior
+                    .unknown_namespace_calls
                     .entry(namespace.to_owned())
                     .or_default()
                     .insert(call.name.clone());
             }
         }
     } else {
-        if definitions.withheld_function_names.contains(&call.name) {
-            return Err(withheld_function_history_call());
+        if catalog.withheld_function_names.contains(&call.name) {
+            return Err(history_call_before_load());
         }
-        let position = definitions
-            .current_history_position
-            .ok_or_else(|| ToolError::Config("tool-search history position is unavailable".to_owned()))?;
-        definitions
+        prior
             .unqualified_call_positions
             .entry(call.name.clone())
             .or_insert(position);
     }
     Ok(())
-}
-
-pub(super) fn withheld_function_history_call() -> ToolError {
-    ToolError::Config("request history calls a function before its definition is loaded".to_owned())
 }

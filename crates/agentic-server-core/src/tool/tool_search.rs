@@ -1,8 +1,6 @@
-mod definitions;
 mod history;
 mod hosted;
 mod validation;
-use definitions::{canonical_definition, canonical_namespace_member, load_definition, loaded_tool_identity};
 use history::load_history_definitions;
 pub(crate) use hosted::{HostedCatalog, HostedCatalogEntry};
 pub(crate) use validation::ensure_request_prepared;
@@ -25,8 +23,8 @@ use crate::types::tools::{
 };
 use crate::utils::common::{deserialize_from_str, deserialize_from_value};
 
-use super::CodexNamespaceHandler;
-use super::declaration::responses_declarations;
+pub(crate) use super::catalog::mcp_namespace_name;
+use super::catalog::{McpLoads, NamespaceMemberRecords, PriorCalls, ToolCatalog, tool_identity};
 use super::handler::{ToolError, ToolHandler};
 use super::registry::ToolType;
 
@@ -154,140 +152,10 @@ fn default_parameters() -> Map<String, Value> {
     ])
 }
 
-/// Stable public identity used to compare definitions accumulated from search outputs.
-///
-/// Equality remains type-aware while the state builder also indexes the visible name
-/// separately, so returning the same name under a different supported kind is rejected.
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-enum LoadedToolIdentity {
-    Function(String),
-    Namespace(String),
-}
-
-impl LoadedToolIdentity {
-    fn name(&self) -> &str {
-        match self {
-            Self::Function(name) | Self::Namespace(name) => name,
-        }
-    }
-
-    const fn kind(&self) -> &'static str {
-        match self {
-            Self::Function(_) => "function",
-            Self::Namespace(_) => "namespace",
-        }
-    }
-}
-
-#[derive(Clone)]
-struct DefinitionRecord {
-    identity: LoadedToolIdentity,
-    canonical: Value,
-    public_index: usize,
-    loaded: bool,
-    namespace_members: Option<NamespaceMemberRecords>,
-}
-
-#[derive(Clone)]
-struct NamespaceMemberRecord {
-    canonical: Value,
-    public_member_index: usize,
-    loaded: bool,
-}
-
-#[derive(Clone)]
-struct NamespaceMemberRecords {
-    ordered: Vec<NamespaceMemberRecord>,
-    indexes: HashMap<String, usize>,
-    unloaded_count: usize,
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ToolSearchActivity {
     Inactive,
     Active,
-}
-
-struct DefinitionAccumulator<'a> {
-    public_tools: &'a mut Vec<ResponsesTool>,
-    definitions: &'a mut Vec<DefinitionRecord>,
-    definition_indexes: &'a mut HashMap<String, usize>,
-    loaded_public_tools: &'a mut Vec<ResponsesTool>,
-    withheld_function_names: &'a mut HashSet<String>,
-    mcp_loads: &'a mut McpLoads,
-    prior_unknown_namespace_calls: HashMap<String, HashSet<String>>,
-    unqualified_call_positions: HashMap<String, usize>,
-    current_history_position: Option<usize>,
-}
-
-struct DefinitionViews<'a> {
-    public_tools: &'a mut Vec<ResponsesTool>,
-    definitions: &'a mut Vec<DefinitionRecord>,
-    definition_indexes: &'a mut HashMap<String, usize>,
-    loaded_public_tools: &'a mut Vec<ResponsesTool>,
-    withheld_function_names: &'a mut HashSet<String>,
-    mcp_loads: &'a mut McpLoads,
-}
-
-/// The namespace name under which hosted search lists a deferred MCP server.
-pub(crate) fn mcp_namespace_name(server_label: &str) -> String {
-    format!("mcp_{server_label}")
-}
-
-/// Deferred MCP servers and the tools hosted search has loaded from them.
-///
-/// A deferred server is searchable as the namespace `mcp_<server_label>`.
-/// Loading its members records MCP tool names; it never adds a client
-/// namespace, because the gateway executes MCP calls itself.
-#[derive(Clone, Debug, Default)]
-struct McpLoads {
-    /// `mcp_<server_label>` to server label, in declaration order.
-    servers: indexmap::IndexMap<String, String>,
-    /// Loaded tool names by server label, in first-load order.
-    loaded: HashMap<String, Vec<String>>,
-}
-
-impl McpLoads {
-    fn from_tools(tools: &[ResponsesTool]) -> Self {
-        let servers = tools
-            .iter()
-            .filter_map(|tool| match tool {
-                ResponsesTool::Mcp(server) if server.defer_loading == Some(true) => {
-                    Some((mcp_namespace_name(&server.server_label), server.server_label.clone()))
-                }
-                _ => None,
-            })
-            .collect();
-        Self {
-            servers,
-            loaded: HashMap::new(),
-        }
-    }
-
-    fn label(&self, namespace: &str) -> Option<&str> {
-        self.servers.get(namespace).map(String::as_str)
-    }
-
-    fn is_deferred(&self, server_label: &str) -> bool {
-        self.servers.values().any(|label| label == server_label)
-    }
-
-    /// Records `names` as loaded and returns the ones that were not loaded yet.
-    fn load<'n>(&mut self, server_label: &str, names: impl Iterator<Item = &'n str>) -> Vec<String> {
-        let loaded = self.loaded.entry(server_label.to_owned()).or_default();
-        let mut newly_loaded = Vec::new();
-        for name in names {
-            if !loaded.iter().any(|loaded| loaded == name) {
-                loaded.push(name.to_owned());
-                newly_loaded.push(name.to_owned());
-            }
-        }
-        newly_loaded
-    }
-
-    fn loaded_names(&self, server_label: &str) -> Vec<String> {
-        self.loaded.get(server_label).cloned().unwrap_or_default()
-    }
 }
 
 /// A tool hosted search may load: a top-level function or one namespace
@@ -357,19 +225,16 @@ impl CatalogEntry {
 pub struct ToolSearchState {
     activity: ToolSearchActivity,
     has_completed_search: bool,
-    public_effective_tools: Option<Vec<ResponsesTool>>,
+    /// Whether the request has effective public declarations: it declared tools, or a load introduced one.
+    has_effective_tools: bool,
     private_upstream_tools: Option<Vec<ResponsesTool>>,
     inference_input: Option<ResponsesInput>,
-    loaded_public_tools: Vec<ResponsesTool>,
     synthetic_tool_search: Option<ToolSearchToolParam>,
-    withheld_function_names: HashSet<String>,
     unqualified_call_positions: HashMap<String, usize>,
     /// Whether the gateway runs this request's search (`execution: "server"`).
     hosted: bool,
-    /// Definition records retained so a hosted search can load tools mid-response.
-    definitions: Vec<DefinitionRecord>,
-    definition_indexes: HashMap<String, usize>,
-    mcp_loads: McpLoads,
+    /// The request's definitions and what is loaded, kept so a hosted search can load tools mid-response.
+    catalog: ToolCatalog,
     /// Tools loaded before this response; hosted search does not offer them again.
     loaded_before_response: HashSet<LoadedKey>,
 }
@@ -387,23 +252,24 @@ impl fmt::Debug for ToolSearchState {
             .field("activity", &self.activity)
             .field("active", &self.is_active())
             .field("has_completed_search", &self.has_completed_search)
+            .field("has_effective_tools", &self.has_effective_tools)
             .field(
                 "public_effective_tool_count",
-                &self.public_effective_tools.as_ref().map_or(0, Vec::len),
+                &self.public_effective_tools().map_or(0, <[_]>::len),
             )
             .field(
                 "private_upstream_tool_count",
                 &self.private_upstream_tools.as_ref().map_or(0, Vec::len),
             )
-            .field("loaded_public_tool_count", &self.loaded_public_tools.len())
+            .field("loaded_public_tool_count", &self.catalog.loaded_public_tools.len())
             .field("has_inference_input", &self.inference_input.is_some())
             .field("has_synthetic_tool_search", &self.synthetic_tool_search.is_some())
-            .field("withheld_function_count", &self.withheld_function_names.len())
+            .field("withheld_function_count", &self.catalog.withheld_function_names.len())
             .field("unqualified_history_call_count", &self.unqualified_call_positions.len())
             .field("hosted", &self.hosted)
-            .field("definition_count", &self.definitions.len())
-            .field("definition_index_count", &self.definition_indexes.len())
-            .field("deferred_mcp_server_count", &self.mcp_loads.servers.len())
+            .field("definition_count", &self.catalog.definitions.len())
+            .field("definition_index_count", &self.catalog.definition_indexes.len())
+            .field("deferred_mcp_server_count", &self.catalog.mcp_loads.servers.len())
             .field("loaded_before_response_count", &self.loaded_before_response.len())
             .finish()
     }
@@ -414,17 +280,13 @@ impl Default for ToolSearchState {
         Self {
             activity: ToolSearchActivity::Inactive,
             has_completed_search: false,
-            public_effective_tools: None,
+            has_effective_tools: false,
             private_upstream_tools: None,
             inference_input: None,
-            loaded_public_tools: Vec::new(),
             synthetic_tool_search: None,
-            withheld_function_names: HashSet::new(),
             unqualified_call_positions: HashMap::new(),
             hosted: false,
-            definitions: Vec::new(),
-            definition_indexes: HashMap::new(),
-            mcp_loads: McpLoads::default(),
+            catalog: ToolCatalog::default(),
             loaded_before_response: HashSet::new(),
         }
     }
@@ -486,72 +348,31 @@ impl ToolSearchState {
         }
 
         let tools_were_present = request.tools.is_some();
-        let mut public_tools = request.tools.clone().unwrap_or_default();
-        let mut definitions = Vec::with_capacity(public_tools.len());
-        let mut definition_indexes = HashMap::with_capacity(public_tools.len());
-        index_initial_definitions(&public_tools, &mut definitions, &mut definition_indexes)?;
+        let mut catalog = ToolCatalog::build(request.tools.clone().unwrap_or_default())?;
         let hosted = declaration.is_some_and(ToolSearchToolParam::is_hosted);
-        let mut mcp_loads = McpLoads::from_tools(&public_tools);
-        validate_deferred_catalog(&public_tools, &definition_indexes, &mcp_loads, declaration)?;
-        let mut withheld_function_names =
-            initial_withheld_function_names(&public_tools, &definitions, &definition_indexes)?;
+        validate_search_mode(&catalog.public_tools, &catalog.mcp_loads, declaration)?;
         let mut unqualified_call_positions = HashMap::new();
+        restore_loaded_definitions(restored_loaded_tools, &mut catalog, restore_only_declared)?;
+        load_history_definitions(&active_input, &mut catalog, &mut unqualified_call_positions)?;
+        catalog.validate_model_visible_names()?;
 
-        let mut loaded_public_tools = Vec::new();
-        restore_loaded_definitions(
-            restored_loaded_tools,
-            DefinitionViews {
-                public_tools: &mut public_tools,
-                definitions: &mut definitions,
-                definition_indexes: &mut definition_indexes,
-                loaded_public_tools: &mut loaded_public_tools,
-                withheld_function_names: &mut withheld_function_names,
-                mcp_loads: &mut mcp_loads,
-            },
-            restore_only_declared,
-        )?;
-        load_history_definitions(
-            &active_input,
-            DefinitionViews {
-                public_tools: &mut public_tools,
-                definitions: &mut definitions,
-                definition_indexes: &mut definition_indexes,
-                loaded_public_tools: &mut loaded_public_tools,
-                withheld_function_names: &mut withheld_function_names,
-                mcp_loads: &mut mcp_loads,
-            },
-            &mut unqualified_call_positions,
-        )?;
-
-        CodexNamespaceHandler.validate_namespace_collisions(Some(&responses_declarations(&public_tools)))?;
-
-        let catalog = build_catalog(&public_tools, &definitions, &definition_indexes);
-        let synthetic_tool_search = declaration.map(|declaration| synthetic_tool_search(declaration, &catalog));
-        let private_tools = build_private_tools(
-            &public_tools,
-            &definitions,
-            &definition_indexes,
-            synthetic_tool_search.as_ref(),
-            &mcp_loads,
-        );
-        let loaded_before_response = loaded_keys(&loaded_public_tools);
-        let public_effective_tools = (tools_were_present || !public_tools.is_empty()).then_some(public_tools);
+        let entries = catalog_entries(&catalog);
+        let synthetic_tool_search = declaration.map(|declaration| synthetic_tool_search(declaration, &entries));
+        let private_tools = build_private_tools(&catalog, synthetic_tool_search.as_ref());
+        let loaded_before_response = loaded_keys(&catalog.loaded_public_tools);
+        let has_effective_tools = tools_were_present || !catalog.public_tools.is_empty();
         let private_upstream_tools = (tools_were_present || !private_tools.is_empty()).then_some(private_tools);
 
         Ok(Self {
             activity: ToolSearchActivity::Active,
             has_completed_search,
-            public_effective_tools,
+            has_effective_tools,
             private_upstream_tools,
             inference_input: Some(active_input),
-            loaded_public_tools,
             synthetic_tool_search,
-            withheld_function_names,
             unqualified_call_positions,
             hosted,
-            definitions,
-            definition_indexes,
-            mcp_loads,
+            catalog,
             loaded_before_response,
         })
     }
@@ -563,7 +384,7 @@ impl ToolSearchState {
 
     #[must_use]
     pub fn public_effective_tools(&self) -> Option<&[ResponsesTool]> {
-        self.public_effective_tools.as_deref()
+        self.has_effective_tools.then_some(self.catalog.public_tools.as_slice())
     }
 
     /// Public declarations available for selection in response metadata.
@@ -572,12 +393,12 @@ impl ToolSearchState {
     /// loaded definitions while preserving their public namespace shape.
     #[must_use]
     pub(crate) fn public_response_tools(&self) -> Vec<ResponsesTool> {
-        let public_tools = self.public_effective_tools.as_deref().unwrap_or_default();
+        let public_tools = self.public_effective_tools().unwrap_or_default();
         // A hosted response echoes the declared tools unchanged, as the Responses API does.
         if self.hosted || !self.has_completed_search {
             return public_tools.to_vec();
         }
-        available_public_tools(public_tools, &self.loaded_public_tools)
+        available_public_tools(public_tools, &self.catalog.loaded_public_tools)
     }
 
     /// Public definitions resolved by completed search outputs, in first-load order.
@@ -586,7 +407,7 @@ impl ToolSearchState {
     /// deferred definition stays deferred publicly even after becoming loaded.
     #[must_use]
     pub fn loaded_public_tools(&self) -> &[ResponsesTool] {
-        &self.loaded_public_tools
+        &self.catalog.loaded_public_tools
     }
 
     /// Private tool-search declaration used by request-scoped registry and upstream normalization.
@@ -597,7 +418,7 @@ impl ToolSearchState {
 
     #[must_use]
     pub(crate) fn withheld_function_names(&self) -> &HashSet<String> {
-        &self.withheld_function_names
+        &self.catalog.withheld_function_names
     }
 
     /// Replace the request's public tool-search views with the prepared input, whose search items the upstream
@@ -609,7 +430,7 @@ impl ToolSearchState {
     /// Returns [`ToolError::Config`] when the effective tool choice conflicts
     /// with the prepared private tool set.
     pub fn prepare_inference_request(&mut self, request: &mut RequestPayload) -> Result<(), ToolError> {
-        validate_effective_tool_choice(request.tool_choice.as_ref(), &self.withheld_function_names)?;
+        validate_effective_tool_choice(request.tool_choice.as_ref(), &self.catalog.withheld_function_names)?;
         let input = self
             .inference_input
             .take()
@@ -622,8 +443,7 @@ impl ToolSearchState {
     /// Deferred top-level functions; their calls report their own name as namespace.
     #[must_use]
     pub(crate) fn hosted_deferred_functions(&self) -> HashSet<String> {
-        self.public_effective_tools
-            .as_deref()
+        self.public_effective_tools()
             .unwrap_or_default()
             .iter()
             .filter_map(|tool| match tool {
@@ -650,7 +470,7 @@ impl ToolSearchState {
     pub(crate) fn hosted_catalog(&self, private_tools: &[ResponsesTool]) -> HostedCatalog {
         let offered = |key: LoadedKey| !self.loaded_before_response.contains(&key);
         let mut entries = Vec::new();
-        for tool in self.public_effective_tools.as_deref().unwrap_or_default() {
+        for tool in self.public_effective_tools().unwrap_or_default() {
             match tool {
                 ResponsesTool::Function(function)
                     if function.defer_loading == Some(true)
@@ -676,7 +496,7 @@ impl ToolSearchState {
                         }));
                     }
                 }
-                ResponsesTool::Mcp(server) if self.mcp_loads.is_deferred(&server.server_label) => {
+                ResponsesTool::Mcp(server) if self.catalog.mcp_loads.is_deferred(&server.server_label) => {
                     let name = mcp_namespace_name(&server.server_label);
                     let discovered = private_tools.iter().find_map(|tool| match tool {
                         ResponsesTool::Mcp(private) if private.server_label == server.server_label => {
@@ -734,11 +554,11 @@ impl ToolSearchState {
         private_tools
             .iter()
             .filter_map(|tool| match tool {
-                ResponsesTool::Mcp(server) if self.mcp_loads.is_deferred(&server.server_label) => Some(server),
+                ResponsesTool::Mcp(server) if self.catalog.mcp_loads.is_deferred(&server.server_label) => Some(server),
                 _ => None,
             })
             .flat_map(|server| {
-                let loaded = self.mcp_loads.loaded.get(&server.server_label);
+                let loaded = self.catalog.mcp_loads.loaded.get(&server.server_label);
                 server
                     .discovered_tools
                     .iter()
@@ -760,31 +580,14 @@ impl ToolSearchState {
         loaded_tools: &[ResponsesTool],
         request: &mut RequestPayload,
     ) -> Result<(), ToolError> {
-        let mut public_tools = self.public_effective_tools.take().unwrap_or_default();
-        let mut accumulator = DefinitionAccumulator {
-            public_tools: &mut public_tools,
-            definitions: &mut self.definitions,
-            definition_indexes: &mut self.definition_indexes,
-            loaded_public_tools: &mut self.loaded_public_tools,
-            withheld_function_names: &mut self.withheld_function_names,
-            mcp_loads: &mut self.mcp_loads,
-            prior_unknown_namespace_calls: HashMap::new(),
-            unqualified_call_positions: HashMap::new(),
-            current_history_position: None,
-        };
+        // A load in this response follows the calls already made in it, so none of them is a call before load.
         let loaded = loaded_tools
             .iter()
-            .try_for_each(|tool| load_definition(tool, &mut accumulator));
-        self.public_effective_tools = Some(public_tools);
+            .try_for_each(|tool| self.catalog.load(tool, &PriorCalls::default()));
+        self.has_effective_tools = true;
         loaded?;
         self.has_completed_search = true;
-        let mut private_tools = build_private_tools(
-            self.public_effective_tools.as_deref().unwrap_or_default(),
-            &self.definitions,
-            &self.definition_indexes,
-            self.synthetic_tool_search.as_ref(),
-            &self.mcp_loads,
-        );
+        let mut private_tools = build_private_tools(&self.catalog, self.synthetic_tool_search.as_ref());
         for tool in &mut private_tools {
             let ResponsesTool::Mcp(server) = tool else {
                 continue;
@@ -810,8 +613,10 @@ impl ToolSearchState {
 
     pub(crate) fn into_public_metadata(mut self) -> ToolSearchMetadata {
         ToolSearchMetadata {
-            effective_tools: self.public_effective_tools.take(),
-            loaded_tools: std::mem::take(&mut self.loaded_public_tools),
+            effective_tools: self
+                .has_effective_tools
+                .then(|| std::mem::take(&mut self.catalog.public_tools)),
+            loaded_tools: std::mem::take(&mut self.catalog.loaded_public_tools),
         }
     }
 }
@@ -857,55 +662,29 @@ fn validate_effective_tool_choice(
 
 fn restore_loaded_definitions(
     restored_loaded_tools: &[ResponsesTool],
-    views: DefinitionViews<'_>,
+    catalog: &mut ToolCatalog,
     restore_only_declared: bool,
 ) -> Result<(), ToolError> {
-    let DefinitionViews {
-        public_tools,
-        definitions,
-        definition_indexes,
-        loaded_public_tools,
-        withheld_function_names,
-        mcp_loads,
-    } = views;
-    let mut accumulator = DefinitionAccumulator {
-        public_tools,
-        definitions,
-        definition_indexes,
-        loaded_public_tools,
-        withheld_function_names,
-        mcp_loads,
-        prior_unknown_namespace_calls: HashMap::new(),
-        unqualified_call_positions: HashMap::new(),
-        current_history_position: None,
-    };
     for tool in restored_loaded_tools {
-        let Some(tool) = restored_definition_for_load(
-            tool,
-            accumulator.definition_indexes,
-            accumulator.mcp_loads,
-            restore_only_declared,
-        )?
-        else {
+        let Some(tool) = restored_definition_for_load(tool, catalog, restore_only_declared)? else {
             continue;
         };
-        load_definition(&tool, &mut accumulator)?;
+        catalog.load(&tool, &PriorCalls::default())?;
     }
     Ok(())
 }
 
 fn restored_definition_for_load(
     restored: &ResponsesTool,
-    definition_indexes: &HashMap<String, usize>,
-    mcp_loads: &McpLoads,
+    catalog: &ToolCatalog,
     restore_only_declared: bool,
 ) -> Result<Option<ResponsesTool>, ToolError> {
-    let identity = loaded_tool_identity(restored)?.ok_or_else(|| {
+    let identity = tool_identity(restored)?.ok_or_else(|| {
         ToolError::Config("stored tool-search availability contains an unsupported definition".to_owned())
     })?;
     if restore_only_declared
-        && !definition_indexes.contains_key(identity.name())
-        && mcp_loads.label(identity.name()).is_none()
+        && catalog.definition(identity.name()).is_none()
+        && catalog.mcp_loads.label(identity.name()).is_none()
     {
         return Ok(None);
     }
@@ -1137,156 +916,15 @@ fn might_contain_tool_search_wire(wire: &str) -> bool {
     wire.contains(TOOL_SEARCH_NAME)
 }
 
-fn index_initial_definitions(
-    tools: &[ResponsesTool],
-    definitions: &mut Vec<DefinitionRecord>,
-    definition_indexes: &mut HashMap<String, usize>,
-) -> Result<(), ToolError> {
-    for (public_index, tool) in tools.iter().enumerate() {
-        let Some(identity) = loaded_tool_identity(tool)? else {
-            continue;
-        };
-        if definition_indexes.contains_key(identity.name()) {
-            return Err(ToolError::Config(format!(
-                "duplicate tool-search definition identity '{}'",
-                identity.name()
-            )));
-        }
-        let index = definitions.len();
-        definition_indexes.insert(identity.name().to_owned(), index);
-        definitions.push(definition_record(tool, identity, public_index, false)?);
-    }
-    Ok(())
-}
-
-fn definition_record(
-    tool: &ResponsesTool,
-    identity: LoadedToolIdentity,
-    public_index: usize,
-    dynamically_loaded: bool,
-) -> Result<DefinitionRecord, ToolError> {
-    let namespace_members = match tool {
-        ResponsesTool::Namespace(namespace) => Some(namespace_member_records(namespace, dynamically_loaded)?),
-        ResponsesTool::Function(_) => None,
-        ResponsesTool::ToolSearch(_)
-        | ResponsesTool::Mcp(_)
-        | ResponsesTool::WebSearch(_)
-        | ResponsesTool::FileSearch(_)
-        | ResponsesTool::CodeInterpreter(_)
-        | ResponsesTool::Shell(_)
-        | ResponsesTool::Custom(_)
-        | ResponsesTool::Unknown => {
-            return Err(ToolError::Config(
-                "tool-search definition record received an unsupported tool".to_owned(),
-            ));
-        }
-    };
-    let loaded = namespace_members
-        .as_ref()
-        .map_or(dynamically_loaded, |members| members.unloaded_count == 0);
-    Ok(DefinitionRecord {
-        identity,
-        canonical: canonical_definition(tool)?,
-        public_index,
-        loaded,
-        namespace_members,
-    })
-}
-
-fn namespace_member_records(
-    namespace: &CodexNamespaceToolParam,
-    dynamically_loaded: bool,
-) -> Result<NamespaceMemberRecords, ToolError> {
-    if namespace.tools.is_empty() {
-        return Err(ToolError::Config(
-            "tool-search namespaces must contain at least one function member".to_owned(),
-        ));
-    }
-    let mut ordered = Vec::with_capacity(namespace.tools.len());
-    let mut indexes = HashMap::with_capacity(namespace.tools.len());
-    let mut unloaded_count = 0;
-    for (public_member_index, member) in namespace.tools.iter().enumerate() {
-        let CodexNamespaceMember::Function(function) = member else {
-            return Err(ToolError::Config(
-                "tool-search namespaces may contain only function members".to_owned(),
-            ));
-        };
-        let name = function.name.as_str();
-        if indexes.insert(name.to_owned(), ordered.len()).is_some() {
-            return Err(ToolError::Config(format!(
-                "duplicate namespace member identity '{}.{name}'",
-                namespace.name
-            )));
-        }
-        let loaded = dynamically_loaded || function.defer_loading != Some(true);
-        unloaded_count += usize::from(!loaded);
-        ordered.push(NamespaceMemberRecord {
-            canonical: canonical_namespace_member(function)?,
-            public_member_index,
-            loaded,
-        });
-    }
-    Ok(NamespaceMemberRecords {
-        ordered,
-        indexes,
-        unloaded_count,
-    })
-}
-
-fn initial_withheld_function_names(
-    public_tools: &[ResponsesTool],
-    definitions: &[DefinitionRecord],
-    definition_indexes: &HashMap<String, usize>,
-) -> Result<HashSet<String>, ToolError> {
-    let mut withheld = HashSet::new();
-    for tool in public_tools {
-        if let ResponsesTool::Function(function) = tool {
-            if function.defer_loading == Some(true) {
-                withheld.insert(function.name.as_str().to_owned());
-            }
-            continue;
-        }
-        let ResponsesTool::Namespace(namespace) = tool else {
-            continue;
-        };
-        let record = definition_indexes
-            .get(&namespace.name)
-            .and_then(|index| definitions.get(*index))
-            .ok_or_else(|| ToolError::Config("namespace availability state is inconsistent".to_owned()))?;
-        let members = record
-            .namespace_members
-            .as_ref()
-            .ok_or_else(|| ToolError::Config("namespace availability state is inconsistent".to_owned()))?;
-        for member in &namespace.tools {
-            let CodexNamespaceMember::Function(function) = member else {
-                continue;
-            };
-            let member_index = members
-                .indexes
-                .get(function.name.as_str())
-                .ok_or_else(|| ToolError::Config("namespace availability state is inconsistent".to_owned()))?;
-            let is_withheld = !members.ordered[*member_index].loaded;
-            if is_withheld {
-                withheld.insert(super::model_visible_namespace_member_name(
-                    &namespace.name,
-                    function.name.as_str(),
-                ));
-            }
-        }
-    }
-    Ok(withheld)
-}
-
-fn build_catalog(
-    public_tools: &[ResponsesTool],
-    definitions: &[DefinitionRecord],
-    definition_indexes: &HashMap<String, usize>,
-) -> Vec<CatalogEntry> {
+/// The deferred entries the synthetic search declaration lists: functions and namespaces not fully loaded, then
+/// deferred MCP servers.
+fn catalog_entries(catalog: &ToolCatalog) -> Vec<CatalogEntry> {
+    let public_tools = &catalog.public_tools;
     public_tools
         .iter()
         .filter_map(|tool| {
-            let identity = loaded_tool_identity(tool).ok().flatten()?;
-            let record = &definitions[*definition_indexes.get(identity.name())?];
+            let identity = tool_identity(tool).ok().flatten()?;
+            let record = catalog.definition(identity.name())?;
             if record.loaded {
                 return None;
             }
@@ -1378,22 +1016,12 @@ fn hosted_parameters() -> Value {
     })
 }
 
-/// Rejects a deferred catalog the gateway cannot search.
-fn validate_deferred_catalog(
+/// Rejects a deferred catalog the declared search mode cannot search.
+fn validate_search_mode(
     public_tools: &[ResponsesTool],
-    definition_indexes: &HashMap<String, usize>,
     mcp_loads: &McpLoads,
     declaration: Option<&ToolSearchToolParam>,
 ) -> Result<(), ToolError> {
-    if let Some((name, label)) = mcp_loads
-        .servers
-        .iter()
-        .find(|(name, _)| definition_indexes.contains_key(name.as_str()))
-    {
-        return Err(ToolError::Config(format!(
-            "deferred MCP server '{label}' is searched as '{name}', which another tool already uses"
-        )));
-    }
     let Some(declaration) = declaration else {
         return Ok(());
     };
@@ -1451,20 +1079,19 @@ fn synthetic_tool_search(declaration: &ToolSearchToolParam, catalog: &[CatalogEn
     normalized
 }
 
+/// The tools offered upstream: loaded and eager definitions without `defer_loading`, the synthetic search
+/// declaration, and deferred MCP servers with the names loaded from them.
 fn build_private_tools(
-    public_tools: &[ResponsesTool],
-    definitions: &[DefinitionRecord],
-    definition_indexes: &HashMap<String, usize>,
+    catalog: &ToolCatalog,
     synthetic_tool_search: Option<&ToolSearchToolParam>,
-    mcp_loads: &McpLoads,
 ) -> Vec<ResponsesTool> {
-    public_tools
+    let mcp_loads = &catalog.mcp_loads;
+    catalog
+        .public_tools
         .iter()
         .filter_map(|tool| match tool {
             ResponsesTool::ToolSearch(_) => synthetic_tool_search.cloned().map(ResponsesTool::ToolSearch),
-            ResponsesTool::Function(_) | ResponsesTool::Namespace(_) => {
-                private_definition(tool, definitions, definition_indexes)
-            }
+            ResponsesTool::Function(_) | ResponsesTool::Namespace(_) => private_definition(tool, catalog),
             // A deferred server stays declared for discovery and execution;
             // upstream normalization exposes only its loaded tools.
             ResponsesTool::Mcp(server) if mcp_loads.is_deferred(&server.server_label) => {
@@ -1557,26 +1184,19 @@ fn available_public_tools(public_tools: &[ResponsesTool], loaded_tools: &[Respon
         .collect()
 }
 
-fn private_definition(
-    tool: &ResponsesTool,
-    definitions: &[DefinitionRecord],
-    definition_indexes: &HashMap<String, usize>,
-) -> Option<ResponsesTool> {
-    let identity = loaded_tool_identity(tool).ok().flatten()?;
-    let loaded = definitions[*definition_indexes.get(identity.name())?].loaded;
+fn private_definition(tool: &ResponsesTool, catalog: &ToolCatalog) -> Option<ResponsesTool> {
+    let identity = tool_identity(tool).ok().flatten()?;
+    let record = catalog.definition(identity.name())?;
+    let loaded = record.loaded;
     match tool {
         ResponsesTool::Function(function) if loaded || function.defer_loading != Some(true) => {
             let mut function = function.clone();
             function.defer_loading = None;
             Some(ResponsesTool::Function(function))
         }
-        ResponsesTool::Namespace(namespace) => private_namespace(
-            namespace,
-            definitions[*definition_indexes.get(identity.name())?]
-                .namespace_members
-                .as_ref(),
-        )
-        .map(ResponsesTool::Namespace),
+        ResponsesTool::Namespace(namespace) => {
+            private_namespace(namespace, record.namespace_members.as_ref()).map(ResponsesTool::Namespace)
+        }
         ResponsesTool::Function(_)
         | ResponsesTool::Mcp(_)
         | ResponsesTool::ToolSearch(_)

@@ -131,6 +131,9 @@ All notable changes to Agentic API are documented here.
   (functions with their schemas, namespaces by name and description), as it already did during a response.
   `agentic_core`: `CodexNamespaceHandler::resolve_input` takes the request's top-level function names
   (`&HashSet<&str>`) between the namespace map and the input.
+  `CodexNamespaceHandler::validate_namespace_collisions` is removed: tool search checks its definitions'
+  model-visible names in its catalog, with the same messages, and the registry still rejects colliding names for
+  every request.
 
 ## [0.9.0] - 2026-09-30
 

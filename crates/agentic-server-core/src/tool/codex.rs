@@ -238,34 +238,6 @@ impl CodexNamespaceHandler {
         namespace_map_from_tools(tools)
     }
 
-    /// Rejects namespace declarations that cannot be represented
-    /// unambiguously by the gateway-owned flat model-visible naming scheme.
-    ///
-    /// This must run before building the upstream request or request-scoped
-    /// registry. Otherwise the gateway could silently drop a namespace member
-    /// or restore a flat model call to the wrong public `{ namespace, name }`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ToolError::Config`] when a generated namespace member name
-    /// collides with another declared function-call tool or with another
-    /// namespace member.
-    pub fn validate_namespace_collisions(&self, tools: Option<&[ToolDeclaration]>) -> Result<(), ToolError> {
-        let Some(tools) = tools else {
-            return Ok(());
-        };
-        let mut builder = NamespaceMapBuilder::new(typed_top_level_registry_keys(tools));
-        for tool in tools {
-            let ToolDeclaration::Namespace(namespace) = tool else {
-                continue;
-            };
-            for member_name in typed_function_member_names(namespace) {
-                builder.validate_and_record_flat_member(&namespace.name, &member_name)?;
-            }
-        }
-        Ok(())
-    }
-
     /// Resolves the request's `tool_choice` (defaulting to `ToolChoice::Auto`
     /// when absent) and, if it's a namespaced `ToolChoice::Function {
     /// namespace, name }`, rewrites it to the flattened, model-visible name
@@ -445,22 +417,7 @@ fn rename_namespace_members(
 fn typed_top_level_registry_keys(tools: &[ToolDeclaration]) -> HashMap<String, ToolType> {
     tools
         .iter()
-        .filter_map(|tool| {
-            let registry_key = match tool {
-                ToolDeclaration::Function(function) => function.name.as_str().to_owned(),
-                ToolDeclaration::WebSearch(_) => "web_search".to_owned(),
-                ToolDeclaration::WebFetch(_) => "web_fetch".to_owned(),
-                ToolDeclaration::FileSearch(_) => "file_search".to_owned(),
-                ToolDeclaration::CodeInterpreter(_) => "code_interpreter".to_owned(),
-                ToolDeclaration::ToolSearch(_)
-                | ToolDeclaration::Mcp(_)
-                | ToolDeclaration::Shell(_)
-                | ToolDeclaration::Namespace(_)
-                | ToolDeclaration::Custom(_)
-                | ToolDeclaration::Unsupported => return None,
-            };
-            tool.tool_type().map(|tool_type| (registry_key, tool_type))
-        })
+        .filter_map(|tool| Some((tool.top_level_registry_key()?, tool.tool_type()?)))
         .collect()
 }
 
@@ -634,27 +591,6 @@ mod tests {
     }
 
     #[test]
-    fn validate_namespace_collisions_rejects_top_level_flat_name_collision() {
-        let tools = responses_declarations(
-            &serde_json::from_value::<Vec<ResponsesTool>>(serde_json::json!([
-                {"type": "function", "name": "agentic_ns__mcp__shell__run"},
-                {
-                    "type": "namespace",
-                    "name": "mcp__shell",
-                    "tools": [{"type": "function", "name": "run"}]
-                }
-            ]))
-            .unwrap(),
-        );
-
-        let err = CodexNamespaceHandler
-            .validate_namespace_collisions(Some(&tools))
-            .unwrap_err();
-
-        assert!(err.to_string().contains("collides with a declared function tool"));
-    }
-
-    #[test]
     fn resolve_namespace_members_rejects_top_level_flat_name_collision() {
         let tools = responses_declarations(
             &serde_json::from_value::<Vec<ResponsesTool>>(serde_json::json!([
@@ -696,31 +632,6 @@ mod tests {
         CodexNamespaceHandler
             .resolve_namespace_members(&tools)
             .expect("native MCP registry keys are derived after discovery");
-    }
-
-    #[test]
-    fn validate_namespace_collisions_rejects_generated_name_collision_between_namespace_members() {
-        let tools = responses_declarations(
-            &serde_json::from_value::<Vec<ResponsesTool>>(serde_json::json!([
-                {
-                    "type": "namespace",
-                    "name": "a__b",
-                    "tools": [{"type": "function", "name": "c"}]
-                },
-                {
-                    "type": "namespace",
-                    "name": "a",
-                    "tools": [{"type": "function", "name": "b__c"}]
-                }
-            ]))
-            .unwrap(),
-        );
-
-        let err = CodexNamespaceHandler
-            .validate_namespace_collisions(Some(&tools))
-            .unwrap_err();
-
-        assert!(err.to_string().contains("generated name"));
     }
 
     #[test]
