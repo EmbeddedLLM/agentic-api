@@ -14,7 +14,7 @@ pub use file_text::InputFileError;
 pub(crate) use history_naming::HistoryNaming;
 pub(crate) use mcp_names::{McpToolNames, internal_mcp_tool_name, stable_name_hash};
 pub(crate) use search_history::{
-    SearchHistory, SearchPairing, TOOL_SEARCH_NAME, hosted_search_output_text, is_search_item,
+    SearchHistory, SearchHistoryDefect, TOOL_SEARCH_NAME, hosted_search_output_text, is_search_item,
 };
 pub(super) use tool_search::check_tool_search_call_id;
 pub use tool_search::{InputToolSearchCall, ToolSearchOutputMessage};

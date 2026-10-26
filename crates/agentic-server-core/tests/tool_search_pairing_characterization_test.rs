@@ -1,8 +1,9 @@
 //! How the gateway answers malformed tool-search history, on the direct path (`store: false` input)
 //! and on a `previous_response_id` continuation.
 //!
-//! The pending-call ledger checks how client search calls and outputs pair, on both paths; tool
-//! search checks the rest (item ids, hosted pairs, output status). Both paths therefore answer alike.
+//! The pending-call ledger checks how client search calls and outputs pair, on both paths; the
+//! search history pairing checks the rest (item ids, hosted pairs, output status), and the tool
+//! catalog applies it in history order. Both paths therefore answer alike.
 //! A request without search items still skips the ledger on the direct path, as before.
 
 use std::collections::VecDeque;
@@ -307,6 +308,25 @@ fn hosted_and_plain_cases() -> Vec<Case> {
             tools: hosted_tools(),
             direct: config(UNRESOLVED),
             continuation: config(UNRESOLVED),
+        },
+        // A history with two defects gets the answer of the earlier one: history is checked in order.
+        Case {
+            name: "an open hosted call, then a call before its function is loaded",
+            input: json!([hosted_call("tsc_h"), function_call("call_f"), function_output("call_f")]),
+            tools: hosted_tools(),
+            direct: config("request history calls a function before its definition is loaded"),
+            continuation: config("request history calls a function before its definition is loaded"),
+        },
+        Case {
+            name: "a hosted output with no call, then an incomplete one",
+            input: json!([
+                hosted_output("tso_x", "completed"),
+                hosted_call("tsc_h"),
+                hosted_output("tso_h", "incomplete")
+            ]),
+            tools: hosted_tools(),
+            direct: config("hosted tool_search_output has no preceding hosted tool_search_call"),
+            continuation: config("hosted tool_search_output has no preceding hosted tool_search_call"),
         },
         Case {
             name: "unanswered function call without tool search",

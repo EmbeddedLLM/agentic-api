@@ -73,9 +73,33 @@ pub(crate) enum SearchPairing {
     UnmatchedOutput,
 }
 
-/// The pairing of every search item in one item sequence, by position.
+/// A search item no history may hold, as the Responses API pairs search items.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum SearchHistoryDefect {
+    #[error("duplicate tool_search_call item id")]
+    DuplicateCallItemId,
+    /// A hosted call's model call id is its item id; another call already uses it, so the model would see two calls
+    /// with one id.
+    #[error("duplicate tool_search_call call_id")]
+    DuplicateHostedCallId,
+    #[error("hosted tool_search_output has no preceding hosted tool_search_call")]
+    HostedOutputWithoutCall,
+    /// Only a completed output loads definitions.
+    #[error("tool_search_output must be completed before it may load tool definitions")]
+    IncompleteOutput,
+    /// A hosted call no later output answers.
+    #[error("unresolved tool_search_call requires a matching completed tool_search_output")]
+    OpenHostedCall,
+}
+
+/// The pairing of every search item in one item sequence, by position, and the first defect at each position.
+///
+/// A client search's call and output pair by `call_id`, which the pending-call ledger checks; this owns the rest:
+/// item ids, hosted pairs and output status.
 pub(crate) struct SearchHistory {
     pairings: Vec<Option<SearchPairing>>,
+    defects: Vec<Option<SearchHistoryDefect>>,
+    open_hosted_call: bool,
 }
 
 impl SearchHistory {
@@ -112,10 +136,26 @@ impl SearchHistory {
                 _ => None,
             };
         }
+        let open_hosted_call = !open_hosted_calls.is_empty();
         for position in open_hosted_calls {
             pairings[position] = Some(SearchPairing::OpenCall);
         }
-        Self { pairings }
+        let defects = defects(items, &pairings);
+        Self {
+            pairings,
+            defects,
+            open_hosted_call,
+        }
+    }
+
+    /// The first defect of the search item at `position`, in the order history is checked.
+    pub(crate) fn defect(&self, position: usize) -> Option<SearchHistoryDefect> {
+        self.defects.get(position).copied().flatten()
+    }
+
+    /// Whether a hosted call is still open at the end of the history.
+    pub(crate) const fn has_open_hosted_call(&self) -> bool {
+        self.open_hosted_call
     }
 
     /// The pairing of the search item at `position`, or `None` for any other item.
@@ -151,6 +191,45 @@ impl SearchHistory {
             _ => None,
         }
     }
+}
+
+/// The first defect of each search item, checked in history order: item ids and hosted call ids are unique among
+/// earlier items (a hosted call id also among every client call id), and an output answers a call and is complete.
+fn defects<T: Borrow<InputItem>>(items: &[T], pairings: &[Option<SearchPairing>]) -> Vec<Option<SearchHistoryDefect>> {
+    let client_call_ids: HashSet<&str> = items.iter().filter_map(|item| item.borrow().call_id()).collect();
+    let mut call_item_ids = HashSet::new();
+    let mut hosted_call_ids = HashSet::new();
+    items
+        .iter()
+        .zip(pairings)
+        .map(|(item, pairing)| match item.borrow() {
+            InputItem::ToolSearchCall(call) => {
+                if !call_item_ids.insert(call.id.as_str()) {
+                    return Some(SearchHistoryDefect::DuplicateCallItemId);
+                }
+                match pairing {
+                    Some(SearchPairing::Paired(call_id))
+                        if call.execution == ToolSearchExecution::Server
+                            && (client_call_ids.contains(call_id.as_str())
+                                || !hosted_call_ids.insert(call_id.as_str())) =>
+                    {
+                        Some(SearchHistoryDefect::DuplicateHostedCallId)
+                    }
+                    _ => None,
+                }
+            }
+            InputItem::ToolSearchOutput(output) => {
+                if output.execution == ToolSearchExecution::Server && pairing == &Some(SearchPairing::UnmatchedOutput) {
+                    Some(SearchHistoryDefect::HostedOutputWithoutCall)
+                } else if output.status != ToolSearchStatus::Completed {
+                    Some(SearchHistoryDefect::IncompleteOutput)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 /// Whether the upstream projection rewrites `item`.

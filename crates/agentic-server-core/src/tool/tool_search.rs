@@ -1,7 +1,5 @@
-mod history;
 mod hosted;
 mod validation;
-use history::load_history_definitions;
 pub(crate) use hosted::{HostedCatalog, HostedCatalogEntry};
 pub(crate) use validation::ensure_request_prepared;
 use validation::{input_contains_tool_search_state, request_contains_tool_search_state, validate_tool_search_request};
@@ -353,7 +351,7 @@ impl ToolSearchState {
         validate_search_mode(&catalog.public_tools, &catalog.mcp_loads, declaration)?;
         let mut unqualified_call_positions = HashMap::new();
         restore_loaded_definitions(restored_loaded_tools, &mut catalog, restore_only_declared)?;
-        load_history_definitions(&active_input, &mut catalog, &mut unqualified_call_positions)?;
+        catalog.load_history(&active_input, &mut unqualified_call_positions)?;
         catalog.validate_model_visible_names()?;
 
         let entries = catalog_entries(&catalog);

@@ -7,6 +7,7 @@
 //! namespace member loaded or deferred, and checks the model-visible names of the whole inventory together
 //! ([`ToolCatalog::validate_model_visible_names`]). Tool search adds only its timing rules, through [`PriorCalls`].
 
+mod history;
 mod load;
 
 pub(crate) use load::{canonical_definition, canonical_namespace_member, history_call_before_load};
