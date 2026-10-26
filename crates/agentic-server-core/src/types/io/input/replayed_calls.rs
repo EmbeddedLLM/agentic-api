@@ -76,7 +76,9 @@ fn web_search_items(call: &WebSearchCall) -> Vec<InputItem> {
     )
 }
 
-/// The record's id serves as the call id, so a replay pairs its call and output deterministically.
+/// The record's id serves as the call id, so a replay pairs its call and output deterministically. The call carries no
+/// item id: an upstream such as `OpenAI` ties the model's own item id to the `call_id` it issued, which the record does
+/// not keep.
 fn call_pair(
     record: &impl Attributed,
     item_id: &str,
@@ -87,7 +89,7 @@ fn call_pair(
     vec![
         InputItem::FunctionCall(InputFunctionToolCall {
             agent: record.agent(),
-            id: Some(item_id.to_owned()),
+            id: None,
             call_id: item_id.to_owned(),
             name,
             namespace: None,
@@ -142,7 +144,7 @@ mod tests {
             model,
             json!([
                 {"type": "message", "role": "user", "content": "hi"},
-                {"type": "function_call", "id": "mcp_1", "call_id": "mcp_1", "name": "mcp__docs__search",
+                {"type": "function_call", "call_id": "mcp_1", "name": "mcp__docs__search",
                     "arguments": "{\"q\":\"x\"}", "status": "completed"},
                 {"type": "function_call_output", "call_id": "mcp_1", "output": "found"}
             ])

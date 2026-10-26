@@ -350,7 +350,6 @@ fn one_history_pass_prepares_canonical_private_input_without_mutating_public_inp
             {"type": "message", "role": "user", "content": "find weather"},
             {
                 "type": "function_call",
-                "id": "tsc_1",
                 "call_id": "call_search_1",
                 "name": "tool_search",
                 "arguments": "{\"z\":2,\"a\":1}",

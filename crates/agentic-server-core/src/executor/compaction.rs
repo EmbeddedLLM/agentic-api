@@ -730,10 +730,16 @@ mod tests {
             items[3]
         ]))
         .expect("public history");
+        // The lowered call carries no item id (an upstream such as OpenAI would tie it to a call_id the public pair
+        // does not keep), so the public pair counts as the stored private pair without that id.
+        let mut model_view = items.clone();
+        if let InputItem::FunctionCall(call) = &mut model_view[1] {
+            call.id = None;
+        }
         assert_eq!(
             estimate_history_tokens(&public),
-            137,
-            "the public pair counts as the private pair"
+            estimate_history_tokens(&model_view),
+            "the public pair counts as the call and output the model reads"
         );
     }
 

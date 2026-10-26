@@ -160,6 +160,13 @@ async fn live_continuation_and_replay_show_the_model_the_same_search() {
         let input = model_input(request);
         assert_eq!(input[..live.len()], live[..], "{path} shares the live round's prefix");
     }
+    // OpenAI ties a function call's item id to the call_id it issued; the lowered search call keeps neither, so it is
+    // sent without an item id, live and on every replay.
+    for request in requests.iter() {
+        for item in model_input(request).iter().filter(|item| item["name"] == "tool_search") {
+            assert!(item.get("id").is_none(), "{item}");
+        }
+    }
 }
 
 fn multi_agent_request(input: &Value) -> Value {

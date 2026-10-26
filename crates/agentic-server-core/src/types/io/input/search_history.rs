@@ -159,7 +159,7 @@ pub(crate) const fn is_search_item(item: &InputItem) -> bool {
 }
 
 fn model_search_call(call: &InputToolSearchCall, call_id: String) -> InputItem {
-    private_search_call(call.agent.clone(), &call.id, call_id, &call.arguments)
+    private_search_call(call.agent.clone(), call_id, &call.arguments)
 }
 
 fn model_search_output(output: &ToolSearchOutputMessage, call_id: String) -> InputItem {
@@ -178,17 +178,14 @@ fn hosted_private_call_id(item_id: &str) -> String {
     item_id.to_owned()
 }
 
-/// The private function call the model sees for a public search call.
-fn private_search_call(
-    agent: Option<AgentAttribution>,
-    item_id: &str,
-    call_id: String,
-    arguments: &Value,
-) -> InputItem {
+/// The private function call the model sees for a public search call. It carries no item id: an upstream such as
+/// `OpenAI` ties the model's own item id to the `call_id` it issued, which the public pair does not keep, so the call is
+/// identified by the derived `call_id` alone.
+fn private_search_call(agent: Option<AgentAttribution>, call_id: String, arguments: &Value) -> InputItem {
     InputItem::FunctionCall(InputFunctionToolCall {
         async_execution: false,
         agent,
-        id: Some(item_id.to_owned()),
+        id: None,
         call_id,
         name: TOOL_SEARCH_NAME.to_owned(),
         namespace: None,
@@ -304,7 +301,7 @@ mod tests {
         assert_eq!(
             lowered,
             json!([
-                {"type": "function_call", "id": "tsc_a", "call_id": "tsc_a", "name": "tool_search",
+                {"type": "function_call", "call_id": "tsc_a", "name": "tool_search",
                     "arguments": "{\"paths\":[\"f\"]}", "status": "completed"},
                 {"type": "function_call_output", "call_id": "tsc_a", "output": HOSTED_EMPTY_SEARCH_OUTPUT},
                 {"type": "message", "role": "user", "content": "next"}
