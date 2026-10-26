@@ -534,6 +534,13 @@ impl ToolRegistry {
             return None;
         };
         let tool_type = entry.tool_type;
+        // A deferred tool no search has loaded is registered, but not callable.
+        if self.is_deferred(&call.name) {
+            return Some(GatewayDispatchResult {
+                tool_type,
+                output: Err(ToolError::UpstreamWithheldFunctionCall),
+            });
+        }
         Some(GatewayDispatchResult {
             tool_type,
             output: binding.execute(&call.call_id, &call.name, &call.arguments).await,

@@ -24,7 +24,7 @@ fn translation_context(registry: &ToolRegistry, agent: &AgentPipeline) -> Transl
             .map(|(name, kind)| (name.to_owned(), kind))
             .collect(),
         // Deferred functions, namespace members and MCP tools no search has loaded yet.
-        registry.withheld_names(agent.request.enriched_request.tools.as_deref().unwrap_or_default()),
+        registry.withheld_names(),
         state.is_some_and(ToolSearchState::is_active),
     )
     .with_self_namespaced_functions(registry.hosted_deferred_functions())

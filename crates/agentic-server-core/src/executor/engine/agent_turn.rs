@@ -320,6 +320,7 @@ impl<'a> AgentTurn<'a> {
 
         let current_output = std::mem::take(&mut payload.output);
         log_custom_tool_calls(&current_output, &self.pipeline.request.response_id);
+        self.registry.ensure_loaded_calls(&current_output)?;
         let client_calls = ClientCalls::of(&current_output, &self.registry);
         let gateway_results = self
             .execute_round_output(&current_output, output_offset, response_budget)

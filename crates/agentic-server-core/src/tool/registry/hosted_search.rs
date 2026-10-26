@@ -30,6 +30,8 @@ pub(crate) struct RegistryToolSearch {
     catalog: Arc<ToolCatalog>,
     synthetic: Option<ToolSearchToolParam>,
     hosted: bool,
+    /// Model-visible names of deferred MCP tools no search has loaded; their discovered entries stay unavailable.
+    deferred_mcp: HashSet<String>,
 }
 
 impl fmt::Debug for RegistryToolSearch {
@@ -39,6 +41,7 @@ impl fmt::Debug for RegistryToolSearch {
             .field("definition_count", &self.catalog.definitions.len())
             .field("has_synthetic", &self.synthetic.is_some())
             .field("hosted", &self.hosted)
+            .field("deferred_mcp_count", &self.deferred_mcp.len())
             .finish()
     }
 }
@@ -59,6 +62,7 @@ impl ToolRegistry {
         if hosted {
             catalog.discover_mcp(private_tools);
         }
+        let deferred_mcp = catalog.withheld_mcp_tool_names(private_tools);
         let catalog = Arc::new(catalog);
         if hosted {
             self.bind_hosted_tool_search(Arc::clone(&catalog));
@@ -67,6 +71,7 @@ impl ToolRegistry {
             catalog,
             synthetic,
             hosted,
+            deferred_mcp,
         });
     }
 
@@ -87,15 +92,38 @@ impl ToolRegistry {
         self.validate_tool_availability(&search.catalog.withheld_function_names, search.synthetic.is_some())
     }
 
-    /// Model-visible names the model may not call yet: deferred functions and namespace members not loaded, and
-    /// deferred MCP tools not loaded, given the discovery recorded on `private_tools`.
-    pub(crate) fn withheld_names(&self, private_tools: &[ResponsesTool]) -> HashSet<String> {
+    /// Model-visible names the model may not call yet: deferred functions, namespace members and MCP tools no search
+    /// has loaded.
+    pub(crate) fn withheld_names(&self) -> HashSet<String> {
         let Some(search) = &self.tool_search else {
             return HashSet::new();
         };
         let mut withheld = search.catalog.withheld_function_names.clone();
-        withheld.extend(search.catalog.withheld_mcp_tool_names(private_tools));
+        withheld.extend(search.deferred_mcp.iter().cloned());
         withheld
+    }
+
+    /// Whether `name` is a deferred definition no search has loaded: the registry knows it, but nothing may call it.
+    pub(crate) fn is_deferred(&self, name: &str) -> bool {
+        self.tool_search.as_ref().is_some_and(|search| {
+            search.catalog.withheld_function_names.contains(name) || search.deferred_mcp.contains(name)
+        })
+    }
+
+    /// Refuses a round whose output calls a deferred definition. Ingestion refuses such a call first; this keeps the
+    /// registry from running one if a call ever reaches it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ToolError::UpstreamWithheldFunctionCall`], as ingestion does.
+    pub(crate) fn ensure_loaded_calls(&self, output: &[OutputItem]) -> Result<(), ToolError> {
+        if output
+            .iter()
+            .any(|item| matches!(item, OutputItem::FunctionCall(call) if self.is_deferred(&call.name)))
+        {
+            return Err(ToolError::UpstreamWithheldFunctionCall);
+        }
+        Ok(())
     }
 
     /// Deferred top-level functions of a hosted search; their calls report their own name as namespace.
@@ -147,6 +175,7 @@ impl ToolRegistry {
             }
         }
         let snapshot = (catalog.public_tools.clone(), catalog.loaded_public_tools.clone());
+        search.deferred_mcp = catalog.withheld_mcp_tool_names(&offered);
         request.tools = Some(offered);
         if search.hosted {
             let catalog = Arc::clone(&search.catalog);

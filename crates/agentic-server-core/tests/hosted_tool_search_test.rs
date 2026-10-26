@@ -1964,3 +1964,25 @@ async fn replayed_hosted_history_allows_parallel_tool_calls_without_a_declaratio
     .expect("request");
     assert_eq!(output(&run(payload, context(llm_url)).await)[0]["type"], "message");
 }
+
+/// The model cannot call a deferred MCP tool before a search loads it: the response fails and the MCP server never
+/// receives the call, blocking and streaming.
+#[tokio::test]
+async fn an_unloaded_deferred_mcp_tool_is_never_called() {
+    let echo = function_call("e1", "mcp__stub__echo", &json!({}));
+    let (mcp_url, calls) = spawn_mcp().await;
+    let tools = json!([{"type": "tool_search"}, deferred_mcp(&mcp_url, None)]);
+
+    let (llm_url, _) = spawn_llm(vec![upstream("up_1", json!([echo.clone()]))]).await;
+    let blocking = Box::pin(ExecuteRequest::new(request(&json!("echo"), &tools), context(llm_url)).run()).await;
+    assert!(blocking.is_err(), "the unloaded call fails the response");
+
+    let (llm_url, _) = spawn_streaming_llm(vec![sse("up_1", &[echo])]).await;
+    let mut streaming = request(&json!("echo"), &tools);
+    streaming.stream = true;
+    let events = run_streaming(streaming, context(llm_url)).await;
+    let last = events.last().expect("a terminal event");
+    assert_eq!(last["type"], "response.failed", "{last}");
+
+    assert_eq!(calls.load(Ordering::SeqCst), 0, "no tools/call reached the MCP server");
+}

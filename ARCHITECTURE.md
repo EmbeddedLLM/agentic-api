@@ -1027,8 +1027,9 @@ agent history changes. Each accepted output goes only to its owner and resumes t
 agent. A parent parked waiting for children stays asleep until mailbox delivery wakes
 it; a new user message resumes the root.
 
-Tool-search outputs restore discovered definitions into the requesting agent's
-`ToolSearchState` before its next registry and upstream request are built. Namespace
+Tool-search outputs restore discovered definitions into the requesting agent's tool
+catalog, prepared in its `ToolSearchState` and then owned by its registry, before its next
+registry and upstream request are built. Namespace
 and custom declarations still use the existing canonical function normalization and
 public-shape translators. MCP, web search and operator-enabled code interpreter execute in the gateway and append their
 canonical call/output pairs during the round, so they require no client output
@@ -1037,16 +1038,23 @@ multi-agent execution does not bypass that rule.
 
 Hosted tool search runs in the gateway like those tools. Its `tool_search` function is
 the one `ToolType::ToolSearch`, gateway-owned because the declaration's `execution` is
-`"server"`, and it searches the request's `ToolCatalog` (`tool/catalog.rs`): deferred
+`"server"`. Every tool-search definition enters one request-scoped inventory,
+`ToolCatalog` (`tool/catalog.rs`): the declarations, then each completed
+`tool_search_output` in history order (with `SearchHistory` and the pending-call ledger
+checking the pairing), restored loads after compaction, and hosted results. Preparation
+builds it, so an invalid history is a 400 before inference; the response's
+`ToolRegistry` then owns it, offers the model its loaded definitions, withholds the
+deferred ones (dispatch refuses them too), and runs a hosted search over it: deferred
 functions, namespace members, and deferred MCP servers (as `mcp_<server_label>`, with the
-members MCP discovery listed), excluding tools loaded by earlier responses. The search is pure, so its `tool_search_output` is known when the
-call is planned: the scheduler gives the call two public output indexes (a follow-up
-item), and later items in the round shift by one, the inverse of an omitted refusal.
-After the round, `ToolSearchState::apply_hosted_search` loads the returned tools,
-rebuilds the private tools for the next round, and the registry adds client entries
-for loaded namespace members without listing MCP servers again. A deferred MCP server
-stays declared with `loaded_tool_names`, which limits the tools normalization sends
-upstream.
+members MCP discovery listed), excluding tools loaded by earlier responses. The search is
+pure, so its `tool_search_output` is known when the call is planned: the scheduler gives
+the call two public output indexes (a follow-up item), and later items in the round shift
+by one, the inverse of an omitted refusal. After the round,
+`ToolRegistry::load_searched_tools` loads the returned tools into the catalog, renders the
+next round's offered tools, and adds client entries for loaded namespace members without
+listing MCP servers again; `ToolSearchState` keeps only the public snapshot persistence
+needs. A deferred MCP server stays declared with `loaded_tool_names`, which limits the
+tools normalization sends upstream.
 
 Code interpreter uses the same canonical function/tool loop in every agent. Agents
 share the ready executor and its process-wide guest permits through `ExecutionContext`;
