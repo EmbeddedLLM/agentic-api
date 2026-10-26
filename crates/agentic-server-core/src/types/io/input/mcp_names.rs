@@ -39,6 +39,15 @@ impl McpToolNames {
         Self { names }
     }
 
+    /// These names, completed by `other`'s for tools these do not name.
+    #[must_use]
+    pub(crate) fn or(mut self, other: &Self) -> Self {
+        for (tool, name) in &other.names {
+            self.names.entry(tool.clone()).or_insert_with(|| name.clone());
+        }
+        self
+    }
+
     /// These names, completed by the names each server's latest successful listing in `items` gave its tools. This
     /// request's discovery names the tools the model can call now, so it wins; a listing names the rest, as when a
     /// request offers no tools (a compaction summary).

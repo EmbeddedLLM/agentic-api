@@ -2,6 +2,7 @@ mod calls;
 mod content;
 mod conversions;
 mod file_text;
+mod history_naming;
 mod mcp_names;
 mod replayed_calls;
 mod search_history;
@@ -10,6 +11,7 @@ mod validation;
 mod window;
 
 pub use file_text::InputFileError;
+pub(crate) use history_naming::HistoryNaming;
 pub(crate) use mcp_names::{McpToolNames, internal_mcp_tool_name, stable_name_hash};
 pub(crate) use search_history::{
     SearchHistory, SearchPairing, TOOL_SEARCH_NAME, hosted_search_output_text, is_search_item,

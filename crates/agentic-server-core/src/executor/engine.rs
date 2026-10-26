@@ -139,15 +139,6 @@ impl<'a> SingleAgentRun<'a> {
         let response_budget = ExecutorResponseBudget::with_limit(exec_ctx.responses_config.max_retained_bytes);
         let root = AgentTurn::new(agent, exec_ctx, &response_budget, MAX_GATEWAY_TOOL_ROUNDS).await?;
         let output = root.discovery_output();
-        // The model never reads a listing; each server's current one names replayed MCP calls for a summary that offers
-        // no tools, even when it repeats an earlier listing and so is not emitted. Only the enriched input holds it.
-        for listing in root.current_mcp_list_tools() {
-            root.pipeline
-                .request
-                .enriched_request
-                .input
-                .push(InputItem::McpListTools(listing));
-        }
         Ok(Self {
             root,
             response_budget,
@@ -215,9 +206,9 @@ async fn run_compaction_trigger(
         )
         .stored
         .into_inputs();
-        let functions = ctx.enriched_request.top_level_function_names();
+        let history = ctx.enriched_request.history_naming();
         let (mut compacted, usage, service_tier) =
-            compact_items(&ctx.enriched_request, functions, input, exec_ctx, auth).await?;
+            compact_items(&ctx.enriched_request, history, input, exec_ctx, auth).await?;
         let Some(InputItem::Compaction(compaction)) = compacted.pop() else {
             unreachable!("compact_items always appends a compaction item");
         };

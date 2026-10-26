@@ -16,6 +16,7 @@ use crate::executor::telemetry::metrics::ExecutionClock;
 use crate::executor::translate::{Translation, TranslationContext};
 use crate::tool::{ToolRegistry, ToolSearchMetadata, ToolSearchState};
 use crate::types::agent::AgentIdentity;
+use crate::types::io::input::HistoryNaming;
 use crate::types::io::{InputMessage, OutputItem};
 use crate::types::request_response::ResponsePayload;
 use crate::types::tools::ResponsesTool;
@@ -34,8 +35,8 @@ pub(super) struct AgentPipeline {
     agent_guidance: Option<InputMessage>,
     /// Set after a `max_tool_calls` refusal; later rounds omit gateway-executed tools.
     builtin_tools_withheld: bool,
-    /// Top-level functions the history knows beyond the request's own declarations; naming context only.
-    history_functions: Vec<String>,
+    /// How the history knows tools beyond the request's own declarations; naming context only.
+    history_naming: HistoryNaming,
     /// Timing state of the execution this pipeline serves, when it streams.
     clock: Option<ExecutionClock>,
 }
@@ -72,14 +73,14 @@ impl AgentPipeline {
         self.builtin_tools_withheld
     }
 
-    /// Names `functions` as top-level functions the history knows, so a call naming itself reaches the model
-    /// unqualified although this request declares no such function.
-    pub(super) fn set_history_functions(&mut self, functions: Vec<String>) {
-        self.history_functions = functions;
+    /// Sets how the history knows its tools, so a call reaches the model under the name it was made with although
+    /// this request declares no such tool.
+    pub(super) fn set_history_naming(&mut self, naming: HistoryNaming) {
+        self.history_naming = naming;
     }
 
-    pub(super) fn history_functions(&self) -> &[String] {
-        &self.history_functions
+    pub(super) const fn history_naming(&self) -> &HistoryNaming {
+        &self.history_naming
     }
 
     pub(super) fn has_live_agent_items(&self, agent: &AgentIdentity) -> bool {
@@ -118,7 +119,7 @@ impl AgentPipeline {
             control: None,
             steering: None,
             builtin_tools_withheld: false,
-            history_functions: Vec::new(),
+            history_naming: HistoryNaming::default(),
             clock: None,
         }
     }

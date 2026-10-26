@@ -9,6 +9,7 @@ use crate::executor::request::{ExecutionContext, RequestContext};
 use crate::executor::response_budget::ExecutorResponseBudget;
 use crate::executor::translate::TranslationContext;
 use crate::tool::{ToolRegistry, ToolSearchState};
+use crate::types::io::input::HistoryNaming;
 use crate::types::io::{InputItem, InputMessage, MultiAgentAction};
 use crate::types::request_response::{ResponsePayload, UpstreamTool};
 use crate::utils::common::serialize_to_string;
@@ -79,23 +80,21 @@ fn translation_context(registry: &ToolRegistry, agent: &AgentPipeline) -> Transl
 /// # Errors
 /// Unsupported message content, a tool-configuration error, or a serialization failure.
 pub fn upstream_request(ctx: &RequestContext, stream: bool) -> ExecutorResult<String> {
-    upstream_request_with_guidance(ctx, stream, None, None, &[])
+    upstream_request_with_guidance(ctx, stream, None, None, &HistoryNaming::default())
 }
 
 /// `withheld` names the registry whose gateway-executed tools are left out
 /// after a `max_tool_calls` refusal, without changing the persisted tools.
-/// `history_functions` are top-level functions the history knows beyond the
-/// request's declarations (see [`AgentPipeline::set_history_functions`]).
+/// `history` is how the history knows tools beyond the request's declarations
+/// (see [`AgentPipeline::set_history_naming`]).
 fn upstream_request_with_guidance(
     ctx: &RequestContext,
     stream: bool,
     guidance: Option<&InputMessage>,
     withheld: Option<&ToolRegistry>,
-    history_functions: &[String],
+    history: &HistoryNaming,
 ) -> ExecutorResult<String> {
-    let mut request = ctx
-        .enriched_request
-        .to_upstream_request_with(stream, history_functions)?;
+    let mut request = ctx.enriched_request.to_upstream_request_with(stream, history)?;
     if let Some(registry) = withheld {
         if let Some(tools) = request.tools.as_mut() {
             // Hosted search does not count toward `max_tool_calls`, so it stays available.
@@ -143,7 +142,7 @@ pub(super) async fn fetch_blocking_payload(
         false,
         agent.agent_guidance(),
         withheld,
-        agent.history_functions(),
+        agent.history_naming(),
     )?;
     let body = fetch_response_json_limited(
         upstream_json,
@@ -215,7 +214,7 @@ pub(super) async fn fetch_stream_payload(
         true,
         agent.agent_guidance(),
         withheld,
-        agent.history_functions(),
+        agent.history_naming(),
     )?;
     let lines = call_inference_with_headers_limited(
         upstream_json,
@@ -267,7 +266,8 @@ pub(super) mod tests {
         let baseline: Value = serde_json::from_str(&upstream_request(&ctx, false).unwrap()).unwrap();
         for stream in [false, true] {
             let body: Value = serde_json::from_str(
-                &upstream_request_with_guidance(&ctx, stream, Some(&guidance), None, &[]).unwrap(),
+                &upstream_request_with_guidance(&ctx, stream, Some(&guidance), None, &HistoryNaming::default())
+                    .unwrap(),
             )
             .unwrap();
             assert_eq!(body["instructions"], "caller instructions");

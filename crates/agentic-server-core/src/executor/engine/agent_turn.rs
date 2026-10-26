@@ -29,7 +29,6 @@ use crate::executor::telemetry::metrics::Stage;
 use crate::executor::upstream::{fetch_blocking_payload, fetch_stream_payload};
 use crate::executor::{inference::UpstreamHeaders, relay::Release};
 use crate::tool::{ToolRegistry, mcp, record_discovered_mcp_tools, responses_declarations};
-use crate::types::io::output::McpListTools;
 use crate::types::io::{InputItem, OutputItem, ResponsesInput};
 use crate::types::request_response::ResponsePayload;
 
@@ -235,11 +234,6 @@ impl<'a> AgentTurn<'a> {
             tool_call_budget,
             async_continuations: AsyncContinuations::default(),
         })
-    }
-
-    /// Each server's successful listing from this request's discovery, emitted or not.
-    pub(super) fn current_mcp_list_tools(&self) -> Vec<McpListTools> {
-        self.registry.current_mcp_list_tools().cloned().collect()
     }
 
     pub(super) fn discovery_output(&self) -> Vec<OutputItem> {

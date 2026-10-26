@@ -10,7 +10,7 @@ use super::{RequestPayload, UpstreamRequestError, UpstreamTool};
 use crate::tool::async_execution::lower_async_calls;
 use crate::tool::{CodexNamespaceHandler, NamespaceMap, ToolDeclaration};
 use crate::types::io::ResponsesInput;
-use crate::types::io::input::{InputValidationError, McpToolNames};
+use crate::types::io::input::{HistoryNaming, InputValidationError, McpToolNames};
 
 impl RequestPayload {
     /// The function tools offered upstream for `declarations`, with namespace members under their flat names.
@@ -36,6 +36,15 @@ impl RequestPayload {
             .map(UpstreamTool::Function)
             .collect();
         Ok(Some(tools).filter(|tools| !tools.is_empty()))
+    }
+
+    /// How this request knows its history's tools, for a request that declares none of them (a compaction summary).
+    #[must_use]
+    pub(crate) fn history_naming(&self) -> HistoryNaming {
+        HistoryNaming {
+            functions: self.top_level_function_names(),
+            mcp: McpToolNames::from_tools(self.tools.as_deref().unwrap_or_default()),
+        }
     }
 
     /// The top-level functions this request knows: those it declares and those a search in its input loaded. A
@@ -67,8 +76,8 @@ impl RequestPayload {
         names
     }
 
-    /// The input as the model reads it, given the request's `declarations`, their namespace `map`, and
-    /// `history_functions`, the top-level functions its history knows beyond what it declares or shows.
+    /// The input as the model reads it, given the request's `declarations`, their namespace `map`, and `history`,
+    /// how its history knows tools beyond what it declares or shows.
     ///
     /// # Errors
     ///
@@ -77,9 +86,10 @@ impl RequestPayload {
         &self,
         declarations: Option<&[ToolDeclaration]>,
         map: Option<&NamespaceMap>,
-        history_functions: &[String],
+        history: &HistoryNaming,
     ) -> Result<Cow<'_, ResponsesInput>, InputValidationError> {
-        let mcp_names = McpToolNames::from_tools(self.tools.as_deref().unwrap_or_default());
+        // This request's discovery names its MCP tools first, then its history's discovery, then its listings.
+        let mcp_names = McpToolNames::from_tools(self.tools.as_deref().unwrap_or_default()).or(&history.mcp);
         // A call naming itself is to a searched function only if this request declares that function, a search
         // output in its input loaded it, or its history knows it (a compaction summary declares no tools).
         let mut functions = self.input.searched_function_names();
@@ -89,7 +99,7 @@ impl RequestPayload {
                 .flatten()
                 .filter_map(ToolDeclaration::function_name),
         );
-        functions.extend(history_functions.iter().map(String::as_str));
+        functions.extend(history.functions.iter().map(String::as_str));
         Ok(lower_async_calls(CodexNamespaceHandler.resolve_input(
             map,
             &functions,

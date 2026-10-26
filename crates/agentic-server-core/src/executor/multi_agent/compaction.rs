@@ -5,7 +5,7 @@ use crate::executor::inference::UpstreamHeaders;
 use crate::executor::pending_calls::resolved_prefix_len;
 use crate::executor::request::ExecutionContext;
 use crate::types::agent::AgentIdentity;
-use crate::types::io::input::async_records;
+use crate::types::io::input::{HistoryNaming, async_records};
 use crate::types::io::{InputItem, ResponseUsage, ResponsesInput};
 use crate::types::request_response::{PromptCacheOptions, PromptCacheRetention, RequestPayload};
 
@@ -19,8 +19,8 @@ pub struct CompactionPlan {
     prompt_cache_retention: Option<PromptCacheRetention>,
     prompt_cache_options: Option<PromptCacheOptions>,
     service_tier: Option<String>,
-    /// The agent request's top-level functions, naming context for its summary.
-    history_functions: Vec<String>,
+    /// How the agent request knew its tools, naming context for its summary.
+    history: HistoryNaming,
 }
 
 pub struct CompactionResult {
@@ -82,7 +82,7 @@ impl CompactionPlan {
             prompt_cache_retention: request.prompt_cache_retention,
             prompt_cache_options: request.prompt_cache_options,
             service_tier: request.service_tier.clone(),
-            history_functions: request.top_level_function_names(),
+            history: request.history_naming(),
         }))
     }
 
@@ -117,14 +117,8 @@ impl CompactionPlan {
             service_tier: self.service_tier,
             ..Default::default()
         };
-        let (mut replacement, usage, service_tier) = compact_items(
-            &request,
-            self.history_functions,
-            ResponsesInput::from(self.prefix),
-            exec,
-            auth,
-        )
-        .await?;
+        let (mut replacement, usage, service_tier) =
+            compact_items(&request, self.history, ResponsesInput::from(self.prefix), exec, auth).await?;
         let at = replacement
             .iter()
             .rposition(|item| matches!(item, InputItem::Compaction(_)))
