@@ -484,7 +484,7 @@ mod tests {
             .expect("reserve most of the response budget");
 
         let mut request = AgentPipeline::new(request, None, StreamRelay::detached());
-        let error = build_tool_registry(&mut request, &exec_ctx, &response_budget)
+        let error = build_tool_registry(&mut request, &exec_ctx, &response_budget, None)
             .await
             .expect_err("MCP discovery must share the request-wide response budget");
 
@@ -580,7 +580,7 @@ mod tests {
 
         let plain_budget = ExecutorResponseBudget::new();
         let mut plain_request = AgentPipeline::new(plain_request, None, StreamRelay::detached());
-        let mut plain_build = Box::pin(build_tool_registry(&mut plain_request, &exec_ctx, &plain_budget));
+        let mut plain_build = Box::pin(build_tool_registry(&mut plain_request, &exec_ctx, &plain_budget, None));
         assert!(matches!(
             futures::poll!(plain_build.as_mut()),
             std::task::Poll::Ready(Ok(_))
@@ -589,7 +589,7 @@ mod tests {
 
         let mcp_budget = ExecutorResponseBudget::new();
         let mut mcp_request = AgentPipeline::new(mcp_request, None, StreamRelay::detached());
-        let mut mcp_build = Box::pin(build_tool_registry(&mut mcp_request, &exec_ctx, &mcp_budget));
+        let mut mcp_build = Box::pin(build_tool_registry(&mut mcp_request, &exec_ctx, &mcp_budget, None));
         assert!(futures::poll!(mcp_build.as_mut()).is_pending());
 
         drop(held_permits.pop());
@@ -647,7 +647,7 @@ mod tests {
         });
 
         let mut agent = AgentPipeline::new(request, None, StreamRelay::detached());
-        let registry = build_tool_registry(&mut agent, &exec_ctx, &ExecutorResponseBudget::new())
+        let registry = build_tool_registry(&mut agent, &exec_ctx, &ExecutorResponseBudget::new(), None)
             .await
             .expect("registry with a discovered MCP tool");
         assert!(registry.lookup("mcp__counter__read").is_some());

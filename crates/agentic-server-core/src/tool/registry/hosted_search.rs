@@ -1,27 +1,162 @@
-//! Registry entries for tool search: one kind, owned where its declaration runs it, the hosted search's per-response
-//! catalog binding, and the tools a search loads.
+//! Tool search in the registry: one kind, owned where its declaration runs it, and the request's tool catalog, which
+//! the registry owns for the response. The registry offers the model the catalog's loaded definitions, withholds the
+//! deferred ones, runs a hosted search over it, and loads what a search returns.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::future::{Future, ready};
 use std::pin::Pin;
 use std::sync::Arc;
 
-use super::super::catalog::ToolCatalog;
+use super::super::catalog::{PriorCalls, ToolCatalog};
 use super::super::declaration::{ToolDeclaration, responses_declarations};
 use super::super::executors::GatewayExecutors;
 use super::super::handler::{GatewayExecutor, GatewayToolEventPlan, PlannedResult, ToolOutput};
 use super::super::ownership::{GatewayBinding, ToolOwnership};
-use super::super::tool_search::{TOOL_SEARCH_NAME, ToolSearchHandler};
+use super::super::tool_search::{TOOL_SEARCH_NAME, ToolSearchHandler, offered_tools};
 use super::super::{CodexNamespaceHandler, ToolError};
 use super::{CustomHandler, ToolEntry, ToolRegistry, ToolType};
 use crate::types::io::OutputItem;
 use crate::types::io::input::hosted_search_output_text;
 use crate::types::io::output::FunctionToolCall;
 use crate::types::io::{ToolSearchCall, ToolSearchOutputMessage};
+use crate::types::request_response::RequestPayload;
 use crate::types::tools::ResponsesTool;
 use crate::types::tools::{ToolSearchStatus, ToolSearchToolParam};
 
+/// The request's tool catalog as the registry owns it, with the synthetic search declaration the offered tools carry.
+#[derive(Clone)]
+pub(crate) struct RegistryToolSearch {
+    catalog: Arc<ToolCatalog>,
+    synthetic: Option<ToolSearchToolParam>,
+    hosted: bool,
+}
+
+impl fmt::Debug for RegistryToolSearch {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RegistryToolSearch")
+            .field("definition_count", &self.catalog.definitions.len())
+            .field("has_synthetic", &self.synthetic.is_some())
+            .field("hosted", &self.hosted)
+            .finish()
+    }
+}
+
+/// The public snapshot persistence keeps after a load: the effective declarations and the loaded definitions.
+pub(crate) type LoadedSnapshot = (Vec<ResponsesTool>, Vec<ResponsesTool>);
+
 impl ToolRegistry {
+    /// Takes ownership of the request's catalog: the one preparation built, or the one the registry this replaces
+    /// held. A hosted search records each deferred MCP server's discovered tools in it and is bound to it.
+    pub(crate) fn attach_tool_search(
+        &mut self,
+        mut catalog: ToolCatalog,
+        synthetic: Option<ToolSearchToolParam>,
+        hosted: bool,
+        private_tools: &[ResponsesTool],
+    ) {
+        if hosted {
+            catalog.discover_mcp(private_tools);
+        }
+        let catalog = Arc::new(catalog);
+        if hosted {
+            self.bind_hosted_tool_search(Arc::clone(&catalog));
+        }
+        self.tool_search = Some(RegistryToolSearch {
+            catalog,
+            synthetic,
+            hosted,
+        });
+    }
+
+    /// The request's tool catalog, when tool search is active.
+    pub(crate) fn tool_catalog(&self) -> Option<&ToolCatalog> {
+        self.tool_search.as_ref().map(|search| &*search.catalog)
+    }
+
+    /// Checks the registry against the catalog: no entry takes a withheld name, and a prepared search is present.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ToolError::Config`] as [`Self::validate_tool_availability`] does.
+    pub(crate) fn validate_tool_search_availability(&self) -> Result<(), ToolError> {
+        let Some(search) = &self.tool_search else {
+            return Ok(());
+        };
+        self.validate_tool_availability(&search.catalog.withheld_function_names, search.synthetic.is_some())
+    }
+
+    /// Model-visible names the model may not call yet: deferred functions and namespace members not loaded, and
+    /// deferred MCP tools not loaded, given the discovery recorded on `private_tools`.
+    pub(crate) fn withheld_names(&self, private_tools: &[ResponsesTool]) -> HashSet<String> {
+        let Some(search) = &self.tool_search else {
+            return HashSet::new();
+        };
+        let mut withheld = search.catalog.withheld_function_names.clone();
+        withheld.extend(search.catalog.withheld_mcp_tool_names(private_tools));
+        withheld
+    }
+
+    /// Deferred top-level functions of a hosted search; their calls report their own name as namespace.
+    pub(crate) fn hosted_deferred_functions(&self) -> HashSet<String> {
+        self.tool_search
+            .as_ref()
+            .filter(|search| search.hosted)
+            .map(|search| search.catalog.deferred_functions())
+            .unwrap_or_default()
+    }
+
+    /// Loads the tools this round's hosted searches returned into the catalog, offers the next round the definitions
+    /// now loaded (keeping MCP discovery), adds client entries for them, and returns the public snapshot to persist.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ToolError::Config`] when a returned definition conflicts with the catalog or a loaded name collides.
+    pub(crate) async fn load_searched_tools(
+        &mut self,
+        loaded: &[ResponsesTool],
+        request: &mut RequestPayload,
+    ) -> Result<Option<LoadedSnapshot>, ToolError> {
+        let Some(search) = self.tool_search.as_mut() else {
+            return Ok(None);
+        };
+        let catalog = Arc::make_mut(&mut search.catalog);
+        // A load in this response follows the calls already made in it, so none of them is a call before load.
+        for tool in loaded {
+            catalog.load(tool, &PriorCalls::default())?;
+        }
+        let mut offered = offered_tools(catalog, search.synthetic.as_ref());
+        for tool in &mut offered {
+            let ResponsesTool::Mcp(server) = tool else {
+                continue;
+            };
+            if let Some(discovered) = request
+                .tools
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .find_map(|previous| match previous {
+                    ResponsesTool::Mcp(previous) if previous.server_label == server.server_label => {
+                        Some(&previous.discovered_tools)
+                    }
+                    _ => None,
+                })
+            {
+                server.discovered_tools.clone_from(discovered);
+            }
+        }
+        let snapshot = (catalog.public_tools.clone(), catalog.loaded_public_tools.clone());
+        request.tools = Some(offered);
+        if search.hosted {
+            let catalog = Arc::clone(&search.catalog);
+            self.bind_hosted_tool_search(catalog);
+        }
+        self.refresh_client_tools(request.tools.as_deref().unwrap_or_default())
+            .await?;
+        Ok(Some(snapshot))
+    }
+
     /// Adds client entries for tools a hosted search loaded mid-response, and
     /// rebuilds the namespace and custom maps that restore their public shape.
     /// Gateway entries, including discovered MCP tools, are kept as built, so
@@ -53,7 +188,7 @@ impl ToolRegistry {
     }
 
     /// Binds the hosted `tool_search` entry to this response's catalog.
-    pub(crate) fn bind_hosted_tool_search(&mut self, catalog: ToolCatalog) {
+    pub(crate) fn bind_hosted_tool_search(&mut self, catalog: Arc<ToolCatalog>) {
         if self.is_hosted_tool_search_name(TOOL_SEARCH_NAME) {
             self.entries
                 .insert(TOOL_SEARCH_NAME.to_owned(), hosted_tool_search_entry(catalog));
@@ -81,7 +216,7 @@ impl ToolRegistry {
 /// response's catalog once MCP discovery has run.
 pub(crate) fn insert_tool_search_entry(entries: &mut HashMap<String, ToolEntry>, param: &ToolSearchToolParam) {
     let entry = if param.is_hosted() {
-        hosted_tool_search_entry(ToolCatalog::default())
+        hosted_tool_search_entry(Arc::new(ToolCatalog::default()))
     } else {
         tool_search_entry(ToolOwnership::Client)
     };
@@ -94,10 +229,10 @@ pub(crate) fn insert_tool_search_entry(entries: &mut HashMap<String, ToolEntry>,
 }
 
 /// The gateway runs a hosted search with [`ToolSearchHandler`] over this response's catalog.
-pub(crate) fn hosted_tool_search_entry(catalog: ToolCatalog) -> ToolEntry {
+pub(crate) fn hosted_tool_search_entry(catalog: Arc<ToolCatalog>) -> ToolEntry {
     tool_search_entry(ToolOwnership::Gateway(Some(GatewayBinding::new(
         Arc::new(ToolSearchHandler),
-        Arc::new(catalog),
+        catalog,
     ))))
 }
 

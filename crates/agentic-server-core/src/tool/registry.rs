@@ -225,6 +225,9 @@ pub struct ToolRegistry {
     /// first while building and rehydrated historical records are appended.
     /// Insertion order preserves the MCP declaration order for public output.
     mcp_list_tools_items: IndexMap<String, Vec<McpListTools>>,
+
+    /// The request's tool catalog, which the registry owns for the response when tool search is active.
+    tool_search: Option<hosted_search::RegistryToolSearch>,
 }
 
 impl ToolRegistry {
@@ -385,6 +388,7 @@ impl ToolRegistry {
             namespace_map,
             custom_tool_map,
             mcp_list_tools_items,
+            tool_search: None,
         })
     }
 

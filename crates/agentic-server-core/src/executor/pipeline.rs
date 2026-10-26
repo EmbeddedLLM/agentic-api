@@ -128,13 +128,16 @@ impl AgentPipeline {
         self.tool_search_state.as_ref()
     }
 
-    /// Loads the tools this round's hosted searches returned, updating the
-    /// search state and the private tools of the next inference round.
-    pub(super) fn apply_hosted_search(&mut self, loaded: &[ResponsesTool]) -> ExecutorResult<()> {
+    /// The search state, from which the registry takes the request's catalog.
+    pub(super) fn tool_search_state_mut(&mut self) -> Option<&mut ToolSearchState> {
+        self.tool_search_state.as_mut()
+    }
+
+    /// Records the public snapshot persistence keeps after the registry loaded searched tools.
+    pub(super) fn record_tool_search_loads(&mut self, effective_tools: Vec<ResponsesTool>, loaded: Vec<ResponsesTool>) {
         if let Some(state) = self.tool_search_state.as_mut() {
-            state.apply_hosted_search(loaded, &mut self.request.enriched_request)?;
+            state.record_loads(effective_tools, loaded);
         }
-        Ok(())
     }
 
     pub(super) fn ensure_request_prepared(&self) -> ExecutorResult<()> {

@@ -4,6 +4,7 @@
 use super::AgentTurn;
 use crate::executor::error::{ExecutorError, ExecutorResult};
 use crate::executor::gateway::GatewayCallResult;
+use crate::executor::pipeline::AgentPipeline;
 use crate::tool::ToolRegistry;
 use crate::types::io::OutputItem;
 use crate::types::tools::ResponsesTool;
@@ -15,6 +16,32 @@ pub(super) fn reject_failed_mcp_listing(registry: &ToolRegistry) -> ExecutorResu
         let mut failed = failed.clone();
         failed.error = None;
         return Err(ExecutorError::McpListToolsFailed(Box::new(failed)));
+    }
+    Ok(())
+}
+
+/// With tool search active, the registry takes the request's catalog: the one preparation built, or else the one
+/// `previous` (the registry this replaces) held. It then checks availability and, for a hosted search, an MCP
+/// `tool_choice` against the discovered tools.
+pub(super) fn attach_tool_search(
+    agent: &mut AgentPipeline,
+    registry: &mut ToolRegistry,
+    previous: Option<&ToolRegistry>,
+) -> ExecutorResult<()> {
+    if let Some(state) = agent.tool_search_state_mut().filter(|state| state.is_active()) {
+        let synthetic = state.synthetic_tool_search().cloned();
+        let hosted = state.is_hosted();
+        let catalog = state
+            .take_catalog()
+            .or_else(|| previous.and_then(ToolRegistry::tool_catalog).cloned())
+            .unwrap_or_default();
+        // A hosted search needs each deferred MCP server's discovered tools.
+        let tools = agent.request.enriched_request.tools.as_deref().unwrap_or_default();
+        registry.attach_tool_search(catalog, synthetic, hosted, tools);
+        registry.validate_tool_search_availability()?;
+        if hosted && let Some(catalog) = registry.tool_catalog() {
+            catalog.validate_mcp_tool_choice(agent.request.enriched_request.tool_choice.as_ref(), tools)?;
+        }
     }
     Ok(())
 }
@@ -37,15 +64,13 @@ impl AgentTurn<'_> {
         if loaded.is_empty() {
             return Ok(());
         }
-        self.pipeline.apply_hosted_search(loaded)?;
-        let tools = self
-            .pipeline
-            .request
-            .enriched_request
-            .tools
-            .as_deref()
-            .unwrap_or_default();
-        self.registry.refresh_client_tools(tools).await?;
+        let snapshot = self
+            .registry
+            .load_searched_tools(loaded, &mut self.pipeline.request.enriched_request)
+            .await?;
+        if let Some((effective_tools, loaded)) = snapshot {
+            self.pipeline.record_tool_search_loads(effective_tools, loaded);
+        }
         Ok(())
     }
 }

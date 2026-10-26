@@ -23,24 +23,11 @@ fn translation_context(registry: &ToolRegistry, agent: &AgentPipeline) -> Transl
             .tool_classifications()
             .map(|(name, kind)| (name.to_owned(), kind))
             .collect(),
-        state
-            .map(|state| {
-                let mut withheld = state.withheld_function_names().clone();
-                // Deferred MCP tools that no hosted search has loaded yet.
-                withheld.extend(
-                    state.withheld_mcp_tool_names(agent.request.enriched_request.tools.as_deref().unwrap_or_default()),
-                );
-                withheld
-            })
-            .unwrap_or_default(),
+        // Deferred functions, namespace members and MCP tools no search has loaded yet.
+        registry.withheld_names(agent.request.enriched_request.tools.as_deref().unwrap_or_default()),
         state.is_some_and(ToolSearchState::is_active),
     )
-    .with_self_namespaced_functions(
-        state
-            .filter(|state| state.is_hosted())
-            .map(ToolSearchState::hosted_deferred_functions)
-            .unwrap_or_default(),
-    )
+    .with_self_namespaced_functions(registry.hosted_deferred_functions())
     .with_collaboration(
         agent
             .request
@@ -294,11 +281,14 @@ pub(super) mod tests {
             ]
         }))
         .expect("request");
-        let registry = ToolRegistry::from_tool_types(std::collections::HashMap::from([
+        let mut registry = ToolRegistry::from_tool_types(std::collections::HashMap::from([
             ("tool_search".to_owned(), ToolType::ToolSearch),
             ("raw_echo".to_owned(), ToolType::Custom),
         ]));
-        let state = ToolSearchState::build(&request).expect("prepared state");
+        let mut state = ToolSearchState::build(&request).expect("prepared state");
+        // The registry takes the prepared catalog, as `build_tool_registry` does.
+        let catalog = state.take_catalog().expect("prepared catalog");
+        registry.attach_tool_search(catalog, state.synthetic_tool_search().cloned(), false, &[]);
         let agent = AgentPipeline::new(request_context(), Some(state), StreamRelay::detached());
         let context = translation_context(&registry, &agent);
         drop(registry);

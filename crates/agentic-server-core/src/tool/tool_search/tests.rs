@@ -537,7 +537,9 @@ fn restored_mcp_loads_survive_compaction_and_offer_only_the_rest() {
         });
     }
     let tools = prepared.tools.clone().unwrap();
-    let found = state.hosted_catalog(&tools).search_raw(r#"{"paths":["mcp_stub"]}"#);
+    let mut catalog = state.catalog().expect("prepared catalog").clone();
+    catalog.discover_mcp(&tools);
+    let found = catalog.search_raw(r#"{"paths":["mcp_stub"]}"#);
     let ResponsesTool::Namespace(namespace) = &found[0] else {
         panic!("an MCP server loads as a namespace");
     };
@@ -546,7 +548,10 @@ fn restored_mcp_loads_survive_compaction_and_offer_only_the_rest() {
         matches!(&namespace.tools[0], CodexNamespaceMember::Function(function) if function.name.as_str() == "reverse")
     );
     assert_eq!(
-        state.withheld_mcp_tool_names(&tools),
+        state
+            .catalog()
+            .expect("prepared catalog")
+            .withheld_mcp_tool_names(&tools),
         HashSet::from(["mcp__stub__reverse".to_owned()])
     );
     // Restored loads are kept for the next response's metadata.
