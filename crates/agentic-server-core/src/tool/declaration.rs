@@ -46,6 +46,26 @@ pub enum ToolDeclaration {
     Unsupported,
 }
 
+impl ToolDeclaration {
+    /// The name of a declared top-level function.
+    #[must_use]
+    pub(crate) fn function_name(&self) -> Option<&str> {
+        match self {
+            Self::Function(function) => Some(function.name.as_str()),
+            Self::ToolSearch(_)
+            | Self::Mcp(_)
+            | Self::WebSearch(_)
+            | Self::WebFetch(_)
+            | Self::FileSearch(_)
+            | Self::CodeInterpreter(_)
+            | Self::Shell(_)
+            | Self::Namespace(_)
+            | Self::Custom(_)
+            | Self::Unsupported => None,
+        }
+    }
+}
+
 impl From<ResponsesTool> for ToolDeclaration {
     fn from(tool: ResponsesTool) -> Self {
         match tool {

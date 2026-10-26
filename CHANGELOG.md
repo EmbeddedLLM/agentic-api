@@ -123,10 +123,13 @@ All notable changes to Agentic API are documented here.
   for function call output with call_id …" with `param: "input"`) instead of a `tool error: invalid tool config: …`
   message; a request without search items is unchanged. A hosted `tool_search_call` whose item id equals another
   call's `call_id` is rejected (`duplicate tool_search_call call_id`), since the model would otherwise see two calls
-  with one id. A `function_call` whose `namespace` equals its `name` and
-  that no declared namespace maps reaches the model unqualified, as a searched top-level function does, with or
-  without declarations. Compaction's token estimate counts a search output as the text the model reads (functions
-  with their schemas, namespaces by name and description), as it already did during a response.
+  with one id. A `function_call` whose `namespace` equals its `name`, that no declared namespace maps, and whose
+  name is a top-level function the request declares or a search output in its input loaded reaches the model
+  unqualified, as a searched top-level function does; any other call keeps its namespace, since a namespace may
+  hold a member of its own name. Compaction's token estimate counts a search output as the text the model reads
+  (functions with their schemas, namespaces by name and description), as it already did during a response.
+  `agentic_core`: `CodexNamespaceHandler::resolve_input` takes the request's top-level function names
+  (`&HashSet<&str>`) between the namespace map and the input.
 
 ## [0.9.0] - 2026-09-30
 

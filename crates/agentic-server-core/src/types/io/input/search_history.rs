@@ -7,18 +7,18 @@
 //! id is that call's item id, so the projection is the same live, on continuation, and on replay.
 
 use std::borrow::Borrow;
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 
 use serde::Serialize;
 use serde_json::Value;
 
 use super::{
-    FunctionToolResultMessage, InputFunctionToolCall, InputItem, InputToolSearchCall, ToolCallOutput,
+    FunctionToolResultMessage, InputFunctionToolCall, InputItem, InputToolSearchCall, ResponsesInput, ToolCallOutput,
     ToolSearchOutputMessage,
 };
 use crate::types::event::MessageStatus;
-use crate::types::io::AgentAttribution;
-use crate::types::tools::{FunctionToolParam, ResponsesTool, ToolSearchExecution};
+use crate::types::io::{AgentAttribution, InOutItem, OutputItem};
+use crate::types::tools::{FunctionToolParam, ResponsesTool, ToolSearchExecution, ToolSearchStatus};
 use crate::utils::common::{serialize_to_string, serialize_to_value};
 
 /// The function the model calls to search; see `tool::tool_search`.
@@ -156,6 +156,38 @@ impl SearchHistory {
 /// Whether the upstream projection rewrites `item`.
 pub(crate) const fn is_search_item(item: &InputItem) -> bool {
     matches!(item, InputItem::ToolSearchCall(_) | InputItem::ToolSearchOutput(_))
+}
+
+impl ResponsesInput {
+    /// The top-level functions this input's completed search outputs loaded. A namespace member may share its
+    /// namespace's name, so these record which calls naming themselves were to a searched function.
+    pub(crate) fn searched_function_names(&self) -> HashSet<&str> {
+        let Self::Items(items) = self else {
+            return HashSet::new();
+        };
+        items
+            .iter()
+            .filter_map(|item| match item {
+                InOutItem::Input(InputItem::ToolSearchOutput(output))
+                | InOutItem::Output(OutputItem::ToolSearchOutput(output)) => Some(output),
+                InOutItem::Input(_) | InOutItem::Output(_) => None,
+            })
+            .filter(|output| output.status == ToolSearchStatus::Completed)
+            .flat_map(|output| &output.tools)
+            .filter_map(|tool| match tool {
+                ResponsesTool::Function(function) => Some(function.name.as_str()),
+                ResponsesTool::Namespace(_)
+                | ResponsesTool::ToolSearch(_)
+                | ResponsesTool::Mcp(_)
+                | ResponsesTool::WebSearch(_)
+                | ResponsesTool::FileSearch(_)
+                | ResponsesTool::CodeInterpreter(_)
+                | ResponsesTool::Shell(_)
+                | ResponsesTool::Custom(_)
+                | ResponsesTool::Unknown => None,
+            })
+            .collect()
+    }
 }
 
 fn model_search_call(call: &InputToolSearchCall, call_id: String) -> InputItem {

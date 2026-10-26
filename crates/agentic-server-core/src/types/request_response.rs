@@ -369,8 +369,13 @@ impl RequestPayload {
         let tools = tools.filter(|tools| !tools.is_empty());
         let namespace_map = CodexNamespaceHandler.build_namespace_map(declarations.as_deref())?;
         let mcp_names = McpToolNames::from_tools(self.tools.as_deref().unwrap_or_default());
+        // A call naming itself is to a searched function only if this request declares that function or a search output
+        // in its input loaded it (a compaction summary declares no tools).
+        let mut functions = self.input.searched_function_names();
+        functions.extend(declarations.iter().flatten().filter_map(ToolDeclaration::function_name));
         let input = lower_async_calls(CodexNamespaceHandler.resolve_input(
             namespace_map.as_ref(),
+            &functions,
             self.input.normalized_model_input_with(&mcp_names)?,
         ));
         let tool_choice = CodexNamespaceHandler.resolve_tool_choice(namespace_map.as_ref(), self.tool_choice.as_ref());
@@ -1110,6 +1115,78 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(explicit.tool_choice, Some(ToolChoice::None));
+    }
+
+    /// The model's view of a history call to `weather` in namespace `weather`, after a hosted search that loaded
+    /// `loaded`, in a request that declares no tools (as a compaction summary does).
+    fn undeclared_self_named_call(loaded: Option<Value>) -> Value {
+        self_named_call(loaded, None)
+    }
+
+    /// The model's view of that call in a request declaring `tools`.
+    fn self_named_call(loaded: Option<Value>, tools: Option<&Value>) -> Value {
+        let mut input = vec![serde_json::json!({"type": "message", "role": "user", "content": "weather?"})];
+        if let Some(loaded) = loaded {
+            input.extend([
+                serde_json::json!({"type": "tool_search_call", "id": "tsc_1", "call_id": null, "execution": "server",
+                    "arguments": {"paths": ["weather"]}, "status": "completed"}),
+                serde_json::json!({"type": "tool_search_output", "id": "tso_1", "call_id": null,
+                    "execution": "server", "status": "completed", "tools": [loaded]}),
+            ]);
+        }
+        input.extend([
+            serde_json::json!({"type": "function_call", "call_id": "call_w", "name": "weather",
+                "namespace": "weather", "arguments": "{}", "status": "completed"}),
+            serde_json::json!({"type": "function_call_output", "call_id": "call_w", "output": "18C"}),
+        ]);
+        let payload: RequestPayload =
+            serde_json::from_value(serde_json::json!({"model": "test", "input": input, "tools": tools}))
+                .expect("request");
+        let upstream = serde_json::to_value(payload.to_upstream_request(false).expect("upstream")).expect("JSON");
+        upstream["input"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .find(|item| item["call_id"] == "call_w" && item["type"] == "function_call")
+            .expect("the weather call")
+            .clone()
+    }
+
+    #[test]
+    fn a_searched_top_level_function_call_is_unqualified_without_declarations() {
+        let function = serde_json::json!({"type": "function", "name": "weather", "parameters": {"type": "object"}});
+
+        let call = undeclared_self_named_call(Some(function));
+
+        assert_eq!(call["name"], "weather");
+        assert!(call.get("namespace").is_none(), "{call}");
+    }
+
+    #[test]
+    fn a_namespace_member_named_like_its_namespace_keeps_the_namespace_without_declarations() {
+        let namespace = serde_json::json!({"type": "namespace", "name": "weather", "description": "Weather tools",
+            "tools": [{"type": "function", "name": "weather", "parameters": {"type": "object"}}]});
+
+        // Neither a search output that loaded the namespace nor a history with no search says the call was to a
+        // searched function, so it stays the namespace member it was.
+        for loaded in [Some(namespace), None] {
+            let call = undeclared_self_named_call(loaded);
+
+            assert_eq!(call["name"], "weather");
+            assert_eq!(call["namespace"], "weather", "{call}");
+        }
+    }
+
+    #[test]
+    fn a_declared_top_level_function_call_is_unqualified_without_its_search_output() {
+        // A compaction can carry a searched function's call past the search output that loaded it; the request still
+        // declares the function.
+        let tools = serde_json::json!([{"type": "function", "name": "weather", "parameters": {"type": "object"}}]);
+
+        let call = self_named_call(None, Some(&tools));
+
+        assert_eq!(call["name"], "weather");
+        assert!(call.get("namespace").is_none(), "{call}");
     }
 
     #[test]

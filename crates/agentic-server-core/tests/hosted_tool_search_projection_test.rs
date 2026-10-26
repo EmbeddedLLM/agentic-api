@@ -301,3 +301,46 @@ async fn compaction_summary_shows_the_search_and_its_call_as_the_model_saw_them(
     assert_eq!(summary[3]["name"], "get_weather");
     assert!(summary[3].get("namespace").is_none(), "{}", summary[3]);
 }
+
+/// A namespace may hold a member of its own name. With no tools to check, the summary keeps that
+/// member's namespace, since only a searched top-level function is known unqualified.
+#[tokio::test]
+async fn compaction_summary_keeps_a_namespace_member_named_like_its_namespace() {
+    let (llm_url, requests) = spawn_llm(vec![
+        upstream("up_summary", json!([message("summary")])),
+        upstream("up_1", json!([message("done")])),
+    ])
+    .await;
+    let (context, _, _) = durable_context(llm_url).await;
+    let weather = json!({"type": "namespace", "name": "weather", "description": "Weather tools",
+        "tools": [{"type": "function", "name": "weather", "description": "Get weather",
+            "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"],
+                "additionalProperties": false},
+            "strict": true, "defer_loading": true}]});
+    let input = json!([
+        user("weather?"),
+        {"type": "tool_search_call", "id": "tsc_s1", "call_id": null, "execution": "server",
+            "arguments": {"paths": ["weather"]}, "status": "completed"},
+        {"type": "tool_search_output", "id": "tso_s1", "call_id": null, "execution": "server", "status": "completed",
+            "tools": [weather.clone()]},
+        {"type": "function_call", "id": "fc_w1", "call_id": "call_w1", "name": "weather",
+            "namespace": "weather", "arguments": "{\"city\":\"Paris\"}", "status": "completed"},
+        {"type": "function_call_output", "call_id": "call_w1", "output": "18C"},
+        user("again")
+    ]);
+    let response = run(
+        json!({"model": "test", "input": input, "tools": [{"type": "tool_search"}, weather], "store": false,
+            "context_management": [{"type": "compaction", "compact_threshold": 1}]}),
+        &context,
+    )
+    .await;
+    assert_eq!(response.status, "completed");
+
+    let requests = requests.lock().await;
+    assert_eq!(requests.len(), 2, "a summary request, then the answer");
+    assert!(requests[0]["tools"].is_null(), "{}", requests[0]["tools"]);
+    let summary = model_input(&requests[0]);
+    assert_eq!(summary[3]["type"], "function_call");
+    assert_eq!(summary[3]["name"], "weather");
+    assert_eq!(summary[3]["namespace"], "weather", "{}", summary[3]);
+}

@@ -1,7 +1,7 @@
 use crate::types::io::InOutItem;
 
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::handler::{ToolError, ToolHandler};
 use super::registry::{ToolEntry, ToolType};
@@ -286,18 +286,20 @@ impl CodexNamespaceHandler {
 
     /// Rewrite public namespaced function-call history to the exact flat names
     /// from the request-scoped namespace map used for tool declarations, and
-    /// unqualify a call that names itself (see [`unqualify_or_flatten_calls`]).
+    /// unqualify a call to a searched top-level function, one of `functions`
+    /// (see [`unqualify_or_flatten_calls`]).
     #[must_use]
     pub fn resolve_input<'a>(
         &self,
         map: Option<&NamespaceMap>,
+        functions: &HashSet<&str>,
         input: Cow<'a, ResponsesInput>,
     ) -> Cow<'a, ResponsesInput> {
         let resolves = |call: &InputFunctionToolCall| {
             call.namespace
                 .as_deref()
                 .is_some_and(|namespace| map.is_some_and(|map| map.mapping_for_member(namespace, &call.name).is_some()))
-                || names_itself(call)
+                || is_searched_function_call(call, |name| functions.contains(name))
         };
         let should_rewrite = matches!(&*input, ResponsesInput::Items(items) if items.iter().any(|item| {
             matches!(item, InOutItem::Input(InputItem::FunctionCall(call)) if resolves(call))
@@ -306,7 +308,7 @@ impl CodexNamespaceHandler {
             return input;
         }
         let mut input = input.into_owned();
-        unqualify_or_flatten_calls(&mut input, map);
+        unqualify_or_flatten_calls(&mut input, map, functions);
         Cow::Owned(input)
     }
 }
@@ -354,11 +356,12 @@ fn namespace_map_from_tools(tools: Option<&[ToolDeclaration]>) -> Result<Option<
 }
 
 /// Lowers namespaced calls to the flat names the model knows. A call whose
-/// namespace is its own name and that no declared namespace maps is to a
-/// searched function: the public item mirrors the Responses API, but the model
-/// knows the function unqualified. This needs no declaration, so a request that
-/// offers no tools (a compaction summary) still shows the call as the model saw it.
-fn unqualify_or_flatten_calls(input: &mut ResponsesInput, map: Option<&NamespaceMap>) {
+/// namespace is its own name, that no declared namespace maps, and whose name
+/// is one of the request's top-level `functions` is to a searched function: the
+/// public item mirrors the Responses API, but the model knows the function
+/// unqualified. Any other unmapped call keeps its namespace, since a namespace
+/// may hold a member of its own name.
+fn unqualify_or_flatten_calls(input: &mut ResponsesInput, map: Option<&NamespaceMap>, functions: &HashSet<&str>) {
     let ResponsesInput::Items(items) = input else {
         return;
     };
@@ -372,15 +375,15 @@ fn unqualify_or_flatten_calls(input: &mut ResponsesInput, map: Option<&Namespace
         if let Some(mapping) = map.and_then(|map| map.mapping_for_member(namespace, &call.name)) {
             call.name.clone_from(&mapping.upstream_name);
             call.namespace = None;
-        } else if names_itself(call) {
+        } else if is_searched_function_call(call, |name| functions.contains(name)) {
             call.namespace = None;
         }
     }
 }
 
-/// Whether `call` is to a searched top-level function: the Responses API reports such a call with its own name as
-/// namespace, and `is_function` confirms that name is a top-level function of this request. The model knows the
-/// function unqualified, so every model-facing projection drops that namespace.
+/// Whether `call` is to a searched top-level function: the Responses API names such a call's namespace after it, and
+/// `is_function` confirms the name is a top-level function the request declares or a search in its history loaded.
+/// The model knows the function unqualified, so every model-facing projection drops that namespace.
 pub(crate) fn is_searched_function_call(call: &InputFunctionToolCall, is_function: impl Fn(&str) -> bool) -> bool {
     names_itself(call) && is_function(&call.name)
 }
