@@ -291,7 +291,7 @@ mod tests {
     use std::collections::HashSet;
 
     use super::*;
-    use crate::types::io::input::{McpToolNames, async_records, open_async_call_ids};
+    use crate::types::io::input::{async_records, open_async_call_ids};
 
     #[test]
     fn compaction_prefix_never_splits_interleaved_calls_and_outputs() {
@@ -628,7 +628,7 @@ mod tests {
                         }
                         let input =
                             ResponsesInput::from(vec![deserialize_from_value::<InputItem>(item.clone()).unwrap()]);
-                        let normalized = input.normalized_model_input_with(&McpToolNames::default()).unwrap();
+                        let normalized = input.normalized_model_input().unwrap();
                         // Only the upstream projection lowers a search call; the session history that steering reads
                         // keeps it public, so its obligation is read from the public history alone.
                         let histories = if output_type == "tool_search_output" {

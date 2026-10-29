@@ -259,7 +259,7 @@ for failed outcomes. This preserves rejected fields and explicit nulls that shar
 message decoding can discard or normalize. Accepted input becomes ordinary user
 `InputItem`s in the successor, not an output slot in the running response.
 `ResponsesInput::into_canonical_items()` in `types/io/input/conversions.rs`
-preserves submitted item variants; `normalized_model_input_with()` still runs at the
+preserves submitted item variants; `normalized_model_input()` still runs at the
 ordinary upstream request boundary.
 
 The existing `SteeringTarget` owns `SteeringState` in `control.rs`. An optional
@@ -641,8 +641,7 @@ This module's job is JSON ⇄ Rust type conversion and shape validation for the
 Responses and Messages APIs. It is not where tool execution, state transitions, or DB
 access happen — those live in `tool/`, `executor/`, and `storage/` respectively.
 `types/io/input` also owns the one model-facing projection of input: every upstream request
-goes through it, so it lowers the public records the model never read (replayed gateway calls,
-search items, compaction checkpoints) and holds the MCP tool naming that lowering needs.
+goes through it, so it lowers the public records the model never read (search items, compaction checkpoints).
 
 - **`types/request_response.rs`** — `RequestPayload` is the deserialized incoming
   request. Its `to_upstream_request(&self, stream: bool) -> Result<UpstreamRequest<'_>, UpstreamRequestError>`
@@ -657,10 +656,8 @@ search items, compaction checkpoints) and holds the MCP tool naming that lowerin
   checks runtime availability before it calls this conversion. Every
   declaration that does reach vLLM is `type: "function"`, because that's the only
   tool type it speaks. The conversion also resolves/validates `tool_choice`
-  and applies `ResponsesInput::normalized_model_input_with`, the model projection: a replayed `mcp_call` or
-  `web_search_call` and each `tool_search_call`/`tool_search_output` become the function call and output the
-  model saw, an MCP call named as this request's discovery named it, else by the server's latest successful listing
-  in the input, else by its derived name. It's called from
+  and applies `ResponsesInput::normalized_model_input`, the model projection: each
+  `tool_search_call`/`tool_search_output` becomes the function call and output the model saw. It's called from
   `executor/upstream.rs`'s `fetch_blocking_payload` and `fetch_stream_payload` — the
   two functions that actually build the outbound request to vLLM.
   Input validation also runs before and after rehydration. It is separate from
@@ -671,13 +668,12 @@ search items, compaction checkpoints) and holds the MCP tool naming that lowerin
   search/MCP calls, reasoning — plus the `ApplyDone` trait described below), `tools.rs`
   (the normalized `FunctionTool` and `ToolChoice`, distinct from tool *declarations*),
   `reasoning.rs` (typed reasoning content, summaries, item status, and bounded opaque
-  state), and `usage.rs` (token accounting structs). `ResponsesInput::model_input_with` (through
-  `normalized_model_input_with`) is the final model-visibility boundary used by
-  `RequestPayload::to_upstream_request`; `model_input()` is the same projection without this request's discovered
-  MCP names. `input/search_history.rs` pairs search items (a client item by its `call_id`, a hosted output with the
-  oldest open hosted call, whose item id is the model's call id) and lowers them; `input/mcp_names.rs` names MCP
-  tools as discovery does: this request's discovered names first, then each server's latest successful listing.
-  It removes orchestration-only `McpListTools`, `CompactionTrigger`, and public collaboration input items. A persisted
+  state), and `usage.rs` (token accounting structs). `ResponsesInput::model_input()` (through
+  `normalized_model_input`) is the final model-visibility boundary used by `RequestPayload::to_upstream_request`.
+  `input/search_history.rs` pairs search items (a client item by its `call_id`, a hosted output with the oldest open
+  hosted call, whose item id is the model's call id) and lowers them. A replayed `mcp_call` or `web_search_call` is
+  not lowered yet and reaches the model as the public record. It removes orchestration-only `McpListTools`,
+  `CompactionTrigger`, and public collaboration input items. A persisted
   `Compaction` item is different: the latest checkpoint supersedes earlier model
   context and is converted into an assistant `output_text` summary, while canonical
   retained user messages and items after the checkpoint remain. This keeps rich
@@ -751,7 +747,7 @@ filter_map(OutputItem::to_input_item)   ← the conversion policy
 ResponsesInput                         ← append only
         │
         ▼
-ResponsesInput::model_input_with()     ← final upstream-visibility filter
+ResponsesInput::model_input()          ← final upstream-visibility filter
 ```
 
 There are two adapters around that one policy:
@@ -1761,12 +1757,11 @@ round that omits `usage` still reports the hidden rounds' counters.
   history still contains `InputItem::Compaction`, `InputItem::CompactionTrigger`, and
   `InputItem::McpListTools` for executor/registry decisions. Immediately before an
   upstream request, `RequestPayload::to_upstream_request` calls
-  `ResponsesInput::normalized_model_input_with`: the latest compaction
+  `ResponsesInput::normalized_model_input`: the latest compaction
   checkpoint is converted to an assistant summary and supersedes older context, while compaction triggers and MCP
   list-tools records and public collaboration items are removed. In particular, MCP
   list-tools remains available long enough for the registry to remember which server labels have already been listed,
-  and for the projection to name replayed MCP calls by it, but it is never serialized to vLLM. A compaction summary
-  therefore needs no tools of its own: the listings in its input name the calls it summarizes.
+  but it is never serialized to vLLM.
 - **`conversation.rs`, `response.rs`** — `ConversationStore` and `ResponseStore`: the
   CRUD-with-transactions layer (`create`, `get`, `get_or_create`, `rehydrate[_snapshot]`,
   `persist`/`persist_if_version` — each transactional, via `pool.begin()` /
@@ -2027,7 +2022,7 @@ router, reusing the same core logic in-process.
 | Change client streaming order, buffering, or backpressure | `executor/relay.rs` and `executor/relay/`; keep parsing in `events/` and response assembly in `executor/accumulator/` |
 | Move streaming ingestion to a worker | Benchmark the equivalent inline and worker paths under [#245](https://github.com/vllm-project/agentic-api/issues/245) before changing executor placement |
 | Feed response output into the next inference round | `types/io/output.rs::OutputItem::to_input_item`; use `executor/gateway.rs::append_output_items_to_input` only to append those converted items |
-| Change continuation history visibility | `types/io/item.rs::InOutItem::into_input_items` → `types/io/output.rs::to_input_item` (preservation) → `types/io/input.rs::model_input_with` (upstream visibility; search items via `types/io/input/search_history.rs`, MCP names via `types/io/input/mcp_names.rs`) |
+| Change continuation history visibility | `types/io/item.rs::InOutItem::into_input_items` → `types/io/output.rs::to_input_item` (preservation) → `types/io/input.rs::model_input` (upstream visibility; search items via `types/io/input/search_history.rs`) |
 | Add a CRUD operation beyond persist/rehydrate | `executor/modes/conversation.rs` or `modes/response.rs`, backed by `storage/conversation.rs` / `storage/response.rs` |
 | Change how output items are assembled from a stream | `executor/accumulator/` — extend the typed slot and transition matches through the existing `RoundIngestion` path |
 | Add a new Responses/Messages wire field | `types/io/` or `types/messages/` — shape only, no behavior |

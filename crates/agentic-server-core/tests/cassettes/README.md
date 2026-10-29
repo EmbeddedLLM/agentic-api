@@ -622,7 +622,7 @@ These files use `sessions`, not the HTTP `turns` schema or synthesized SSE.
 | `record_dynamo_messages_cassettes.sh` | Two-round Messages web-search cassettes (streaming + non-streaming), validated before replacement | Existing NVIDIA Dynamo frontend |
 | `record_sglang_cassettes.sh` | Same shared executor scenarios as Dynamo, staged validation and sanitized provenance | SGLang |
 | `record_tool_search_cassettes.sh` | Four-turn mixed function/namespace client tool-search characterization; gateway blocking, HTTP/SSE, and WebSocket acceptance | gateway and OpenAI reference |
-| `record_hosted_tool_search_cassettes.sh` | Hosted (`execution: "server"`) tool search over deferred functions, namespaces, and MCP servers: validation, output items and streaming events, `query` filtering, `max_tool_calls`, continuation, `store: false` replay, and WebSocket | gateway and OpenAI reference |
+| `record_hosted_tool_search_cassettes.sh` | Hosted (`execution: "server"`) tool search over deferred functions, namespaces, and MCP servers: validation, output items and streaming events, `query` filtering, `max_tool_calls`, continuation, `store: false` replay (OpenAI reference only), and WebSocket | gateway and OpenAI reference |
 
 ### Messages forced tool choice (vLLM)
 
@@ -937,9 +937,9 @@ embedded-code-interpreter gateway described above.
 ### Hosted tool search (OpenAI reference and gateway)
 
 The recorder captures hosted tool search (`{"type": "tool_search"}`), run by OpenAI and by the gateway, for
-[#448](https://github.com/vllm-project/agentic-api/issues/448). `hosted_tool_search/` holds one recording per group,
-provider, and mode, named `hosted-tool-search-<group>-<provider>[-<mode>].yaml`, where the provider is
-`openai-reference-gpt-5.6` or `gateway-Qwen-Qwen3.6-35B-A3B-FP8`. The recorder's inputs live in
+[#448](https://github.com/vllm-project/agentic-api/issues/448). `hosted_tool_search/` holds one recording per group
+(the gateway has no `replay` group), provider, and mode, named `hosted-tool-search-<group>-<provider>[-<mode>].yaml`,
+where the provider is `openai-reference-gpt-5.6` or `gateway-Qwen-Qwen3.6-35B-A3B-FP8`. The recorder's inputs live in
 `hosted_tool_search/inputs/`: the tool catalogs and the fake function outputs. The MCP failure legs share
 `tools-mcp-unreachable.json`; the recorder derives each variant (URL, eager, or an `allowed_tools` filter that matches
 nothing) at record time. Each recording keeps its full request bodies.
@@ -949,9 +949,9 @@ nothing) at record time. Each recording keeps its full request bodies.
 | `validation` | JSON | 6 | Which declarations and `tool_choice` values are refused | `validation_errors_match_openai`, `gateway_validation_matches_openai_except_the_intended_mcp_choice` |
 | `contract` | JSON, SSE | 6 | Item shapes, an MCP server searched as `mcp_<label>`, streaming events, `max_tool_calls`, continuation | `deferred_mcp_server_loads_as_a_namespace`, `streaming_has_no_dedicated_tool_search_events`, `search_does_not_count_toward_max_tool_calls`, `gateway_search_items_have_the_reference_shape_and_pairing` |
 | `query` | JSON | 21 | How the `query` argument filters the loaded tools | `query_is_a_case_insensitive_substring_filter_within_paths`, `gateway_loads_the_same_tools_as_openai_for_the_same_arguments` |
-| `edges` | JSON | 6 | Repeat searches in one response and across responses; an unreachable MCP server | `edge_cases_match_openai`, `gateway_restores_loads_on_continuation_and_replay` |
+| `edges` | JSON | 6 | Repeat searches in one response and across responses; an unreachable MCP server | `edge_cases_match_openai`, `gateway_restores_loads_on_continuation` |
 | `mcp-failures` | JSON, SSE | 7 | A failing MCP listing fails the request (424); a filter that matches nothing completes | `openai_fails_the_request_when_any_mcp_listing_fails`, `gateway_handles_mcp_listing_failures_exactly_like_openai` |
-| `replay` | JSON | 1 | A `store: false` transcript replayed as input loads without searching again | `loaded_tools_persist_without_a_new_search`, `gateway_restores_loads_on_continuation_and_replay` |
+| `replay` | JSON | 1 | A `store: false` transcript replayed as input loads without searching again (OpenAI reference only: the transcript holds `mcp_call` items, which the gateway does not convert for vLLM yet) | `loaded_tools_persist_without_a_new_search` |
 | `websocket` | WebSocket | 1 | The streaming events over a WebSocket | `streaming_has_no_dedicated_tool_search_events`, `gateway_streams_searches_with_only_added_and_done_events` |
 
 Each leg is an independent conversation appended with `--append`; the script header lists the legs and what each

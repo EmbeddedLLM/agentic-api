@@ -167,11 +167,12 @@ discovered MCP tools. MCP discovery metadata shares the request's retained
 response budget (`[responses] max_retained_bytes`, default 8 MiB) with upstream
 rounds and gateway tool output.
 
-A client that replays a response's items (`store: false`) may send back the `mcp_call` and `web_search_call` items it
-returned. The model sees each one as the function call and output it saw live; a replayed web search carries its
-sources when the item has them, since its result text is not part of the item. Replayed `tool_search_call` and
-`tool_search_output` items are checked as a continuation's history is, so a malformed client search history gets the
-same error with `store: false` as after a `previous_response_id`.
+A client that replays a response's items (`store: false`) may send back its `tool_search_call` and
+`tool_search_output` items. They are checked as a continuation's history is, so a malformed client search history gets
+the same error with `store: false` as after a `previous_response_id`, and the model sees each pair as the function call
+and output it saw live. Replayed `mcp_call` and `web_search_call` items are not converted yet. Sent inline, they reach
+vLLM as public records, which it does not accept; sent by `id`, the stored record is left out of the model's input.
+Continue such a response with `previous_response_id`.
 
 #### Hosted tool search
 

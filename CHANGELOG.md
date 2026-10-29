@@ -76,11 +76,15 @@ All notable changes to Agentic API are documented here.
   servers with `defer_loading: true` (searched as the namespace `mcp_<server_label>`). The model calls `tool_search`
   with `paths` and an optional `query`, which keeps tools whose name or description contains it, ignoring case; the
   loaded tools join the round and persist across `previous_response_id`, conversations, WebSocket sessions,
-  compaction, `store: false` replay, and multi-agent. Each search adds a `tool_search_call` and a
-  `tool_search_output` item with `execution: "server"` and `call_id: null`, streamed as `output_item.added`/`done`
-  only, and does not count toward `max_tool_calls`. `tool_search` with no deferred tool, deferred MCP with
-  `execution: "client"`, and a `tool_choice` naming an unloaded deferred tool are rejected with HTTP 400.
-  `[mcp_servers]` entries accept `defer_loading` and `description` as defaults. `execution: "client"` is unchanged.
+  compaction, and multi-agent, and across a `store: false` replay that sends back the search items. Each search adds
+  a `tool_search_call` and a `tool_search_output` item with `execution: "server"` and `call_id: null`, streamed as
+  `output_item.added`/`done` only, and does not count toward `max_tool_calls`. `tool_search` with no deferred tool,
+  deferred MCP with `execution: "client"`, and a `tool_choice` naming an unloaded deferred tool are rejected with
+  HTTP 400. `[mcp_servers]` entries accept `defer_loading` and `description` as defaults. `execution: "client"` is
+  unchanged.
+  A replay that also sends back a hosted MCP response's `mcp_call` items still fails on vLLM, as before, and one that
+  refers to a stored `mcp_call` by `id` leaves it out of the model's input: replayed gateway calls are not converted
+  to model input yet.
 
 ### Changed
 

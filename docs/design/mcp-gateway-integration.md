@@ -202,15 +202,12 @@ stored OutputItem::McpListTools
   -> InOutItem::into_input_items
   -> InputItem::McpListTools in enriched continuation history
   -> ToolRegistry lifecycle cache
-  -> ResponsesInput::model_input names replayed MCP calls by it, then removes it before vLLM
+  -> ResponsesInput::model_input removes it before vLLM
 ```
 
 Stored public `mcp_call` items are not reconstructed as model input. The
 model-visible `function_call` and matching `function_call_output` pair is
-persisted separately and remains the canonical continuation source. A client that replays a
-public `mcp_call` (`store: false`) gets it lowered to that pair, named as this request's
-discovery named the tool, else by the server's latest successful listing in the input, else by
-its derived name; a compaction summary, which offers no tools, names them by the listings.
+persisted separately and remains the canonical continuation source.
 
 ## Turn execution
 

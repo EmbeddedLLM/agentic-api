@@ -9,7 +9,7 @@
 # cassettes record that contract from OpenAI as the reference, and from the
 # gateway running the search itself.
 #
-# Each provider writes seven groups. A group is one cassette per transport mode;
+# The OpenAI reference writes seven groups and the gateway six (no replay). A group is one cassette per mode;
 # every leg in it is an independent conversation appended with --append, so
 # legs never share previous_response_id state. Legs appear in the order below.
 #
@@ -77,7 +77,8 @@
 #     failure-auth-required         deferred server that requires authorization (GitHub MCP, HTTP 401).
 #     failure-empty-allowed         deferred gitmcp server whose allowed_tools names no listed tool.
 #
-#   replay (JSON only) -- two turns with store=false that replay the hosted transcript as input
+#   replay (JSON only, OpenAI reference only) -- two turns with store=false that replay the hosted transcript as
+#   input. The gateway sends a replayed mcp_call to the model unchanged, which vLLM rejects, so it has no leg yet.
 #
 #   websocket -- the mcp-deferred leg over the WebSocket transport (--append is HTTP only)
 #
@@ -442,7 +443,8 @@ record_provider_suite() {
     done
   fi
 
-  if selected replay; then
+  # The replayed transcript holds mcp_call items, which the gateway does not yet lower for vLLM.
+  if selected replay && [[ "$endpoint_flag" == "--openai" ]]; then
     bold "replay (nonstreaming)"
     record_group "$endpoint_flag" "$endpoint" "$model" --no-stream \
       "$prefix-replay-$suffix-$slug-nonstreaming.yaml" replay

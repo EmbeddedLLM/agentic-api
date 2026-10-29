@@ -1,8 +1,8 @@
 //! The model's view of a request's tools and input.
 //!
-//! `types::io::input` projects search items, replayed gateway calls and MCP names; this resolves namespaced calls
-//! against the request's declarations and lowers async calls, so a live round, a continuation, a replay and a
-//! compaction summary show the model its history the same way.
+//! `types::io::input` projects search items; this resolves namespaced calls against the request's declarations and
+//! lowers async calls, so a live round, a continuation, a replay and a compaction summary show the model its history
+//! the same way.
 
 use std::borrow::Cow;
 
@@ -10,7 +10,7 @@ use super::{RequestPayload, UpstreamRequestError, UpstreamTool};
 use crate::tool::async_execution::lower_async_calls;
 use crate::tool::{CodexNamespaceHandler, NamespaceMap, ToolDeclaration};
 use crate::types::io::ResponsesInput;
-use crate::types::io::input::{HistoryNaming, InputValidationError, McpToolNames};
+use crate::types::io::input::{HistoryNaming, InputValidationError};
 
 impl RequestPayload {
     /// The function tools offered upstream for `declarations`, with namespace members under their flat names.
@@ -43,7 +43,6 @@ impl RequestPayload {
     pub(crate) fn history_naming(&self) -> HistoryNaming {
         HistoryNaming {
             functions: self.top_level_function_names(),
-            mcp: McpToolNames::from_tools(self.tools.as_deref().unwrap_or_default()),
         }
     }
 
@@ -88,8 +87,6 @@ impl RequestPayload {
         map: Option<&NamespaceMap>,
         history: &HistoryNaming,
     ) -> Result<Cow<'_, ResponsesInput>, InputValidationError> {
-        // This request's discovery names its MCP tools first, then its history's discovery, then its listings.
-        let mcp_names = McpToolNames::from_tools(self.tools.as_deref().unwrap_or_default()).or(&history.mcp);
         // A call naming itself is to a searched function only if this request declares that function, a search
         // output in its input loaded it, or its history knows it (a compaction summary declares no tools).
         let mut functions = self.input.searched_function_names();
@@ -103,7 +100,7 @@ impl RequestPayload {
         Ok(lower_async_calls(CodexNamespaceHandler.resolve_input(
             map,
             &functions,
-            self.input.normalized_model_input_with(&mcp_names)?,
+            self.input.normalized_model_input()?,
         )))
     }
 }

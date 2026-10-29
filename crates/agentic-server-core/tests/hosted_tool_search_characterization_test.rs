@@ -519,13 +519,12 @@ fn edge_cases_match_openai() {
 }
 
 /// Every recorded gateway cassette, by `(group, mode)`.
-const GATEWAY_RECORDINGS: [(&str, &str); 7] = [
+const GATEWAY_RECORDINGS: [(&str, &str); 6] = [
     ("validation", "-nonstreaming"),
     ("contract", "-nonstreaming"),
     ("contract", "-streaming"),
     ("query", "-nonstreaming"),
     ("edges", "-nonstreaming"),
-    ("replay", "-nonstreaming"),
     ("websocket", ""),
 ];
 
@@ -726,21 +725,11 @@ fn gateway_validation_matches_openai_except_the_intended_mcp_choice() {
 }
 
 #[test]
-fn gateway_restores_loads_on_continuation_and_replay() {
+fn gateway_restores_loads_on_continuation() {
     let edges = provider_cassette(GATEWAY, "edges", "-nonstreaming");
     // repeat-continuation: loads from the earlier response are restored, not listed again.
     assert!(edges.turns[3].request.body.previous_response_id.is_some());
     assert!(items(&terminal(&edges.turns[3]), "mcp_list_tools").is_empty());
-
-    let replay = provider_cassette(GATEWAY, "replay", "-nonstreaming");
-    assert!(!replay.turns[1].request.body.store);
-    let replayed = terminal(&replay.turns[1]);
-    assert!(
-        items(&replayed, "tool_search_call").is_empty(),
-        "the replayed load is kept"
-    );
-    assert!(items(&replayed, "mcp_list_tools").is_empty());
-    assert_eq!(items(&replayed, "mcp_call").len(), 1);
 }
 
 const LISTING_FAILED: &str =

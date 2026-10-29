@@ -9,12 +9,11 @@ use crate::tool::declaration::ToolDeclaration;
 use crate::tool::handler::MAX_GATEWAY_TOOL_OUTPUT_BYTES;
 use crate::tool::{GatewayExecutor, GatewayToolEventPlan, ToolError, ToolHandler, ToolOutput, ToolType};
 use crate::types::io::FunctionTool;
-use crate::types::io::input::{internal_mcp_tool_name, stable_name_hash};
 use crate::types::io::output::{
     FunctionToolCall, GatewayCallStatus, McpCall, McpCallError, McpCallStatus, McpListTool, McpListTools, OutputItem,
 };
 use crate::types::tools::{McpDiscoveredToolParam, McpToolParam};
-use crate::utils::common::{deserialize_from_str, deserialize_from_str_opt, serialize_to_string};
+use crate::utils::common::{deserialize_from_str, deserialize_from_str_opt, serialize_to_string, stable_name_hash};
 use crate::utils::uuid7_str;
 
 use super::{McpClient, McpError};
@@ -389,6 +388,48 @@ fn ensure_mcp_output_size(bytes: usize) -> Result<(), ToolError> {
 
 pub(crate) fn discovered_mcp_function_tool(param: &McpDiscoveredToolParam) -> FunctionTool {
     mcp_tool_to_function_tool(&param.internal_name, &param.tool)
+}
+
+const INTERNAL_MCP_PREFIX: &str = "mcp__";
+const MAX_INTERNAL_TOOL_NAME_LEN: usize = 64;
+
+fn internal_mcp_tool_name(server_label: &str, tool_name: &str, used: &mut HashMap<String, (String, String)>) -> String {
+    let identity = (server_label.to_owned(), tool_name.to_owned());
+    let base = sanitize_internal_tool_name(&format!("{INTERNAL_MCP_PREFIX}{server_label}__{tool_name}"));
+    if base.len() <= MAX_INTERNAL_TOOL_NAME_LEN && used.get(&base).is_none_or(|existing| existing == &identity) {
+        used.insert(base.clone(), identity);
+        return base;
+    }
+
+    let mut attempt = 0_u32;
+    loop {
+        let hash_input = if attempt == 0 {
+            format!("{server_label}:{tool_name}")
+        } else {
+            format!("{server_label}:{tool_name}:{attempt}")
+        };
+        let suffix = format!("__{:010x}", stable_name_hash(&hash_input) & 0xff_ffff_ffff);
+        let prefix_len = MAX_INTERNAL_TOOL_NAME_LEN.saturating_sub(suffix.len());
+        let candidate = format!("{}{}", &base[..base.len().min(prefix_len)], suffix);
+        if used.get(&candidate).is_none_or(|existing| existing == &identity) {
+            used.insert(candidate.clone(), identity);
+            return candidate;
+        }
+        attempt = attempt.saturating_add(1);
+    }
+}
+
+fn sanitize_internal_tool_name(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 fn mcp_tool_to_function_tool(name: &str, tool: &rmcp::model::Tool) -> FunctionTool {

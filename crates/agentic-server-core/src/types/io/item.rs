@@ -78,14 +78,12 @@ impl InOutItem {
         self
     }
 
-    /// The stored record a client replays as input. The continuation conversion leaves out gateway records (an MCP or
-    /// web search call, a hosted search item), which the executor records as history itself; a replayed one is input
-    /// the upstream projection lowers, so it stays an input record.
+    /// The stored record a client replays as input. The continuation conversion leaves out a hosted search item, which
+    /// the executor records as history itself; a replayed one is input the upstream projection lowers, so it stays an
+    /// input record.
     #[must_use]
     pub(crate) fn into_replayed_input(self) -> Self {
         match self {
-            Self::Output(OutputItem::McpCall(call)) => Self::Input(InputItem::McpCall(call)),
-            Self::Output(OutputItem::WebSearchCall(call)) => Self::Input(InputItem::WebSearchCall(call)),
             Self::Output(OutputItem::ToolSearchOutput(output)) => Self::Input(InputItem::ToolSearchOutput(output)),
             Self::Output(OutputItem::ToolSearchCall(call)) => InputToolSearchCall::try_from(&call)
                 .map_or(Self::Output(OutputItem::ToolSearchCall(call)), |call| {

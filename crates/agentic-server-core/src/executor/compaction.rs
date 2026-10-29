@@ -200,7 +200,7 @@ async fn summarize_items(
     };
     let mut agent = AgentPipeline::new(ctx, None, StreamRelay::detached());
     // The summary declares no tools; the source request's naming still says how the model knew each call, after an
-    // earlier compaction removed the search that loaded a function, or the listing that named an MCP tool.
+    // earlier compaction removed the search that loaded a function.
     agent.set_history_naming(history);
     let response =
         fetch_blocking_payload(&mut agent, exec_ctx, auth, &crate::tool::ToolRegistry::default(), None).await?;
@@ -421,25 +421,21 @@ pub async fn compact_response(
 #[cfg(test)]
 mod tests {
     use super::estimate::ESTIMATED_IMAGE_TOKENS;
-    use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 
     use axum::Router;
     use axum::routing::post;
 
     use crate::executor::modes::{ConversationHandler, ResponseHandler};
-    use crate::executor::multi_agent::CompactionPlan;
     use crate::executor::request::{ExecutionContext, RequestContext};
     use crate::storage::{ConversationStore, ResponseMetadata, ResponseStore, create_pool_with_schema};
-    use crate::types::agent::AgentIdentity;
     use crate::types::event::MessageStatus;
     use crate::types::io::InOutItem;
-    use crate::types::io::input::internal_mcp_tool_name;
     use crate::types::io::{
         CompactionItem, CustomToolCallOutputMessage, FunctionToolResultMessage, InputContent, InputImageContent,
         InputItem, InputMessage, InputMessageContent, ResponsesInput, ToolCallOutput, ToolOutputContent,
     };
-    use crate::types::request_response::{ContextManagement, RequestPayload};
+    use crate::types::request_response::ContextManagement;
 
     use super::{
         build_compacted_window, compact_response, completed_summary_text, estimate_history_tokens,
@@ -1082,47 +1078,6 @@ mod tests {
         assert_eq!(requests[0]["prompt_cache_key"], "workspace-a");
         assert_eq!(requests[0]["service_tier"], "priority");
         assert_eq!(requests[0]["prompt_cache_retention"], "24h");
-        server.abort();
-    }
-
-    /// The summary request carries no tools; a replayed call still takes the name discovery gave its tool, so two
-    /// tools whose names sanitize alike stay distinct in a multi-agent compaction summary.
-    #[tokio::test]
-    async fn multi_agent_compaction_summary_names_replayed_mcp_calls_from_the_listing() {
-        let (exec, requests, server) = mock_execution_context(ResponseStore::disabled()).await;
-        let request: RequestPayload =
-            serde_json::from_value(serde_json::json!({"model": "test-model", "input": []})).expect("request");
-        // Discovery named both tools in listing order; the second one's name collides once sanitized.
-        let history: Vec<InputItem> = serde_json::from_value(serde_json::json!([
-            {"type": "mcp_list_tools", "id": "mcpl_1", "server_label": "docs", "tools": [
-                {"name": "read.file", "input_schema": {"type": "object"}},
-                {"name": "read_file", "input_schema": {"type": "object"}}
-            ]},
-            {"type": "message", "role": "user", "content": "read it"},
-            {"type": "mcp_call", "id": "mcp_2", "server_label": "docs", "name": "read_file", "arguments": "{}",
-                "status": "completed", "approval_request_id": null, "output": "second", "error": null}
-        ]))
-        .expect("history");
-        let mut used = HashMap::new();
-        internal_mcp_tool_name("docs", "read.file", &mut used);
-        let discovered = internal_mcp_tool_name("docs", "read_file", &mut used);
-        assert_ne!(discovered, "mcp__docs__read_file");
-        let plan = CompactionPlan::prepare_explicit(&AgentIdentity::root(), 0, &history, &request)
-            .expect("plan")
-            .expect("a resolved prefix");
-
-        plan.execute(&exec, None).await.expect("compaction");
-
-        let requests = requests.lock().expect("request capture lock");
-        assert!(requests[0]["tools"].is_null(), "the summary offers no tools");
-        let call = requests[0]["input"]
-            .as_array()
-            .expect("summary input")
-            .iter()
-            .find(|item| item["type"] == "function_call" && item["call_id"] == "mcp_2")
-            .expect("the replayed MCP call")
-            .clone();
-        assert_eq!(call["name"], discovered.as_str(), "{call}");
         server.abort();
     }
 

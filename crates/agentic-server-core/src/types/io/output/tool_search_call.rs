@@ -5,12 +5,12 @@ use serde_json::{Map, Value};
 
 use crate::types::io::ToolSearchOutputMessage;
 use crate::types::io::input::{
-    check_tool_search_call_id, deserialize_non_blank_string, deserialize_optional_non_blank_string, stable_name_hash,
+    check_tool_search_call_id, deserialize_non_blank_string, deserialize_optional_non_blank_string,
 };
 use crate::types::io::multi_agent::AgentAttribution;
 use crate::types::io::output::FunctionToolCall;
 use crate::types::tools::{ResponsesTool, ToolSearchExecution, ToolSearchStatus};
-use crate::utils::common::deserialize_from_str;
+use crate::utils::common::{deserialize_from_str, stable_name_hash};
 
 #[derive(Deserialize)]
 struct ToolSearchCallWire {

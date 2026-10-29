@@ -494,9 +494,9 @@ impl ToolCatalog {
     }
 }
 
-/// Model-visible history (replayed gateway calls kept for the upstream request to name) plus MCP list records.
+/// Model-visible history (search items kept for definition loading) plus MCP list records.
 fn active_model_input(input: &ResponsesInput) -> ResponsesInput {
-    let mut active_input = input.model_input_keeping_gateway_calls().into_owned();
+    let mut active_input = input.model_input_keeping_search_items().into_owned();
     if let (ResponsesInput::Items(public_items), ResponsesInput::Items(active_items)) = (input, &mut active_input) {
         active_items.extend(
             public_items
