@@ -9,6 +9,7 @@ use std::future::{Future, ready};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
+use super::catalog::ToolCatalog;
 use super::code_interpreter::CodeInterpreterHandler;
 use super::codex::insert_namespace_entries;
 use super::custom::{CustomHandler, CustomToolMap, insert_custom_entry};
@@ -137,6 +138,18 @@ impl ToolEntry {
         self.async_execution = async_execution;
         self
     }
+}
+
+/// The declarations as the registry keys them, checked before anything is registered or discovered: the catalog's
+/// name rule first, then namespace members renamed to the flat, model-visible names the model calls (as the upstream
+/// request renames them), MCP server labels and count, and code interpreter declarations.
+fn resolve_declarations(tools: &[ToolDeclaration]) -> Result<Vec<ToolDeclaration>, ToolError> {
+    ToolCatalog::validate_declared_names(tools)?;
+    let resolved_tools = CodexNamespaceHandler.resolve_namespace_members(tools)?;
+    McpHandler::validate_server_labels(&resolved_tools)?;
+    validate_mcp_server_count(&resolved_tools)?;
+    CodeInterpreterHandler::validate_declarations(&resolved_tools)?;
+    Ok(resolved_tools)
 }
 
 fn insert_unique_tool_entries(
@@ -287,14 +300,7 @@ impl ToolRegistry {
         let mut entries = HashMap::with_capacity(tools.len());
         let mut mcp_list_tools_items = IndexMap::<String, Vec<McpListTools>>::new();
         let mut discovered_mcp_tools = 0usize;
-        // Namespace members must be keyed by the same flat, model-visible name
-        // the model will call, so resolve them first — the same pure pass used
-        // to build the upstream request.
-        let resolved_tools = CodexNamespaceHandler.resolve_namespace_members(tools)?;
-        McpHandler::validate_server_labels(&resolved_tools)?;
-        validate_mcp_server_count(&resolved_tools)?;
-
-        CodeInterpreterHandler::validate_declarations(&resolved_tools)?;
+        let resolved_tools = resolve_declarations(tools)?;
 
         for (index, tool) in resolved_tools.iter().enumerate() {
             match tool {
@@ -1383,6 +1389,31 @@ mod tests {
                 if message.contains("discovered MCP tools")
                     && message.contains(&MAX_DISCOVERED_MCP_TOOLS_PER_REQUEST.to_string())
         ));
+    }
+
+    /// A registry built directly, for a request without tool search, applies the catalog's name rule with its message
+    /// before any MCP declaration is checked or discovered.
+    #[tokio::test]
+    async fn the_registry_applies_the_catalog_name_rule_before_discovery() {
+        let mut tools: Vec<ToolDeclaration> = serde_json::from_value::<Vec<ResponsesTool>>(serde_json::json!([
+            {"type": "function", "name": "agentic_ns__mcp__shell__run"},
+            {"type": "namespace", "name": "mcp__shell", "tools": [{"type": "function", "name": "run"}]},
+            {"type": "mcp", "server_label": "docs", "connector_id": "connector_dropbox"}
+        ]))
+        .expect("tools")
+        .into_iter()
+        .map(ToolDeclaration::from)
+        .collect();
+
+        let error = ToolRegistry::build_with_handlers(&mut tools, &mut GatewayExecutors::default())
+            .await
+            .expect_err("a colliding member name must fail");
+
+        assert_eq!(
+            error.to_string(),
+            "invalid tool config: codex namespace member mcp__shell.run generates name agentic_ns__mcp__shell__run, \
+             which collides with a declared function tool"
+        );
     }
 
     #[tokio::test]

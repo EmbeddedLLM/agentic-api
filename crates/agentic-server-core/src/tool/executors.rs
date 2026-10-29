@@ -10,7 +10,7 @@ use super::mcp::{McpClientPool, McpDiscoveredHandler, McpHandler};
 use super::normalize::code_interpreter_unavailable_error;
 use super::web_fetch::{WebFetchExecutor, WebFetchHandler};
 use super::web_search::{WebSearchExecutor, WebSearchHandler};
-use super::{GatewayExecutor, ToolError};
+use super::{GatewayExecutor, ToolError, ToolHandler};
 use crate::config::{DEFAULT_MAX_CONCURRENT_GATEWAY_CALLS, ToolRuntimeConfig, WebFetchConfig};
 use crate::types::tools::{McpToolParam, ResponsesTool};
 
@@ -275,7 +275,10 @@ impl GatewayExecutors {
         }
         let configured_handlers = self.mcp.get(server_label);
         let configured_server = self.mcp_configs.contains_key(server_label);
-        validate_mcp_execution_options(param, configured_server || configured_handlers.is_some())?;
+        // Request validation ran the declaration's own checks already; a caller that builds a registry directly
+        // reaches discovery without it.
+        McpHandler::spec_from_param(param).validate(param)?;
+        validate_mcp_approval_source(param, configured_server || configured_handlers.is_some())?;
         if (configured_server || configured_handlers.is_some()) && param.server_url.is_some() {
             return Err(ToolError::Config(format!(
                 "MCP server '{server_label}' is configured by the gateway; omit server_url from the request"
@@ -372,21 +375,8 @@ fn filter_allowed_mcp_handlers(
         .collect()
 }
 
-fn validate_mcp_execution_options(param: &McpToolParam, configured_server: bool) -> Result<(), ToolError> {
-    if param.connector_id.is_some() {
-        return Err(ToolError::Config(
-            "MCP connector_id is not supported; configure server_url instead".to_owned(),
-        ));
-    }
-    if param
-        .require_approval
-        .as_deref()
-        .is_some_and(|policy| policy != "never")
-    {
-        return Err(ToolError::Config(
-            "MCP require_approval supports only 'never'; approval gating is not yet supported".to_owned(),
-        ));
-    }
+/// A server the gateway does not configure needs the request to set `require_approval`.
+fn validate_mcp_approval_source(param: &McpToolParam, configured_server: bool) -> Result<(), ToolError> {
     if !configured_server && param.require_approval.is_none() {
         return Err(ToolError::Config(
             "MCP require_approval must be set to 'never' in gateway configuration or the request".to_owned(),

@@ -1116,8 +1116,11 @@ the one `ToolType::ToolSearch`, gateway-owned because the declaration's `executi
 `ToolCatalog` (`tool/catalog.rs`): the declarations, then each completed
 `tool_search_output` in history order (with `SearchHistory` and the pending-call ledger
 checking the pairing), restored loads after compaction, and hosted results. Preparation
-builds it, so an invalid history is a 400 before inference; the response's
-`ToolRegistry` then owns it, offers the model its loaded definitions, withholds the
+builds it, so an invalid history is a 400 before inference. The catalog owns the
+model-visible name rule (`ToolCatalog::validate_declared_names`): preparation applies it to
+the whole catalog, deferred definitions included, and every registry build applies it to
+the request's declarations before it registers or discovers anything. The response's
+`ToolRegistry` then owns the catalog, offers the model its loaded definitions, withholds the
 deferred ones (the round's call check refuses a call to one before any tool runs, behind
 ingestion's rejection), and runs a hosted search over it: deferred
 functions, namespace members, and deferred MCP servers (as `mcp_<server_label>`, with the

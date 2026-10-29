@@ -227,9 +227,24 @@ impl ToolHandler for McpHandler {
         ToolType::Mcp
     }
 
-    fn validate(&self, _params: &McpToolParam) -> Result<(), ToolError> {
-        // A deferred server is valid only behind hosted tool search, which
-        // tool-search preparation validates with the rest of the catalog.
+    /// Checks what one declaration can say on its own. A deferred server is valid only behind hosted tool search,
+    /// which tool-search preparation checks with the rest of the catalog; whether a server that omits
+    /// `require_approval` is configured is the gateway executors' check, since only they know the configuration.
+    fn validate(&self, params: &McpToolParam) -> Result<(), ToolError> {
+        if params.connector_id.is_some() {
+            return Err(ToolError::Config(
+                "MCP connector_id is not supported; configure server_url instead".to_owned(),
+            ));
+        }
+        if params
+            .require_approval
+            .as_deref()
+            .is_some_and(|policy| policy != "never")
+        {
+            return Err(ToolError::Config(
+                "MCP require_approval supports only 'never'; approval gating is not yet supported".to_owned(),
+            ));
+        }
         Ok(())
     }
 
@@ -441,6 +456,31 @@ mod tests {
         let handler = McpHandler::spec_from_param(&param);
 
         assert!(handler.normalize(&param).is_empty());
+    }
+
+    #[test]
+    fn validate_rejects_unsupported_mcp_options() {
+        let handler = McpHandler::discovered_tool_spec_only();
+        for (param, message) in [
+            (
+                serde_json::json!({"server_label": "counter", "connector_id": "connector_dropbox"}),
+                "MCP connector_id is not supported; configure server_url instead",
+            ),
+            (
+                serde_json::json!({"server_label": "counter", "server_url": "http://127.0.0.1:8000/mcp",
+                    "require_approval": "always"}),
+                "MCP require_approval supports only 'never'; approval gating is not yet supported",
+            ),
+        ] {
+            let params = serde_json::from_value::<McpToolParam>(param).expect("MCP tool param");
+            let error = handler.validate(&params).expect_err(message);
+            assert!(matches!(&error, ToolError::Config(text) if text == message), "{error}");
+        }
+        let unset = serde_json::from_value::<McpToolParam>(serde_json::json!({"server_label": "counter"}))
+            .expect("MCP tool param");
+        handler
+            .validate(&unset)
+            .expect("whether the server is configured is the executors' check");
     }
 
     #[test]

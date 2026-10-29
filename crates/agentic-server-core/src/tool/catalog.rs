@@ -6,6 +6,10 @@
 //! namespace members, compares a returned definition with the one it already holds, keeps each function and
 //! namespace member loaded or deferred, and checks the model-visible names of the whole inventory together
 //! ([`ToolCatalog::validate_model_visible_names`]). Tool search adds only its timing rules, through [`PriorCalls`].
+//!
+//! The catalog owns the name rule for every request ([`ToolCatalog::validate_declared_names`]): the registry checks
+//! each request's declarations with it before it registers or discovers anything, and with tool search active,
+//! preparation checks the whole catalog with it after loading, deferred definitions included.
 
 mod history;
 mod load;
@@ -19,7 +23,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
 
-use super::declaration::responses_declarations;
+use super::declaration::{ToolDeclaration, responses_declarations};
 use super::handler::ToolError;
 use super::tool_search::TOOL_SEARCH_NAME;
 use super::{CodexNamespaceHandler, model_visible_namespace_member_name};
@@ -221,15 +225,24 @@ impl ToolCatalog {
             .is_some_and(|record| matches!(record.identity, ToolIdentity::Function(_)))
     }
 
-    /// Checks the model-visible names of the whole inventory together, with the one rule codex's namespace map applies:
-    /// a flattened namespace member name must not repeat a top-level tool's name or another member's.
+    /// Checks the model-visible names of the whole inventory together, deferred and loaded definitions included,
+    /// with [`Self::validate_declared_names`].
     ///
     /// # Errors
     ///
     /// Returns [`ToolError::Config`] naming the first colliding member.
     pub(crate) fn validate_model_visible_names(&self) -> Result<(), ToolError> {
-        let declarations = responses_declarations(&self.public_tools);
-        CodexNamespaceHandler.build_namespace_map(Some(&declarations)).map(drop)
+        Self::validate_declared_names(&responses_declarations(&self.public_tools))
+    }
+
+    /// The name rule for a request's tools, the one codex's namespace map applies: a flattened namespace member name
+    /// must not repeat a top-level tool's name or another member's.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ToolError::Config`] naming the first colliding member.
+    pub(crate) fn validate_declared_names(declarations: &[ToolDeclaration]) -> Result<(), ToolError> {
+        CodexNamespaceHandler.build_namespace_map(Some(declarations)).map(drop)
     }
 
     fn initial_withheld_function_names(&self) -> Result<HashSet<String>, ToolError> {
